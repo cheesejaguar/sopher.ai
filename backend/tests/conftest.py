@@ -27,16 +27,24 @@ def client():
 
 @pytest.fixture
 async def async_client():
-    """Create async test client with proper mocking"""
+    """Create async test client with comprehensive database mocking"""
     # Mock database and cache connections
     mock_cache = AsyncMock()
     mock_cache.redis = AsyncMock()
     mock_cache.redis.ping = AsyncMock()
 
+    # Mock database engine and session creation to prevent any real DB connections
+    mock_engine = AsyncMock()
+    mock_session_factory = AsyncMock()
+
     with (
         patch("app.main.init_db", new_callable=AsyncMock),
         patch("app.main.close_db", new_callable=AsyncMock),
         patch("app.main.cache", mock_cache),
+        patch("app.db.engine", mock_engine),
+        patch("app.db.AsyncSessionLocal", mock_session_factory),
+        patch("sqlalchemy.ext.asyncio.create_async_engine", return_value=mock_engine),
+        patch("sqlalchemy.ext.asyncio.async_sessionmaker", return_value=mock_session_factory),
     ):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -62,6 +70,17 @@ def mock_db_session():
     mock_db.refresh = AsyncMock()
     mock_db.rollback = AsyncMock()
     mock_db.close = AsyncMock()
+    mock_db.flush = AsyncMock()
+    mock_db.execute = AsyncMock()
+    mock_db.scalar = AsyncMock()
+
+    # Create a proper async context manager for the session
+    async def async_session_context():
+        yield mock_db
+
+    mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_db.__aexit__ = AsyncMock(return_value=None)
+
     return mock_db
 
 
