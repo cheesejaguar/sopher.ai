@@ -124,7 +124,7 @@ async def test_cost_tracking_models_and_schema():
         "model": "claude-3-5-sonnet",
         "prompt_tokens": 1000,
         "completion_tokens": 500,
-        "usd": Decimal("0.025")
+        "usd": Decimal("0.025"),
     }
 
     # This validates the model structure without database interaction
@@ -141,7 +141,7 @@ async def test_cost_tracking_models_and_schema():
         "by_agent": {"outliner": 2.25, "writer": 3.25},
         "by_model": {"claude-3-5-sonnet": 5.50},
         "period_start": datetime.now(),
-        "period_end": datetime.now()
+        "period_end": datetime.now(),
     }
 
     cost_report = CostReport(**report_data)
@@ -228,29 +228,18 @@ def test_database_models_structure():
     assert project.settings["theme"] == "sci-fi"
 
     # Test Session model
-    session = Session(
-        project_id=str(uuid4()),
-        user_id="test-user",
-        context={"brief": "Test brief"}
-    )
+    session = Session(project_id=str(uuid4()), user_id="test-user", context={"brief": "Test brief"})
     assert session.user_id == "test-user"
     assert session.context["brief"] == "Test brief"
 
     # Test Event model
-    event = Event(
-        session_id=str(uuid4()),
-        type="outline_start",
-        payload={"target_chapters": 10}
-    )
+    event = Event(session_id=str(uuid4()), type="outline_start", payload={"target_chapters": 10})
     assert event.type == "outline_start"
     assert event.payload["target_chapters"] == 10
 
     # Test Artifact model
     artifact = Artifact(
-        session_id=str(uuid4()),
-        kind="outline",
-        meta={"word_count": 1500},
-        blob=b"test content"
+        session_id=str(uuid4()), kind="outline", meta={"word_count": 1500}, blob=b"test content"
     )
     assert artifact.kind == "outline"
     assert artifact.meta["word_count"] == 1500
@@ -263,7 +252,7 @@ def test_database_models_structure():
         model="gpt-4o",
         prompt_tokens=500,
         completion_tokens=250,
-        usd=Decimal("0.015")
+        usd=Decimal("0.015"),
     )
     assert cost.agent == "writer"
     assert cost.model == "gpt-4o"
