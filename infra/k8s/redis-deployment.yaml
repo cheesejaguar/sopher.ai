@@ -14,8 +14,14 @@ spec:
       labels:
         app: redis
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
       - name: redis
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
         image: redis:7
         ports:
         - containerPort: 6379

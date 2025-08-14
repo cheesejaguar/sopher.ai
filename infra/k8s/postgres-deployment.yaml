@@ -15,8 +15,14 @@ spec:
       labels:
         app: postgres
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
       containers:
       - name: postgres
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
         image: postgres:15
         ports:
         - containerPort: 5432
