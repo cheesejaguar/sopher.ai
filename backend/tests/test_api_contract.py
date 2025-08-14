@@ -5,48 +5,9 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
-from app.main import app
 from app.schemas import ChapterDraftRequest, ContinuityReport, OutlineRequest
-
-
-@pytest.fixture
-def client():
-    """Create test client"""
-    return TestClient(app)
-
-
-@pytest.fixture
-async def async_client():
-    """Create async test client"""
-    from httpx import ASGITransport, AsyncClient
-
-    # Mock database and cache connections
-    mock_cache = AsyncMock()
-    mock_cache.redis = AsyncMock()
-    mock_cache.redis.ping = AsyncMock()
-
-    with (
-        patch("app.main.init_db", new_callable=AsyncMock),
-        patch("app.main.close_db", new_callable=AsyncMock),
-        patch("app.main.cache", mock_cache),
-    ):
-
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            yield ac
-
-
-@pytest.fixture
-def mock_token():
-    """Mock JWT token"""
-    with patch("app.security.verify_token") as mock:
-        mock.return_value = type(
-            "TokenData", (), {"user_id": "test-user", "project_id": str(uuid4()), "role": "author"}
-        )()
-        yield mock
 
 
 @pytest.mark.asyncio
@@ -105,36 +66,23 @@ async def test_outline_request_validation(async_client: AsyncClient, mock_token)
     assert response.status_code == 422
 
 
-@pytest.mark.skip(
-    reason=(
-        "Complex integration test - SSE endpoint works but " "mocking SQLAlchemy models is complex"
-    )
-)
 @pytest.mark.asyncio
-async def test_outline_stream_contract(async_client: AsyncClient, mock_token):
+async def test_outline_stream_contract(
+    async_client: AsyncClient, mock_token, mock_db_session, mock_sqlalchemy_models
+):
     """Test outline streaming endpoint contract"""
     project_id = str(uuid4())
 
     with (
         patch("app.routers.outline.BookWritingAgents") as mock_agents,
-        patch("app.routers.outline.get_db") as mock_get_db,
+        patch("app.routers.outline.get_db", return_value=mock_db_session),
         patch("app.routers.outline.cache.get", return_value=None),
         patch("app.routers.outline.cache.set"),
-        patch("app.routers.outline.Session") as mock_session_class,
-        patch("app.routers.outline.Cost"),
-        patch("app.routers.outline.Event"),
-        patch("app.routers.outline.Artifact"),
+        patch("app.models.Session", mock_sqlalchemy_models["Session"]),
+        patch("app.models.Cost", mock_sqlalchemy_models["Cost"]),
+        patch("app.models.Event", mock_sqlalchemy_models["Event"]),
+        patch("app.models.Artifact", mock_sqlalchemy_models["Artifact"]),
     ):
-
-        # Mock database session
-        mock_db = AsyncMock()
-        mock_get_db.return_value = mock_db
-
-        # Mock SQLAlchemy models to avoid state issues
-        mock_session_instance = AsyncMock()
-        mock_session_instance.__class__ = AsyncMock()
-        mock_session_instance.__class__.__name__ = "Session"
-        mock_session_class.return_value = mock_session_instance
 
         # Mock the agents
         mock_agent_instance = AsyncMock()
@@ -162,37 +110,29 @@ async def test_outline_stream_contract(async_client: AsyncClient, mock_token):
             assert "text/event-stream" in response.headers.get("content-type", "")
 
 
-@pytest.mark.skip(
-    reason=(
-        "Complex integration test - cost tracking works but " "mocking SQLAlchemy models is complex"
-    )
-)
 @pytest.mark.asyncio
-async def test_cost_tracking(async_client: AsyncClient, mock_token):
+async def test_cost_tracking(
+    async_client: AsyncClient, mock_token, mock_db_session, mock_sqlalchemy_models
+):
     """Test that costs are tracked properly"""
     project_id = str(uuid4())
 
     with (
-        patch("app.routers.outline.Cost") as mock_cost,
-        patch("app.routers.outline.get_db") as mock_get_db,
+        patch("app.routers.outline.get_db", return_value=mock_db_session),
         patch("app.routers.outline.cache.get", return_value=None),
         patch("app.routers.outline.cache.set"),
-        patch("app.routers.outline.Session") as mock_session_class,
-        patch("app.routers.outline.Event"),
-        patch("app.routers.outline.Artifact"),
+        patch("app.models.Session", mock_sqlalchemy_models["Session"]),
+        patch("app.models.Cost", mock_sqlalchemy_models["Cost"]),
+        patch("app.models.Event", mock_sqlalchemy_models["Event"]),
+        patch("app.models.Artifact", mock_sqlalchemy_models["Artifact"]),
     ):
 
-        # Mock database session
-        mock_db = AsyncMock()
-        mock_get_db.return_value = mock_db
+        with patch("app.routers.outline.BookWritingAgents") as mock_agents:
+            # Mock the agents
+            mock_agent_instance = AsyncMock()
+            mock_agent_instance.generate_concepts = AsyncMock(return_value={"concepts": "test"})
+            mock_agents.return_value = mock_agent_instance
 
-        # Mock SQLAlchemy models to avoid state issues
-        mock_session_instance = AsyncMock()
-        mock_session_instance.__class__ = AsyncMock()
-        mock_session_instance.__class__.__name__ = "Session"
-        mock_session_class.return_value = mock_session_instance
-
-        with patch("app.routers.outline.BookWritingAgents"):
             with patch("app.routers.outline.acompletion") as mock_completion:
                 # Mock LLM with usage data
                 async def mock_stream():
@@ -207,8 +147,8 @@ async def test_cost_tracking(async_client: AsyncClient, mock_token):
                     headers={"Authorization": "Bearer test-token"},
                 )
 
-                # Verify cost was tracked
-                assert mock_cost.called
+                # Verify cost model was instantiated (cost tracking occurred)
+                assert mock_sqlalchemy_models["Cost"].called
 
 
 @pytest.mark.asyncio
