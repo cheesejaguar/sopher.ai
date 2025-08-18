@@ -362,6 +362,8 @@ async def test_outline_stream_error_handling_scenarios():
 
 def test_outline_validation_error_structure():
     """Test outline endpoint validation errors return structured format."""
+    from unittest.mock import patch
+
     from fastapi.testclient import TestClient
 
     from app.main import app
@@ -369,24 +371,30 @@ def test_outline_validation_error_structure():
     client = TestClient(app)
     project_id = str(uuid4())
 
-    # Test brief too short
-    response = client.get(
-        f"/api/v1/projects/{project_id}/outline/stream",
-        params={"brief": "short", "target_chapters": 10},  # Less than 10 characters
-        headers={"Authorization": "Bearer fake-token"},
-    )
+    # Mock authentication to bypass auth middleware
+    with patch("app.security.verify_token") as mock_verify:
+        mock_verify.return_value = type(
+            "TokenData", (), {"user_id": "test-user", "project_id": str(uuid4()), "role": "author"}
+        )()
 
-    assert response.status_code == 422
-    error_data = response.json()
+        # Test brief too short
+        response = client.get(
+            f"/api/v1/projects/{project_id}/outline/stream",
+            params={"brief": "short", "target_chapters": 10},  # Less than 10 characters
+            headers={"Authorization": "Bearer fake-token"},
+        )
 
-    # Check structured error format
-    assert "error_id" in error_data
-    assert error_data["error_code"] == "OUTLINE_INVALID_PARAMETER"
-    assert "Brief must be between 10 and 10000 characters" in error_data["message"]
-    assert error_data["hint"] == "Ensure 'brief' is 10-10000 characters."
-    assert error_data["details"]["field"] == "brief"
-    assert "request_id" in error_data
-    assert "timestamp" in error_data
+        assert response.status_code == 422
+        error_data = response.json()
+
+        # Check structured error format
+        assert "error_id" in error_data
+        assert error_data["error_code"] == "OUTLINE_INVALID_PARAMETER"
+        assert "Brief must be between 10 and 10000 characters" in error_data["message"]
+        assert error_data["hint"] == "Ensure 'brief' is 10-10000 characters."
+        assert error_data["details"]["field"] == "brief"
+        assert "request_id" in error_data
+        assert "timestamp" in error_data
 
 
 @pytest.mark.asyncio

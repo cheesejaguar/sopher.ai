@@ -24,6 +24,10 @@ def test_validation_exception_handler():
     # Create a test app with validation
     test_app = FastAPI()
 
+    # Add middleware for request ID (needed by exception handler)
+    from app.middleware import RequestIDMiddleware
+    test_app.add_middleware(RequestIDMiddleware)
+
     # Import and register the exception handlers from main
     from app.main import validation_exception_handler
 
@@ -48,7 +52,7 @@ def test_validation_exception_handler():
     data = response.json()
     assert "error_id" in data
     assert data["error_code"] == ErrorCode.VALIDATION_ERROR
-    assert data["message"] == "Invalid request data."
+    assert data["message"] == "Invalid request."
     assert data["hint"] == "Check request body against schema."
     assert "details" in data
     assert "errors" in data["details"]
@@ -110,6 +114,10 @@ def test_unhandled_exception_handler():
 
     from app.main import unhandled_exception_handler
 
+    # Add middleware for request ID (needed by exception handler)
+    from app.middleware import RequestIDMiddleware
+    test_app.add_middleware(RequestIDMiddleware)
+
     test_app.exception_handler(Exception)(unhandled_exception_handler)
 
     @test_app.get("/crash")
@@ -125,8 +133,8 @@ def test_unhandled_exception_handler():
     assert response.status_code == 500
     data = response.json()
     assert data["error_code"] == ErrorCode.INTERNAL_ERROR
-    assert data["message"] == "Internal server error."
-    assert data["hint"] == "The server encountered an error. Please try again later."
+    assert data["message"] == "An internal error occurred."
+    assert data["hint"] == "Please try again later."
 
     # Should NOT expose the original error message
     assert "dangerous internal error" not in data["message"]
@@ -202,6 +210,10 @@ def test_error_response_structure_consistency():
         unhandled_exception_handler,
         validation_exception_handler,
     )
+
+    # Add middleware for request ID (needed by exception handlers)
+    from app.middleware import RequestIDMiddleware
+    test_app.add_middleware(RequestIDMiddleware)
 
     test_app.exception_handler(RequestValidationError)(validation_exception_handler)
     test_app.exception_handler(StarletteHTTPException)(http_exception_handler)
