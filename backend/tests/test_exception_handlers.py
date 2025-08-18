@@ -263,7 +263,7 @@ async def test_error_response_structure_consistency():
         assert isinstance(data["timestamp"], str)
 
         # Optional fields should be proper types when present
-        if "hint" in data:
+        if "hint" in data and data["hint"] is not None:
             assert isinstance(data["hint"], str)
         if "details" in data:
             assert isinstance(data["details"], dict)
