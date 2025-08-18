@@ -26,6 +26,7 @@ def test_validation_exception_handler():
 
     # Add middleware for request ID (needed by exception handler)
     from app.middleware import RequestIDMiddleware
+
     test_app.add_middleware(RequestIDMiddleware)
 
     # Import and register the exception handlers from main
@@ -116,6 +117,7 @@ def test_unhandled_exception_handler():
 
     # Add middleware for request ID (needed by exception handler)
     from app.middleware import RequestIDMiddleware
+
     test_app.add_middleware(RequestIDMiddleware)
 
     test_app.exception_handler(Exception)(unhandled_exception_handler)
@@ -213,6 +215,7 @@ def test_error_response_structure_consistency():
 
     # Add middleware for request ID (needed by exception handlers)
     from app.middleware import RequestIDMiddleware
+
     test_app.add_middleware(RequestIDMiddleware)
 
     test_app.exception_handler(RequestValidationError)(validation_exception_handler)
