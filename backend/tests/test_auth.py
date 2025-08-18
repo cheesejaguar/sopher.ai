@@ -59,9 +59,7 @@ def test_auth_me_with_bearer_token(mock_db, client, valid_access_token):
     mock_session.execute.return_value = mock_result
 
     # Make request with Bearer token
-    response = client.get(
-        "/auth/me", headers={"Authorization": f"Bearer {valid_access_token}"}
-    )
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {valid_access_token}"})
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
