@@ -40,4 +40,3 @@ def test_api_error_builds_response_with_context():
     assert payload["request_id"] == "req-test-123"
     # timestamp is ISO8601
     datetime.fromisoformat(payload["timestamp"])
-
