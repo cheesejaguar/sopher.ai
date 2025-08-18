@@ -88,9 +88,7 @@ def get_google_auth_url(state: str, code_challenge: str) -> str:
     return f"{GOOGLE_AUTHORIZE_URL}?{urlencode(params)}"
 
 
-async def exchange_code_for_token(
-    code: str, code_verifier: str
-) -> tuple[dict, dict]:
+async def exchange_code_for_token(code: str, code_verifier: str) -> tuple[dict, dict]:
     """Exchange authorization code for tokens and fetch user info"""
     client = get_google_oauth_client()
 

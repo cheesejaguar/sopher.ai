@@ -116,7 +116,9 @@ async def callback_google(
     set_auth_cookies(response, access_token, refresh_token, request)
 
     # Redirect to frontend home page
-    frontend_url = "http://localhost:3000" if "localhost" in str(request.url) else "https://sopher.ai"
+    frontend_url = (
+        "http://localhost:3000" if "localhost" in str(request.url) else "https://sopher.ai"
+    )
     return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
 
 
