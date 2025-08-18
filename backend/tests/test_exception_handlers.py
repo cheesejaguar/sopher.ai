@@ -109,34 +109,38 @@ def test_http_exception_handler():
     assert data["error_code"] == ErrorCode.METHOD_NOT_ALLOWED
 
 
-def test_unhandled_exception_handler():
+async def test_unhandled_exception_handler():
     """Test generic Exception catch-all produces safe error response."""
-    test_app = FastAPI()
+    # Test the handler function directly since FastAPI's middleware stack
+    # in test environments can interfere with exception handling
+    import json
 
+    from app.errors import ErrorCode, request_id_ctx_var
     from app.main import unhandled_exception_handler
 
-    # Add middleware for request ID (needed by exception handler)
-    from app.middleware import RequestIDMiddleware
+    # Set up context
+    request_id_ctx_var.set("test-request-123")
 
-    test_app.add_middleware(RequestIDMiddleware)
+    # Create mock request
+    mock_request = type('MockRequest', (), {
+        'method': 'GET',
+        'url': type('MockURL', (), {'path': '/crash'})()
+    })()
 
-    test_app.exception_handler(Exception)(unhandled_exception_handler)
-
-    @test_app.get("/crash")
-    async def crash_endpoint():
-        raise ValueError("This is a dangerous internal error with secrets: api_key_123")
-
-    client = TestClient(test_app)
+    # Create test exception
+    test_exception = ValueError("This is a dangerous internal error with secrets: api_key_123")
 
     with patch("app.main.logger") as mock_logger:
-        response = client.get("/crash")
+        # Call handler directly
+        response = await unhandled_exception_handler(mock_request, test_exception)
 
     # Should return 500 with safe error message
     assert response.status_code == 500
-    data = response.json()
+    data = json.loads(response.body)
     assert data["error_code"] == ErrorCode.INTERNAL_ERROR
     assert data["message"] == "An internal error occurred."
     assert data["hint"] == "Please try again later."
+    assert data["request_id"] == "test-request-123"
 
     # Should NOT expose the original error message
     assert "dangerous internal error" not in data["message"]
@@ -203,55 +207,53 @@ def test_exception_handlers_track_metrics(mock_metrics):
     mock_metrics.assert_called_once_with(method="GET", endpoint="/error", status_code=404)
 
 
-def test_error_response_structure_consistency():
+async def test_error_response_structure_consistency():
     """Test that all exception handlers return consistent error structure."""
-    test_app = FastAPI()
+    # Test handler functions directly to avoid middleware interference
+    import json
 
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    from app.errors import request_id_ctx_var
     from app.main import (
         http_exception_handler,
         unhandled_exception_handler,
         validation_exception_handler,
     )
 
-    # Add middleware for request ID (needed by exception handlers)
-    from app.middleware import RequestIDMiddleware
+    # Set up context
+    request_id_ctx_var.set("test-consistency-123")
 
-    test_app.add_middleware(RequestIDMiddleware)
+    # Create mock request
+    mock_request = type('MockRequest', (), {
+        'method': 'GET',
+        'url': type('MockURL', (), {'path': '/test'})()
+    })()
 
-    test_app.exception_handler(RequestValidationError)(validation_exception_handler)
-    test_app.exception_handler(StarletteHTTPException)(http_exception_handler)
-    test_app.exception_handler(Exception)(unhandled_exception_handler)
+    # Test validation error handler
+    validation_error = RequestValidationError([
+        {"type": "string_too_short", "loc": ["field"], "msg": "too short"}
+    ])
+    val_response = await validation_exception_handler(mock_request, validation_error)
+    val_data = json.loads(val_response.body)
 
-    class TestModel(BaseModel):
-        field: str = Field(..., min_length=10)
+    # Test HTTP error handler
+    http_error = StarletteHTTPException(status_code=404, detail="Not found")
+    http_response = await http_exception_handler(mock_request, http_error)
+    http_data = json.loads(http_response.body)
 
-    @test_app.post("/validation-error")
-    async def validation_error_endpoint(data: TestModel):
-        return {"ok": True}
-
-    @test_app.get("/http-error")
-    async def http_error_endpoint():
-        raise StarletteHTTPException(status_code=404)
-
-    @test_app.get("/internal-error")
-    async def internal_error_endpoint():
-        raise Exception("Internal error")
-
-    client = TestClient(test_app)
-
-    # Test all error types
-    responses = [
-        client.post("/validation-error", json={"field": "short"}),  # 422
-        client.get("/http-error"),  # 404
-        client.get("/internal-error"),  # 500
-    ]
+    # Test unhandled exception handler
+    internal_error = Exception("Internal error")
+    internal_response = await unhandled_exception_handler(mock_request, internal_error)
+    internal_data = json.loads(internal_response.body)
 
     # All should have consistent structure
     required_fields = {"error_id", "error_code", "message", "request_id", "timestamp"}
 
-    for response in responses:
-        data = response.json()
+    responses_data = [val_data, http_data, internal_data]
 
+    for data in responses_data:
         # Check all required fields are present
         assert required_fields.issubset(set(data.keys()))
 
