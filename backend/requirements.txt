@@ -20,7 +20,7 @@ passlib[bcrypt]==1.7.4
 prometheus-client==0.21.0
 
 # AI and LLM integration
-litellm==1.61.15
+litellm==1.74.9
 crewai==0.80.0
 
 # HTTP client and utilities

@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useStore } from '@/lib/zustand'
-import type { Message, AppState } from '@/lib/zustand'
-import { BookOpen, Loader2, DollarSign, Zap } from 'lucide-react'
+import type { Message, AppState, User } from '@/lib/zustand'
+import { BookOpen, Loader2, DollarSign, Zap, LogOut, User as UserIcon } from 'lucide-react'
 
 export default function Home() {
   const [brief, setBrief] = useState('')
@@ -28,12 +28,40 @@ export default function Home() {
   const setProgress = useStore((state: AppState) => state.setProgress)
   const totalCost = useStore((state: AppState) => state.totalCost)
   const incrementCost = useStore((state: AppState) => state.incrementCost)
+  const user = useStore((state: AppState) => state.user)
+  const setUser = useStore((state: AppState) => state.setUser)
   
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    // Fetch user profile on mount
+    const fetchUser = async () => {
+      try {
+        const response = await fetch('/api/backend/auth/me', {
+          credentials: 'include',
+        })
+        if (response.ok) {
+          const userData = await response.json()
+          setUser(userData as User)
+        }
+      } catch (error) {
+        console.error('Failed to fetch user:', error)
+      }
+    }
+    fetchUser()
+  }, [setUser])
+
+  useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [streamedContent, messages])
+
+  const handleLogout = async () => {
+    await fetch('/api/backend/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    })
+    window.location.href = '/login'
+  }
 
   const startOutlineGeneration = async () => {
     if (!brief.trim() || isGenerating) return
@@ -61,20 +89,13 @@ export default function Home() {
     })
     
     try {
-      // Get demo token (in production, use real auth)
-      const tokenResponse = await fetch('/api/backend/auth/demo-token', {
-        method: 'POST',
-      })
-      const { access_token } = await tokenResponse.json()
-      
       // Create project (using demo project ID for now)
       const projectId = '00000000-0000-0000-0000-000000000000'
       
-      // Start SSE connection
+      // Start SSE connection (cookies will be included automatically)
       const eventSource = new EventSource(
         `/api/backend/v1/projects/${projectId}/outline/stream?` +
         new URLSearchParams({
-          access_token,
           brief: brief.trim(),
           style_guide: styleGuide || '',
           target_chapters: targetChapters.toString(),
@@ -208,6 +229,30 @@ export default function Home() {
               <div className="flex items-center gap-2">
                 <Loader2 className="h-4 w-4 animate-spin text-teal" />
                 <span className="text-sm">{Math.round(progress)}%</span>
+              </div>
+            )}
+
+            {user && (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 text-sm">
+                  {user.picture ? (
+                    <img
+                      src={user.picture}
+                      alt={user.name || user.email}
+                      className="h-8 w-8 rounded-full border border-gold"
+                    />
+                  ) : (
+                    <UserIcon className="h-5 w-5 text-gold" />
+                  )}
+                  <span className="hidden sm:inline">{user.name || user.email}</span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 hover:bg-indigo-700 rounded-lg transition-colors"
+                  title="Logout"
+                >
+                  <LogOut className="h-4 w-4" />
+                </button>
               </div>
             )}
           </div>
