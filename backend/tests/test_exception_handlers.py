@@ -122,10 +122,9 @@ async def test_unhandled_exception_handler():
     request_id_ctx_var.set("test-request-123")
 
     # Create mock request
-    mock_request = type('MockRequest', (), {
-        'method': 'GET',
-        'url': type('MockURL', (), {'path': '/crash'})()
-    })()
+    mock_request = type(
+        "MockRequest", (), {"method": "GET", "url": type("MockURL", (), {"path": "/crash"})()}
+    )()
 
     # Create test exception
     test_exception = ValueError("This is a dangerous internal error with secrets: api_key_123")
@@ -226,15 +225,14 @@ async def test_error_response_structure_consistency():
     request_id_ctx_var.set("test-consistency-123")
 
     # Create mock request
-    mock_request = type('MockRequest', (), {
-        'method': 'GET',
-        'url': type('MockURL', (), {'path': '/test'})()
-    })()
+    mock_request = type(
+        "MockRequest", (), {"method": "GET", "url": type("MockURL", (), {"path": "/test"})()}
+    )()
 
     # Test validation error handler
-    validation_error = RequestValidationError([
-        {"type": "string_too_short", "loc": ["field"], "msg": "too short"}
-    ])
+    validation_error = RequestValidationError(
+        [{"type": "string_too_short", "loc": ["field"], "msg": "too short"}]
+    )
     val_response = await validation_exception_handler(mock_request, validation_error)
     val_data = json.loads(val_response.body)
 
