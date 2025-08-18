@@ -8,7 +8,6 @@ from typing import AsyncIterator, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
-from fastapi.responses import JSONResponse
 from litellm import acompletion
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
