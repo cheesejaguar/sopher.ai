@@ -112,16 +112,31 @@ export default function Home() {
         setProgress(100)
       })
       
-      eventSource.addEventListener('error', (event) => {
+      eventSource.addEventListener('error', (event: MessageEvent) => {
         console.error('SSE error:', event)
         eventSource.close()
         setGenerating(false)
-        
-        // Add error message
+
+        let errorDetail = 'Failed to generate outline. Please try again.'
+        try {
+          if (typeof event.data === 'string' && event.data.trim()) {
+            const parsed = JSON.parse(event.data)
+            errorDetail =
+              parsed.error || parsed.message || parsed.detail || event.data
+          } else if (event.data) {
+            errorDetail = String(event.data)
+          }
+        } catch {
+          if (event.data) {
+            errorDetail = String(event.data)
+          }
+        }
+
+        // Add detailed error message
         addMessage({
           id: Date.now().toString(),
           role: 'system',
-          content: 'Error: Failed to generate outline. Please try again.',
+          content: `Error: ${errorDetail}`,
           timestamp: new Date(),
         })
       })
@@ -134,11 +149,18 @@ export default function Home() {
     } catch (error) {
       console.error('Error starting generation:', error)
       setGenerating(false)
-      
+
+      const message =
+        error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : typeof error === 'string'
+            ? error
+            : JSON.stringify(error)
+
       addMessage({
         id: Date.now().toString(),
         role: 'system',
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        content: `Error starting generation: ${message}`,
         timestamp: new Date(),
       })
     }
