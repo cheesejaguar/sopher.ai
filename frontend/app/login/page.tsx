@@ -11,7 +11,12 @@ export default function LoginPage() {
     // Check if already authenticated
     const checkAuth = async () => {
       try {
-        const response = await fetch('/api/backend/auth/me', {
+        // Determine API base URL based on environment
+        const apiBase = typeof window !== 'undefined' && window.location.hostname === 'sopher.ai' 
+          ? 'https://api.sopher.ai'
+          : ''
+        
+        const response = await fetch(`${apiBase}/auth/me`, {
           credentials: 'include',
         })
         if (response.ok) {
@@ -26,8 +31,13 @@ export default function LoginPage() {
   }, [router])
 
   const handleGoogleLogin = () => {
+    // Determine API base URL based on environment
+    const apiBase = typeof window !== 'undefined' && window.location.hostname === 'sopher.ai' 
+      ? 'https://api.sopher.ai'
+      : ''
+    
     // Redirect to backend OAuth endpoint
-    window.location.href = '/api/backend/auth/login/google'
+    window.location.href = `${apiBase}/auth/login/google`
   }
 
   return (

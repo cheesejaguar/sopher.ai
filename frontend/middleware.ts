@@ -6,8 +6,6 @@ const publicRoutes = [
   '/login',
   '/_next',
   '/favicon.ico',
-  '/api/backend/auth/login',
-  '/api/backend/auth/callback',
 ]
 
 export function middleware(request: NextRequest) {
