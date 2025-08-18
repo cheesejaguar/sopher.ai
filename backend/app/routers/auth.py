@@ -86,8 +86,8 @@ async def callback_google(
     if user:
         # Update existing user
         user.email = email
-        user.name = name if name else None
-        user.picture = picture if picture else None
+        user.name = name  # type: ignore[assignment]
+        user.picture = picture  # type: ignore[assignment]
     else:
         # Create new user
         user = User(
