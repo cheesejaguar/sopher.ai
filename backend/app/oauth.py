@@ -165,6 +165,7 @@ def set_auth_cookies(
 ) -> None:
     """Set authentication cookies with appropriate security settings"""
     import logging
+
     logger = logging.getLogger(__name__)
 
     # Determine if we're in production based on the request
@@ -221,6 +222,7 @@ def set_auth_cookies(
 def clear_auth_cookies(response: Response, request: Request) -> None:
     """Clear authentication cookies"""
     import logging
+
     logger = logging.getLogger(__name__)
 
     host = request.headers.get("host", "")
