@@ -16,7 +16,7 @@ from .cache import cache
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_OAUTH_REDIRECT_URI = os.getenv(
-    "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8000/auth/callback/google"
+    "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:3000/api/backend/auth/callback/google"
 )
 
 # Google OAuth2 endpoints
@@ -122,22 +122,24 @@ def set_auth_cookies(
     # This allows cookies to be accessible on the same domain as the request
 
     # Set access token cookie (1 hour)
+    # httponly=False allows Next.js middleware to read the cookie for auth checks
     response.set_cookie(
         key="access_token",
         value=access_token,
         max_age=3600,
-        httponly=True,
+        httponly=False,  # Allow JavaScript/middleware to read for auth checks
         samesite="lax",
         secure=is_production,
         path="/",
     )
 
     # Set refresh token cookie (7 days)
+    # Keep httponly=True for refresh token for security
     response.set_cookie(
         key="refresh_token",
         value=refresh_token,
         max_age=7 * 24 * 3600,
-        httponly=True,
+        httponly=True,  # Keep secure - only server should access refresh token
         samesite="lax",
         secure=is_production,
         path="/",
@@ -153,13 +155,13 @@ def clear_auth_cookies(response: Response, request: Request) -> None:
         key="access_token",
         path="/",
         secure=is_production,
-        httponly=True,
+        httponly=False,  # Match the setting when cookie was created
         samesite="lax",
     )
     response.delete_cookie(
         key="refresh_token",
         path="/",
         secure=is_production,
-        httponly=True,
+        httponly=True,  # Match the setting when cookie was created
         samesite="lax",
     )
