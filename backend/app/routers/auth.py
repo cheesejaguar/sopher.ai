@@ -125,7 +125,6 @@ async def callback_google(
         "localhost:3001",
         "127.0.0.1:3000",
         "sopher.ai",
-        "www.sopher.ai",
         "api.sopher.ai",
     }
 
@@ -149,15 +148,9 @@ async def callback_google(
                 frontend_url = "http://localhost:3000/"
 
         # Check if it's an allowed production host
-        elif host in allowed_hosts or hostname in ["sopher.ai", "www.sopher.ai", "api.sopher.ai"]:
-            # Remove API subdomain if present for frontend redirect
-            if hostname.startswith("api."):
-                frontend_url = "https://sopher.ai/"
-            elif hostname in ["sopher.ai", "www.sopher.ai"]:
-                frontend_url = f"https://{hostname}/"
-            else:
-                # Default to main domain for any other allowed host
-                frontend_url = "https://sopher.ai/"
+        elif host in allowed_hosts or hostname in ["sopher.ai", "api.sopher.ai"]:
+            # Always redirect to main domain for production
+            frontend_url = "https://sopher.ai/"
         else:
             # Unrecognized host - use safe default
             logger.warning(f"Unrecognized host header: {host}")
