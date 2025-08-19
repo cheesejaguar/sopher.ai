@@ -2,6 +2,7 @@
 
 import logging
 import os
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
@@ -67,8 +68,8 @@ async def login_google():
 async def callback_google(
     request: Request,
     response: Response,
-    code: str = None,
-    state: str = None,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """Handle Google OAuth2 callback"""
