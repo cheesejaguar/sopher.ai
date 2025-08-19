@@ -115,25 +115,55 @@ async def callback_google(
     # Set cookies and redirect to frontend
     set_auth_cookies(response, access_token, refresh_token, request)
 
-    # Redirect to frontend home page
-    # When proxied through frontend, use the host header to determine domain
+    # Redirect to frontend home page with proper host validation
+    # When proxied through frontend, use the host header but validate it first
     host = request.headers.get("host", "")
 
-    # Determine the frontend URL based on the host
-    if "localhost" in host:
-        # Extract port from host if present
-        if ":" in host:
-            port = host.split(":")[1]
-            frontend_url = f"http://localhost:{port}/"
+    # Define allowed hosts to prevent SSRF attacks
+    allowed_hosts = {
+        "localhost:3000",
+        "localhost:3001",
+        "127.0.0.1:3000",
+        "sopher.ai",
+        "www.sopher.ai",
+        "api.sopher.ai",
+    }
+
+    # Validate and determine the frontend URL
+    if host:
+        # Extract hostname without port for validation
+        hostname = host.split(":")[0] if ":" in host else host
+
+        # Check if it's a localhost development environment
+        if hostname in ["localhost", "127.0.0.1"]:
+            # For localhost, preserve the port from the host header
+            if ":" in host:
+                port = host.split(":")[1]
+                # Validate port is numeric
+                try:
+                    int(port)
+                    frontend_url = f"http://localhost:{port}/"
+                except ValueError:
+                    frontend_url = "http://localhost:3000/"
+            else:
+                frontend_url = "http://localhost:3000/"
+
+        # Check if it's an allowed production host
+        elif host in allowed_hosts or hostname in ["sopher.ai", "www.sopher.ai", "api.sopher.ai"]:
+            # Remove API subdomain if present for frontend redirect
+            if hostname.startswith("api."):
+                frontend_url = "https://sopher.ai/"
+            elif hostname in ["sopher.ai", "www.sopher.ai"]:
+                frontend_url = f"https://{hostname}/"
+            else:
+                # Default to main domain for any other allowed host
+                frontend_url = "https://sopher.ai/"
         else:
-            frontend_url = "http://localhost:3000/"
-    elif host:
-        # For production, use HTTPS and the host domain
-        # Remove any API subdomain if present
-        clean_host = host[4:] if host.startswith("api.") else host
-        frontend_url = f"https://{clean_host}/"
+            # Unrecognized host - use safe default
+            logger.warning(f"Unrecognized host header: {host}")
+            frontend_url = "https://sopher.ai/"
     else:
-        # Fallback to production URL
+        # No host header - use production URL as fallback
         frontend_url = "https://sopher.ai/"
 
     return RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
