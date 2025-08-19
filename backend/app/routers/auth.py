@@ -205,11 +205,16 @@ async def callback_google(
             # For localhost, preserve the port from the host header
             if ":" in host:
                 port = host.split(":")[1]
-                # Validate port is numeric
+                # Validate port is numeric and within valid range (1-65535)
                 try:
-                    int(port)
-                    frontend_url = f"http://localhost:{port}/"
+                    port_num = int(port)
+                    if 1 <= port_num <= 65535:
+                        frontend_url = f"http://localhost:{port}/"
+                    else:
+                        # Invalid port range, use default
+                        frontend_url = "http://localhost:3000/"
                 except ValueError:
+                    # Non-numeric port, use default
                     frontend_url = "http://localhost:3000/"
             else:
                 frontend_url = "http://localhost:3000/"
