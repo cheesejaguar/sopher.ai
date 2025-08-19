@@ -88,7 +88,7 @@ async def callback_google(
     try:
         verifier = await validate_oauth_state(state)
     except Exception as e:
-        logger.error(f"Failed to validate OAuth state: {e}")
+        logger.error(f"Failed to validate OAuth state: {type(e).__name__}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to validate OAuth state. Please try logging in again.",
@@ -108,7 +108,7 @@ async def callback_google(
         logger.error(f"OAuth HTTP error: {http_e.detail}")
         raise
     except Exception as e:
-        logger.error(f"OAuth token exchange failed: {e}", exc_info=True)
+        logger.error(f"OAuth token exchange failed: {type(e).__name__}", exc_info=True)
         # Check if it's a configuration issue
         if "GOOGLE_CLIENT_ID" in str(e) or "GOOGLE_CLIENT_SECRET" in str(e):
             raise HTTPException(

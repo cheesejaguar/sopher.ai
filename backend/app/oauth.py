@@ -63,10 +63,15 @@ async def validate_oauth_state(state: str) -> Optional[str]:
                 logger.warning("OAuth state found but no verifier present")
                 return None
         else:
-            logger.warning(f"OAuth state not found or expired: {state[:8]}...")
+            # Log only a hash of the state to prevent log injection
+            import hashlib
+
+            state_hash = hashlib.sha256(state.encode()).hexdigest()[:8]
+            logger.warning(f"OAuth state not found or expired: hash={state_hash}")
             return None
     except Exception as e:
-        logger.error(f"Failed to validate OAuth state: {e}", exc_info=True)
+        # Use exc_info for full details, log only error type for safety
+        logger.error(f"Failed to validate OAuth state: {type(e).__name__}", exc_info=True)
         raise
 
 
@@ -119,7 +124,7 @@ async def exchange_code_for_token(code: str, code_verifier: str) -> tuple[dict, 
         # Re-raise configuration errors
         raise
     except Exception as e:
-        logger.error(f"Failed to create OAuth client: {e}")
+        logger.error(f"Failed to create OAuth client: {type(e).__name__}", exc_info=True)
         raise
 
     try:
@@ -131,7 +136,7 @@ async def exchange_code_for_token(code: str, code_verifier: str) -> tuple[dict, 
             code_verifier=code_verifier,
         )
     except Exception as e:
-        logger.error(f"Token exchange failed: {e}", exc_info=True)
+        logger.error(f"Token exchange failed: {type(e).__name__}", exc_info=True)
         # Add more context to the error
         if "invalid_grant" in str(e):
             raise ValueError("invalid_grant: The authorization code is invalid or has expired")
@@ -147,7 +152,7 @@ async def exchange_code_for_token(code: str, code_verifier: str) -> tuple[dict, 
         resp.raise_for_status()
         userinfo = resp.json()
     except Exception as e:
-        logger.error(f"Failed to fetch user info: {e}", exc_info=True)
+        logger.error(f"Failed to fetch user info: {type(e).__name__}", exc_info=True)
         raise ValueError(f"Failed to fetch user info from Google: {str(e)}")
 
     return token, userinfo
