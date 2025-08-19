@@ -166,9 +166,7 @@ Format as structured markdown."""
                     )
 
                     # Calculate cost using pricing module
-                    total_cost = calculate_cost_usd(
-                        model, prompt_tokens, completion_tokens
-                    )
+                    total_cost = calculate_cost_usd(model, prompt_tokens, completion_tokens)
 
                     MetricsTracker.track_cost(model, "outliner", total_cost)
 
