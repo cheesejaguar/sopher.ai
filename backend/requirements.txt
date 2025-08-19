@@ -22,7 +22,7 @@ prometheus-client==0.21.0
 
 # AI and LLM integration
 openai>=1.51.0,<1.57.0
-litellm>=1.48.0,<1.49.0
+litellm>=1.48.0,<1.76.0
 crewai==0.80.0
 
 # HTTP client and utilities
@@ -36,4 +36,4 @@ pydantic==2.10.2
 pydantic-settings==2.6.1
 
 # Build tools (required by crewai)
-setuptools==69.0.0
+setuptools==78.1.1
