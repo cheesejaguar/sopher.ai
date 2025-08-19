@@ -259,9 +259,9 @@ async def verify_auth(request: Request):
     )
 
     return {
-        "authenticated": bool(access_token),
-        "has_access_token": bool(access_token),
-        "has_refresh_token": bool(refresh_token),
+        "authenticated": access_token is not None,
+        "has_access_token": access_token is not None,
+        "has_refresh_token": refresh_token is not None,
         "host": request.headers.get("host", ""),
         "cookies_present": list(request.cookies.keys()),
     }
