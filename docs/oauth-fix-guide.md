@@ -44,7 +44,7 @@ GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3000/api/backend/auth/callback/google
 
 For production deployment, use:
 ```env
-GOOGLE_OAUTH_REDIRECT_URI=https://api.sopher.ai/auth/callback/google
+GOOGLE_OAUTH_REDIRECT_URI=https://sopher.ai/api/backend/auth/callback/google
 ```
 
 ### Step 4: Restart the Backend Server

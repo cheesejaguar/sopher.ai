@@ -33,7 +33,7 @@ ssh <production-server>
 kubectl create secret generic google-oauth \
   --from-literal=GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com" \
   --from-literal=GOOGLE_CLIENT_SECRET="your-client-secret" \
-  --from-literal=GOOGLE_OAUTH_REDIRECT_URI="https://api.sopher.ai/auth/callback/google" \
+  --from-literal=GOOGLE_OAUTH_REDIRECT_URI="https://sopher.ai/api/backend/auth/callback/google" \
   -n sopher-ai
 ```
 
@@ -60,7 +60,7 @@ kubectl rollout restart deployment/backend -n sopher-ai
 2. Add the following secrets:
    - `GOOGLE_CLIENT_ID`: Your OAuth client ID
    - `GOOGLE_CLIENT_SECRET`: Your OAuth client secret
-   - `GOOGLE_OAUTH_REDIRECT_URI`: `https://api.sopher.ai/auth/callback/google`
+   - `GOOGLE_OAUTH_REDIRECT_URI`: `https://sopher.ai/api/backend/auth/callback/google`
 
 3. Update `.github/workflows/ci.yml` to pass these secrets to the deployment:
 ```yaml
@@ -77,7 +77,7 @@ If using Docker Compose or direct deployment:
 ```bash
 export GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
 export GOOGLE_CLIENT_SECRET="your-client-secret"
-export GOOGLE_OAUTH_REDIRECT_URI="https://api.sopher.ai/auth/callback/google"
+export GOOGLE_OAUTH_REDIRECT_URI="https://sopher.ai/api/backend/auth/callback/google"
 ```
 
 ### 3. Configure Google Cloud Console
@@ -87,7 +87,7 @@ export GOOGLE_OAUTH_REDIRECT_URI="https://api.sopher.ai/auth/callback/google"
 3. Navigate to **APIs & Services** > **Credentials**
 4. Click on your OAuth 2.0 Client ID
 5. Add the following to **Authorized redirect URIs**:
-   - `https://api.sopher.ai/auth/callback/google`
+   - `https://sopher.ai/api/backend/auth/callback/google`
    - `https://sopher.ai/api/backend/auth/callback/google` (if using frontend proxy)
 6. Click **Save**
 
@@ -106,7 +106,7 @@ Expected response:
   "google_oauth_configured": true,
   "client_id_set": true,
   "client_secret_set": true,
-  "redirect_uri": "https://api.sopher.ai/auth/callback/google",
+  "redirect_uri": "https://sopher.ai/api/backend/auth/callback/google",
   "message": "OAuth is properly configured"
 }
 ```

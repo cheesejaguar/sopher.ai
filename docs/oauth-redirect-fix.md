@@ -16,7 +16,7 @@ https://sopher.ai/api/backend/auth/callback/google
 
 **NEW (correct):**
 ```
-https://api.sopher.ai/auth/callback/google
+https://sopher.ai/api/backend/auth/callback/google
 ```
 
 ### 2. Update Backend Environment Variable
@@ -28,7 +28,7 @@ Update the `GOOGLE_OAUTH_REDIRECT_URI` environment variable in your production d
 kubectl edit configmap backend-config
 
 # Or update your secret/configmap YAML
-GOOGLE_OAUTH_REDIRECT_URI=https://api.sopher.ai/auth/callback/google
+GOOGLE_OAUTH_REDIRECT_URI=https://sopher.ai/api/backend/auth/callback/google
 ```
 
 ### 3. Frontend Changes (Already Applied)
@@ -36,17 +36,16 @@ GOOGLE_OAUTH_REDIRECT_URI=https://api.sopher.ai/auth/callback/google
 The frontend login page has been updated to redirect directly to the API subdomain:
 
 ```typescript
-// OLD: window.location.href = '/api/backend/auth/login/google'
-// NEW: 
-window.location.href = 'https://api.sopher.ai/auth/login/google'
+// Correct approach - use frontend proxy:
+window.location.href = '/api/backend/auth/login/google'
 ```
 
 ## OAuth Flow After Fix
 
 1. User clicks "Sign in with Google" on `sopher.ai/login`
-2. Frontend redirects to `https://api.sopher.ai/auth/login/google`
+2. Frontend redirects to `/api/backend/auth/login/google` (proxied to backend)
 3. Backend redirects to Google OAuth consent page
-4. Google redirects back to `https://api.sopher.ai/auth/callback/google`
+4. Google redirects back to `https://sopher.ai/api/backend/auth/callback/google`
 5. Backend processes OAuth, sets cookies with domain `.sopher.ai`
 6. Backend redirects to `https://sopher.ai/` with auth cookies
 7. Frontend middleware validates cookies and allows access
@@ -54,7 +53,7 @@ window.location.href = 'https://api.sopher.ai/auth/login/google'
 ## Cookie Configuration
 
 Cookies are set with:
-- Domain: `.sopher.ai` (allows sharing between sopher.ai and api.sopher.ai)
+- Domain: `sopher.ai` (set on the frontend domain)
 - SameSite: `none` (for cross-subdomain in production)
 - Secure: `true` (required for SameSite=none)
 - HttpOnly: `false` for access_token (so frontend can validate)

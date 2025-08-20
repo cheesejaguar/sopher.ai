@@ -88,7 +88,7 @@ New required variables:
 ```bash
 GOOGLE_CLIENT_ID=<oauth_client_id>
 GOOGLE_CLIENT_SECRET=<oauth_client_secret>
-GOOGLE_OAUTH_REDIRECT_URI=https://api.sopher.ai/auth/callback/google
+GOOGLE_OAUTH_REDIRECT_URI=https://sopher.ai/api/backend/auth/callback/google
 ```
 
 ## Testing
