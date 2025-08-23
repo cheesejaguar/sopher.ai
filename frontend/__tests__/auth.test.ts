@@ -17,7 +17,8 @@ vi.mock('process', () => ({
 describe('Auth Library', () => {
   beforeEach(() => {
     // Clear cookies before each test
-    document.cookie = '';
+    document.cookie = 'access_token=; Max-Age=0; path=/';
+    document.cookie = 'refresh_token=; Max-Age=0; path=/';
     vi.clearAllMocks();
   });
 
@@ -272,7 +273,7 @@ describe('OAuth Flow Integration', () => {
     const errorDescription = params.get('error_description');
     
     expect(error).toBe('access_denied');
-    expect(errorDescription).toBe('User+denied+access');  // URL encoded
+    expect(errorDescription).toBe('User denied access');
   });
 
   it('should clear cookies on logout', async () => {

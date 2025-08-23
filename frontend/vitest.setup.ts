@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { vi, beforeEach } from 'vitest';
 
 // Mock Next.js router
 vi.mock('next/navigation', () => ({
@@ -22,6 +22,20 @@ vi.mock('next/navigation', () => ({
 
 // Setup global mocks
 global.fetch = vi.fn();
+
+// Ensure fetch mock is reset for every test to avoid cross-test leakage
+beforeEach(() => {
+  global.fetch = vi.fn((input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/api/v1/auth/login/google')) {
+      return Promise.resolve({ ok: true, status: 302, headers: new Headers({ location: 'http://localhost:3000' }) } as any)
+    }
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as any)
+  }) as any
+});
+
+// Default API base for tests
+process.env.NEXT_PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 // Mock window.location
 Object.defineProperty(window, 'location', {
