@@ -40,35 +40,60 @@ function formatReadingTime(totalWords: number): string {
   return `${hours} hr ${remainingMinutes} min`;
 }
 
-// Highlight character names in text
+// Highlight character names in text using safe string matching (no dynamic RegExp)
 function highlightCharacters(text: string, characters: string[]): React.ReactNode {
   if (!characters.length) return text;
 
-  // Escape special regex characters in character names
-  const escapedCharacters = characters.map(c =>
-    c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  );
+  // Create a set of lowercase character names for fast lookup
+  const characterSet = new Set(characters.map(c => c.toLowerCase()));
 
-  // Create regex pattern for all character names (case insensitive, word boundary)
-  const pattern = new RegExp(`\\b(${escapedCharacters.join('|')})\\b`, 'gi');
+  // Split text into words while preserving whitespace and punctuation
+  const result: React.ReactNode[] = [];
+  let currentWord = '';
+  let currentNonWord = '';
+  let keyIndex = 0;
 
-  const parts = text.split(pattern);
+  for (let i = 0; i <= text.length; i++) {
+    const char = text[i];
+    const isWordChar = char && /\w/.test(char);
 
-  return parts.map((part, index) => {
-    const isCharacter = characters.some(c => c.toLowerCase() === part.toLowerCase());
-    if (isCharacter) {
-      return (
-        <span
-          key={index}
-          className="bg-blue-100 text-blue-800 px-1 rounded font-medium"
-          data-testid="character-highlight"
-        >
-          {part}
-        </span>
-      );
+    if (isWordChar) {
+      // If we have accumulated non-word characters, push them first
+      if (currentNonWord) {
+        result.push(currentNonWord);
+        currentNonWord = '';
+      }
+      currentWord += char;
+    } else {
+      // If we have accumulated a word, check if it's a character name
+      if (currentWord) {
+        if (characterSet.has(currentWord.toLowerCase())) {
+          result.push(
+            <span
+              key={keyIndex++}
+              className="bg-blue-100 text-blue-800 px-1 rounded font-medium"
+              data-testid="character-highlight"
+            >
+              {currentWord}
+            </span>
+          );
+        } else {
+          result.push(currentWord);
+        }
+        currentWord = '';
+      }
+      if (char) {
+        currentNonWord += char;
+      }
     }
-    return part;
-  });
+  }
+
+  // Push any remaining non-word characters
+  if (currentNonWord) {
+    result.push(currentNonWord);
+  }
+
+  return result.length > 0 ? result : text;
 }
 
 // Chapter Preview Card Component

@@ -23,7 +23,9 @@ class RedisCache:
             decode_responses=True,
             max_connections=50,
         )
-        await self.redis.ping()
+        # Verify connection with ping
+        if self.redis:
+            await self.redis.ping()  # type: ignore[misc]
 
     async def disconnect(self) -> None:
         """Disconnect from Redis"""
