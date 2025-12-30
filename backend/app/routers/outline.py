@@ -15,7 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from ..agents.agents import BookWritingAgents
+from ..agents import BookWritingAgents
 from ..cache import cache
 from ..db import get_db
 from ..errors import ErrorCode, api_error

@@ -25,17 +25,14 @@ ecdsa>=0.19.1  # Fix for Minerva attack vulnerability
 prometheus-client==0.21.0
 
 # AI and LLM integration
+# Using LiteLLM directly instead of CrewAI/LangChain for:
+# - 50+ fewer dependencies
+# - Faster CI/CD (no complex resolution)
+# - Full control over agent behavior
+# - Easier debugging (no framework magic)
+# - Stability (no surprise breaking changes)
 openai>=1.58.1,<2.0.0
-litellm==1.53.3  # Pinned for faster dependency resolution
-crewai==0.80.0
-# Pin langchain ecosystem versions for compatibility
-langchain==0.3.25
-langchain-core==0.3.63
-langchain-community==0.3.21
-langchain-openai==0.2.14
-langchain-text-splitters==0.3.8
-# Pin crewai-tools and instructor
-crewai-tools==0.17.0
+litellm>=1.48.0,<2.0.0
 instructor==1.3.3
 
 # HTTP client and utilities
@@ -48,7 +45,7 @@ websockets==14.1
 pydantic==2.10.2
 pydantic-settings==2.6.1
 
-# Build tools (required by crewai)
+# Build tools
 setuptools>=75.0.0  # Fix for path traversal and RCE vulnerabilities
 
 # PDF processing
@@ -56,6 +53,3 @@ pypdf==5.9.0  # Fix for RAM exhaustion vulnerability
 
 # Additional pins for dependency resolution
 jiter>=0.4.1,<0.5.0  # instructor requires jiter<0.5.0
-numpy==1.26.4
-chromadb==0.5.23
-tokenizers==0.20.3
