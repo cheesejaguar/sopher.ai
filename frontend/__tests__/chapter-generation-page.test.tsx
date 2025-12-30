@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { useParams, useRouter } from 'next/navigation'
+import type { Chapter, ChapterGenerationJob } from '@/lib/zustand'
 
 // Mock next/navigation
 vi.mock('next/navigation', () => ({
@@ -9,7 +10,18 @@ vi.mock('next/navigation', () => ({
 }))
 
 // Mock zustand store
-const mockStore = {
+const mockStore: {
+  user: { id: string; email: string; role: string; monthly_budget_usd: number }
+  currentProject: { id: string; name: string; target_chapters: number }
+  chapters: Chapter[]
+  setChapters: ReturnType<typeof vi.fn>
+  addChapter: ReturnType<typeof vi.fn>
+  updateChapter: ReturnType<typeof vi.fn>
+  removeChapter: ReturnType<typeof vi.fn>
+  generationJobs: ChapterGenerationJob[]
+  setGenerationJobs: ReturnType<typeof vi.fn>
+  updateGenerationJob: ReturnType<typeof vi.fn>
+} = {
   user: { id: 'user-1', email: 'test@example.com', role: 'user', monthly_budget_usd: 100 },
   currentProject: { id: 'project-1', name: 'Test Project', target_chapters: 10 },
   chapters: [],

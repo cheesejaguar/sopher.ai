@@ -2,11 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useStore } from '@/lib/zustand'
-import type { AppState } from '@/lib/zustand'
 import { Loader2, AlertCircle } from 'lucide-react'
 import ManuscriptPreview from '@/components/ManuscriptPreview'
 import Link from 'next/link'
+import { getCookie } from '@/lib/auth'
 
 // Types matching the ManuscriptPreview component
 interface ChapterData {
@@ -76,12 +75,11 @@ export default function ManuscriptPreviewPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const user = useStore((state: AppState) => state.user)
-
   // Fetch manuscript data
   useEffect(() => {
     const fetchManuscript = async () => {
-      if (!user?.access_token) return
+      const accessToken = getCookie('access_token')
+      if (!accessToken) return
 
       try {
         setIsLoading(true)
@@ -92,7 +90,7 @@ export default function ManuscriptPreviewPage() {
           `${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${projectId}/export/manuscript`,
           {
             headers: {
-              Authorization: `Bearer ${user.access_token}`,
+              Authorization: `Bearer ${accessToken}`,
             },
           }
         )
@@ -114,7 +112,7 @@ export default function ManuscriptPreviewPage() {
     }
 
     fetchManuscript()
-  }, [projectId, user])
+  }, [projectId])
 
   // Handle back navigation
   const handleBack = () => {

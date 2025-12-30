@@ -18,20 +18,19 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git \
     && rm -rf /var/lib/apt/lists*
 
-# Upgrade pip and build tools
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip==24.3.1 setuptools==75.1.0 wheel==0.44.0
+# Install uv for fast dependency resolution
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Install python dependencies using cached wheels when possible
+# Install python dependencies using uv (much faster than pip)
 COPY requirements.txt ./
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --prefer-binary -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system --compile-bytecode -r requirements.txt
 
 # Copy application code and pyproject.toml for editable install
 COPY pyproject.toml ./
 COPY app ./app
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --prefer-binary -e . --no-deps
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system -e . --no-deps
 
 # Production runtime stage
 FROM python:3.12-slim AS runtime

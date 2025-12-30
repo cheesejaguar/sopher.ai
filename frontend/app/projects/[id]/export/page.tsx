@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { useStore } from '@/lib/zustand'
-import type { AppState, Project } from '@/lib/zustand'
+import type { Project } from '@/lib/zustand'
+import { getCookie } from '@/lib/auth'
 import {
   BookOpen,
   ChevronLeft,
@@ -182,13 +182,11 @@ export default function ExportPage() {
     include_chapter_epigraphs: true,
   })
 
-  // Store
-  const user = useStore((state: AppState) => state.user)
-
   // Fetch project data
   useEffect(() => {
     const fetchData = async () => {
-      if (!user?.access_token) return
+      const accessToken = getCookie('access_token')
+      if (!accessToken) return
 
       try {
         setIsLoading(true)
@@ -199,7 +197,7 @@ export default function ExportPage() {
           `${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${projectId}`,
           {
             headers: {
-              Authorization: `Bearer ${user.access_token}`,
+              Authorization: `Bearer ${accessToken}`,
             },
           }
         )
@@ -216,7 +214,7 @@ export default function ExportPage() {
           `${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${projectId}/export/preview`,
           {
             headers: {
-              Authorization: `Bearer ${user.access_token}`,
+              Authorization: `Bearer ${accessToken}`,
             },
           }
         )
@@ -233,11 +231,12 @@ export default function ExportPage() {
     }
 
     fetchData()
-  }, [projectId, user])
+  }, [projectId])
 
   // Start export
   const handleExport = useCallback(async () => {
-    if (!user?.access_token) return
+    const accessToken = getCookie('access_token')
+    if (!accessToken) return
 
     try {
       setIsExporting(true)
@@ -257,7 +256,7 @@ export default function ExportPage() {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${user.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(request),
@@ -278,20 +277,27 @@ export default function ExportPage() {
       setError(err instanceof Error ? err.message : 'Export failed')
       setIsExporting(false)
     }
-  }, [projectId, selectedFormat, frontMatter, backMatter, formatting, user])
+  }, [projectId, selectedFormat, frontMatter, backMatter, formatting])
 
   // Poll for export job status
   const pollExportJob = useCallback(
     async (jobId: string) => {
-      if (!user?.access_token) return
+      const accessToken = getCookie('access_token')
+      if (!accessToken) return
 
       const poll = async () => {
+        const token = getCookie('access_token')
+        if (!token) {
+          setIsExporting(false)
+          return
+        }
+
         try {
           const response = await fetch(
             `${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${projectId}/export/${jobId}`,
             {
               headers: {
-                Authorization: `Bearer ${user.access_token}`,
+                Authorization: `Bearer ${token}`,
               },
             }
           )
@@ -316,19 +322,20 @@ export default function ExportPage() {
 
       poll()
     },
-    [projectId, user]
+    [projectId]
   )
 
   // Download exported file
   const handleDownload = useCallback(async () => {
-    if (!user?.access_token || !exportJob?.download_url) return
+    const accessToken = getCookie('access_token')
+    if (!accessToken || !exportJob?.download_url) return
 
     try {
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/v1/projects/${projectId}/export/${exportJob.id}/download`,
         {
           headers: {
-            Authorization: `Bearer ${user.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
         }
       )
@@ -349,7 +356,7 @@ export default function ExportPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed')
     }
-  }, [projectId, exportJob, selectedFormat, user])
+  }, [projectId, exportJob, selectedFormat])
 
   // Render loading state
   if (isLoading) {
@@ -404,7 +411,7 @@ export default function ExportPage() {
               <div className="flex items-center gap-2">
                 <BookOpen className="h-5 w-5 text-teal" />
                 <span className="text-charcoal font-semibold">
-                  {project?.title || 'Export'}
+                  {project?.name || 'Export'}
                 </span>
               </div>
             </div>

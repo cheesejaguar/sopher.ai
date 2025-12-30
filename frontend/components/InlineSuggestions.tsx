@@ -135,7 +135,7 @@ function HighlightedSpan({
   const [showTooltip, setShowTooltip] = useState(false)
   const [tooltipPosition, setTooltipPosition] = useState({ top: 0, left: 0 })
 
-  const handleMouseEnter = (e: React.MouseEvent) => {
+  const handleShow = (e: React.MouseEvent | React.FocusEvent) => {
     const rect = e.currentTarget.getBoundingClientRect()
     setTooltipPosition({
       top: rect.top - rect.height,
@@ -144,7 +144,7 @@ function HighlightedSpan({
     setShowTooltip(true)
   }
 
-  const handleMouseLeave = () => {
+  const handleHide = () => {
     setShowTooltip(false)
   }
 
@@ -163,10 +163,10 @@ function HighlightedSpan({
   return (
     <span
       className={`relative cursor-pointer inline ${severityStyles[suggestion.severity]} ${statusStyles[suggestion.status]}`}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onFocus={handleMouseEnter}
-      onBlur={handleMouseLeave}
+      onMouseEnter={handleShow}
+      onMouseLeave={handleHide}
+      onFocus={handleShow}
+      onBlur={handleHide}
       tabIndex={0}
       role="button"
       aria-label={`Edit suggestion: ${suggestion.suggestion_type}`}
