@@ -8,8 +8,9 @@ from datetime import datetime
 from typing import AsyncIterator, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request, Response, status
 from litellm import acompletion
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
@@ -19,9 +20,9 @@ from ..cache import cache
 from ..db import get_db
 from ..errors import ErrorCode, api_error
 from ..metrics import MetricsTracker, active_sessions
-from ..models import Artifact, Cost, Event, Session, User
+from ..models import Artifact, Cost, Event, Project, Session, User
 from ..pricing import calculate_cost_usd
-from ..schemas import OutlineRequest
+from ..schemas import BookOutline, OutlineRequest, OutlineRevision
 from ..security import TokenData, get_current_user
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["outline"])
@@ -393,3 +394,435 @@ async def stream_outline(
             "X-Accel-Buffering": "no",  # Disable Nginx buffering
         },
     )
+
+
+@router.get("/outline")
+async def get_outline(
+    project_id: UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+) -> dict:
+    """Get the current outline for a project."""
+    # Verify project ownership
+    project_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == user.user_id,
+        )
+    )
+    project = project_result.scalar_one_or_none()
+
+    if not project:
+        MetricsTracker.track_api_request(request.method, request.url.path, 404)
+        return api_error(
+            ErrorCode.PROJECT_NOT_FOUND.value,
+            "Project not found or access denied.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Get the latest outline artifact for this project
+    outline_result = await db.execute(
+        select(Artifact)
+        .join(Session, Artifact.session_id == Session.id)
+        .where(
+            Session.project_id == project_id,
+            Artifact.kind == "outline",
+        )
+        .order_by(Artifact.created_at.desc())
+        .limit(1)
+    )
+    outline_artifact = outline_result.scalar_one_or_none()
+
+    if not outline_artifact:
+        MetricsTracker.track_api_request(request.method, request.url.path, 404)
+        return api_error(
+            "OUTLINE_NOT_FOUND",
+            "No outline found for this project.",
+            hint="Generate an outline first using the /outline/stream endpoint.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    MetricsTracker.track_api_request(request.method, request.url.path, 200)
+
+    # Return the outline content
+    return {
+        "id": str(outline_artifact.id),
+        "content": outline_artifact.blob.decode() if outline_artifact.blob else None,
+        "meta": outline_artifact.meta,
+        "created_at": outline_artifact.created_at.isoformat(),
+    }
+
+
+@router.put("/outline")
+async def update_outline(
+    project_id: UUID,
+    request: Request,
+    outline_data: dict = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+) -> dict:
+    """Update the outline for a project.
+
+    This endpoint allows users to manually edit the generated outline.
+    The outline can be either raw markdown content or a structured BookOutline.
+    """
+    # Verify project ownership
+    project_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == user.user_id,
+        )
+    )
+    project = project_result.scalar_one_or_none()
+
+    if not project:
+        MetricsTracker.track_api_request(request.method, request.url.path, 404)
+        return api_error(
+            ErrorCode.PROJECT_NOT_FOUND.value,
+            "Project not found or access denied.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Get the content from the request
+    content = outline_data.get("content")
+    if not content:
+        MetricsTracker.track_api_request(request.method, request.url.path, 422)
+        return api_error(
+            ErrorCode.OUTLINE_INVALID_PARAMETER.value,
+            "Outline content is required.",
+            hint="Provide 'content' field with the outline text.",
+            status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
+
+    # Try to validate as BookOutline if it's structured data
+    structured_outline = None
+    if isinstance(content, dict):
+        try:
+            structured_outline = BookOutline(**content)
+            content = structured_outline.model_dump_json()
+        except ValidationError as e:
+            MetricsTracker.track_api_request(request.method, request.url.path, 422)
+            return api_error(
+                ErrorCode.OUTLINE_INVALID_PARAMETER.value,
+                "Invalid outline structure.",
+                hint="Ensure the outline matches the BookOutline schema.",
+                details={"validation_errors": e.errors()},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+    # Get or create a session for this update
+    session_result = await db.execute(
+        select(Session)
+        .where(Session.project_id == project_id)
+        .order_by(Session.created_at.desc())
+        .limit(1)
+    )
+    session = session_result.scalar_one_or_none()
+
+    if not session:
+        # Create a new session for this update
+        session = Session(
+            project_id=project_id,
+            user_id=user.user_id,
+            context={"action": "outline_update"},
+        )
+        db.add(session)
+        await db.flush()
+
+    # Create new artifact with updated content
+    content_bytes = content.encode() if isinstance(content, str) else json.dumps(content).encode()
+    artifact = Artifact(
+        session_id=session.id,
+        kind="outline",
+        meta={
+            "updated_by_user": True,
+            "revision": True,
+            "previous_artifact_id": (
+                str(outline_data.get("previous_id")) if outline_data.get("previous_id") else None
+            ),
+        },
+        blob=content_bytes,
+    )
+    db.add(artifact)
+
+    # Log the update event
+    event = Event(
+        session_id=session.id,
+        type="outline_updated",
+        payload={
+            "artifact_id": str(artifact.id),
+            "content_length": len(content_bytes),
+        },
+    )
+    db.add(event)
+
+    await db.commit()
+    await db.refresh(artifact)
+
+    MetricsTracker.track_api_request(request.method, request.url.path, 200)
+
+    return {
+        "id": str(artifact.id),
+        "message": "Outline updated successfully",
+        "created_at": artifact.created_at.isoformat(),
+    }
+
+
+@router.post("/outline/revise/stream")
+async def revise_outline_stream(
+    project_id: UUID,
+    request: Request,
+    revision: OutlineRevision = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+) -> Response:
+    """Revise an existing outline based on instructions.
+
+    This endpoint allows AI-assisted revision of an outline while preserving
+    specified chapters and making requested changes.
+    """
+    # Verify project ownership
+    project_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == user.user_id,
+        )
+    )
+    project = project_result.scalar_one_or_none()
+
+    if not project:
+        MetricsTracker.track_api_request(request.method, request.url.path, 404)
+        return api_error(
+            ErrorCode.PROJECT_NOT_FOUND.value,
+            "Project not found or access denied.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Get the current outline
+    outline_result = await db.execute(
+        select(Artifact)
+        .join(Session, Artifact.session_id == Session.id)
+        .where(
+            Session.project_id == project_id,
+            Artifact.kind == "outline",
+        )
+        .order_by(Artifact.created_at.desc())
+        .limit(1)
+    )
+    current_outline = outline_result.scalar_one_or_none()
+
+    if not current_outline:
+        MetricsTracker.track_api_request(request.method, request.url.path, 404)
+        return api_error(
+            "OUTLINE_NOT_FOUND",
+            "No outline found to revise.",
+            hint="Generate an outline first using the /outline/stream endpoint.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Create session for revision
+    session = Session(
+        project_id=project_id,
+        user_id=user.user_id,
+        context={
+            "action": "outline_revision",
+            "revision_instructions": revision.revision_instructions,
+            "original_outline_id": str(current_outline.id),
+        },
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+
+    MetricsTracker.track_api_request(request.method, request.url.path, 200)
+
+    return EventSourceResponse(
+        revision_event_generator(
+            request=request,
+            project_id=project_id,
+            revision=revision,
+            current_outline=current_outline,
+            session=session,
+            db=db,
+            user=user,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def revision_event_generator(
+    request: Request,
+    project_id: UUID,
+    revision: OutlineRevision,
+    current_outline: Artifact,
+    session: Session,
+    db: AsyncSession,
+    user: TokenData,
+) -> AsyncIterator[dict]:
+    """Generate SSE events for outline revision streaming."""
+    active_sessions.inc()
+    start_time = time.perf_counter()
+    tokens_emitted = 0
+    model = "gpt-5"
+
+    try:
+        yield {
+            "event": "checkpoint",
+            "data": json.dumps({"stage": "analyzing_outline", "progress": 0.1}),
+        }
+
+        current_content = current_outline.blob.decode() if current_outline.blob else ""
+
+        # Build revision prompt
+        chapters_to_revise_text = ""
+        if revision.chapters_to_revise:
+            chapters_to_revise_text = f"Focus on revising chapters: {revision.chapters_to_revise}"
+        if revision.preserve_chapters:
+            chapters_to_revise_text += (
+                f"\nKeep these chapters unchanged: {revision.preserve_chapters}"
+            )
+        if revision.add_chapters:
+            chapters_to_revise_text += f"\nAdd {revision.add_chapters} new chapter(s)"
+        if revision.remove_chapters:
+            chapters_to_revise_text += f"\nRemove chapters: {revision.remove_chapters}"
+
+        prompt = f"""Revise the following book outline based on the instructions provided.
+
+CURRENT OUTLINE:
+{current_content}
+
+REVISION INSTRUCTIONS:
+{revision.revision_instructions}
+
+{chapters_to_revise_text}
+
+Please provide the complete revised outline maintaining the same format and structure.
+Preserve any chapters marked as unchanged. Implement all requested changes.
+Format as structured markdown."""
+
+        yield {
+            "event": "checkpoint",
+            "data": json.dumps({"stage": "generating_revision", "progress": 0.2}),
+        }
+
+        with MetricsTracker.track_inference(model, "outliner", "outline_revision"):
+            stream = await acompletion(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                stream=True,
+                max_tokens=4096,
+                temperature=0.7,
+            )
+
+            buffer = []
+            checkpoint_counter = 0
+
+            async for chunk in stream:
+                if await request.is_disconnected():
+                    break
+
+                choice = chunk.get("choices", [{}])[0]
+                delta = choice.get("delta", {})
+                content = delta.get("content", "")
+
+                if content:
+                    tokens_emitted += 1
+                    buffer.append(content)
+
+                    yield {"event": "token", "data": content}
+
+                    if tokens_emitted % 100 == 0:
+                        checkpoint_counter += 1
+                        progress = min(0.2 + (tokens_emitted / 4000) * 0.7, 0.9)
+                        yield {
+                            "event": "checkpoint",
+                            "data": json.dumps(
+                                {
+                                    "checkpoint": checkpoint_counter,
+                                    "tokens": tokens_emitted,
+                                    "progress": progress,
+                                }
+                            ),
+                        }
+
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                    prompt_tokens = usage.get("prompt_tokens", 0)
+                    completion_tokens = usage.get("completion_tokens", 0)
+
+                    MetricsTracker.track_tokens(
+                        model=model,
+                        agent="outliner",
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                    )
+
+                    total_cost = calculate_cost_usd(model, prompt_tokens, completion_tokens)
+                    MetricsTracker.track_cost(model, "outliner", total_cost)
+
+                    cost_record = Cost(
+                        session_id=session.id,
+                        agent="outliner",
+                        model=model,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        usd=total_cost,
+                    )
+                    db.add(cost_record)
+
+        revised_outline = "".join(buffer)
+
+        # Save revised outline artifact
+        artifact = Artifact(
+            session_id=session.id,
+            kind="outline",
+            meta={
+                "revision": True,
+                "original_outline_id": str(current_outline.id),
+                "revision_instructions": revision.revision_instructions[:500],
+                "tokens": tokens_emitted,
+            },
+            blob=revised_outline.encode(),
+        )
+        db.add(artifact)
+
+        event = Event(
+            session_id=session.id,
+            type="outline_revised",
+            payload={
+                "tokens": tokens_emitted,
+                "duration": time.perf_counter() - start_time,
+                "model": model,
+                "original_outline_id": str(current_outline.id),
+            },
+        )
+        db.add(event)
+
+        await db.commit()
+
+        yield {
+            "event": "complete",
+            "data": json.dumps(
+                {
+                    "tokens": tokens_emitted,
+                    "duration": time.perf_counter() - start_time,
+                    "outline_id": str(artifact.id),
+                }
+            ),
+        }
+
+    except Exception as e:
+        MetricsTracker.track_model_error(model, type(e).__name__)
+        logger.error(f"Outline revision failed: {e}")
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": str(e), "code": "REVISION_FAILED"}),
+        }
+    finally:
+        active_sessions.dec()

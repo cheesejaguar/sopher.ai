@@ -36,12 +36,22 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     name = Column(Text, nullable=False)
+    description = Column(Text)
+    brief = Column(Text)  # The creative brief for the book
+    genre = Column(Text)
+    target_chapters = Column(Integer, default=10)
+    style_guide = Column(Text)
     settings = Column(JSONB, default={})
+    status = Column(Text, default="draft")  # draft, in_progress, completed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    user = relationship("User")
     sessions = relationship("Session", back_populates="project", cascade="all, delete-orphan")
+
+    __table_args__ = (Index("idx_project_user_id", "user_id"),)
 
 
 class Session(Base):
@@ -121,3 +131,53 @@ class Cost(Base):
         Index("idx_cost_session_created", "session_id", "created_at"),
         Index("idx_cost_agent", "agent"),
     )
+
+
+class Suggestion(Base):
+    """Suggestion tracks edit suggestions for chapters"""
+
+    __tablename__ = "suggestions"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(PGUUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    chapter_number = Column(Integer, nullable=False)
+    pass_type = Column(Text, nullable=False)  # structural, line, copy, proofread
+    suggestion_type = Column(Text, nullable=False)  # pacing, grammar, spelling, etc.
+    severity = Column(Text, nullable=False, default="info")  # info, warning, error
+    original_text = Column(Text, default="")
+    suggested_text = Column(Text, default="")
+    start_position = Column(Integer, default=0)
+    end_position = Column(Integer, default=0)
+    explanation = Column(Text, nullable=False)
+    confidence = Column(Numeric(3, 2), default=0.5)
+    status = Column(Text, default="pending")  # pending, applied, rejected
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    project = relationship("Project")
+
+    __table_args__ = (
+        Index("idx_suggestion_project_chapter", "project_id", "chapter_number"),
+        Index("idx_suggestion_status", "status"),
+    )
+
+
+class EditHistory(Base):
+    """EditHistory tracks editing sessions for chapters"""
+
+    __tablename__ = "edit_history"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(PGUUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    chapter_number = Column(Integer, nullable=False)
+    pass_type = Column(Text, nullable=False)  # structural, line, copy, proofread
+    suggestions_generated = Column(Integer, default=0)
+    suggestions_applied = Column(Integer, default=0)
+    suggestions_rejected = Column(Integer, default=0)
+    content_before = Column(Text)  # Original content before edits
+    content_after = Column(Text)  # Content after edits applied
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    project = relationship("Project")
+
+    __table_args__ = (Index("idx_edit_history_project_chapter", "project_id", "chapter_number"),)

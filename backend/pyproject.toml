@@ -39,6 +39,7 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.10.0",
     "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
 ]
 
 [build-system]
@@ -59,6 +60,26 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 
+[tool.ruff.lint.per-file-ignores]
+# Content-heavy files with long prompt strings
+"app/agents/genre_templates.py" = ["E501"]
+"app/agents/plot_structures.py" = ["E501"]
+"app/agents/voice_profiles.py" = ["E501"]
+"app/agents/style_profiles.py" = ["E501"]
+"app/agents/genres/*.py" = ["E501"]
+"app/services/editing_service.py" = ["E501"]
+"app/services/style_learning.py" = ["E501"]
+"app/services/quality_metrics.py" = ["E501"]
+"app/services/pacing_analyzer.py" = ["E501"]
+"app/services/scaling.py" = ["E501"]
+"app/routers/continuity.py" = ["E501"]
+"app/routers/editing.py" = ["E501"]
+"app/routers/chapters.py" = ["E501"]
+"app/services/chapter_service.py" = ["E501"]
+"app/monitoring/error_tracker.py" = ["E501"]
+# Test files with long test names and assertions
+"tests/*.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = true
@@ -68,3 +89,35 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = [
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-report=xml:coverage.xml",
+    "--cov-branch",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+omit = [
+    "app/__pycache__/*",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+]
+fail_under = 66
+show_missing = true
+skip_covered = false
+
+[tool.coverage.html]
+directory = "htmlcov"

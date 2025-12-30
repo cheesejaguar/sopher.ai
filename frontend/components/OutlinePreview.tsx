@@ -1,0 +1,344 @@
+"use client";
+
+import { useState, useMemo } from "react";
+import Link from "next/link";
+import { ChevronDown, ChevronRight, Clock, BookOpen, Users, ArrowLeft } from "lucide-react";
+
+// Types
+interface ChapterData {
+  number: number;
+  title: string;
+  summary: string;
+  setting?: string;
+  emotional_arc?: string;
+  estimated_word_count?: number;
+  characters_involved?: string[];
+  key_events?: string[];
+}
+
+interface OutlinePreviewProps {
+  projectId: string;
+  title: string;
+  chapters: ChapterData[];
+  characters?: string[];
+  onBack?: () => void;
+}
+
+// Reading time calculation: average 250 words per minute
+const WORDS_PER_MINUTE = 250;
+
+function formatReadingTime(totalWords: number): string {
+  const minutes = Math.round(totalWords / WORDS_PER_MINUTE);
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes === 0) {
+    return `${hours} hr`;
+  }
+  return `${hours} hr ${remainingMinutes} min`;
+}
+
+// Highlight character names in text
+function highlightCharacters(text: string, characters: string[]): React.ReactNode {
+  if (!characters.length) return text;
+
+  // Escape special regex characters in character names
+  const escapedCharacters = characters.map(c =>
+    c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  );
+
+  // Create regex pattern for all character names (case insensitive, word boundary)
+  const pattern = new RegExp(`\\b(${escapedCharacters.join('|')})\\b`, 'gi');
+
+  const parts = text.split(pattern);
+
+  return parts.map((part, index) => {
+    const isCharacter = characters.some(c => c.toLowerCase() === part.toLowerCase());
+    if (isCharacter) {
+      return (
+        <span
+          key={index}
+          className="bg-blue-100 text-blue-800 px-1 rounded font-medium"
+          data-testid="character-highlight"
+        >
+          {part}
+        </span>
+      );
+    }
+    return part;
+  });
+}
+
+// Chapter Preview Card Component
+function ChapterPreviewCard({
+  chapter,
+  characters,
+  isExpanded,
+  onToggle
+}: {
+  chapter: ChapterData;
+  characters: string[];
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const readingTime = chapter.estimated_word_count
+    ? formatReadingTime(chapter.estimated_word_count)
+    : null;
+
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden" data-testid={`chapter-preview-${chapter.number}`}>
+      {/* Header - always visible */}
+      <button
+        onClick={onToggle}
+        className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+        aria-expanded={isExpanded}
+        data-testid={`chapter-toggle-${chapter.number}`}
+      >
+        <div className="flex items-center gap-3">
+          {isExpanded ? (
+            <ChevronDown className="w-5 h-5 text-gray-500" data-testid="chevron-down" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-gray-500" data-testid="chevron-right" />
+          )}
+          <span className="text-sm font-medium text-gray-500">Chapter {chapter.number}</span>
+          <span className="font-semibold text-gray-900">{chapter.title}</span>
+        </div>
+        <div className="flex items-center gap-4 text-sm text-gray-500">
+          {chapter.emotional_arc && (
+            <span className="capitalize">{chapter.emotional_arc.replace('_', ' ')}</span>
+          )}
+          {readingTime && (
+            <span className="flex items-center gap-1">
+              <Clock className="w-4 h-4" />
+              {readingTime}
+            </span>
+          )}
+        </div>
+      </button>
+
+      {/* Expanded content */}
+      {isExpanded && (
+        <div className="px-4 py-4 space-y-4 bg-white" data-testid={`chapter-content-${chapter.number}`}>
+          {/* Summary */}
+          <div>
+            <h4 className="text-sm font-medium text-gray-500 mb-1">Summary</h4>
+            <p className="text-gray-700">{highlightCharacters(chapter.summary, characters)}</p>
+          </div>
+
+          {/* Setting */}
+          {chapter.setting && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-500 mb-1">Setting</h4>
+              <p className="text-gray-700">{chapter.setting}</p>
+            </div>
+          )}
+
+          {/* Characters Involved */}
+          {chapter.characters_involved && chapter.characters_involved.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-500 mb-1">Characters</h4>
+              <div className="flex flex-wrap gap-2">
+                {chapter.characters_involved.map((char, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-sm"
+                  >
+                    {char}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Key Events */}
+          {chapter.key_events && chapter.key_events.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium text-gray-500 mb-1">Key Events</h4>
+              <ul className="list-disc list-inside text-gray-700 space-y-1">
+                {chapter.key_events.map((event, idx) => (
+                  <li key={idx}>{highlightCharacters(event, characters)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Word count */}
+          {chapter.estimated_word_count && (
+            <div className="text-sm text-gray-500">
+              Estimated: {chapter.estimated_word_count.toLocaleString()} words
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Main Outline Preview Component
+export default function OutlinePreview({
+  projectId,
+  title,
+  chapters,
+  characters = [],
+  onBack
+}: OutlinePreviewProps) {
+  const [expandedChapters, setExpandedChapters] = useState<Set<number>>(new Set());
+  const [isAllExpanded, setIsAllExpanded] = useState(false);
+
+  // Calculate totals
+  const stats = useMemo(() => {
+    const totalWords = chapters.reduce((sum, ch) => sum + (ch.estimated_word_count || 0), 0);
+    const totalReadingTime = formatReadingTime(totalWords);
+
+    // Extract all unique characters from chapters
+    const allCharacters = new Set<string>(characters);
+    chapters.forEach(ch => {
+      ch.characters_involved?.forEach(c => allCharacters.add(c));
+    });
+
+    return {
+      chapterCount: chapters.length,
+      totalWords,
+      totalReadingTime,
+      uniqueCharacters: Array.from(allCharacters),
+    };
+  }, [chapters, characters]);
+
+  const toggleChapter = (chapterNumber: number) => {
+    setExpandedChapters(prev => {
+      const next = new Set(prev);
+      if (next.has(chapterNumber)) {
+        next.delete(chapterNumber);
+      } else {
+        next.add(chapterNumber);
+      }
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (isAllExpanded) {
+      setExpandedChapters(new Set());
+    } else {
+      setExpandedChapters(new Set(chapters.map(ch => ch.number)));
+    }
+    setIsAllExpanded(!isAllExpanded);
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {onBack ? (
+                <button
+                  onClick={onBack}
+                  className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+                  data-testid="back-button"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                  Back
+                </button>
+              ) : (
+                <Link
+                  href={`/projects/${projectId}/outline`}
+                  className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+                  data-testid="back-link"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                  Back to Editor
+                </Link>
+              )}
+            </div>
+            <h1 className="text-xl font-bold text-gray-900">{title}</h1>
+            <button
+              onClick={toggleAll}
+              className="text-sm text-blue-600 hover:text-blue-800"
+              data-testid="toggle-all-button"
+            >
+              {isAllExpanded ? 'Collapse All' : 'Expand All'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Bar */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-4xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-around text-sm">
+            <div className="flex items-center gap-2 text-gray-600" data-testid="chapter-count">
+              <BookOpen className="w-4 h-4" />
+              <span>{stats.chapterCount} Chapters</span>
+            </div>
+            <div className="flex items-center gap-2 text-gray-600" data-testid="word-count">
+              <span>{stats.totalWords.toLocaleString()} Words</span>
+            </div>
+            <div className="flex items-center gap-2 text-gray-600" data-testid="reading-time">
+              <Clock className="w-4 h-4" />
+              <span>{stats.totalReadingTime} reading time</span>
+            </div>
+            <div className="flex items-center gap-2 text-gray-600" data-testid="character-count">
+              <Users className="w-4 h-4" />
+              <span>{stats.uniqueCharacters.length} Characters</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Character Legend (if characters provided) */}
+      {stats.uniqueCharacters.length > 0 && (
+        <div className="bg-white border-b border-gray-200">
+          <div className="max-w-4xl mx-auto px-4 py-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-gray-500">Characters:</span>
+              {stats.uniqueCharacters.map((char, idx) => (
+                <span
+                  key={idx}
+                  className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
+                  data-testid={`character-legend-${char}`}
+                >
+                  {char}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Chapter List */}
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        <div className="space-y-3" data-testid="chapter-list">
+          {chapters.map((chapter) => (
+            <ChapterPreviewCard
+              key={chapter.number}
+              chapter={chapter}
+              characters={stats.uniqueCharacters}
+              isExpanded={expandedChapters.has(chapter.number)}
+              onToggle={() => toggleChapter(chapter.number)}
+            />
+          ))}
+        </div>
+
+        {chapters.length === 0 && (
+          <div className="text-center py-12 text-gray-500" data-testid="empty-state">
+            <BookOpen className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+            <p>No chapters in this outline yet.</p>
+            <Link
+              href={`/projects/${projectId}/outline`}
+              className="text-blue-600 hover:text-blue-800 mt-2 inline-block"
+            >
+              Go to Outline Editor
+            </Link>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Named export for testing
+export { formatReadingTime, highlightCharacters };

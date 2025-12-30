@@ -62,7 +62,7 @@ def test_middleware_sets_response_header(client):
     assert len(response.headers["X-Request-ID"]) > 0
 
 
-@patch("app.middleware.logger")
+@patch("app.middleware.request_id.logger")
 def test_middleware_logs_request_start(mock_logger, client):
     """Middleware should log request start with correlation info."""
     client.get("/test", headers={"X-Request-ID": "test-123"})

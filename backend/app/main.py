@@ -20,7 +20,7 @@ from .db import close_db, init_db
 from .errors import ErrorCode, api_error
 from .logging import clear_request_context, parse_trace_context, set_request_context, setup_logging
 from .metrics import MetricsTracker, metrics_router
-from .routers import auth, outline, usage
+from .routers import auth, chapters, continuity, editing, export, outline, projects, usage
 from .security import create_access_token
 
 # Configure structured logging early
@@ -331,7 +331,12 @@ async def get_demo_token():
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(metrics_router, prefix="/api", tags=["metrics"])
 app.include_router(outline.router, prefix="/api/v1", tags=["outline"])
+app.include_router(chapters.router, prefix="/api/v1", tags=["chapters"])
+app.include_router(editing.router, prefix="/api/v1", tags=["editing"])
+app.include_router(projects.router, tags=["projects"])
 app.include_router(usage.router, prefix="/api/v1", tags=["usage"])
+app.include_router(continuity.router, prefix="/api/v1", tags=["continuity"])
+app.include_router(export.router, prefix="/api/v1", tags=["export"])
 
 
 # Root endpoint

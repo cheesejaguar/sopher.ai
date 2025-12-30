@@ -1,5 +1,4 @@
-/* eslint-env node */
-const assert = require('assert');
+import { describe, it, expect } from 'vitest';
 
 /**
  * Convert a hex color string to its relative luminance.
@@ -37,19 +36,15 @@ const colors = {
   indigo: '#1B2559',
 };
 
-const combinations = [
-  {
-    fg: colors.teal,
-    bg: colors.indigo,
-    description: 'teal text on indigo background',
-  },
-];
+describe('Color Contrast WCAG Compliance', () => {
+  it('teal text on indigo background passes WCAG AA (4.5:1 minimum)', () => {
+    const ratio = contrast(colors.teal, colors.indigo);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
 
-for (const combo of combinations) {
-  const ratio = contrast(combo.fg, combo.bg);
-  assert(
-    ratio >= 4.5,
-    `${combo.description} contrast ratio ${ratio.toFixed(2)} fails WCAG AA`
-  );
-  console.log(`✓ ${combo.description} contrast ratio ${ratio.toFixed(2)} passes WCAG AA`);
-}
+  it('has adequate contrast ratio for readability', () => {
+    const ratio = contrast(colors.teal, colors.indigo);
+    // Ratio should be around 6.63
+    expect(ratio).toBeGreaterThan(6);
+  });
+});
