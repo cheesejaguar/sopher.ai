@@ -5,10 +5,11 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+import jwt
 from cryptography.fernet import Fernet
 from fastapi import Cookie, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 
 # Configuration
@@ -81,7 +82,7 @@ def verify_token(token: str, token_type: str = "access") -> TokenData:
             project_id=payload.get("project_id"),
             role=payload.get("role", "author"),
         )
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

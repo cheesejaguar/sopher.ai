@@ -2,10 +2,10 @@
 
 from unittest.mock import MagicMock, patch
 
+import jwt
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
-from jose import jwt
 
 from app.main import app
 from app.security import ALGORITHM, SECRET_KEY, create_access_token
