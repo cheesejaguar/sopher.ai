@@ -1,233 +1,333 @@
-# sopher.ai ✍️📚
+# sopher.ai
 
 [![CI/CD Pipeline](https://github.com/cheesejaguar/sopher.ai/actions/workflows/ci.yml/badge.svg)](https://github.com/cheesejaguar/sopher.ai/actions/workflows/ci.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Production-ready AI book-writing system that transforms author briefs into complete manuscripts with real-time streaming, multi-agent collaboration, and comprehensive cost controls.
+An AI-powered book writing system that transforms author briefs into complete manuscripts using a multi-agent pipeline with real-time streaming and cost controls.
 
-## Features ✨
+## Overview
 
-- **Real-time Streaming**: SSE-based token streaming with sub-300ms latency
-- **Multi-Agent System**: 5 specialized CrewAI agents (Concept, Outline, Writer, Editor, Continuity)
-- **Intelligent Routing**: LiteLLM router with primary/fallback models and overflow handling
-- **Cost Management**: Real-time cost tracking with budget controls and agent allocation
-- **Continuity Checking**: Automated consistency verification across chapters
-- **Production Ready**: Dockerized, Kubernetes-ready with HPA, monitoring, and CI/CD
+sopher.ai orchestrates five specialized AI agents to generate novels from a simple brief:
 
-## Tech Stack 🧰
+1. **Concept Generator** - Expands briefs into rich story concepts with themes, settings, and conflicts
+2. **Outliner** - Creates detailed chapter-by-chapter structure with plot threads and character arcs
+3. **Writer** - Generates prose following style guides and maintaining voice consistency
+4. **Editor** - Performs structural editing, pacing adjustments, and prose polish
+5. **Continuity Checker** - Validates consistency across characters, timeline, and plot details
 
-- **Backend**: FastAPI, SQLAlchemy (async), PostgreSQL, Redis
-- **AI/ML**: LiteLLM, CrewAI, GPT-5, Claude Sonnet 4 (claude-sonnet-4-20250514), Gemini 2.5 Pro
-- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, Zustand
-- **Infrastructure**: Docker, Kubernetes (GKE), Prometheus, Grafana
-- **CI/CD**: GitHub Actions, automated testing, security scanning
+The system uses a thin orchestration layer built on [LiteLLM](https://github.com/BerriAI/litellm) for model routing, providing full control over prompts and generation flow without heavy framework dependencies.
 
-## Quick Start 🚀
+## Features
+
+- **Real-time Streaming** - Server-Sent Events with sub-300ms latency for live generation feedback
+- **Multi-Model Support** - Route between GPT-4, Claude, Gemini with automatic fallbacks
+- **Structured Outputs** - Pydantic models ensure type-safe, validated responses from LLMs
+- **Cost Management** - Per-agent budget allocation with real-time tracking and limits
+- **Parallel Generation** - Write multiple chapters concurrently with shared context
+- **Genre Templates** - Specialized prompts for mystery, romance, fantasy, thriller, and more
+- **Style Learning** - Analyze and replicate author voice from sample text
+- **Export Formats** - Generate manuscripts in Markdown, plain text, or structured JSON
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Backend** | FastAPI, SQLAlchemy (async), PostgreSQL, Redis |
+| **AI Orchestration** | LiteLLM, Pydantic, custom Agent framework |
+| **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS, Zustand |
+| **Infrastructure** | Docker, Kubernetes (GKE), Prometheus, Grafana |
+| **CI/CD** | GitHub Actions, CodeQL, Semgrep |
+
+## Quick Start
 
 ### Prerequisites
 
 - Python 3.12+
 - Node.js 20+
 - Docker & Docker Compose
-- API Keys: Anthropic, OpenAI, Google (for LLMs)
+- API keys for at least one LLM provider (OpenAI, Anthropic, or Google)
 
-### Local Development 🛠️
+### Setup
 
-1. Clone the repository:
 ```bash
+# Clone the repository
 git clone https://github.com/cheesejaguar/sopher.ai.git
 cd sopher.ai
-```
 
-2. Set up environment variables:
-```bash
+# Copy environment template
 cp .env.example .env
-# Edit .env and add your API keys (required: ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)
+
+# Add your API keys to .env (at minimum, one of these):
+# OPENAI_API_KEY=sk-...
+# ANTHROPIC_API_KEY=sk-ant-...
+# GOOGLE_API_KEY=AI...
 ```
 
-3. Choose your development method:
+### Run with Docker (Recommended)
 
-#### Option A: Docker Compose (Recommended)
 ```bash
 cd infra
 docker-compose -f docker-compose.dev.yml up
 ```
-Access the application at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
 
-#### Option B: Local Development
+Access the application:
+- **Frontend**: http://localhost:3000
+- **API Docs**: http://localhost:8000/docs
+- **Prometheus**: http://localhost:9090
+
+### Run Locally
+
 ```bash
-# Terminal 1: Start Backend
+# Terminal 1: Backend
 cd backend
 pip install -e .[dev]
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload
 
-# Terminal 2: Start Frontend
+# Terminal 2: Frontend
 cd frontend
 npm install
 npm run dev
 ```
 
-4. Access the application:
-- Frontend: http://localhost:3000
-- API Docs: http://localhost:8000/docs
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3001 (admin/admin)
+## Architecture
 
-## API Endpoints 🔌
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         Next.js Frontend                          │
+│                    (SSE streaming, Zustand state)                 │
+└─────────────────────────────┬────────────────────────────────────┘
+                              │ HTTP/SSE
+┌─────────────────────────────▼────────────────────────────────────┐
+│                         FastAPI Backend                           │
+│                                                                   │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
+│  │   Routers   │  │  Services   │  │   Agents    │              │
+│  │  (outline,  │──│  (chapter,  │──│  (concept,  │              │
+│  │  chapters,  │  │  continuity,│  │  outline,   │              │
+│  │  export)    │  │  export)    │  │  writer,    │              │
+│  └─────────────┘  └─────────────┘  │  editor,    │              │
+│                                     │  continuity)│              │
+│                                     └──────┬──────┘              │
+└────────────────────────────────────────────┼─────────────────────┘
+                                             │
+┌────────────────────────────────────────────▼─────────────────────┐
+│                          LiteLLM Router                           │
+│                                                                   │
+│     ┌─────────┐      ┌─────────┐      ┌─────────┐               │
+│     │ GPT-4/5 │      │ Claude  │      │ Gemini  │               │
+│     │(primary)│ ───▶ │(fallback│ ───▶ │(overflow│               │
+│     └─────────┘      └─────────┘      └─────────┘               │
+└───────────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+┌───────────────┐    ┌───────────────┐    ┌───────────────┐
+│  PostgreSQL   │    │     Redis     │    │  Prometheus   │
+│  (projects,   │    │   (cache,     │    │   (metrics,   │
+│   artifacts)  │    │  rate limits) │    │   monitoring) │
+└───────────────┘    └───────────────┘    └───────────────┘
+```
+
+## API Reference
+
+### Core Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/projects/{id}/outline/stream` | POST | Generate book outline with SSE streaming |
-| `/api/v1/projects/{id}/chapter/{n}/draft/stream` | POST | Stream chapter draft generation |
-| `/api/v1/projects/{id}/chapter/{n}/edit/stream` | POST | Stream editorial pass |
-| `/api/v1/projects/{id}/continuity/run` | POST | Run continuity checker |
-| `/api/v1/projects/{id}/costs` | GET | Get cost report |
-| `/ws/agents/{id}` | WebSocket | Real-time agent status updates |
+| `/api/v1/projects` | POST | Create a new book project |
+| `/api/v1/projects/{id}/outline/stream` | GET | Stream outline generation |
+| `/api/v1/projects/{id}/chapters/{n}/generate/stream` | POST | Stream chapter generation |
+| `/api/v1/projects/{id}/chapters/{n}/edit/stream` | POST | Stream editorial pass |
+| `/api/v1/projects/{id}/continuity/check` | POST | Run continuity validation |
+| `/api/v1/projects/{id}/export` | GET | Export manuscript |
 
-## Architecture 🏗️
+### SSE Event Format
 
+```typescript
+// Token stream
+{ "event": "token", "data": "The story begins..." }
+
+// Progress checkpoint
+{ "event": "checkpoint", "data": {"stage": "writing", "progress": 0.45} }
+
+// Completion
+{ "event": "complete", "data": {"tokens": 3500, "duration": 12.3} }
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Next.js   │────▶│   FastAPI    │────▶│   LiteLLM   │
-│   Frontend  │ SSE │   Backend    │     │   Router    │
-└─────────────┘     └──────────────┘     └─────────────┘
-                           │                     │
-                    ┌──────▼──────┐      ┌──────▼──────┐
-                    │ PostgreSQL  │      │   CrewAI    │
-                    │   + Redis   │      │   Agents    │
-                    └─────────────┘      └─────────────┘
+
+## Agent System
+
+The agent system uses a thin abstraction over LiteLLM:
+
+```python
+from app.agents import BookPipeline
+
+pipeline = BookPipeline(model="gpt-4")
+
+# Generate a complete book
+async for item in pipeline.generate_book(
+    brief="A detective novel set in 1920s Chicago",
+    num_chapters=12
+):
+    if isinstance(item, GenerationProgress):
+        print(f"Stage: {item.stage}, Progress: {item.progress}")
+    elif isinstance(item, Chapter):
+        print(f"Chapter {item.number}: {item.title}")
 ```
 
-## Development 🧪
+### Custom Agents
 
-### Backend Development
+Create specialized agents with structured outputs:
+
+```python
+from app.agents import Agent, AgentConfig
+from pydantic import BaseModel
+
+class CharacterProfile(BaseModel):
+    name: str
+    background: str
+    motivations: list[str]
+
+config = AgentConfig(
+    role="character_designer",
+    system_prompt="You create detailed character profiles...",
+    model="gpt-4",
+    temperature=0.8
+)
+
+agent = Agent(config, response_model=CharacterProfile)
+profile = await agent.run("Create a villain for a noir mystery")
+```
+
+## Development
+
+### Running Tests
 
 ```bash
 cd backend
-pip install -e .[dev]
-uvicorn app.main:app --reload
+
+# Run all tests with coverage
+pytest tests/ -v --cov=app
+
+# Run specific test file
+pytest tests/test_agents/test_orchestrator.py -v
+
+# Run with parallel execution
+pytest tests/ -n auto
+```
+
+Current test coverage: **86%** with **2280+ tests**
+
+### Code Quality
+
+```bash
+cd backend
+
+# Format code
+black app tests
+
+# Lint
+ruff check app tests
+
+# Type check
+mypy app
+
+# Run all checks
+black app tests && ruff check app tests && mypy app && pytest tests/
 ```
 
 ### Frontend Development
 
 ```bash
 cd frontend
-npm install
-npm run dev
+
+npm run dev          # Start dev server
+npm run build        # Production build
+npm run lint         # ESLint
+npm run type-check   # TypeScript validation
+npm run test         # Run tests
 ```
 
-### Running Tests ✅
-
-```bash
-# Backend tests
-cd backend
-pytest tests/ -v --cov=app
-
-# Frontend tests
-cd frontend
-npm run test
-npm run type-check
-```
-
-## Deployment 🚢
-
-### Deploy to Kubernetes (GKE)
-
-1. Build and push images:
-```bash
-docker build -t ghcr.io/your-org/sopher-api:latest backend/
-docker build -t ghcr.io/your-org/sopher-web:latest frontend/
-docker push ghcr.io/your-org/sopher-api:latest
-docker push ghcr.io/your-org/sopher-web:latest
-```
-
-2. Apply Kubernetes manifests:
-```bash
-kubectl apply -f infra/k8s/
-```
-
-3. Configure secrets:
-```bash
-kubectl create secret generic sopher-ai-secrets \
-  --from-literal=ANTHROPIC_API_KEY=your-key \
-  --from-literal=OPENAI_API_KEY=your-key \
-  --from-literal=GOOGLE_API_KEY=your-key \
-  -n sopher-ai
-```
-
-## Configuration ⚙️
-
-### LiteLLM Router
-
-Configure model routing in `router/litellm.config.yaml`:
-- Primary: gpt-5
-- Secondary: claude-sonnet-4-20250514
-- Overflow: gemini-2.5-pro
-- Budget allocation by agent
+## Configuration
 
 ### Environment Variables
 
-See `.env.example` for a complete list with descriptions. Key variables:
-
-### Required Variables
-| Variable | Description | How to Obtain |
-|----------|-------------|---------------|
-| `ANTHROPIC_API_KEY` | Claude API access | [Anthropic Console](https://console.anthropic.com/) |
-| `OPENAI_API_KEY` | OpenAI GPT models | [OpenAI Platform](https://platform.openai.com/api-keys) |
-| `GOOGLE_API_KEY` | Gemini models | [Google AI Studio](https://makersuite.google.com/app/apikey) |
-
-### Core Configuration
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/sopherai` |
-| `REDIS_URL` | Redis connection string | `redis://localhost:6379/0` |
-| `JWT_SECRET` | JWT signing secret | `dev-secret-key-change-in-production` |
-| `MONTHLY_BUDGET_USD` | Monthly cost limit | `100` |
-| `PRIMARY_MODEL` | Main LLM model | `gpt-5` |
+| `OPENAI_API_KEY` | OpenAI API key | - |
+| `ANTHROPIC_API_KEY` | Anthropic API key | - |
+| `GOOGLE_API_KEY` | Google AI API key | - |
+| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://postgres:postgres@localhost:5432/sopherai` |
+| `REDIS_URL` | Redis connection | `redis://localhost:6379/0` |
+| `JWT_SECRET` | JWT signing secret (min 32 chars) | - |
+| `MONTHLY_BUDGET_USD` | Cost limit per user | `100` |
+| `PRIMARY_MODEL` | Default LLM model | `gpt-4` |
 | `LOG_LEVEL` | Logging verbosity | `INFO` |
-| `CORS_ORIGINS` | Allowed origins | `http://localhost:3000` |
 
-For production deployment, see `infra/.env.production.template` for comprehensive configuration options including GCP, monitoring, SSL, and backup settings.
+### Model Configuration
 
-## Monitoring 📈
+Configure model routing in code or via environment:
 
-- **Metrics**: Prometheus metrics at `/api/metrics`
-- **Health Checks**: `/healthz`, `/readyz`, `/livez`
-- **Custom Metrics**:
-  - `llm_inference_seconds`: LLM response time
-  - `llm_tokens_total`: Token usage
-  - `llm_cost_usd_total`: Cost tracking
-  - `active_sessions`: Concurrent writing sessions
+```python
+pipeline = BookPipeline(
+    model="gpt-4",
+    fallback_models=["claude-3-opus", "gemini-pro"],
+    temperature=0.7,
+    max_tokens=4000
+)
+```
 
-## Security 🔐
+## Deployment
 
-- JWT authentication with 1-hour expiry
-- API key encryption with Fernet
-- Rate limiting (60 RPM per key)
-- Input sanitization and output encoding
-- Circuit breaker for LLM calls
-- Kubernetes network policies
+### Kubernetes (GKE)
 
-## Contributing 🤝
+```bash
+# Build images
+docker build -t ghcr.io/your-org/sopher-api:latest backend/
+docker build -t ghcr.io/your-org/sopher-web:latest frontend/
+
+# Push to registry
+docker push ghcr.io/your-org/sopher-api:latest
+docker push ghcr.io/your-org/sopher-web:latest
+
+# Deploy
+kubectl apply -f infra/k8s/
+
+# Create secrets
+kubectl create secret generic sopher-secrets \
+  --from-literal=OPENAI_API_KEY=$OPENAI_API_KEY \
+  --from-literal=JWT_SECRET=$(openssl rand -hex 32)
+```
+
+### Health Checks
+
+| Endpoint | Purpose |
+|----------|---------|
+| `/healthz` | Basic health check |
+| `/readyz` | Readiness probe (DB + Redis) |
+| `/livez` | Liveness probe |
+
+## Monitoring
+
+Prometheus metrics available at `/api/metrics`:
+
+- `llm_inference_seconds` - LLM response latency histogram
+- `llm_tokens_total` - Token usage by model and agent
+- `llm_cost_usd_total` - Cost tracking
+- `active_sessions` - Concurrent generation sessions
+- `cache_hits_total` / `cache_misses_total` - Cache efficiency
+
+## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Run tests and linting (`pytest && ruff check && mypy app`)
+4. Commit changes (`git commit -m 'Add amazing feature'`)
+5. Push to branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
 
-### CI/CD Pipeline 🔄
+The CI pipeline runs automatically on PRs - all checks must pass before merging.
 
-The project includes a comprehensive GitHub Actions pipeline that:
-- Runs automated tests for backend and frontend
-- Performs security scanning with Semgrep and CodeQL
-- Builds and publishes Docker images to GitHub Container Registry
-- Optionally deploys to GKE (requires secrets configuration)
+## License
 
-**For contributors**: The pipeline works without any secrets configured. Tests and builds will run successfully. See [`.github/SETUP_SECRETS.md`](.github/SETUP_SECRETS.md) for deployment configuration.
-
-## License 📄
-
-MIT License - see [LICENSE](LICENSE) file
+MIT License - see [LICENSE](LICENSE) for details.
