@@ -391,3 +391,22 @@ class TestFrontendURLHelper:
         request.headers = {"host": "127.0.0.1:3000"}
         result = _get_frontend_url(request)
         assert result == "http://localhost:3000/"
+
+
+class TestDevAuthBypass:
+    """Tests for the development auth bypass functionality"""
+
+    def test_dev_status_disabled_by_default(self, client):
+        """Test that dev auth is disabled by default"""
+        response = client.get("/auth/dev/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["dev_auth_enabled"] is False
+        assert data["test_email"] is None
+
+    def test_dev_login_disabled_by_default(self, client):
+        """Test that dev login returns 403 when not enabled"""
+        response = client.get("/auth/dev/login", follow_redirects=False)
+        assert response.status_code == 403
+        # The custom error handler returns 'message' instead of 'detail'
+        assert "not enabled" in response.json()["message"]

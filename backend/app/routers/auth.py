@@ -389,3 +389,113 @@ async def get_me(
         "role": user.role,
         "monthly_budget_usd": float(user.monthly_budget_usd),
     }
+
+
+# =============================================================================
+# Local Development Auth Bypass
+# =============================================================================
+# Enable with LOCAL_AUTH_BYPASS=true in .env
+# WARNING: Never enable this in production!
+
+LOCAL_AUTH_BYPASS = os.getenv("LOCAL_AUTH_BYPASS", "false").lower() == "true"
+
+# Default test user configuration
+DEV_TEST_EMAIL = os.getenv("DEV_TEST_EMAIL", "test@localhost.dev")
+DEV_TEST_NAME = os.getenv("DEV_TEST_NAME", "Test User")
+
+
+@router.get("/dev/login")
+async def dev_login(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Development-only login endpoint that bypasses OAuth.
+
+    This creates or retrieves a test user and sets authentication cookies,
+    allowing local development without requiring a public OAuth callback URL.
+
+    Only available when LOCAL_AUTH_BYPASS=true is set in environment.
+    """
+    if not LOCAL_AUTH_BYPASS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Dev login is not enabled. "
+                "Set LOCAL_AUTH_BYPASS=true in .env for local development."
+            ),
+        )
+
+    # Check if we're in a safe environment
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment == "production":
+        logger.error("Attempted dev login in production environment!")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dev login is not available in production.",
+        )
+
+    logger.warning(
+        f"Dev login bypass activated - Environment: {environment}. "
+        "This should never happen in production!"
+    )
+
+    # Find or create the test user
+    result = await db.execute(select(User).where(User.email == DEV_TEST_EMAIL))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        # Create the test user
+        user = User(
+            email=DEV_TEST_EMAIL,
+            name=DEV_TEST_NAME,
+            provider="dev-bypass",
+            provider_sub=f"dev-{DEV_TEST_EMAIL}",
+            role="author",
+        )
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        logger.info(f"Created dev test user: {user.id}")
+    else:
+        logger.info(f"Using existing dev test user: {user.id}")
+
+    # Create JWT tokens for the test user
+    token_data = {
+        "user_id": str(user.id),
+        "email": user.email,
+        "role": user.role,
+    }
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
+
+    # Get frontend URL and redirect
+    frontend_url = _get_frontend_url(request)
+    frontend_url += "?oauth=success&dev=true"
+
+    # Create redirect response with auth cookies
+    redirect_response = RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
+    set_auth_cookies(redirect_response, access_token, refresh_token, request)
+
+    # Add debug headers
+    redirect_response.headers["X-Auth-Status"] = "dev-bypass"
+    redirect_response.headers["X-Dev-User"] = DEV_TEST_EMAIL
+
+    return redirect_response
+
+
+@router.get("/dev/status")
+async def dev_auth_status():
+    """Check if dev auth bypass is enabled (for debugging/frontend)"""
+    environment = os.getenv("ENVIRONMENT", "development")
+    return {
+        "dev_auth_enabled": LOCAL_AUTH_BYPASS,
+        "environment": environment,
+        "test_email": DEV_TEST_EMAIL if LOCAL_AUTH_BYPASS else None,
+        "test_name": DEV_TEST_NAME if LOCAL_AUTH_BYPASS else None,
+        "warning": (
+            "Dev auth bypass is enabled - do not use in production!"
+            if LOCAL_AUTH_BYPASS
+            else "Dev auth bypass is disabled"
+        ),
+    }
