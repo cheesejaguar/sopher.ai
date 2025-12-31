@@ -85,6 +85,7 @@ jobs:
         DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/sopherai_test
         REDIS_URL: redis://localhost:6379/0
         JWT_SECRET: test-secret-that-is-at-least-32-characters-long-for-security
+        FERNET_KEY: dGVzdC1mZXJuZXQta2V5LWZvci1jaS10ZXN0aW5nMTIzNA==
       run: uv run pytest tests/ -v
     
     - name: Upload coverage to Codecov
