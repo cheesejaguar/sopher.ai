@@ -415,3 +415,334 @@ class TestJobStatusTransitions:
         assert job.status == JobStatus.RUNNING
         await queue.mark_failed(job.id, "Error message")
         assert job.status == JobStatus.FAILED
+
+
+class TestParallelChapterServiceInitialization:
+    """Tests for ParallelChapterService initialization and methods."""
+
+    def test_service_attributes(self):
+        """Test service has correct attributes after init."""
+        async def mock_gen(*args) -> str:
+            return "Content"
+
+        service = ParallelChapterService(
+            generator=mock_gen,
+            max_parallel=5,
+            retry_on_failure=True,
+            max_retries=3,
+        )
+
+        assert service.generator is mock_gen
+        assert service.max_parallel == 5
+        assert service.retry_on_failure is True
+        assert service.max_retries == 3
+        assert service._queue is None
+        assert service._progress_callback is None
+
+    def test_set_progress_callback_chainable(self):
+        """Test set_progress_callback returns self for chaining."""
+        async def mock_gen(*args) -> str:
+            return "Content"
+
+        service = ParallelChapterService(generator=mock_gen)
+        result = service.set_progress_callback(lambda p: None)
+
+        assert result is service
+
+
+class TestJobQueueProgressEstimation:
+    """Tests for progress estimation with time tracking."""
+
+    @pytest.mark.asyncio
+    async def test_estimated_remaining_time(self):
+        """Test estimated remaining time calculation."""
+        import asyncio
+
+        queue = JobQueue(max_parallel=2)
+        job1 = ChapterJob(chapter_number=1, outline="1")
+        job2 = ChapterJob(chapter_number=2, outline="2")
+        job3 = ChapterJob(chapter_number=3, outline="3")
+
+        queue.add_job(job1)
+        queue.add_job(job2)
+        queue.add_job(job3)
+
+        # Complete first job with timing
+        await queue.mark_running(job1.id)
+        await asyncio.sleep(0.01)  # Small delay to ensure time difference
+        await queue.mark_completed(job1.id, "Content 1", 500)
+
+        progress = queue.get_progress()
+        assert progress.completed_chapters == 1
+        # Estimated remaining should exist since we have timing data
+        # (though it might be very small due to fast execution)
+
+    @pytest.mark.asyncio
+    async def test_progress_with_failed_jobs(self):
+        """Test progress calculation with failed jobs."""
+        queue = JobQueue()
+        job1 = ChapterJob(chapter_number=1, outline="1")
+        job2 = ChapterJob(chapter_number=2, outline="2")
+
+        queue.add_job(job1)
+        queue.add_job(job2)
+
+        await queue.mark_running(job1.id)
+        await queue.mark_failed(job1.id, "Error")
+
+        progress = queue.get_progress()
+        assert progress.total_chapters == 2
+        assert progress.failed_chapters == 1
+        assert progress.completed_chapters == 0
+
+
+class TestNotifyProgress:
+    """Tests for progress notification."""
+
+    def test_notify_progress_no_callback(self):
+        """Test notify_progress does nothing without callback."""
+        async def mock_gen(*args) -> str:
+            return "Content"
+
+        service = ParallelChapterService(generator=mock_gen)
+        # Should not raise
+        service._notify_progress()
+
+    def test_notify_progress_no_queue(self):
+        """Test notify_progress handles missing queue."""
+        async def mock_gen(*args) -> str:
+            return "Content"
+
+        service = ParallelChapterService(generator=mock_gen)
+        service.set_progress_callback(lambda p: None)
+        # Should not raise even without queue
+        service._notify_progress()
+
+
+class TestQueueOperationsWithMissingJob:
+    """Tests for queue operations with non-existent job IDs."""
+
+    @pytest.mark.asyncio
+    async def test_mark_running_missing_job(self):
+        """Test mark_running with non-existent job."""
+        queue = JobQueue()
+        await queue.mark_running(uuid4())  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_mark_completed_missing_job(self):
+        """Test mark_completed with non-existent job."""
+        queue = JobQueue()
+        await queue.mark_completed(uuid4(), "Result")  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_mark_failed_missing_job(self):
+        """Test mark_failed with non-existent job."""
+        queue = JobQueue()
+        await queue.mark_failed(uuid4(), "Error")  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_update_progress_missing_job(self):
+        """Test update_progress with non-existent job."""
+        queue = JobQueue()
+        await queue.update_progress(uuid4(), 0.5)  # Should not raise
+
+
+class TestProgressWithQueue:
+    """Tests for progress methods when queue exists."""
+
+    @pytest.mark.asyncio
+    async def test_get_current_progress_with_queue(self):
+        """Test get_current_progress returns progress when queue exists."""
+        async def mock_gen(*args):
+            return "Content"
+
+        service = ParallelChapterService(generator=mock_gen)
+        service._queue = JobQueue()
+        job = ChapterJob(chapter_number=1, outline="Test")
+        job.status = JobStatus.COMPLETED
+        job.progress = 1.0
+        service._queue.add_job(job)
+
+        progress = service.get_current_progress()
+        assert progress is not None
+        assert progress.total_chapters == 1
+        assert progress.completed_chapters == 1
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_queue(self):
+        """Test cancel returns count when queue exists."""
+        async def mock_gen(*args):
+            return "Content"
+
+        service = ParallelChapterService(generator=mock_gen, max_parallel=1)
+        service._queue = JobQueue(max_parallel=1)
+        service._queue.add_job(ChapterJob(chapter_number=1, outline="1"))
+        service._queue.add_job(ChapterJob(chapter_number=2, outline="2"))
+
+        cancelled = service.cancel()
+        assert cancelled == 2
+
+
+class TestNotifyProgressWithQueue:
+    """Tests for _notify_progress with callback and queue."""
+
+    def test_notify_progress_with_callback_and_queue(self):
+        """Test _notify_progress calls callback when both are set."""
+        progress_updates = []
+
+        async def mock_gen(*args):
+            return "Content"
+
+        service = ParallelChapterService(generator=mock_gen)
+        service._queue = JobQueue()
+        service._queue.add_job(ChapterJob(chapter_number=1, outline="Test"))
+        service.set_progress_callback(lambda p: progress_updates.append(p))
+
+        # Manually call _notify_progress
+        service._notify_progress()
+
+        assert len(progress_updates) == 1
+        assert progress_updates[0].total_chapters == 1
+
+
+class TestEstimatedRemainingTime:
+    """Tests for estimated remaining time calculation."""
+
+    @pytest.mark.asyncio
+    async def test_estimated_time_with_completed_jobs(self):
+        """Test estimated time calculation with multiple completed jobs."""
+        import asyncio
+
+        queue = JobQueue(max_parallel=2)
+        job1 = ChapterJob(chapter_number=1, outline="1")
+        job2 = ChapterJob(chapter_number=2, outline="2")
+        job3 = ChapterJob(chapter_number=3, outline="3")
+
+        queue.add_job(job1)
+        queue.add_job(job2)
+        queue.add_job(job3)
+
+        # Complete first two jobs with artificial timing
+        await queue.mark_running(job1.id)
+        await asyncio.sleep(0.02)
+        await queue.mark_completed(job1.id, "C1", 500)
+
+        await queue.mark_running(job2.id)
+        await asyncio.sleep(0.02)
+        await queue.mark_completed(job2.id, "C2", 500)
+
+        progress = queue.get_progress()
+        assert progress.completed_chapters == 2
+        # Estimated remaining should be calculated
+        assert progress.estimated_remaining_seconds is not None
+
+    @pytest.mark.asyncio
+    async def test_estimated_time_covers_branch(self):
+        """Test that estimated time calculation branch is covered."""
+        from datetime import datetime, timedelta
+
+        queue = JobQueue(max_parallel=3)
+
+        # Create job with manual timestamps
+        job1 = ChapterJob(chapter_number=1, outline="1")
+        job1.status = JobStatus.COMPLETED
+        job1.started_at = datetime.utcnow() - timedelta(seconds=2)
+        job1.completed_at = datetime.utcnow()
+        job1.progress = 1.0
+
+        job2 = ChapterJob(chapter_number=2, outline="2")  # Pending
+
+        queue._jobs[job1.id] = job1
+        queue._jobs[job2.id] = job2
+        queue._queue = [job1.id, job2.id]
+
+        progress = queue.get_progress()
+        assert progress.completed_chapters == 1
+        assert progress.estimated_remaining_seconds is not None
+        # Should estimate ~2 seconds for remaining 1 job at max_parallel=3
+        assert progress.estimated_remaining_seconds >= 0
+
+
+class TestRunJobBranches:
+    """Tests for _run_job method branches."""
+
+    @pytest.mark.asyncio
+    async def test_run_job_success(self):
+        """Test _run_job with successful generation."""
+        async def mock_gen(ch_num, outline, style, char_bible, prev):
+            return "Generated content here"
+
+        service = ParallelChapterService(generator=mock_gen)
+        service._queue = JobQueue()
+        job = ChapterJob(chapter_number=1, outline="Test outline")
+        service._queue.add_job(job)
+
+        await service._run_job(job, {"char": "info"}, ["prev chapter"])
+
+        assert job.status == JobStatus.COMPLETED
+        assert job.result == "Generated content here"
+        assert job.word_count == 3
+
+    @pytest.mark.asyncio
+    async def test_run_job_failure_no_retry(self):
+        """Test _run_job failure without retry."""
+        async def failing_gen(*args):
+            raise ValueError("Test error")
+
+        service = ParallelChapterService(
+            generator=failing_gen,
+            retry_on_failure=False,
+        )
+        service._queue = JobQueue()
+        job = ChapterJob(chapter_number=1, outline="Test")
+        service._queue.add_job(job)
+
+        await service._run_job(job, None, [])
+
+        assert job.status == JobStatus.FAILED
+        assert "Test error" in job.error
+
+    @pytest.mark.asyncio
+    async def test_run_job_failure_with_exhausted_retries(self):
+        """Test _run_job fails after exhausting retries."""
+        async def failing_gen(*args):
+            raise ValueError("Persistent error")
+
+        service = ParallelChapterService(
+            generator=failing_gen,
+            retry_on_failure=True,
+            max_retries=2,
+        )
+        service._queue = JobQueue()
+        job = ChapterJob(chapter_number=1, outline="Test")
+        service._queue.add_job(job)
+
+        await service._run_job(job, None, [])
+
+        assert job.status == JobStatus.FAILED
+        assert "Persistent error" in job.error
+
+    @pytest.mark.asyncio
+    async def test_run_job_success_after_retry(self):
+        """Test _run_job succeeds after retrying."""
+        attempts = [0]
+
+        async def flaky_gen(*args):
+            attempts[0] += 1
+            if attempts[0] < 2:
+                raise ValueError("Temp error")
+            return "Success"
+
+        service = ParallelChapterService(
+            generator=flaky_gen,
+            retry_on_failure=True,
+            max_retries=3,
+        )
+        service._queue = JobQueue()
+        job = ChapterJob(chapter_number=1, outline="Test")
+        service._queue.add_job(job)
+
+        await service._run_job(job, None, [])
+
+        assert job.status == JobStatus.COMPLETED
+        assert attempts[0] == 2

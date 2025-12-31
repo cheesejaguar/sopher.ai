@@ -47,7 +47,6 @@ async def store_oauth_state(state: str, verifier: str) -> None:
 
 async def validate_oauth_state(state: str) -> Optional[str]:
     """Validate OAuth state and return PKCE verifier"""
-    import hashlib
     import logging
 
     logger = logging.getLogger(__name__)
@@ -301,17 +300,17 @@ def clear_auth_cookies(response: Response, request: Request) -> None:
         key="access_token",
         path="/",
         secure=is_production,
-        httponly=False,
-        samesite="lax" if not is_production else "none",  # Match the setting logic
+        httponly=True,  # Must match the httponly setting used when creating the cookie
+        samesite="lax",  # Match the setting used when creating the cookie
         domain=domain,
     )
 
-    # Clear refresh token
+    # Clear refresh token (matching the settings from set_auth_cookies)
     response.delete_cookie(
         key="refresh_token",
         path="/",
         secure=is_production,
         httponly=True,
-        samesite="lax" if not is_production else "none",  # Match the setting logic
+        samesite="lax",  # Match the setting used when creating the cookie
         domain=domain,
     )

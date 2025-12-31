@@ -235,3 +235,308 @@ class TestProjectEndpointDocumentation:
         # Verify CRUD endpoints exist
         assert "/api/v1/projects" in paths
         assert "/api/v1/projects/{project_id}" in paths
+
+
+class TestProjectCRUDOperations:
+    """Tests for successful CRUD operations on projects."""
+
+    @pytest.mark.asyncio
+    async def test_create_project_success(self, mock_user, mock_db_session):
+        """Test successful project creation."""
+        from datetime import datetime, timezone
+
+        from app.routers.projects import create_project
+        from app.schemas import ProjectCreate
+
+        # Create project data
+        project_data = ProjectCreate(
+            name="My Fantasy Book",
+            description="A story about dragons",
+            brief="A young wizard discovers they have the power to talk to dragons.",
+            genre="fantasy",
+            target_chapters=12,
+        )
+
+        # Mock the database refresh to set all required fields
+        async def mock_refresh(obj):
+            obj.id = uuid4()
+            obj.created_at = datetime.now(timezone.utc)
+            obj.updated_at = datetime.now(timezone.utc)
+
+        mock_db_session.refresh = mock_refresh
+
+        # Call the endpoint function directly
+        result = await create_project(
+            project_data=project_data,
+            current_user=mock_user,
+            db=mock_db_session,
+        )
+
+        # Verify the result
+        assert result.name == "My Fantasy Book"
+        assert result.genre == "fantasy"
+        assert mock_db_session.add.called
+        assert mock_db_session.commit.called
+
+    @pytest.mark.asyncio
+    async def test_list_projects_success(self, mock_user, mock_db_session):
+        """Test successful project listing."""
+        from datetime import datetime, timezone
+
+        from app.models import Project
+        from app.routers.projects import list_projects
+
+        # Create mock projects with all required fields
+        mock_project = MagicMock(spec=Project)
+        mock_project.id = uuid4()
+        mock_project.user_id = mock_user.id
+        mock_project.name = "Test Project"
+        mock_project.description = "A test project"
+        mock_project.brief = None
+        mock_project.genre = "fiction"
+        mock_project.target_chapters = 10
+        mock_project.style_guide = None
+        mock_project.settings = {}
+        mock_project.status = "draft"
+        mock_project.created_at = datetime.now(timezone.utc)
+        mock_project.updated_at = datetime.now(timezone.utc)
+
+        # Set up mock responses
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 1
+
+        mock_list_result = MagicMock()
+        mock_list_result.scalars.return_value.all.return_value = [mock_project]
+
+        mock_db_session.execute = AsyncMock(side_effect=[mock_count_result, mock_list_result])
+
+        # Call the endpoint
+        result = await list_projects(
+            page=1,
+            page_size=10,
+            status_filter=None,
+            current_user=mock_user,
+            db=mock_db_session,
+        )
+
+        # Verify the result
+        assert result.total == 1
+        assert result.page == 1
+        assert len(result.projects) == 1
+        assert result.projects[0].name == "Test Project"
+
+    @pytest.mark.asyncio
+    async def test_list_projects_with_status_filter(self, mock_user, mock_db_session):
+        """Test project listing with status filter."""
+        from app.routers.projects import list_projects
+
+        # Set up mock responses for empty result
+        mock_count_result = MagicMock()
+        mock_count_result.scalar.return_value = 0
+
+        mock_list_result = MagicMock()
+        mock_list_result.scalars.return_value.all.return_value = []
+
+        mock_db_session.execute = AsyncMock(side_effect=[mock_count_result, mock_list_result])
+
+        # Call the endpoint with status filter
+        result = await list_projects(
+            page=1,
+            page_size=10,
+            status_filter="completed",
+            current_user=mock_user,
+            db=mock_db_session,
+        )
+
+        # Verify the result
+        assert result.total == 0
+        assert len(result.projects) == 0
+
+    @pytest.mark.asyncio
+    async def test_get_project_success(self, mock_user, mock_db_session):
+        """Test successful project retrieval."""
+        from datetime import datetime, timezone
+
+        from app.models import Project
+        from app.routers.projects import get_project
+
+        # Create a mock project with all required fields
+        project_id = uuid4()
+        mock_project = MagicMock(spec=Project)
+        mock_project.id = project_id
+        mock_project.user_id = mock_user.id
+        mock_project.name = "Test Project"
+        mock_project.description = "A test project"
+        mock_project.brief = None
+        mock_project.genre = "fiction"
+        mock_project.target_chapters = 10
+        mock_project.style_guide = None
+        mock_project.settings = {}
+        mock_project.status = "draft"
+        mock_project.created_at = datetime.now(timezone.utc)
+        mock_project.updated_at = datetime.now(timezone.utc)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_project
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        # Call the endpoint
+        result = await get_project(
+            project_id=project_id,
+            current_user=mock_user,
+            db=mock_db_session,
+        )
+
+        # Verify the result
+        assert result.id == project_id
+        assert result.name == "Test Project"
+
+    @pytest.mark.asyncio
+    async def test_get_project_not_found(self, mock_user, mock_db_session):
+        """Test project retrieval when project doesn't exist."""
+        from fastapi import HTTPException
+
+        from app.routers.projects import get_project
+
+        project_id = uuid4()
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        # Call the endpoint - should raise HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            await get_project(
+                project_id=project_id,
+                current_user=mock_user,
+                db=mock_db_session,
+            )
+
+        assert exc_info.value.status_code == 404
+        assert "not found" in exc_info.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_update_project_success(self, mock_user, mock_db_session):
+        """Test successful project update."""
+        from datetime import datetime, timezone
+
+        from app.models import Project
+        from app.routers.projects import update_project
+        from app.schemas import ProjectUpdate
+
+        # Create a mock project with all required fields
+        project_id = uuid4()
+        mock_project = MagicMock(spec=Project)
+        mock_project.id = project_id
+        mock_project.user_id = mock_user.id
+        mock_project.name = "Test Project"
+        mock_project.description = "A test project"
+        mock_project.brief = None
+        mock_project.genre = "fiction"
+        mock_project.target_chapters = 10
+        mock_project.style_guide = None
+        mock_project.settings = {}
+        mock_project.status = "draft"
+        mock_project.created_at = datetime.now(timezone.utc)
+        mock_project.updated_at = datetime.now(timezone.utc)
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_project
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        # Mock refresh to update the object
+        async def mock_refresh(obj):
+            obj.updated_at = datetime.now(timezone.utc)
+
+        mock_db_session.refresh = mock_refresh
+
+        # Create update data
+        update_data = ProjectUpdate(name="Updated Project Name")
+
+        # Call the endpoint
+        await update_project(
+            project_id=project_id,
+            project_data=update_data,
+            current_user=mock_user,
+            db=mock_db_session,
+        )
+
+        # Verify the result
+        assert mock_db_session.commit.called
+
+    @pytest.mark.asyncio
+    async def test_update_project_not_found(self, mock_user, mock_db_session):
+        """Test project update when project doesn't exist."""
+        from fastapi import HTTPException
+
+        from app.routers.projects import update_project
+        from app.schemas import ProjectUpdate
+
+        project_id = uuid4()
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        update_data = ProjectUpdate(name="Updated Name")
+
+        # Call the endpoint - should raise HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            await update_project(
+                project_id=project_id,
+                project_data=update_data,
+                current_user=mock_user,
+                db=mock_db_session,
+            )
+
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_project_success(self, mock_user, mock_db_session):
+        """Test successful project deletion."""
+        from app.models import Project
+        from app.routers.projects import delete_project
+
+        # Create a mock project
+        project_id = uuid4()
+        mock_project = MagicMock(spec=Project)
+        mock_project.id = project_id
+        mock_project.user_id = mock_user.id
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_project
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        # Call the endpoint
+        await delete_project(
+            project_id=project_id,
+            current_user=mock_user,
+            db=mock_db_session,
+        )
+
+        # Verify deletion was called
+        mock_db_session.delete.assert_called_with(mock_project)
+        assert mock_db_session.commit.called
+
+    @pytest.mark.asyncio
+    async def test_delete_project_not_found(self, mock_user, mock_db_session):
+        """Test project deletion when project doesn't exist."""
+        from fastapi import HTTPException
+
+        from app.routers.projects import delete_project
+
+        project_id = uuid4()
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db_session.execute = AsyncMock(return_value=mock_result)
+
+        # Call the endpoint - should raise HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            await delete_project(
+                project_id=project_id,
+                current_user=mock_user,
+                db=mock_db_session,
+            )
+
+        assert exc_info.value.status_code == 404

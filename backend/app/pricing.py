@@ -1,6 +1,26 @@
 """Centralized pricing logic for LLM models"""
 
-from typing import Any, Dict
+from typing import Any, Dict, TypedDict
+
+
+class CostBreakdown(TypedDict):
+    """Breakdown of costs by category"""
+
+    chapters: float
+    outline: float
+    editing: float
+    continuity: float
+
+
+class BookCostEstimate(TypedDict):
+    """Result of book cost estimation"""
+
+    estimated_usd: float
+    total_prompt_tokens: int
+    total_completion_tokens: int
+    breakdown: CostBreakdown
+    model: str
+    chapters: int
 
 # Model pricing in USD per 1000 tokens
 # Based on public pricing as of 2024
@@ -101,7 +121,7 @@ def estimate_book_cost(
     include_outline: bool = True,
     include_editing: bool = True,
     include_continuity: bool = True,
-) -> Dict[str, Any]:
+) -> BookCostEstimate:
     """Estimate total cost for generating a book"""
     # Base chapter generation
     chapter_prompt_tokens = target_chapters * avg_prompt_tokens_per_chapter

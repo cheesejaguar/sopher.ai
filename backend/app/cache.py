@@ -7,6 +7,12 @@ from typing import Any, Optional
 import redis.asyncio as redis_async
 from redis.asyncio import Redis
 
+# TTL constants (in seconds)
+TTL_DEFAULT = 3600  # 1 hour
+TTL_SHORT = 300  # 5 minutes
+TTL_MEDIUM = 600  # 10 minutes
+TTL_LONG = 86400  # 24 hours
+
 
 class RedisCache:
     """Redis cache wrapper with JSON serialization"""
@@ -14,6 +20,8 @@ class RedisCache:
     def __init__(self):
         self.redis: Optional[Redis] = None
         self.url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        # Configurable connection pool size
+        self.max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
 
     async def connect(self) -> None:
         """Connect to Redis"""
@@ -21,7 +29,7 @@ class RedisCache:
             self.url,
             encoding="utf-8",
             decode_responses=True,
-            max_connections=50,
+            max_connections=self.max_connections,
         )
         # Verify connection with ping
         if self.redis:
@@ -45,7 +53,7 @@ class RedisCache:
                 return value
         return None
 
-    async def set(self, key: str, value: Any, ttl: Optional[int] = 3600) -> None:
+    async def set(self, key: str, value: Any, ttl: Optional[int] = TTL_DEFAULT) -> None:
         """Set value in cache with optional TTL"""
         if not self.redis:
             return

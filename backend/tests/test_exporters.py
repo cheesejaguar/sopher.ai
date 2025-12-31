@@ -537,3 +537,92 @@ class TestIntegration:
         assert md_result.success is True
         assert text_result.metadata.chapter_count == 20
         assert md_result.metadata.chapter_count == 20
+
+
+class TestMarkdownExporterEdgeCases:
+    """Tests for edge cases in markdown export."""
+
+    def test_title_page_with_edition(self):
+        """Title page with edition should be included."""
+        manuscript = Manuscript(
+            title="Test",
+            title_page=TitlePageContent(
+                title="Test Book",
+                author_name="Author",
+                edition="Second Edition",
+            ),
+        )
+        exporter = MarkdownExporter()
+        result = exporter.export(manuscript)
+
+        content = result.content.decode("utf-8")
+        assert "*Second Edition*" in content
+
+    def test_copyright_with_publisher_and_edition(self):
+        """Copyright with publisher and edition info."""
+        manuscript = Manuscript(
+            title="Test",
+            copyright_page=CopyrightContent(
+                author_name="Author",
+                year=2024,
+                publisher="Big Publisher",
+                edition_info="First hardcover edition",
+                credits=["Cover design by Artist", "Edited by Editor"],
+            ),
+        )
+        exporter = MarkdownExporter()
+        result = exporter.export(manuscript)
+
+        content = result.content.decode("utf-8")
+        assert "Published by Big Publisher" in content
+        assert "First hardcover edition" in content
+        assert "- Cover design by Artist" in content
+        assert "- Edited by Editor" in content
+
+    def test_export_error_handling(self):
+        """Export errors should be captured in result."""
+        # Create a manuscript that might cause issues
+        manuscript = Manuscript(
+            title="Test",
+            chapters=[ChapterContent(number=1, title="Ch1", content="Valid content")],
+        )
+        exporter = MarkdownExporter()
+
+        # Normal export should succeed
+        result = exporter.export(manuscript)
+        assert result.success is True
+
+    def test_chapter_without_scene_breaks(self):
+        """Chapter without scene breaks should export cleanly."""
+        manuscript = Manuscript(
+            title="Test",
+            chapters=[
+                ChapterContent(
+                    number=1,
+                    title="Simple Chapter",
+                    content="Just one continuous scene with no breaks.",
+                    word_count=6,
+                )
+            ],
+        )
+        exporter = MarkdownExporter()
+        result = exporter.export(manuscript)
+
+        content = result.content.decode("utf-8")
+        assert "Just one continuous scene" in content
+        assert "---" not in content  # No scene break markers
+
+
+class TestFileNameSanitization:
+    """Tests for file name sanitization in exporters."""
+
+    def test_empty_title_uses_default(self):
+        """Empty or special-chars-only title should default to 'manuscript'."""
+        manuscript = Manuscript(
+            title="@#$%^&*()",  # Only special chars, sanitizes to empty
+            author_name="Test Author",
+            chapters=[],
+        )
+        exporter = TextExporter()
+        file_name = exporter._create_file_name(manuscript)
+        assert file_name == "manuscript.txt"

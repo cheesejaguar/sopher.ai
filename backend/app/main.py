@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .cache import cache
-from .db import close_db, init_db
+from .db import check_db_health, close_db, init_db
 from .errors import ErrorCode, api_error
 from .logging import clear_request_context, parse_trace_context, set_request_context, setup_logging
 from .metrics import MetricsTracker, metrics_router
@@ -97,6 +97,55 @@ app.add_middleware(
 
 # Add compression middleware for better performance
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# Request size limit (10MB max for all requests)
+MAX_REQUEST_SIZE_MB = int(os.getenv("MAX_REQUEST_SIZE_MB", "10"))
+MAX_REQUEST_SIZE_BYTES = MAX_REQUEST_SIZE_MB * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_size(request: Request, call_next: Callable) -> Response:
+    """Limit request body size to prevent DoS attacks"""
+    content_length = request.headers.get("content-length")
+    if content_length:
+        if int(content_length) > MAX_REQUEST_SIZE_BYTES:
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content={
+                    "error_code": "REQUEST_TOO_LARGE",
+                    "message": f"Request body too large. Maximum size is {MAX_REQUEST_SIZE_MB}MB.",
+                },
+            )
+    return await call_next(request)
+
+
+# Security headers middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next: Callable) -> Response:
+    """Add security headers to all responses"""
+    response = await call_next(request)
+
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Enable XSS filter (legacy but harmless)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+
+    # Strict Transport Security (only apply in production to avoid dev issues)
+    if os.getenv("ENVIRONMENT", "development") == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+    # Referrer policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+
+    # Content Security Policy (basic policy - adjust as needed)
+    response.headers["Content-Security-Policy"] = "default-src 'self'; frame-ancestors 'none'"
+
+    return response
 
 
 # Exception handlers
@@ -296,15 +345,22 @@ async def health_check():
 @app.get("/readyz", tags=["health"])
 async def readiness_check():
     """Readiness check - verify dependencies"""
+    checks = {"redis": False, "database": False}
     try:
         # Check Redis
         await cache.redis.ping()
-        return {"status": "ready", "redis": "connected"}
+        checks["redis"] = True
+
+        # Check Database
+        await check_db_health()
+        checks["database"] = True
+
+        return {"status": "ready", **checks}
     except Exception as e:
         logger.error(f"Readiness check failed: {e}")
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "not ready", "error": str(e)},
+            content={"status": "not ready", "checks": checks, "error": str(e)},
         )
 
 

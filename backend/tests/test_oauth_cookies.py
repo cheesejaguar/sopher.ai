@@ -101,11 +101,21 @@ class TestOAuthCallback:
         db.commit = AsyncMock()
         db.refresh = AsyncMock()
 
-        # Mock OAuth functions
+        # Mock OAuth functions using AsyncMock
         with (
-            patch("app.routers.auth.validate_oauth_state", return_value="verifier123"),
+            patch(
+                "app.routers.auth.check_oauth_rate_limit",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.routers.auth.validate_oauth_state",
+                new_callable=AsyncMock,
+                return_value="verifier123",
+            ),
             patch(
                 "app.routers.auth.exchange_code_for_token",
+                new_callable=AsyncMock,
                 return_value=(
                     {"access_token": "google_token"},
                     {"sub": "google123", "email": "test@example.com", "name": "Test User"},

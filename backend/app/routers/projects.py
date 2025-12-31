@@ -48,17 +48,18 @@ async def list_projects(
     db: AsyncSession = Depends(get_db),
 ) -> ProjectListResponse:
     """List all projects for the authenticated user."""
-    query = select(Project).where(Project.user_id == current_user.id)
-
+    # Build base where conditions
+    where_conditions = [Project.user_id == current_user.id]
     if status_filter:
-        query = query.where(Project.status == status_filter)
+        where_conditions.append(Project.status == status_filter)
 
-    query = query.order_by(Project.created_at.desc())
-
-    # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
+    # Get total count directly (more efficient than subquery)
+    count_query = select(func.count(Project.id)).where(*where_conditions)
     result = await db.execute(count_query)
     total = result.scalar() or 0
+
+    # Build main query with ordering
+    query = select(Project).where(*where_conditions).order_by(Project.created_at.desc())
 
     # Paginate
     offset = (page - 1) * page_size

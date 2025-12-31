@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,7 +30,7 @@ class UsageResponse(BaseModel):
 class BudgetUpdateRequest(BaseModel):
     """Request to update monthly budget"""
 
-    monthly_budget_usd: float
+    monthly_budget_usd: float = Field(ge=0, le=10000, description="Monthly budget in USD (0-10000)")
 
 
 class EstimateRequest(BaseModel):
@@ -143,19 +143,7 @@ async def update_budget(
     db: AsyncSession = Depends(get_db),
 ) -> Dict[str, float]:
     """Update user's monthly budget"""
-
-    # Validate budget
-    if request.monthly_budget_usd < 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Budget must be non-negative",
-        )
-
-    if request.monthly_budget_usd > 10000:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Budget cannot exceed $10,000",
-        )
+    # Note: Budget validation (0-10000) is handled by Pydantic Field constraint
 
     # Convert user_id string to UUID
     from uuid import UUID
@@ -201,10 +189,10 @@ async def estimate_cost(
     )
 
     return EstimateResponse(
-        estimated_usd=estimate["estimated_usd"],  # type: ignore[arg-type]
-        total_prompt_tokens=estimate["total_prompt_tokens"],  # type: ignore[arg-type]
-        total_completion_tokens=estimate["total_completion_tokens"],  # type: ignore[arg-type]
-        breakdown=estimate["breakdown"],  # type: ignore[arg-type]
-        model=estimate["model"],  # type: ignore[arg-type]
-        chapters=estimate["chapters"],  # type: ignore[arg-type]
+        estimated_usd=estimate["estimated_usd"],
+        total_prompt_tokens=estimate["total_prompt_tokens"],
+        total_completion_tokens=estimate["total_completion_tokens"],
+        breakdown=estimate["breakdown"],
+        model=estimate["model"],
+        chapters=estimate["chapters"],
     )

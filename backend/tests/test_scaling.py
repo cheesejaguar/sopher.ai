@@ -290,6 +290,34 @@ class TestHealthChecker:
         assert "Unknown check" in result.message
 
     @pytest.mark.asyncio
+    async def test_run_check_with_string_result(self, checker):
+        """Should handle string return value (else branch)."""
+
+        async def check():
+            return "Custom status message"
+
+        checker.register_check("test", check)
+        result = await checker.run_check("test")
+        assert result.status == HealthStatus.HEALTHY
+        assert result.message == "Custom status message"
+
+    @pytest.mark.asyncio
+    async def test_run_check_with_custom_object(self, checker):
+        """Should handle custom object return value (else branch)."""
+
+        class CustomResult:
+            def __str__(self):
+                return "Custom object result"
+
+        async def check():
+            return CustomResult()
+
+        checker.register_check("test", check)
+        result = await checker.run_check("test")
+        assert result.status == HealthStatus.HEALTHY
+        assert result.message == "Custom object result"
+
+    @pytest.mark.asyncio
     async def test_run_all_checks(self, checker):
         """Should run all checks."""
 

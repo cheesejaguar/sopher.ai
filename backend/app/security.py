@@ -7,19 +7,25 @@ from typing import Any, Dict, Optional
 
 import jwt
 from cryptography.fernet import Fernet
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt.exceptions import InvalidTokenError
 from passlib.context import CryptContext
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET", "dev-secret-key-change-in-production")
+_jwt_secret = os.getenv("JWT_SECRET")
+if not _jwt_secret:
+    raise RuntimeError("JWT_SECRET environment variable is required")
+SECRET_KEY = _jwt_secret
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
 
 # API key encryption
-FERNET_KEY = os.getenv("FERNET_KEY", Fernet.generate_key().decode())
+_fernet_key = os.getenv("FERNET_KEY")
+if not _fernet_key:
+    raise RuntimeError("FERNET_KEY environment variable is required")
+FERNET_KEY = _fernet_key
 fernet = Fernet(FERNET_KEY.encode())
 
 # Password hashing
@@ -91,7 +97,6 @@ def verify_token(token: str, token_type: str = "access") -> TokenData:
 
 
 async def get_current_user(
-    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     access_token_cookie: Optional[str] = Cookie(None, alias="access_token"),
 ) -> TokenData:
@@ -106,9 +111,8 @@ async def get_current_user(
     if not token and access_token_cookie:
         token = access_token_cookie
 
-    # Also support query parameter for SSE endpoints (backward compatibility)
-    if not token:
-        token = request.query_params.get("access_token")
+    # NOTE: Query parameter token support removed for security
+    # Query params are logged in server logs and browser history
 
     if not token:
         raise HTTPException(

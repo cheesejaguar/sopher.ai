@@ -1,8 +1,10 @@
 """Outline generation endpoint with SSE streaming"""
 
+import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 from datetime import datetime
 from typing import AsyncIterator, Optional
@@ -25,6 +27,15 @@ from ..pricing import calculate_cost_usd
 from ..schemas import BookOutline, OutlineRequest, OutlineRevision
 from ..security import TokenData, get_current_user
 
+# Maximum stream duration in seconds (30 minutes default)
+STREAM_TIMEOUT_SECONDS = int(os.getenv("STREAM_TIMEOUT_SECONDS", "1800"))
+
+
+def check_stream_timeout(start_time: float, timeout: int = STREAM_TIMEOUT_SECONDS) -> bool:
+    """Check if stream has exceeded timeout. Returns True if timed out."""
+    elapsed = asyncio.get_event_loop().time() - start_time
+    return elapsed > timeout
+
 router = APIRouter(prefix="/projects/{project_id}", tags=["outline"])
 
 logger = logging.getLogger(__name__)
@@ -44,6 +55,7 @@ async def event_generator(
     start_time = time.perf_counter()
     tokens_emitted = 0
     model = outline_request.model
+    stream_start = asyncio.get_event_loop().time()
 
     try:
         # Check cache
@@ -123,6 +135,15 @@ Format as structured markdown."""
 
             async for chunk in stream:
                 if await request.is_disconnected():
+                    break
+
+                # Check for stream timeout
+                if check_stream_timeout(stream_start):
+                    logger.warning(f"Stream timeout for project {project_id}")
+                    yield {
+                        "event": "error",
+                        "data": json.dumps({"error": "Stream timeout exceeded"}),
+                    }
                     break
 
                 choice = chunk.get("choices", [{}])[0]
@@ -268,8 +289,9 @@ async def stream_outline(
 ) -> Response:
     """Stream outline generation via Server-Sent Events"""
 
-    # Check user's budget before starting
-    user_result = await db.execute(select(User).where(User.id == user.user_id))
+    # Check user's budget before starting with row-level locking
+    # Use FOR UPDATE to prevent race conditions between concurrent requests
+    user_result = await db.execute(select(User).where(User.id == user.user_id).with_for_update())
     user_record = user_result.scalar_one_or_none()
 
     if not user_record:
@@ -279,7 +301,7 @@ async def stream_outline(
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Get current month's usage
+    # Get current month's usage within the same transaction
     current_month = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_usage_result = await db.execute(
         select(func.sum(Cost.usd))
@@ -291,7 +313,7 @@ async def stream_outline(
     )
     month_usage = month_usage_result.scalar() or 0
 
-    # Check if budget exceeded
+    # Check if budget exceeded (lock held until transaction commits)
     if month_usage >= user_record.monthly_budget_usd:
         return api_error(
             "BUDGET_EXCEEDED",
@@ -670,6 +692,7 @@ async def revision_event_generator(
     start_time = time.perf_counter()
     tokens_emitted = 0
     model = "gpt-5"
+    stream_start = asyncio.get_event_loop().time()
 
     try:
         yield {
@@ -725,6 +748,15 @@ Format as structured markdown."""
 
             async for chunk in stream:
                 if await request.is_disconnected():
+                    break
+
+                # Check for stream timeout
+                if check_stream_timeout(stream_start):
+                    logger.warning(f"Stream timeout for project {project_id}")
+                    yield {
+                        "event": "error",
+                        "data": json.dumps({"error": "Stream timeout exceeded"}),
+                    }
                     break
 
                 choice = chunk.get("choices", [{}])[0]

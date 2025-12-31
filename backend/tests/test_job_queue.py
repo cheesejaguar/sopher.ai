@@ -393,6 +393,38 @@ class TestJobQueue:
         assert stats["completed"] == 1
 
     @pytest.mark.asyncio
+    async def test_cancel_nonexistent(self, queue):
+        """Should return False when cancelling nonexistent job."""
+        result = await queue.cancel(uuid4())
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_complete_nonexistent(self, queue):
+        """Should return False when completing nonexistent job."""
+        result = await queue.complete(uuid4(), JobResult(success=True))
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_retry_nonexistent(self, queue):
+        """Should return False when retrying nonexistent job."""
+        result = await queue.retry(uuid4())
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_total_jobs(self, queue):
+        """Should return total number of tracked jobs."""
+        # Initially empty
+        total = await queue.total_jobs()
+        assert total == 0
+
+        # Add some jobs
+        for i in range(3):
+            await queue.enqueue(Job(priority=JobPriority.NORMAL, job_type=f"job-{i}"))
+
+        total = await queue.total_jobs()
+        assert total == 3
+
+    @pytest.mark.asyncio
     async def test_cleanup(self, queue):
         """Should clean up old completed jobs."""
         job = Job(priority=JobPriority.NORMAL, job_type="test")

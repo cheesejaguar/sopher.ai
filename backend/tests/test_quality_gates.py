@@ -386,6 +386,16 @@ In the third paragraph, we see the consequences of what came before. The charact
         score = analyzer.analyze_pacing(text)
         assert score.score >= 0.5
 
+    def test_analyze_pacing_long_paragraphs(self, analyzer):
+        """Long paragraphs (>200 words) should get analyzed."""
+        # Need at least 2 paragraphs (separated by \n\n) with >200 words each
+        long_paragraph = " ".join(["word"] * 250)
+        text = f"{long_paragraph}\n\n{long_paragraph}"
+        score = analyzer.analyze_pacing(text)
+        assert score.dimension == QualityDimension.PACING
+        # Should have suggestion to break up long paragraphs
+        assert any("Break up" in s or "long" in s.lower() for s in score.suggestions) or score.score < 1.0
+
     def test_analyze_dialogue_varied_tags(self, analyzer):
         """Varied dialogue tags should score well."""
         text = """
@@ -407,6 +417,20 @@ In the third paragraph, we see the consequences of what came before. The charact
         score = analyzer.analyze_dialogue(text)
         assert score.score >= 0.6
         assert "No dialogue" in score.details
+
+    def test_analyze_dialogue_repetitive_tags(self, analyzer):
+        """Repetitive dialogue tags should get suggestions."""
+        text = """
+        "Hello," said John.
+        "Hi," said Sarah.
+        "How are you?" said John.
+        "Fine," said Sarah.
+        "Good," said John.
+        """
+        score = analyzer.analyze_dialogue(text)
+        assert score.dimension == QualityDimension.DIALOGUE
+        # Should suggest varying tags due to repetition
+        assert any("Vary" in s for s in score.suggestions) or score.score < 1.0
 
     def test_analyze_description_sensory(self, analyzer):
         """Sensory descriptions should score well."""

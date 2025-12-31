@@ -85,30 +85,43 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl)
   }
 
-  // Token exists, check if it's not expired (basic check)
+  // Token exists, check basic structure (UX optimization only)
+  // SECURITY NOTE: This is NOT a security check - it's purely for UX to avoid
+  // unnecessary API calls with obviously expired tokens. The backend performs
+  // full cryptographic signature verification. A malicious actor could forge
+  // a token with future expiry, but backend will reject it.
   try {
-    // Parse JWT to check expiry (basic validation without verification)
     const tokenParts = accessToken.value.split('.')
-    if (tokenParts.length === 3) {
-      const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString())
-      const now = Math.floor(Date.now() / 1000)
-      
-      if (payload.exp && payload.exp < now) {
-        if (DEBUG) {
-          console.log('[Middleware] Token expired, redirecting to login', {
-            exp: payload.exp,
-            now,
-            expired: true,
-          })
-        }
-        const loginUrl = new URL('/login', request.url)
-        loginUrl.searchParams.set('redirect', pathname)
-        return NextResponse.redirect(loginUrl)
+    // Validate JWT structure (must have 3 parts)
+    if (tokenParts.length !== 3) {
+      if (DEBUG) console.log('[Middleware] Invalid token structure')
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('redirect', pathname)
+      return NextResponse.redirect(loginUrl)
+    }
+
+    const payload = JSON.parse(Buffer.from(tokenParts[1], 'base64').toString())
+    const now = Math.floor(Date.now() / 1000)
+
+    if (payload.exp && payload.exp < now) {
+      if (DEBUG) {
+        console.log('[Middleware] Token expired, redirecting to login', {
+          exp: payload.exp,
+          now,
+          expired: true,
+        })
       }
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('redirect', pathname)
+      return NextResponse.redirect(loginUrl)
     }
   } catch (error) {
-    if (DEBUG) console.log('[Middleware] Error parsing token:', error)
-    // If we can't parse the token, let it through and let the backend validate
+    // Log all errors, not just debug mode (this is unexpected)
+    console.error('[Middleware] Error parsing token:', error)
+    // Invalid token structure - redirect to login
+    const loginUrl = new URL('/login', request.url)
+    loginUrl.searchParams.set('redirect', pathname)
+    return NextResponse.redirect(loginUrl)
   }
 
   if (DEBUG) {

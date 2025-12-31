@@ -270,6 +270,25 @@ class TestErrorCategorizer:
         """Should categorize unknown errors."""
         assert categorizer.categorize(Exception("Something happened")) == ErrorCategory.UNKNOWN
 
+    def test_categorize_permission_error_by_type(self, categorizer):
+        """Should categorize PermissionError by exception type."""
+        # Use message that doesn't match any pattern
+        error = PermissionError("something went wrong")
+        assert categorizer.categorize(error) == ErrorCategory.AUTHORIZATION
+
+    def test_categorize_timeout_by_type(self, categorizer):
+        """Should categorize TimeoutError by exception type when message doesn't match."""
+        # Use message that doesn't contain "timeout" - error type "timeouterror" contains "timeout"
+        # So this will still match the pattern. Let's verify the behavior.
+        error = TimeoutError("operation failed")
+        assert categorizer.categorize(error) == ErrorCategory.TIMEOUT
+
+    def test_categorize_connection_error_by_type(self, categorizer):
+        """Should categorize ConnectionError by exception type when message doesn't match."""
+        # "connectionerror" type contains "connection" so pattern will match
+        error = ConnectionError("failed")
+        assert categorizer.categorize(error) == ErrorCategory.NETWORK
+
 
 # =============================================================================
 # ErrorFingerprinter Tests

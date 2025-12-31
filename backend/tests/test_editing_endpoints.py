@@ -546,3 +546,365 @@ class TestPositionTracking:
         )
         assert suggestion.start_position == 50000
         assert suggestion.end_position == 50004
+
+
+class TestEditingIntegrationAuth:
+    """Integration tests for editing endpoints requiring auth."""
+
+    @pytest.fixture
+    def client(self):
+        """Create test client."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        return TestClient(app)
+
+    def test_edit_stream_requires_auth(self, client):
+        """Test POST /edit/stream requires authentication."""
+        from uuid import uuid4
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/chapters/1/edit/stream",
+            json={"edit_type": "structural"},
+        )
+        assert response.status_code == 401
+
+    def test_proofread_stream_requires_auth(self, client):
+        """Test POST /proofread/stream requires authentication."""
+        from uuid import uuid4
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/chapters/1/proofread/stream",
+            json={},
+        )
+        assert response.status_code == 401
+
+    def test_get_suggestions_requires_auth(self, client):
+        """Test GET /suggestions requires authentication."""
+        from uuid import uuid4
+
+        project_id = str(uuid4())
+        response = client.get(
+            f"/api/v1/projects/{project_id}/chapters/1/suggestions",
+        )
+        assert response.status_code == 401
+
+    def test_apply_suggestion_requires_auth(self, client):
+        """Test POST /suggestions/{id}/apply requires authentication."""
+        from uuid import uuid4
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/chapters/1/suggestions/sugg-1/apply",
+            json={},
+        )
+        assert response.status_code == 401
+
+    def test_reject_suggestion_requires_auth(self, client):
+        """Test POST /suggestions/{id}/reject requires authentication."""
+        from uuid import uuid4
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/chapters/1/suggestions/sugg-1/reject",
+            json={},
+        )
+        assert response.status_code == 401
+
+    def test_edit_history_requires_auth(self, client):
+        """Test GET /edit-history requires authentication."""
+        from uuid import uuid4
+
+        project_id = str(uuid4())
+        response = client.get(
+            f"/api/v1/projects/{project_id}/chapters/1/edit-history",
+        )
+        assert response.status_code == 401
+
+
+class TestVerifyProjectOwnership:
+    """Tests for project ownership verification."""
+
+    @pytest.mark.asyncio
+    async def test_verify_project_ownership_not_found(self):
+        """Test verify_project_ownership raises 404 for missing project."""
+        from unittest.mock import AsyncMock, MagicMock
+        from uuid import uuid4
+
+        from fastapi import HTTPException
+
+        from app.routers.editing import verify_project_ownership
+        from app.security import TokenData
+
+        # Create mocks
+        mock_db = MagicMock()
+        mock_user = TokenData(user_id="user-123")
+        project_id = uuid4()
+
+        # Patch the ProjectService
+        with pytest.raises(HTTPException) as exc_info:
+            from unittest.mock import patch
+
+            with patch(
+                "app.routers.editing.ProjectService"
+            ) as mock_project_service:
+                mock_service = MagicMock()
+                mock_service.get_project = AsyncMock(return_value=None)
+                mock_project_service.return_value = mock_service
+
+                await verify_project_ownership(project_id, mock_user, mock_db)
+
+        assert exc_info.value.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_verify_project_ownership_forbidden(self):
+        """Test verify_project_ownership raises 403 for unauthorized user."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from fastapi import HTTPException
+
+        from app.routers.editing import verify_project_ownership
+        from app.security import TokenData
+
+        # Create mocks
+        mock_db = MagicMock()
+        mock_user = TokenData(user_id="user-123")  # Different from project owner
+        project_id = uuid4()
+
+        # Create a mock project owned by different user
+        mock_project = MagicMock()
+        mock_project.user_id = uuid4()  # Different user
+
+        with patch("app.routers.editing.ProjectService") as mock_project_service:
+            mock_service = MagicMock()
+            mock_service.get_project = AsyncMock(return_value=mock_project)
+            mock_project_service.return_value = mock_service
+
+            with pytest.raises(HTTPException) as exc_info:
+                await verify_project_ownership(project_id, mock_user, mock_db)
+
+            assert exc_info.value.status_code == 403
+            assert "don't have access" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_verify_project_ownership_success(self):
+        """Test verify_project_ownership succeeds for correct owner."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from uuid import uuid4
+
+        from app.routers.editing import verify_project_ownership
+        from app.security import TokenData
+
+        # Create mocks
+        mock_db = MagicMock()
+        user_id = "user-123"
+        mock_user = TokenData(user_id=user_id)
+        project_id = uuid4()
+
+        # Create a mock project owned by same user
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        with patch("app.routers.editing.ProjectService") as mock_project_service:
+            mock_service = MagicMock()
+            mock_service.get_project = AsyncMock(return_value=mock_project)
+            mock_project_service.return_value = mock_service
+
+            # Should not raise
+            result = await verify_project_ownership(project_id, mock_user, mock_db)
+            assert result is None  # Returns None on success
+
+
+class TestGetChapterContent:
+    """Tests for chapter content retrieval."""
+
+    def test_get_chapter_content_function_exists(self):
+        """Test get_chapter_content function is defined correctly."""
+        import asyncio
+        import inspect
+
+        from app.routers.editing import get_chapter_content
+
+        assert callable(get_chapter_content)
+        assert asyncio.iscoroutinefunction(get_chapter_content)
+
+        # Check signature
+        sig = inspect.signature(get_chapter_content)
+        params = list(sig.parameters.keys())
+        assert "project_id" in params
+        assert "chapter_number" in params
+        assert "db" in params
+
+    def test_get_chapter_content_return_type(self):
+        """Test get_chapter_content has correct return type annotation."""
+        import inspect
+        from typing import Optional
+
+        from app.routers.editing import get_chapter_content
+
+        sig = inspect.signature(get_chapter_content)
+        # Check function returns Optional[str]
+        assert sig.return_annotation == Optional[str]
+
+
+class TestEditChapterStreamLogic:
+    """Tests for edit chapter stream endpoint logic."""
+
+    def test_edit_request_field_descriptions(self):
+        """Test EditRequest field descriptions for documentation."""
+        from app.routers.editing import EditRequest
+
+        schema = EditRequest.model_json_schema()
+        props = schema.get("properties", {})
+
+        assert "edit_type" in props
+        assert "description" in props["edit_type"]
+        assert "structural" in props["edit_type"].get("default", "")
+
+        assert "focus_areas" in props
+        assert "description" in props["focus_areas"]
+
+        assert "preserve_voice" in props
+        assert "description" in props["preserve_voice"]
+
+        assert "aggressiveness" in props
+        assert "description" in props["aggressiveness"]
+
+
+class TestProofreadRequestDocumentation:
+    """Tests for proofreading request documentation."""
+
+    def test_proofread_request_has_descriptions(self):
+        """Test all ProofreadRequest fields have descriptions."""
+        from app.routers.editing import ProofreadRequest
+
+        schema = ProofreadRequest.model_json_schema()
+        props = schema.get("properties", {})
+
+        for field in ["check_grammar", "check_spelling", "check_punctuation", "check_formatting", "style_guide"]:
+            assert field in props
+            assert "description" in props[field]
+
+
+class TestEditSuggestionDocumentation:
+    """Tests for edit suggestion schema documentation."""
+
+    def test_edit_suggestion_has_all_descriptions(self):
+        """Test all EditSuggestion fields have descriptions."""
+        from app.routers.editing import EditSuggestion
+
+        schema = EditSuggestion.model_json_schema()
+        props = schema.get("properties", {})
+
+        required_fields = [
+            "id",
+            "suggestion_type",
+            "severity",
+            "original_text",
+            "suggested_text",
+            "start_position",
+            "end_position",
+            "explanation",
+            "confidence",
+        ]
+
+        for field in required_fields:
+            assert field in props, f"Missing field: {field}"
+            assert "description" in props[field], f"Missing description for: {field}"
+
+
+class TestRouterHelperFunctions:
+    """Tests for router helper function signatures."""
+
+    def test_verify_project_ownership_signature(self):
+        """Test verify_project_ownership has correct signature."""
+        import asyncio
+        import inspect
+
+        from app.routers.editing import verify_project_ownership
+
+        assert asyncio.iscoroutinefunction(verify_project_ownership)
+        sig = inspect.signature(verify_project_ownership)
+        params = list(sig.parameters.keys())
+        assert "project_id" in params
+        assert "current_user" in params
+        assert "db" in params
+
+    def test_get_chapter_content_signature(self):
+        """Test get_chapter_content has correct signature."""
+        import asyncio
+        import inspect
+
+        from app.routers.editing import get_chapter_content
+
+        assert asyncio.iscoroutinefunction(get_chapter_content)
+        sig = inspect.signature(get_chapter_content)
+        params = list(sig.parameters.keys())
+        assert "project_id" in params
+        assert "chapter_number" in params
+        assert "db" in params
+
+
+class TestApplySuggestionResponseFields:
+    """Tests for ApplySuggestionResponse schema fields."""
+
+    def test_response_optional_new_content(self):
+        """Test new_content is optional."""
+        response = ApplySuggestionResponse(
+            success=True,
+            applied_count=1,
+            message="Applied",
+        )
+        assert response.new_content is None
+
+    def test_response_with_all_fields(self):
+        """Test response with all fields populated."""
+        response = ApplySuggestionResponse(
+            success=True,
+            applied_count=5,
+            new_content="Updated chapter content with all fixes applied.",
+            message="Applied 5 suggestions",
+        )
+        assert response.success is True
+        assert response.applied_count == 5
+        assert "Updated chapter" in response.new_content
+        assert "5 suggestions" in response.message
+
+    def test_batch_apply_response(self):
+        """Test response for batch application of similar suggestions."""
+        response = ApplySuggestionResponse(
+            success=True,
+            applied_count=10,
+            new_content="Content with all similar issues fixed",
+            message="Applied suggestion and 9 similar suggestions",
+        )
+        assert response.applied_count == 10
+
+
+class TestEditSuggestionsResponseFields:
+    """Tests for EditSuggestionsResponse schema fields."""
+
+    def test_response_with_summary(self):
+        """Test response includes meaningful summary."""
+        response = EditSuggestionsResponse(
+            chapter_number=5,
+            suggestion_count=15,
+            suggestions=[],
+            summary="Found 15 issues: 3 grammar, 5 spelling, 7 style suggestions",
+        )
+        assert response.summary.startswith("Found")
+        assert "15" in response.summary
+
+    def test_response_chapter_metadata(self):
+        """Test response includes chapter metadata."""
+        response = EditSuggestionsResponse(
+            chapter_number=10,
+            suggestion_count=0,
+            suggestions=[],
+            summary="No issues found",
+        )
+        assert response.chapter_number == 10

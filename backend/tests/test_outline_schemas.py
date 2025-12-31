@@ -558,3 +558,28 @@ class TestSchemasSerialization:
         restored = BookOutline(**data)
         assert restored.character_arcs["test"].character_name == "Nested Test"
         assert restored.chapters[0].title == "Nested Chapter"
+
+
+class TestOutlineRequestModelValidation:
+    """Tests for OutlineRequest model validation."""
+
+    def test_valid_model(self):
+        """Test creating outline request with valid model."""
+        from app.config import DEFAULT_MODEL
+
+        request = OutlineRequest(
+            brief="A fantasy story about a young wizard.",
+            model=DEFAULT_MODEL,
+        )
+        assert request.model == DEFAULT_MODEL
+
+    def test_unsupported_model_rejected(self):
+        """Test that unsupported models are rejected."""
+        with pytest.raises(ValidationError) as exc_info:
+            OutlineRequest(
+                brief="A fantasy story about a young wizard.",
+                model="unsupported-model-xyz",
+            )
+        error_str = str(exc_info.value)
+        assert "Unsupported model" in error_str
+        assert "unsupported-model-xyz" in error_str

@@ -47,6 +47,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
+        except Exception:
+            # Rollback on any exception
+            await session.rollback()
+            raise
         finally:
             await session.close()
 
@@ -54,3 +58,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 async def close_db() -> None:
     """Close database connections"""
     await engine.dispose()
+
+
+async def check_db_health() -> bool:
+    """Check database connection health"""
+    from sqlalchemy import text
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(text("SELECT 1"))
+        return True

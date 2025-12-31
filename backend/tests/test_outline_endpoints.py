@@ -371,3 +371,707 @@ class TestOutlineRequestValidation:
 
         assert "The Fade" in request.world_building
         assert request.world_building["The Fade"].category == "magic_system"
+
+
+class TestOutlineStreamTimeout:
+    """Tests for outline stream timeout handling."""
+
+    def test_check_stream_timeout_not_exceeded(self):
+        """Test check_stream_timeout returns False when not exceeded."""
+        import asyncio
+
+        from app.routers.outline import check_stream_timeout
+
+        # Use current time
+        start_time = asyncio.get_event_loop().time()
+        result = check_stream_timeout(start_time, timeout=60)
+
+        assert result is False
+
+    def test_check_stream_timeout_exceeded(self):
+        """Test check_stream_timeout returns True when exceeded."""
+        import asyncio
+
+        from app.routers.outline import check_stream_timeout
+
+        # Use time far in the past
+        start_time = asyncio.get_event_loop().time() - 100
+        result = check_stream_timeout(start_time, timeout=60)
+
+        assert result is True
+
+
+class TestOutlineRouterConfig:
+    """Tests for outline router configuration."""
+
+    def test_router_has_correct_prefix(self):
+        """Test router has correct prefix."""
+        from app.routers.outline import router
+
+        assert router.prefix == "/projects/{project_id}"
+
+    def test_router_has_outline_tag(self):
+        """Test router has outline tag."""
+        from app.routers.outline import router
+
+        assert "outline" in router.tags
+
+    def test_stream_timeout_default(self):
+        """Test default stream timeout value."""
+        from app.routers.outline import STREAM_TIMEOUT_SECONDS
+
+        assert STREAM_TIMEOUT_SECONDS == 1800  # 30 minutes default
+
+
+class TestOutlineHelperFunctions:
+    """Tests for outline helper functions."""
+
+    @pytest.mark.asyncio
+    async def test_event_generator_cached_response(self):
+        """Test event_generator returns cached content when available."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastapi import Request
+
+        from app.routers.outline import event_generator
+        from app.schemas import OutlineRequest
+        from app.security import TokenData
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.is_disconnected = AsyncMock(return_value=False)
+        mock_session = MagicMock()
+        mock_session.id = uuid4()
+        mock_db = AsyncMock()
+        mock_user = TokenData(user_id=str(uuid4()))
+        outline_request = OutlineRequest(brief="A thrilling story about adventure and discovery")
+
+        with patch("app.routers.outline.cache") as mock_cache:
+            mock_cache.cache_key.return_value = "test-key"
+            mock_cache.get = AsyncMock(return_value="Cached outline content")
+            mock_cache.set = AsyncMock()
+
+            events = []
+            async for event in event_generator(
+                request=mock_request,
+                project_id=uuid4(),
+                outline_request=outline_request,
+                session=mock_session,
+                db=mock_db,
+                user=mock_user,
+            ):
+                events.append(event)
+
+        # Should have checkpoint and complete events for cached content
+        assert len(events) == 2
+        assert events[0]["event"] == "checkpoint"
+        assert events[1]["event"] == "complete"
+        assert "cached" in events[1]["data"]
+
+
+class TestOutlineEndpointValidation:
+    """Tests for outline endpoint input validation."""
+
+    @pytest.mark.asyncio
+    async def test_stream_outline_user_not_found(self):
+        """Test stream_outline returns error when user not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import stream_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await stream_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            brief="A thrilling adventure story",
+            db=mock_db,
+            user=mock_user,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_stream_outline_brief_too_short(self):
+        """Test stream_outline validates brief length minimum."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import stream_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_user = MagicMock()
+        mock_user.monthly_budget_usd = 100.0
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_result.scalar.return_value = 0  # No month usage
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_token = TokenData(user_id=str(uuid4()))
+
+        response = await stream_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            brief="short",  # Too short
+            db=mock_db,
+            user=mock_token,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_stream_outline_target_chapters_too_high(self):
+        """Test stream_outline validates target_chapters maximum."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import stream_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_user = MagicMock()
+        mock_user.monthly_budget_usd = 100.0
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_result.scalar.return_value = 0
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_token = TokenData(user_id=str(uuid4()))
+
+        response = await stream_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            brief="A valid brief with enough characters for validation",
+            target_chapters=100,  # Too high (max 50)
+            db=mock_db,
+            user=mock_token,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_stream_outline_target_chapters_too_low(self):
+        """Test stream_outline validates target_chapters minimum."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import stream_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_user = MagicMock()
+        mock_user.monthly_budget_usd = 100.0
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_user
+        mock_result.scalar.return_value = 0
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_token = TokenData(user_id=str(uuid4()))
+
+        response = await stream_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            brief="A valid brief with enough characters for validation",
+            target_chapters=0,  # Too low (min 1)
+            db=mock_db,
+            user=mock_token,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_get_outline_project_not_found(self):
+        """Test get_outline returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import get_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await get_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_outline_no_outline_found(self):
+        """Test get_outline returns error when no outline exists."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import get_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_outline_result = MagicMock()
+        mock_outline_result.scalar_one_or_none.return_value = None
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_outline_result])
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=user_id)
+
+        response = await get_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_update_outline_project_not_found(self):
+        """Test update_outline returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import update_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "PUT"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await update_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            outline_data={"content": "New outline content"},
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_update_outline_missing_content(self):
+        """Test update_outline returns error when content is missing."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import update_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_project
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "PUT"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=user_id)
+
+        response = await update_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            outline_data={},  # Missing content
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio
+    async def test_revise_outline_project_not_found(self):
+        """Test revise_outline_stream returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import revise_outline_stream
+        from app.schemas import OutlineRevision
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "POST"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=str(uuid4()))
+        revision = OutlineRevision(revision_instructions="Add more conflict in the middle chapters")
+
+        response = await revise_outline_stream(
+            project_id=uuid4(),
+            request=mock_request,
+            revision=revision,
+            db=mock_db,
+            user=mock_user,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_revise_outline_no_outline_found(self):
+        """Test revise_outline_stream returns error when no outline exists."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import revise_outline_stream
+        from app.schemas import OutlineRevision
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_outline_result = MagicMock()
+        mock_outline_result.scalar_one_or_none.return_value = None
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_outline_result])
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "POST"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=user_id)
+        revision = OutlineRevision(revision_instructions="Add more conflict in the middle chapters")
+
+        response = await revise_outline_stream(
+            project_id=uuid4(),
+            request=mock_request,
+            revision=revision,
+            db=mock_db,
+            user=mock_user,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 404
+
+
+class TestOutlineSuccessPaths:
+    """Tests for successful outline operations."""
+
+    @pytest.mark.asyncio
+    async def test_get_outline_success(self):
+        """Test get_outline returns outline content successfully."""
+        from datetime import datetime, timezone
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import get_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_artifact = MagicMock()
+        mock_artifact.id = uuid4()
+        mock_artifact.blob = b"# Book Outline\n\n## Chapter 1"
+        mock_artifact.created_at = datetime.now(timezone.utc)
+        mock_artifact.meta = {"chapters": 10}
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_outline_result = MagicMock()
+        mock_outline_result.scalar_one_or_none.return_value = mock_artifact
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_outline_result])
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=user_id)
+
+        response = await get_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response["content"] == "# Book Outline\n\n## Chapter 1"
+        assert response["meta"] == {"chapters": 10}
+
+    @pytest.mark.asyncio
+    async def test_update_outline_success(self):
+        """Test update_outline creates new artifact successfully."""
+        from datetime import datetime, timezone
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import update_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_session = MagicMock()
+        mock_session.id = uuid4()
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_session_result = MagicMock()
+        mock_session_result.scalar_one_or_none.return_value = mock_session
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_session_result])
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock()
+
+        async def mock_refresh(artifact):
+            artifact.id = uuid4()
+            artifact.created_at = datetime.now(timezone.utc)
+
+        mock_db.refresh = mock_refresh
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "PUT"
+        mock_request.url.path = "/test"
+        mock_user = TokenData(user_id=user_id)
+
+        response = await update_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            outline_data={"content": "Updated outline content"},
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response["message"] == "Outline updated successfully"
+        assert "id" in response
+
+
+class TestOutlineIntegration:
+    """Integration tests for outline endpoints with TestClient."""
+
+    def test_outline_endpoints_require_auth(self):
+        """Test outline endpoints require authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+
+        # GET /outline
+        response = client.get(f"/api/v1/projects/{project_id}/outline")
+        assert response.status_code == 401
+
+    def test_get_outline_requires_auth(self):
+        """Test GET /outline requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.get(f"/api/v1/projects/{project_id}/outline")
+
+        assert response.status_code == 401
+
+    def test_update_outline_requires_auth(self):
+        """Test PUT /outline requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.put(
+            f"/api/v1/projects/{project_id}/outline",
+            json={"content": "New outline"},
+        )
+
+        assert response.status_code == 401
+
+    def test_stream_outline_requires_auth(self):
+        """Test GET /outline/stream requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.get(
+            f"/api/v1/projects/{project_id}/outline/stream",
+            params={"brief": "A test story"},
+        )
+
+        assert response.status_code == 401
+
+    def test_revise_outline_requires_auth(self):
+        """Test POST /outline/revise/stream requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/outline/revise/stream",
+            json={"revision_instructions": "Add more conflict"},
+        )
+
+        assert response.status_code == 401
+
+
+class TestOutlineBudgetChecks:
+    """Tests for outline budget validation."""
+
+    @pytest.mark.asyncio
+    async def test_stream_outline_budget_exceeded(self):
+        """Test stream_outline returns error when budget exceeded."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import BackgroundTasks, Request
+
+        from app.routers.outline import stream_outline
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_user = MagicMock()
+        mock_user.monthly_budget_usd = 50.0  # Budget is $50
+
+        mock_user_result = MagicMock()
+        mock_user_result.scalar_one_or_none.return_value = mock_user
+
+        mock_usage_result = MagicMock()
+        mock_usage_result.scalar.return_value = 60.0  # Usage is $60 (exceeded)
+
+        mock_db.execute = AsyncMock(side_effect=[mock_user_result, mock_usage_result])
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.method = "GET"
+        mock_request.url.path = "/test"
+        mock_token = TokenData(user_id=user_id)
+
+        response = await stream_outline(
+            project_id=uuid4(),
+            request=mock_request,
+            brief="A valid brief with enough characters for validation",
+            db=mock_db,
+            user=mock_token,
+            background_tasks=BackgroundTasks(),
+        )
+
+        assert response.status_code == 403
+
+
+class TestRevisionEventGenerator:
+    """Tests for revision event generator behavior."""
+
+    @pytest.mark.asyncio
+    async def test_revision_event_generator_starts_correctly(self):
+        """Test revision_event_generator emits initial checkpoint."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.outline import revision_event_generator
+        from app.schemas import OutlineRevision
+        from app.security import TokenData
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.is_disconnected = AsyncMock(return_value=True)  # Disconnect immediately
+
+        mock_artifact = MagicMock()
+        mock_artifact.blob = b"Original outline content"
+        mock_artifact.id = uuid4()
+
+        mock_session = MagicMock()
+        mock_session.id = uuid4()
+        mock_db = AsyncMock()
+        mock_user = TokenData(user_id=str(uuid4()))
+        revision = OutlineRevision(revision_instructions="Add more conflict")
+
+        events = []
+        async for event in revision_event_generator(
+            request=mock_request,
+            project_id=uuid4(),
+            revision=revision,
+            current_outline=mock_artifact,
+            session=mock_session,
+            db=mock_db,
+            user=mock_user,
+        ):
+            events.append(event)
+
+        # Should have initial checkpoint
+        assert len(events) >= 1
+        assert events[0]["event"] == "checkpoint"

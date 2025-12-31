@@ -4,7 +4,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from .config import DEFAULT_MODEL, SUPPORTED_MODELS_SET
 
 
 class ProjectCreate(BaseModel):
@@ -294,7 +296,17 @@ class OutlineRequest(BaseModel):
     style_guide: Optional[str] = Field(None, max_length=5000)
     genre: Optional[str] = Field(None, max_length=50)
     target_chapters: int = Field(default=10, ge=1, le=50)
-    model: Literal["gpt-5", "claude-sonnet-4-20250514", "gemini-2.5-pro"] = "gpt-5"
+    model: str = Field(default=DEFAULT_MODEL, description="LLM model to use")
+
+    @field_validator("model")
+    @classmethod
+    def validate_model(cls, v: str) -> str:
+        """Validate that the model is supported"""
+        if v not in SUPPORTED_MODELS_SET:
+            supported = sorted(SUPPORTED_MODELS_SET)
+            raise ValueError(f"Unsupported model: {v}. Supported models: {supported}")
+        return v
+
     plot_structure_type: Optional[
         Literal[
             "three_act",
@@ -318,6 +330,70 @@ class ChapterDraftRequest(BaseModel):
     style_guide: Optional[str] = None
     character_bible: Optional[Dict[str, Any]] = None
     previous_chapters: Optional[List[str]] = None
+
+
+class ChapterOutlineItem(BaseModel):
+    """Outline for a single chapter in parallel generation."""
+
+    chapter_number: int = Field(..., ge=1, description="Chapter number")
+    title: Optional[str] = Field(None, max_length=200, description="Chapter title")
+    outline: str = Field(..., min_length=10, description="Chapter outline/summary")
+
+
+class ParallelChapterRequest(BaseModel):
+    """Request for parallel chapter generation."""
+
+    chapter_outlines: List[ChapterOutlineItem] = Field(
+        ...,
+        min_length=1,
+        max_length=20,
+        description="List of chapter outlines to generate",
+    )
+    style_guide: Optional[str] = Field(None, max_length=5000)
+    character_bible: Optional[Dict[str, Any]] = None
+    max_parallel: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description="Maximum concurrent chapter generations (1-5)",
+    )
+
+
+class ChapterJobStatus(BaseModel):
+    """Status of a single chapter generation job."""
+
+    job_id: UUID
+    chapter_number: int
+    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    progress: float = Field(..., ge=0.0, le=1.0)
+    word_count: int = 0
+    error: Optional[str] = None
+
+
+class ParallelGenerationProgress(BaseModel):
+    """Progress update for parallel generation."""
+
+    batch_id: UUID
+    total_chapters: int
+    completed_chapters: int
+    failed_chapters: int
+    in_progress_chapters: int
+    overall_progress: float = Field(..., ge=0.0, le=1.0)
+    estimated_remaining_seconds: Optional[float] = None
+    word_count_total: int = 0
+    jobs: List[ChapterJobStatus]
+
+
+class ParallelGenerationResult(BaseModel):
+    """Final result of parallel generation."""
+
+    batch_id: UUID
+    total_chapters: int
+    completed_chapters: int
+    failed_chapters: int
+    chapters: List[Dict[str, Any]]  # chapter_number, content, word_count, error
+    total_word_count: int
+    duration_seconds: float
 
 
 class EditRequest(BaseModel):

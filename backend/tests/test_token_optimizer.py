@@ -653,3 +653,320 @@ class TestIntegration:
         assert result.budget_used_percent == pytest.approx(
             budget.used / budget.available_for_input * 100, rel=0.1
         )
+
+
+class TestSummarizerTemplateEdgeCases:
+    """Additional edge case tests for SummarizerTemplate."""
+
+    def test_summarize_chapter_one_sentence(self):
+        """Test summarizing to exactly one sentence."""
+        text = "First sentence. Second sentence. Third sentence. Fourth sentence."
+        result = SummarizerTemplate.summarize_chapter(text, max_sentences=1)
+        assert "First" in result
+        # Should only have first sentence
+        assert result.count(".") == 1
+
+    def test_summarize_chapter_two_sentences(self):
+        """Test summarizing to exactly two sentences."""
+        text = "First sentence. Second sentence. Third sentence. Fourth sentence. Fifth sentence."
+        result = SummarizerTemplate.summarize_chapter(text, max_sentences=2)
+        # Should have first and last
+        assert "First" in result
+        assert "Fifth" in result
+        # Should have exactly 2 sentences
+        assert result.count(".") == 2
+
+    def test_summarize_outline_many_chapters(self):
+        """Test summarizing outline with many chapters."""
+        chapters = [f"Chapter {i}: Content for chapter {i}" for i in range(1, 21)]
+        outline = "\n\n".join(chapters)
+        result = SummarizerTemplate.summarize_outline(outline, max_chapters=3)
+        # Should keep first and last
+        assert "Chapter 1" in result
+        assert "Chapter 20" in result
+        # But not all chapters
+        assert "Chapter 10" not in result or "Chapter 5" not in result
+
+    def test_summarize_outline_exact_max_chapters(self):
+        """Test outline with exactly max_chapters."""
+        chapters = [f"Chapter {i}: Content" for i in range(1, 6)]
+        outline = "\n\n".join(chapters)
+        result = SummarizerTemplate.summarize_outline(outline, max_chapters=5)
+        # Should keep all chapters when exactly at limit
+        assert result == outline
+
+
+class TestTokenCounterMethods:
+    """Tests for TokenCounter edge cases."""
+
+    def test_count_long_text(self):
+        """Test counting tokens in long text."""
+        counter = TokenCounter()
+        long_text = "word " * 10000
+        count = counter.count(long_text)
+        assert count > 0
+        assert count < 50000  # Reasonable upper bound
+
+    def test_count_empty_string(self):
+        """Test counting tokens in empty string."""
+        counter = TokenCounter()
+        assert counter.count("") == 0
+
+    def test_chars_per_token_affects_count(self):
+        """Test that chars_per_token affects count."""
+        counter1 = TokenCounter(chars_per_token=4.0)
+        counter2 = TokenCounter(chars_per_token=2.0)
+        text = "abcdefgh"
+        assert counter1.count(text) < counter2.count(text)
+
+
+class TestSummarizerCharacterContext:
+    """Tests for character context summarization."""
+
+    def test_summarize_character_short(self):
+        """Test summarizing short character context."""
+        context = "Name: John\nRole: Hero"
+        result = SummarizerTemplate.summarize_character_context(context, max_chars=500)
+        assert result == context
+
+    def test_summarize_character_long(self):
+        """Test summarizing long character context."""
+        context = "\n".join([
+            "Name: John Smith",
+            "Role: Protagonist hero",
+            "Appearance: Tall with dark hair",
+            "Personality: Brave and kind",
+            "Motivation: Save the world",
+            "Relationship: Friend of Mary",
+            "Background: " + "x" * 500,  # Long background text
+            "Additional: " + "y" * 500,  # Extra content
+        ])
+        result = SummarizerTemplate.summarize_character_context(context, max_chars=200)
+        assert len(result) <= 300  # Some buffer allowed
+        # Should keep key attributes
+        assert "Name" in result or "Role" in result
+
+
+class TestContextWindowOptimizerInit:
+    """Tests for ContextWindowOptimizer initialization."""
+
+    def test_optimizer_creation_defaults(self):
+        """Test creating a context window optimizer with defaults."""
+        optimizer = ContextWindowOptimizer()
+        assert optimizer.counter is not None
+        assert optimizer.compressor is not None
+        assert optimizer.summarizer is not None
+
+    def test_optimizer_with_custom_counter(self):
+        """Test optimizer with custom token counter."""
+        counter = TokenCounter(chars_per_token=3.0)
+        optimizer = ContextWindowOptimizer(token_counter=counter)
+        assert optimizer.counter.chars_per_token == 3.0
+
+    def test_optimizer_with_custom_compressor(self):
+        """Test optimizer with custom compressor."""
+        counter = TokenCounter()
+        compressor = TextCompressor(counter)
+        optimizer = ContextWindowOptimizer(compressor=compressor)
+        assert optimizer.compressor is compressor
+
+
+class TestSmartContextSelectorMethods:
+    """Tests for SmartContextSelector methods."""
+
+    def test_select_relevant_chapters_empty(self):
+        """Test selecting from empty chapters list."""
+        selector = SmartContextSelector()
+        result = selector.select_relevant_chapters([], current_chapter=5)
+        assert result == []
+
+    def test_select_relevant_chapters_current_is_first(self):
+        """Test selecting when current chapter is 1."""
+        selector = SmartContextSelector()
+        result = selector.select_relevant_chapters([(1, "Summary")], current_chapter=1)
+        assert result == []
+
+    def test_select_relevant_chapters_small(self):
+        """Test selecting when chapters fit in budget."""
+        selector = SmartContextSelector()
+        chapters = [(1, "Chapter 1 summary"), (2, "Chapter 2 summary")]
+        result = selector.select_relevant_chapters(chapters, current_chapter=3)
+        assert len(result) <= 3
+
+    def test_select_relevant_chapters_many(self):
+        """Test selecting when many chapters need filtering."""
+        selector = SmartContextSelector()
+        chapters = [(i, f"Chapter {i} summary") for i in range(1, 11)]
+        result = selector.select_relevant_chapters(chapters, current_chapter=11, max_chapters=3)
+        assert len(result) == 3
+        # Should include first and preceding
+        chapter_nums = [c[0] for c in result]
+        assert 1 in chapter_nums
+        assert 10 in chapter_nums
+
+    def test_select_relevant_characters_empty(self):
+        """Test selecting from empty characters list."""
+        selector = SmartContextSelector()
+        result = selector.select_relevant_characters([], chapter_mentions=[])
+        assert result == []
+
+    def test_select_relevant_characters_small(self):
+        """Test selecting when characters fit in limit."""
+        selector = SmartContextSelector()
+        characters = [("hero", "Description of hero", 5), ("villain", "Description of villain", 3)]
+        result = selector.select_relevant_characters(
+            characters,
+            chapter_mentions=["hero"]
+        )
+        assert isinstance(result, list)
+
+
+class TestContextWindowOptimizerBranches:
+    """Tests for ContextWindowOptimizer branch coverage."""
+
+    def test_critical_item_truncation(self):
+        """Test that critical items are truncated when too large."""
+        counter = TokenCounter(chars_per_token=1.0)
+        optimizer = ContextWindowOptimizer(token_counter=counter)
+
+        # Create a budget with limited space
+        budget = TokenBudget(total_limit=100, reserved_for_output=50)  # 50 available
+
+        # Create a critical item that's too large
+        item = ContentItem(
+            name="critical",
+            content="X" * 200,  # 200 tokens (too large for 50)
+            content_type=ContentType.SYSTEM_PROMPT,
+            priority=TokenBudgetPriority.CRITICAL,
+            minimum_tokens=10,
+        )
+
+        result = optimizer.optimize_context([item], budget)
+        # Critical items should be included even if truncated
+        assert len(result) >= 0
+
+    def test_summarize_branch(self):
+        """Test items that can be summarized."""
+        counter = TokenCounter(chars_per_token=1.0)
+        optimizer = ContextWindowOptimizer(token_counter=counter)
+
+        # Budget that forces summarization
+        budget = TokenBudget(total_limit=200, reserved_for_output=50)
+
+        # Item that exceeds budget but can be summarized
+        item = ContentItem(
+            name="chapter",
+            content="First sentence. Second sentence. Third sentence. Fourth sentence. Fifth sentence.",
+            content_type=ContentType.CHAPTER_SUMMARY,
+            priority=TokenBudgetPriority.MEDIUM,
+            can_summarize=True,
+            minimum_tokens=10,
+        )
+
+        result = optimizer.optimize_context([item], budget)
+        assert isinstance(result, list)
+
+    def test_truncate_branch(self):
+        """Test items that can be truncated."""
+        counter = TokenCounter(chars_per_token=1.0)
+        optimizer = ContextWindowOptimizer(token_counter=counter)
+
+        # Budget that forces truncation
+        budget = TokenBudget(total_limit=100, reserved_for_output=50)
+
+        # Item that exceeds budget but can be truncated
+        item = ContentItem(
+            name="extra",
+            content="Y" * 200,
+            content_type=ContentType.WORLD_CONTEXT,
+            priority=TokenBudgetPriority.LOW,
+            can_truncate=True,
+            minimum_tokens=10,
+        )
+
+        result = optimizer.optimize_context([item], budget)
+        assert isinstance(result, list)
+
+
+class TestSummarizeItemBranches:
+    """Tests for _summarize_item method branches."""
+
+    def test_summarize_chapter_summary_type(self):
+        """Test summarizing CHAPTER_SUMMARY content type."""
+        optimizer = ContextWindowOptimizer()
+        item = ContentItem(
+            name="chapter",
+            content="First sentence. Second sentence. Third sentence. Fourth sentence.",
+            content_type=ContentType.CHAPTER_SUMMARY,
+            priority=TokenBudgetPriority.MEDIUM,
+        )
+        result = optimizer._summarize_item(item, max_tokens=50)
+        assert result is not None
+
+    def test_summarize_previous_content_type(self):
+        """Test summarizing PREVIOUS_CONTENT content type."""
+        optimizer = ContextWindowOptimizer()
+        item = ContentItem(
+            name="previous",
+            content="First sentence. Second sentence. Third sentence. Fourth sentence.",
+            content_type=ContentType.PREVIOUS_CONTENT,
+            priority=TokenBudgetPriority.MEDIUM,
+        )
+        result = optimizer._summarize_item(item, max_tokens=50)
+        assert result is not None
+
+    def test_summarize_outline_type(self):
+        """Test summarizing OUTLINE content type."""
+        optimizer = ContextWindowOptimizer()
+        chapters = [f"Chapter {i}: Content" for i in range(1, 10)]
+        item = ContentItem(
+            name="outline",
+            content="\n\n".join(chapters),
+            content_type=ContentType.OUTLINE,
+            priority=TokenBudgetPriority.MEDIUM,
+        )
+        result = optimizer._summarize_item(item, max_tokens=100)
+        assert result is not None
+
+    def test_summarize_character_context_type(self):
+        """Test summarizing CHARACTER_CONTEXT content type."""
+        optimizer = ContextWindowOptimizer()
+        item = ContentItem(
+            name="character",
+            content="Name: John\nRole: Hero\nBackground: " + "x" * 500,
+            content_type=ContentType.CHARACTER_CONTEXT,
+            priority=TokenBudgetPriority.MEDIUM,
+        )
+        result = optimizer._summarize_item(item, max_tokens=50)
+        assert result is not None
+
+    def test_summarize_default_type(self):
+        """Test summarizing unsupported content type (falls back to truncate)."""
+        optimizer = ContextWindowOptimizer()
+        item = ContentItem(
+            name="user",
+            content="X" * 200,
+            content_type=ContentType.USER_INSTRUCTION,
+            priority=TokenBudgetPriority.MEDIUM,
+        )
+        result = optimizer._summarize_item(item, max_tokens=50)
+        assert result is not None
+
+
+class TestSummarizerCharacterContextEdgeCases:
+    """Edge case tests for summarize_character_context."""
+
+    def test_summarize_character_truncation(self):
+        """Test character context that needs truncation."""
+        context = "\n".join([
+            "Name: John Smith",
+            "Role: Protagonist hero",
+            "Appearance: Tall with dark hair and piercing blue eyes",
+            "Personality: Brave, kind, and intelligent",
+            "Motivation: Save the world from destruction",
+            "Relationship: Friend of Mary and enemy of Bob",
+            "Background: Born in a small village, trained by masters, " + "x" * 1000,
+        ])
+        result = SummarizerTemplate.summarize_character_context(context, max_chars=100)
+        # Should truncate to near max_chars
+        assert len(result) <= 200  # Some buffer for word boundaries

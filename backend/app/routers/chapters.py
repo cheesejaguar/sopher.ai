@@ -1,13 +1,15 @@
 """Chapter generation endpoints with SSE streaming"""
 
+import asyncio
 import hashlib
 import json
 import logging
 import time
+from datetime import datetime
 from typing import AsyncIterator, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Body, Depends, Request, Response, status
+from fastapi import APIRouter, Body, Depends, Path, Request, Response, status
 from litellm import acompletion
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +21,22 @@ from ..errors import ErrorCode, api_error
 from ..metrics import MetricsTracker, active_sessions
 from ..models import Artifact, Cost, Event, Project, Session, User
 from ..pricing import calculate_cost_usd
-from ..schemas import ChapterDraftRequest
+from ..schemas import (
+    ChapterDraftRequest,
+    ChapterJobStatus,
+    ChapterOutlineItem,
+    ParallelChapterRequest,
+    ParallelGenerationProgress,
+    ParallelGenerationResult,
+    ProjectSettings,
+)
 from ..security import TokenData, get_current_user
+from ..services.content_filter import build_content_filter_prompt
+from ..services.parallel_writer import (
+    BatchProgress,
+    JobStatus,
+    ParallelChapterService,
+)
 
 router = APIRouter(prefix="/projects/{project_id}", tags=["chapters"])
 
@@ -98,9 +114,25 @@ async def chapter_event_generator(
     session: Session,
     db: AsyncSession,
     user: TokenData,
+    project_settings: Optional[ProjectSettings] = None,
     model: str = "gpt-4o",
 ) -> AsyncIterator[dict]:
-    """Generate SSE events for chapter streaming"""
+    """Generate SSE events for chapter streaming
+
+    Args:
+        request: The incoming request
+        project_id: UUID of the project
+        chapter_number: The chapter number to generate
+        outline: The chapter outline
+        style_guide: Optional style guide
+        character_bible: Optional character bible dict
+        previous_chapters: List of previous chapter content for context
+        session: The database session record
+        db: The async database session
+        user: The authenticated user's token data
+        project_settings: Optional project settings for content filtering
+        model: The LLM model to use
+    """
 
     active_sessions.inc()
     start_time = time.perf_counter()
@@ -139,6 +171,9 @@ async def chapter_event_generator(
             "data": json.dumps({"stage": "preparing", "progress": 0.1}),
         }
 
+        # Build content filtering guidelines
+        content_guidelines = build_content_filter_prompt(project_settings)
+
         # Build the chapter generation prompt
         char_bible_str = json.dumps(character_bible) if character_bible else "Not provided"
         prompt = f"""Write Chapter {chapter_number} following this outline:
@@ -150,6 +185,8 @@ Style Guide: {style_guide or 'Standard narrative prose'}
 Character Bible: {char_bible_str}
 {context}
 
+{content_guidelines}
+
 Requirements:
 1. Match the style guide precisely
 2. Maintain character consistency
@@ -157,6 +194,7 @@ Requirements:
 4. End with a compelling hook for the next chapter
 5. Target 3000-5000 words
 6. Use markdown formatting for structure
+7. STRICTLY follow all content guidelines above
 
 Begin writing the chapter now:"""
 
@@ -273,13 +311,14 @@ Begin writing the chapter now:"""
 
     except Exception as e:
         MetricsTracker.track_model_error(model, type(e).__name__)
-        logger.error(f"Chapter generation failed: {e}")
+        # Log full error details server-side but return generic message to client
+        logger.error(f"Chapter generation failed: {e}", exc_info=True)
         yield {
             "event": "error",
             "data": json.dumps(
                 {
                     "error_code": ChapterErrorCode.CHAPTER_GENERATION_FAILED,
-                    "message": str(e),
+                    "message": "Chapter generation failed. Please try again.",
                 }
             ),
         }
@@ -292,9 +331,9 @@ Begin writing the chapter now:"""
 
 @router.post("/chapters/{chapter_number}/generate/stream")
 async def stream_chapter_generation(
-    project_id: UUID,
-    chapter_number: int,
     request: Request,
+    project_id: UUID,
+    chapter_number: int = Path(..., ge=1, description="Chapter number (must be >= 1)"),
     body: ChapterDraftRequest = Body(...),
     db: AsyncSession = Depends(get_db),
     user: TokenData = Depends(get_current_user),
@@ -303,8 +342,8 @@ async def stream_chapter_generation(
 
     Generates a chapter based on the provided outline and context.
     """
-
-    if chapter_number < 1:
+    # Note: chapter_number validation now handled by Path(ge=1)
+    if chapter_number < 1:  # Keep for safety, but Path validation handles this
         return api_error(
             ChapterErrorCode.CHAPTER_INVALID_NUMBER,
             "Chapter number must be at least 1.",
@@ -324,8 +363,8 @@ async def stream_chapter_generation(
             status=status.HTTP_404_NOT_FOUND,
         )
 
-    # Check user's budget
-    user_result = await db.execute(select(User).where(User.id == user.user_id))
+    # Check user's budget with row-level locking to prevent race conditions
+    user_result = await db.execute(select(User).where(User.id == user.user_id).with_for_update())
     user_record = user_result.scalar_one_or_none()
 
     if not user_record:
@@ -355,6 +394,14 @@ async def stream_chapter_generation(
         db, project_id, chapter_number
     )
 
+    # Get project settings for content filtering
+    project_settings = None
+    if project.settings:
+        try:
+            project_settings = ProjectSettings(**project.settings)
+        except Exception as e:
+            logger.warning(f"Failed to parse project settings: {e}")
+
     return EventSourceResponse(
         chapter_event_generator(
             request=request,
@@ -367,6 +414,7 @@ async def stream_chapter_generation(
             session=session,
             db=db,
             user=user,
+            project_settings=project_settings,
         )
     )
 
@@ -374,12 +422,12 @@ async def stream_chapter_generation(
 @router.get("/chapters/{chapter_number}")
 async def get_chapter(
     project_id: UUID,
-    chapter_number: int,
+    chapter_number: int = Path(..., ge=1, description="Chapter number (must be >= 1)"),
     db: AsyncSession = Depends(get_db),
     user: TokenData = Depends(get_current_user),
 ) -> Response:
     """Get a specific chapter's content"""
-
+    # Note: chapter_number validation handled by Path(ge=1)
     if chapter_number < 1:
         return api_error(
             ChapterErrorCode.CHAPTER_INVALID_NUMBER,
@@ -426,13 +474,13 @@ async def get_chapter(
 @router.put("/chapters/{chapter_number}")
 async def update_chapter(
     project_id: UUID,
-    chapter_number: int,
+    chapter_number: int = Path(..., ge=1, description="Chapter number (must be >= 1)"),
     content: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
     user: TokenData = Depends(get_current_user),
 ) -> Response:
     """Update a chapter's content manually"""
-
+    # Note: chapter_number validation handled by Path(ge=1)
     if chapter_number < 1:
         return api_error(
             ChapterErrorCode.CHAPTER_INVALID_NUMBER,
@@ -515,9 +563,9 @@ async def update_chapter(
 
 @router.post("/chapters/{chapter_number}/regenerate/stream")
 async def stream_chapter_regeneration(
-    project_id: UUID,
-    chapter_number: int,
     request: Request,
+    project_id: UUID,
+    chapter_number: int = Path(..., ge=1, description="Chapter number (must be >= 1)"),
     instructions: Optional[str] = Body(None),
     db: AsyncSession = Depends(get_db),
     user: TokenData = Depends(get_current_user),
@@ -526,7 +574,7 @@ async def stream_chapter_regeneration(
 
     Uses the project's outline and previous chapters for context.
     """
-
+    # Note: chapter_number validation handled by Path(ge=1)
     if chapter_number < 1:
         return api_error(
             ChapterErrorCode.CHAPTER_INVALID_NUMBER,
@@ -587,6 +635,14 @@ async def stream_chapter_regeneration(
     )
     await cache.delete(cache_key)
 
+    # Get project settings for content filtering
+    project_settings = None
+    if project.settings:
+        try:
+            project_settings = ProjectSettings(**project.settings)
+        except Exception as e:
+            logger.warning(f"Failed to parse project settings for regeneration: {e}")
+
     return EventSourceResponse(
         chapter_event_generator(
             request=request,
@@ -599,6 +655,7 @@ async def stream_chapter_regeneration(
             session=session,
             db=db,
             user=user,
+            project_settings=project_settings,
         )
     )
 
@@ -655,4 +712,335 @@ async def list_chapters(
     return Response(
         content=json.dumps({"chapters": chapters, "total": len(chapters)}),
         media_type="application/json",
+    )
+
+
+# --- Parallel Chapter Generation ---
+
+
+def _create_chapter_generator(
+    model: str,
+    content_guidelines: str,
+) -> callable:
+    """Create a chapter generator function for the parallel writer service."""
+
+    async def generate_chapter(
+        chapter_number: int,
+        outline: str,
+        style_guide: str | None,
+        character_bible: dict | None,
+        previous_chapters: list[str] | None,
+    ) -> str:
+        """Generate a single chapter using LLM."""
+        # Build context from previous chapters
+        context = ""
+        if previous_chapters:
+            recent = previous_chapters[-2:] if len(previous_chapters) > 1 else previous_chapters
+            context = f"\n\nPrevious chapters for context:\n{'...'.join(c[-500:] for c in recent)}"
+
+        char_bible_str = json.dumps(character_bible) if character_bible else "Not provided"
+        prompt = f"""Write Chapter {chapter_number} following this outline:
+
+{outline}
+
+Style Guide: {style_guide or 'Standard narrative prose'}
+
+Character Bible: {char_bible_str}
+{context}
+
+{content_guidelines}
+
+Requirements:
+1. Match the style guide precisely
+2. Maintain character consistency
+3. Create vivid scenes and engaging dialogue
+4. End with a compelling hook for the next chapter
+5. Target 3000-5000 words
+6. Use markdown formatting for structure
+7. STRICTLY follow all content guidelines above
+
+Begin writing the chapter now:"""
+
+        response = await acompletion(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a talented fiction writer who creates vivid, engaging prose.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            stream=False,
+        )
+
+        return response.choices[0].message.content or ""
+
+    return generate_chapter
+
+
+async def parallel_generation_event_generator(
+    request: Request,
+    project_id: UUID,
+    batch_id: UUID,
+    chapter_outlines: list[ChapterOutlineItem],
+    style_guide: str | None,
+    character_bible: dict | None,
+    max_parallel: int,
+    project_settings: ProjectSettings | None,
+    session: Session,
+    db: AsyncSession,
+    user: TokenData,
+    model: str = "gpt-4o",
+) -> AsyncIterator[dict]:
+    """Generate SSE events for parallel chapter generation."""
+    active_sessions.inc()
+    start_time = time.perf_counter()
+
+    try:
+        # Build content filtering guidelines
+        content_guidelines = build_content_filter_prompt(project_settings)
+
+        # Create the chapter generator
+        generator = _create_chapter_generator(model, content_guidelines)
+
+        # Create parallel service
+        service = ParallelChapterService(
+            generator=generator,
+            max_parallel=max_parallel,
+            retry_on_failure=True,
+            max_retries=2,
+        )
+
+        # Convert outline items to the format expected by the service
+        outlines_for_service = [
+            {"chapter_number": item.chapter_number, "outline": item.outline, "title": item.title}
+            for item in chapter_outlines
+        ]
+
+        # Track progress via callback
+        last_progress: BatchProgress | None = None
+
+        def progress_callback(progress: BatchProgress) -> None:
+            nonlocal last_progress
+            last_progress = progress
+
+        service.set_progress_callback(progress_callback)
+
+        # Start generation in a background task
+        generation_task = asyncio.create_task(
+            service.generate_chapters(
+                chapter_outlines=[item["outline"] for item in outlines_for_service],
+                style_guide=style_guide,
+                character_bible=character_bible,
+                start_chapter=min(item.chapter_number for item in chapter_outlines),
+            )
+        )
+
+        # Stream progress updates
+        yield {
+            "event": "started",
+            "data": json.dumps({
+                "batch_id": str(batch_id),
+                "total_chapters": len(chapter_outlines),
+                "max_parallel": max_parallel,
+            }),
+        }
+
+        while not generation_task.done():
+            if await request.is_disconnected():
+                service.cancel()
+                generation_task.cancel()
+                break
+
+            # Get current progress
+            current_progress = service.get_current_progress()
+            if current_progress:
+                jobs = service._queue.get_all_jobs() if service._queue else []
+                job_statuses = [
+                    ChapterJobStatus(
+                        job_id=job.id,
+                        chapter_number=job.chapter_number,
+                        status=job.status.value,
+                        progress=job.progress,
+                        word_count=job.word_count,
+                        error=job.error,
+                    ).model_dump()
+                    for job in jobs
+                ]
+
+                progress_data = ParallelGenerationProgress(
+                    batch_id=batch_id,
+                    total_chapters=current_progress.total_chapters,
+                    completed_chapters=current_progress.completed_chapters,
+                    failed_chapters=current_progress.failed_chapters,
+                    in_progress_chapters=current_progress.in_progress_chapters,
+                    overall_progress=current_progress.overall_progress,
+                    estimated_remaining_seconds=current_progress.estimated_remaining_seconds,
+                    word_count_total=current_progress.word_count_total,
+                    jobs=job_statuses,
+                ).model_dump()
+
+                # Convert UUIDs to strings for JSON serialization
+                progress_data["batch_id"] = str(progress_data["batch_id"])
+                for job in progress_data["jobs"]:
+                    job["job_id"] = str(job["job_id"])
+
+                yield {
+                    "event": "progress",
+                    "data": json.dumps(progress_data),
+                }
+
+            await asyncio.sleep(1)  # Update every second
+
+        # Get final results
+        try:
+            completed_jobs = await generation_task
+        except asyncio.CancelledError:
+            yield {
+                "event": "cancelled",
+                "data": json.dumps({"batch_id": str(batch_id)}),
+            }
+            return
+
+        duration = time.perf_counter() - start_time
+
+        # Save completed chapters as artifacts
+        chapters_result = []
+        for job in completed_jobs:
+            chapter_data = {
+                "chapter_number": job.chapter_number,
+                "status": job.status.value,
+                "word_count": job.word_count,
+                "error": job.error,
+            }
+
+            if job.status == JobStatus.COMPLETED and job.result:
+                # Save as artifact
+                artifact = Artifact(
+                    session_id=session.id,
+                    kind="chapter",
+                    blob=job.result.encode("utf-8"),
+                    meta={
+                        "chapter_number": job.chapter_number,
+                        "word_count": job.word_count,
+                        "batch_id": str(batch_id),
+                        "generated_at": datetime.utcnow().isoformat(),
+                    },
+                )
+                db.add(artifact)
+                chapter_data["content"] = job.result
+                chapter_data["artifact_id"] = str(artifact.id)
+
+            chapters_result.append(chapter_data)
+
+        await db.commit()
+
+        # Calculate totals
+        total_word_count = sum(job.word_count for job in completed_jobs)
+        completed_count = sum(1 for job in completed_jobs if job.status == JobStatus.COMPLETED)
+        failed_count = sum(1 for job in completed_jobs if job.status == JobStatus.FAILED)
+
+        result = ParallelGenerationResult(
+            batch_id=batch_id,
+            total_chapters=len(completed_jobs),
+            completed_chapters=completed_count,
+            failed_chapters=failed_count,
+            chapters=chapters_result,
+            total_word_count=total_word_count,
+            duration_seconds=duration,
+        ).model_dump()
+
+        result["batch_id"] = str(result["batch_id"])
+
+        yield {
+            "event": "complete",
+            "data": json.dumps(result),
+        }
+
+    except Exception as e:
+        logger.error(f"Parallel generation failed: {e}", exc_info=True)
+        yield {
+            "event": "error",
+            "data": json.dumps({
+                "error_code": ChapterErrorCode.CHAPTER_GENERATION_FAILED,
+                "message": f"Parallel generation failed: {str(e)}",
+                "batch_id": str(batch_id),
+            }),
+        }
+    finally:
+        active_sessions.dec()
+
+
+@router.post("/chapters/generate/parallel/stream")
+async def stream_parallel_chapter_generation(
+    request: Request,
+    project_id: UUID,
+    body: ParallelChapterRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+) -> Response:
+    """Generate multiple chapters in parallel via Server-Sent Events.
+
+    Streams progress updates for each chapter and returns all completed chapters.
+
+    Args:
+        project_id: UUID of the project
+        body: ParallelChapterRequest with chapter outlines and settings
+
+    Returns:
+        SSE stream with progress events and final results
+    """
+    # Verify project exists and user has access
+    project_result = await db.execute(
+        select(Project).where(Project.id == project_id).where(Project.user_id == user.user_id)
+    )
+    project = project_result.scalar_one_or_none()
+
+    if not project:
+        return api_error(
+            ErrorCode.PROJECT_NOT_FOUND.value,
+            "Project not found or you don't have access.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Create or retrieve session
+    session_result = await db.execute(
+        select(Session)
+        .where(Session.project_id == project_id)
+        .where(Session.ended_at.is_(None))
+        .order_by(Session.started_at.desc())
+        .limit(1)
+    )
+    session = session_result.scalar_one_or_none()
+
+    if not session:
+        session = Session(project_id=project_id)
+        db.add(session)
+        await db.flush()
+
+    # Get project settings for content filtering
+    project_settings = None
+    if project.settings:
+        try:
+            project_settings = ProjectSettings(**project.settings)
+        except Exception as e:
+            logger.warning(f"Failed to parse project settings: {e}")
+
+    # Generate batch ID
+    batch_id = uuid4()
+
+    return EventSourceResponse(
+        parallel_generation_event_generator(
+            request=request,
+            project_id=project_id,
+            batch_id=batch_id,
+            chapter_outlines=body.chapter_outlines,
+            style_guide=body.style_guide,
+            character_bible=body.character_bible,
+            max_parallel=body.max_parallel,
+            project_settings=project_settings,
+            session=session,
+            db=db,
+            user=user,
+        )
     )

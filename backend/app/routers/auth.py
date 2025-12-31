@@ -9,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..cache import cache
 from ..db import get_db
 from ..models import User
 from ..oauth import (
@@ -26,10 +27,49 @@ from ..security import TokenData, create_access_token, create_refresh_token, get
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Rate limiting constants for OAuth endpoints
+OAUTH_RATE_LIMIT_REQUESTS = 10  # Max requests per window
+OAUTH_RATE_LIMIT_WINDOW = 60  # Window in seconds
+
+
+async def check_oauth_rate_limit(request: Request) -> None:
+    """Check rate limit for OAuth endpoints, raises HTTPException if exceeded"""
+    # Use client IP for rate limiting
+    forwarded_for = request.headers.get("x-forwarded-for")
+    client_ip = (
+        forwarded_for.split(",")[0].strip()
+        if forwarded_for
+        else request.client.host if request.client else "unknown"
+    )
+
+    rate_key = f"oauth_rate:{client_ip}"
+    count = await cache.increment(rate_key, ttl=OAUTH_RATE_LIMIT_WINDOW)
+
+    if count > OAUTH_RATE_LIMIT_REQUESTS:
+        logger.warning(f"OAuth rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many authentication requests. Please try again later.",
+        )
+
+
 # Safe URL constants to avoid security scan false positives
 LOCALHOST_URL_TEMPLATE = "http://localhost:{}/"
 DEFAULT_LOCALHOST_URL = "http://localhost:3000/"
 PRODUCTION_URL = "https://sopher.ai/"
+
+# Allowed hosts for OAuth redirects - loaded from environment for flexibility
+# Format: comma-separated list of hosts (e.g., "sopher.ai,api.sopher.ai,staging.sopher.ai")
+_extra_hosts = os.getenv("ALLOWED_OAUTH_HOSTS", "")
+_default_hosts = {
+    "localhost:3000",
+    "localhost:3001",
+    "127.0.0.1:3000",
+    "sopher.ai",
+    "api.sopher.ai",
+    "www.sopher.ai",
+}
+ALLOWED_OAUTH_HOSTS = _default_hosts | {h.strip() for h in _extra_hosts.split(",") if h.strip()}
 
 
 def _get_frontend_url(request: Request) -> str:
@@ -43,15 +83,8 @@ def _get_frontend_url(request: Request) -> str:
     # Don't log full URLs to prevent information disclosure
     logger.info(f"Determining frontend URL - host_present: {bool(host)}")
 
-    # Define allowed hosts to prevent SSRF attacks
-    allowed_hosts = {
-        "localhost:3000",
-        "localhost:3001",
-        "127.0.0.1:3000",
-        "sopher.ai",
-        "api.sopher.ai",
-        "www.sopher.ai",
-    }
+    # Use configurable allowed hosts to prevent SSRF attacks
+    allowed_hosts = ALLOWED_OAUTH_HOSTS
 
     # Validate and determine the frontend URL
     if host:
@@ -114,8 +147,11 @@ async def oauth_config_status():
 
 
 @router.get("/login/google")
-async def login_google():
+async def login_google(request: Request):
     """Initiate Google OAuth2 login flow"""
+    # Rate limit OAuth login attempts
+    await check_oauth_rate_limit(request)
+
     state = generate_state()
     verifier, challenge = generate_pkce_challenge()
 
@@ -142,6 +178,9 @@ async def callback_google(
     # Handle HEAD requests (return empty response)
     if request.method == "HEAD":
         return Response(status_code=status.HTTP_200_OK)
+
+    # Rate limit OAuth callback attempts
+    await check_oauth_rate_limit(request)
 
     # Log all callback parameters for debugging
     # Sanitize user-provided inputs to prevent log injection
@@ -172,7 +211,7 @@ async def callback_google(
 
     # Validate required parameters
     if not code or not state:
-        logger.error(f"Missing OAuth parameters - code: {bool(code)}, state: {bool(state)}")
+        logger.warning(f"Missing OAuth parameters - code: {bool(code)}, state: {bool(state)}")
         # Redirect to frontend with error instead of raising exception
         frontend_url = _get_frontend_url(request)
         error_url = f"{frontend_url}?oauth=error&error=missing_parameters"
@@ -272,9 +311,8 @@ async def callback_google(
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
-    # Log successful authentication with more details
-    logger.info(f"User {user.email} authenticated successfully")
-    logger.info(f"User details - ID: {user.id}, Role: {user.role}, Provider: {user.provider}")
+    # Log successful authentication (user ID only, not PII like email)
+    logger.info(f"User {user.id} authenticated successfully via {user.provider}")
 
     # Get frontend URL using helper function
     frontend_url = _get_frontend_url(request)

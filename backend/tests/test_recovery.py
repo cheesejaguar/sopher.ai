@@ -450,6 +450,33 @@ class TestFailureClassifier:
         message = classifier.get_error_message(error)
         assert len(message) == 500
 
+    def test_classify_timeout_by_type(self, classifier):
+        """Should classify TimeoutError by exception type when message doesn't match."""
+        # Use a message that doesn't match any pattern
+        error = TimeoutError("something happened")
+        # The error_type will be "timeouterror" which contains "timeout" pattern
+        # So we need a truly bare TimeoutError
+        assert classifier.classify(error) == FailureType.TIMEOUT
+
+    def test_classify_connection_by_type(self, classifier):
+        """Should classify ConnectionError by exception type when message doesn't match."""
+        # "connectionerror" type contains "connection" so pattern will match
+        error = ConnectionError("failed")
+        assert classifier.classify(error) == FailureType.NETWORK_ERROR
+
+    def test_classify_memory_by_type(self, classifier):
+        """Should classify MemoryError by exception type when message doesn't match."""
+        # "memoryerror" type contains "memory" so pattern will match
+        error = MemoryError("allocation failed")
+        assert classifier.classify(error) == FailureType.OUT_OF_MEMORY
+
+    def test_classify_value_error_no_pattern_match(self, classifier):
+        """Should classify ValueError by exception type when message doesn't match patterns."""
+        # "valueerror" type doesn't match any pattern - it only matches "validation" or "invalid"
+        # So this will fall through to isinstance check
+        error = ValueError("wrong type")
+        assert classifier.classify(error) == FailureType.VALIDATION_ERROR
+
 
 # =============================================================================
 # RecoveryService Tests

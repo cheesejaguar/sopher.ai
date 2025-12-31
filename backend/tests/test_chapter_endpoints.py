@@ -521,3 +521,601 @@ class TestChapterMetricsIntegration:
 
         assert hasattr(MetricsTracker, "track_tokens")
         assert callable(MetricsTracker.track_tokens)
+
+
+class TestChapterHelperFunctions:
+    """Tests for chapter router helper functions with mocked database."""
+
+    @pytest.mark.asyncio
+    async def test_get_project_outline_returns_content(self):
+        """Test get_project_outline retrieves outline blob content."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import get_project_outline
+
+        mock_db = AsyncMock()
+        mock_artifact = MagicMock()
+        mock_artifact.blob = b"# Outline Content\n\n## Chapter 1"
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_artifact
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        result = await get_project_outline(mock_db, uuid4())
+
+        assert result == "# Outline Content\n\n## Chapter 1"
+
+    @pytest.mark.asyncio
+    async def test_get_project_outline_returns_none_when_no_artifact(self):
+        """Test get_project_outline returns None when no outline exists."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import get_project_outline
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        result = await get_project_outline(mock_db, uuid4())
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_project_outline_returns_none_when_blob_empty(self):
+        """Test get_project_outline returns None when blob is empty."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import get_project_outline
+
+        mock_db = AsyncMock()
+        mock_artifact = MagicMock()
+        mock_artifact.blob = None
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_artifact
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        result = await get_project_outline(mock_db, uuid4())
+
+        assert result is None
+
+    def test_get_chapter_artifact_function_signature(self):
+        """Test get_chapter_artifact function exists and has correct signature."""
+        import inspect
+
+        from app.routers.chapters import get_chapter_artifact
+
+        assert callable(get_chapter_artifact)
+        sig = inspect.signature(get_chapter_artifact)
+        params = list(sig.parameters.keys())
+        assert "db" in params
+        assert "project_id" in params
+        assert "chapter_number" in params
+
+    def test_get_chapter_artifact_is_async(self):
+        """Test get_chapter_artifact is an async function."""
+        import asyncio
+
+        from app.routers.chapters import get_chapter_artifact
+
+        assert asyncio.iscoroutinefunction(get_chapter_artifact)
+
+    @pytest.mark.asyncio
+    async def test_get_previous_chapters_empty(self):
+        """Test get_previous_chapters returns empty list for chapter 1."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.routers.chapters import get_previous_chapters
+
+        mock_db = AsyncMock()
+
+        with patch("app.routers.chapters.get_chapter_artifact", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = None
+            result = await get_previous_chapters(mock_db, uuid4(), 1)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_previous_chapters_returns_content(self):
+        """Test get_previous_chapters retrieves previous chapter content."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.routers.chapters import get_previous_chapters
+
+        mock_db = AsyncMock()
+
+        mock_artifact = MagicMock()
+        mock_artifact.blob = b"Previous chapter content"
+
+        with patch("app.routers.chapters.get_chapter_artifact", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_artifact
+            result = await get_previous_chapters(mock_db, uuid4(), 3, limit=2)
+
+        # Should retrieve chapters 1 and 2
+        assert mock_get.call_count == 2
+        assert len(result) == 2
+        assert result[0] == "Previous chapter content"
+
+
+class TestChapterEndpointValidation:
+    """Tests for chapter endpoint input validation."""
+
+    @pytest.mark.asyncio
+    async def test_stream_chapter_project_not_found(self):
+        """Test stream_chapter_generation returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.chapters import stream_chapter_generation
+        from app.schemas import ChapterDraftRequest
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_user = TokenData(user_id=str(uuid4()))
+        body = ChapterDraftRequest(
+            outline="A detailed outline for chapter generation testing purposes.",
+            chapter_number=1,
+        )
+
+        response = await stream_chapter_generation(
+            request=mock_request,
+            project_id=uuid4(),
+            chapter_number=1,
+            body=body,
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_chapter_project_not_found(self):
+        """Test get_chapter returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import get_chapter
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await get_chapter(
+            project_id=uuid4(),
+            chapter_number=1,
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_chapter_chapter_not_found(self):
+        """Test get_chapter returns error when chapter not found."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.routers.chapters import get_chapter
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_project = MagicMock()
+        mock_project.id = uuid4()
+        mock_project.user_id = str(uuid4())
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_artifact_result = MagicMock()
+        mock_artifact_result.scalar_one_or_none.return_value = None
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_artifact_result])
+
+        mock_user = TokenData(user_id=mock_project.user_id)
+
+        with patch("app.routers.chapters.get_chapter_artifact", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = None
+            response = await get_chapter(
+                project_id=mock_project.id,
+                chapter_number=5,
+                db=mock_db,
+                user=mock_user,
+            )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_update_chapter_project_not_found(self):
+        """Test update_chapter returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import update_chapter
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await update_chapter(
+            project_id=uuid4(),
+            chapter_number=1,
+            content="Updated chapter content here.",
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_list_chapters_project_not_found(self):
+        """Test list_chapters returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import list_chapters
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await list_chapters(
+            project_id=uuid4(),
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_regenerate_project_not_found(self):
+        """Test stream_chapter_regeneration returns error when project not found."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from fastapi import Request
+
+        from app.routers.chapters import stream_chapter_regeneration
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        response = await stream_chapter_regeneration(
+            request=mock_request,
+            project_id=uuid4(),
+            chapter_number=1,
+            instructions=None,
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_regenerate_outline_required(self):
+        """Test stream_chapter_regeneration returns error when no outline exists."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastapi import Request
+
+        from app.routers.chapters import stream_chapter_regeneration
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        mock_project = MagicMock()
+        user_id = str(uuid4())
+        mock_project.user_id = user_id
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_db.execute = AsyncMock(return_value=mock_project_result)
+
+        mock_request = MagicMock(spec=Request)
+        mock_user = TokenData(user_id=user_id)
+
+        with patch("app.routers.chapters.get_project_outline", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = None
+            response = await stream_chapter_regeneration(
+                request=mock_request,
+                project_id=uuid4(),
+                chapter_number=1,
+                instructions=None,
+                db=mock_db,
+                user=mock_user,
+            )
+
+        assert response.status_code == 400
+
+
+class TestChapterSuccessPaths:
+    """Tests for successful chapter operations."""
+
+    @pytest.mark.asyncio
+    async def test_get_chapter_success(self):
+        """Test get_chapter returns chapter content successfully."""
+        import json
+        from datetime import datetime, timezone
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from app.routers.chapters import get_chapter
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_artifact = MagicMock()
+        mock_artifact.blob = b"Chapter content here"
+        mock_artifact.created_at = datetime.now(timezone.utc)
+        mock_artifact.meta = {"chapter_number": 1}
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_db.execute = AsyncMock(return_value=mock_project_result)
+
+        mock_user = TokenData(user_id=user_id)
+
+        with patch("app.routers.chapters.get_chapter_artifact", new_callable=AsyncMock) as mock_get:
+            mock_get.return_value = mock_artifact
+            response = await get_chapter(
+                project_id=uuid4(),
+                chapter_number=1,
+                db=mock_db,
+                user=mock_user,
+            )
+
+        assert response.status_code == 200
+        content = json.loads(response.body)
+        assert content["chapter_number"] == 1
+        assert content["content"] == "Chapter content here"
+
+    @pytest.mark.asyncio
+    async def test_list_chapters_success_empty(self):
+        """Test list_chapters returns empty list when no chapters exist."""
+        import json
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import list_chapters
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_artifacts_result = MagicMock()
+        mock_artifacts_result.scalars.return_value.all.return_value = []
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_artifacts_result])
+
+        mock_user = TokenData(user_id=user_id)
+
+        response = await list_chapters(
+            project_id=uuid4(),
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 200
+        content = json.loads(response.body)
+        assert content["chapters"] == []
+        assert content["total"] == 0
+
+    @pytest.mark.asyncio
+    async def test_list_chapters_success_with_chapters(self):
+        """Test list_chapters returns chapters list successfully."""
+        import json
+        from datetime import datetime, timezone
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.routers.chapters import list_chapters
+        from app.security import TokenData
+
+        mock_db = AsyncMock()
+        user_id = str(uuid4())
+        mock_project = MagicMock()
+        mock_project.user_id = user_id
+
+        mock_artifact1 = MagicMock()
+        mock_artifact1.id = uuid4()
+        mock_artifact1.blob = b"Chapter 1 content"
+        mock_artifact1.created_at = datetime.now(timezone.utc)
+        mock_artifact1.meta = {"chapter_number": 1}
+
+        mock_artifact2 = MagicMock()
+        mock_artifact2.id = uuid4()
+        mock_artifact2.blob = b"Chapter 2 content"
+        mock_artifact2.created_at = datetime.now(timezone.utc)
+        mock_artifact2.meta = {"chapter_number": 2}
+
+        mock_project_result = MagicMock()
+        mock_project_result.scalar_one_or_none.return_value = mock_project
+
+        mock_artifacts_result = MagicMock()
+        mock_artifacts_result.scalars.return_value.all.return_value = [mock_artifact1, mock_artifact2]
+
+        mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_artifacts_result])
+
+        mock_user = TokenData(user_id=user_id)
+
+        response = await list_chapters(
+            project_id=uuid4(),
+            db=mock_db,
+            user=mock_user,
+        )
+
+        assert response.status_code == 200
+        content = json.loads(response.body)
+        assert content["total"] == 2
+        assert len(content["chapters"]) == 2
+
+    def test_update_chapter_function_exists(self):
+        """Test update_chapter function exists and is callable."""
+        import asyncio
+
+        from app.routers.chapters import update_chapter
+
+        assert callable(update_chapter)
+        assert asyncio.iscoroutinefunction(update_chapter)
+
+    def test_update_chapter_function_signature(self):
+        """Test update_chapter has correct function signature."""
+        import inspect
+
+        from app.routers.chapters import update_chapter
+
+        sig = inspect.signature(update_chapter)
+        params = list(sig.parameters.keys())
+        assert "project_id" in params
+        assert "chapter_number" in params
+        assert "db" in params
+        assert "user" in params
+
+
+class TestChapterEventGenerator:
+    """Tests for chapter event generator behavior."""
+
+    @pytest.mark.asyncio
+    async def test_chapter_event_generator_cached_response(self):
+        """Test chapter_event_generator returns cached content."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from fastapi import Request
+
+        from app.routers.chapters import chapter_event_generator
+        from app.security import TokenData
+
+        mock_request = MagicMock(spec=Request)
+        mock_request.is_disconnected = AsyncMock(return_value=False)
+        mock_session = MagicMock()
+        mock_session.id = uuid4()
+        mock_db = AsyncMock()
+        mock_user = TokenData(user_id=str(uuid4()))
+
+        with patch("app.routers.chapters.cache") as mock_cache:
+            mock_cache.cache_key.return_value = "test-key"
+            mock_cache.get = AsyncMock(return_value="Cached chapter content")
+            mock_cache.set = AsyncMock()
+
+            events = []
+            async for event in chapter_event_generator(
+                request=mock_request,
+                project_id=uuid4(),
+                chapter_number=1,
+                outline="Test outline for chapter.",
+                style_guide=None,
+                character_bible=None,
+                previous_chapters=[],
+                session=mock_session,
+                db=mock_db,
+                user=mock_user,
+            ):
+                events.append(event)
+
+        # Should have checkpoint and complete events for cached content
+        assert len(events) == 2
+        assert events[0]["event"] == "checkpoint"
+        assert events[1]["event"] == "complete"
+        assert "cached" in events[1]["data"]
+
+
+class TestChapterIntegration:
+    """Integration tests for chapter endpoints with TestClient."""
+
+    def test_chapter_endpoint_requires_auth(self):
+        """Test chapter endpoints require authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.get(f"/api/v1/projects/{project_id}/chapters")
+
+        # Should require authentication
+        assert response.status_code == 401
+
+    def test_get_chapter_requires_auth(self):
+        """Test GET /chapters/{n} requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.get(f"/api/v1/projects/{project_id}/chapters/1")
+
+        assert response.status_code == 401
+
+    def test_update_chapter_requires_auth(self):
+        """Test PUT /chapters/{n} requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.put(
+            f"/api/v1/projects/{project_id}/chapters/1",
+            json={"content": "New content"},
+        )
+
+        assert response.status_code == 401
+
+    def test_generate_stream_requires_auth(self):
+        """Test POST /chapters/{n}/generate/stream requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/chapters/1/generate/stream",
+            json={"outline": "A detailed chapter outline."},
+        )
+
+        assert response.status_code == 401
+
+    def test_regenerate_stream_requires_auth(self):
+        """Test POST /chapters/{n}/regenerate/stream requires authentication."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+
+        project_id = str(uuid4())
+        response = client.post(
+            f"/api/v1/projects/{project_id}/chapters/1/regenerate/stream",
+            json={"instructions": "Add more dialogue."},
+        )
+
+        assert response.status_code == 401

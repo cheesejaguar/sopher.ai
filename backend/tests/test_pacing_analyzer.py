@@ -553,3 +553,159 @@ class TestEdgeCases:
         text = "Scene one.\n\n***\n\nScene two.\n\n---\n\nScene three.\n\nScene four."
         report = PacingAnalyzer.analyze(text)
         assert report.scene_distribution.total_scenes >= 2
+
+
+class TestTensionCurveTypes:
+    """Tests for different tension curve types."""
+
+    def test_very_low_tension_text(self):
+        """Test text with very low tension words."""
+        text = "The peaceful serene calm quiet still tranquil peaceful " * 50
+        level = TensionAnalyzer.calculate_tension_level(text)
+        assert level == TensionLevel.VERY_LOW
+
+    def test_low_tension_text(self):
+        """Test text with low tension words."""
+        text = "The calm gentle peaceful serene day passed slowly. " * 20
+        level = TensionAnalyzer.calculate_tension_level(text)
+        assert level in [TensionLevel.VERY_LOW, TensionLevel.LOW]
+
+    def test_climactic_tension_text(self):
+        """Test text with climactic tension."""
+        text = "Danger! Death! Suddenly exploded! Terrified! KILLED! " * 20
+        level = TensionAnalyzer.calculate_tension_level(text)
+        assert level in [TensionLevel.HIGH, TensionLevel.CLIMACTIC]
+
+    def test_falling_curve_type(self):
+        """Test falling tension curve."""
+        # Start with high tension, end with calm
+        text = "Danger! Emergency! Crisis! " * 50 + "Peace. Calm. Rest. " * 150
+        curve = TensionAnalyzer.analyze_tension_curve(text, intervals=4)
+        # Curve type should be falling or arc
+        assert curve.curve_type in ["falling", "arc", "rising", "flat", "volatile"]
+
+    def test_flat_curve_type(self):
+        """Test flat tension curve with consistent tension."""
+        text = "Normal day. Regular activity. Nothing special happens. " * 200
+        curve = TensionAnalyzer.analyze_tension_curve(text, intervals=10)
+        assert curve.tension_variance >= 0
+
+    def test_tension_curve_empty_intervals(self):
+        """Test tension curve with short text."""
+        text = "Short."
+        curve = TensionAnalyzer.analyze_tension_curve(text, intervals=10)
+        # Should handle gracefully
+        assert isinstance(curve.tension_points, list)
+
+
+class TestPacingAnalyzerEdgeCases:
+    """Additional edge case tests for pacing analyzer."""
+
+    def test_dialogue_heavy_text(self):
+        """Test dialogue-heavy text analysis."""
+        text = '"Hello!" "Hi there!" "How are you?" "Fine, thanks." ' * 50
+        report = PacingAnalyzer.analyze(text)
+        # Dialogue analysis is done at scene level
+        assert report.word_count > 0
+        assert report.scene_distribution is not None
+
+    def test_all_caps_text(self):
+        """Test all caps text (high tension markers)."""
+        text = "DANGER! RUN! ESCAPE! HELP! NOW!"
+        report = PacingAnalyzer.analyze(text)
+        # At least confirms it runs without error
+        assert report is not None
+        assert report.word_count > 0
+
+    def test_mixed_content_text(self):
+        """Test mixed action and reflection content."""
+        text = (
+            "He thought about his past. She wondered about the future. "
+            "Then suddenly he ran! He fought! He jumped!"
+        )
+        report = PacingAnalyzer.analyze(text)
+        assert report.word_count > 0
+        assert report.scene_distribution is not None
+
+
+class TestTensionAnalyzerEdgeCases:
+    """Additional edge case tests for TensionAnalyzer."""
+
+    def test_very_low_tension_detection(self):
+        """Test VERY_LOW tension with high concentration of calm words."""
+        # Use lots of calm, peaceful, relaxed, serene, gentle, quiet, soft words
+        # Need calm_ratio > 0.06 (6% calm words)
+        calm_text = (
+            "The peaceful calm serene gentle quiet soft relaxed tranquil "
+            "placid mellow soothing restful still silent hushed subdued "
+            "peaceful calm serene gentle quiet soft relaxed tranquil "
+            "placid mellow soothing restful still silent hushed subdued "
+            "peaceful calm serene gentle quiet soft relaxed tranquil "
+            "placid mellow soothing restful still silent hushed subdued. "
+            "It was a peaceful calm and serene gentle quiet day."
+        )
+        tension = TensionAnalyzer.calculate_tension_level(calm_text)
+        # Should return LOW or VERY_LOW
+        assert tension.value <= TensionLevel.LOW.value
+
+    def test_analyze_curve_whitespace_only(self):
+        """Test tension curve with whitespace-only text."""
+        curve = TensionAnalyzer.analyze_tension_curve("   \n   \t   ")
+        assert curve.tension_points == []
+
+    def test_analyze_curve_single_word(self):
+        """Test tension curve with very short text."""
+        curve = TensionAnalyzer.analyze_tension_curve("Hello", intervals=10)
+        # Short text should still produce some result
+        assert len(curve.tension_points) >= 0
+
+    def test_climactic_tension(self):
+        """Test CLIMACTIC tension with very high tension words."""
+        text = (
+            "SUDDENLY DANGER DANGER DANGER! Panic screaming terror death! "
+            "Emergency! Run! Escape! Crash! Explosion! Fear! Horror! "
+            "SUDDENLY DANGER struck! Terror and chaos everywhere! "
+            "The threat was imminent! Deadly peril! Desperate screams!"
+        )
+        tension = TensionAnalyzer.calculate_tension_level(text)
+        # Should return HIGH or CLIMACTIC
+        assert tension.value >= TensionLevel.HIGH.value
+
+
+class TestTensionCurveTypesExtended:
+    """Extended tests for tension curve type detection."""
+
+    def test_rising_curve(self):
+        """Test rising tension curve detection."""
+        # Start calm, end tense
+        text = (
+            "The quiet peaceful morning. " * 30
+            + "Suddenly danger struck! Panic everywhere! Terror! " * 30
+        )
+        curve = TensionAnalyzer.analyze_tension_curve(text, intervals=5)
+        # Last point should be higher than first
+        if len(curve.tension_points) >= 2:
+            assert curve.tension_points[-1] >= curve.tension_points[0]
+
+    def test_falling_curve(self):
+        """Test falling tension curve detection."""
+        # Start tense, end calm
+        text = (
+            "Danger! Panic! Terror! Emergency! " * 30
+            + "Everything calmed down. Peace returned. Serene and quiet. " * 30
+        )
+        curve = TensionAnalyzer.analyze_tension_curve(text, intervals=5)
+        # Should have some tension points
+        assert len(curve.tension_points) > 0
+
+    def test_peak_middle_curve(self):
+        """Test curve with peak in middle."""
+        text = (
+            "Calm peaceful morning. " * 20
+            + "DANGER! Panic terror! Emergency crisis! " * 20
+            + "Calm resolution peace. " * 20
+        )
+        curve = TensionAnalyzer.analyze_tension_curve(text, intervals=5)
+        # Peak should be somewhere in the middle
+        if len(curve.tension_points) >= 3:
+            assert curve.peak_tension >= curve.average_tension

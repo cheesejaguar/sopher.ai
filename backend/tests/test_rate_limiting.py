@@ -586,3 +586,61 @@ class TestRateLimitingIntegration:
         # Pro tier should allow all 15 (burst_limit=20)
         assert pro_allowed == 15
         assert pro_stats["minute_count"] == 15
+
+
+# =============================================================================
+# Handle Exceeded Method Tests
+# =============================================================================
+
+
+class TestHandleLimitExceeded:
+    """Tests for _handle_limit_exceeded method branches."""
+
+    def test_handle_exceeded_block_action(self):
+        """Should return blocked result with retry_after for BLOCK action."""
+        limiter = RateLimiter()
+        config = RateLimitConfig(action=RateLimitAction.BLOCK)
+        state = RateLimitState(client_id="test-client")
+
+        result = limiter._handle_limit_exceeded(state, config, "minute", 30)
+
+        assert result.allowed is False
+        assert "minute rate limit exceeded" in result.reason
+        assert result.retry_after_seconds >= 1
+
+    def test_handle_exceeded_slow_down_action(self):
+        """Should return allowed with slowdown for SLOW_DOWN action."""
+        limiter = RateLimiter()
+        config = RateLimitConfig(
+            action=RateLimitAction.SLOW_DOWN,
+            slowdown_factor=5,
+        )
+        state = RateLimitState(client_id="test-client")
+
+        result = limiter._handle_limit_exceeded(state, config, "hour", 60)
+
+        assert result.allowed is True
+        assert "slowing down" in result.reason
+        assert result.slowdown_seconds == 5
+
+    def test_handle_exceeded_log_only_action(self):
+        """Should return allowed for LOG_ONLY action."""
+        limiter = RateLimiter()
+        config = RateLimitConfig(action=RateLimitAction.LOG_ONLY)
+        state = RateLimitState(client_id="test-client")
+
+        result = limiter._handle_limit_exceeded(state, config, "day", 3600)
+
+        assert result.allowed is True
+        assert "logged only" in result.reason
+
+    def test_handle_exceeded_queue_action(self):
+        """Should return blocked for QUEUE action (falls to default)."""
+        limiter = RateLimiter()
+        config = RateLimitConfig(action=RateLimitAction.QUEUE)
+        state = RateLimitState(client_id="test-client")
+
+        result = limiter._handle_limit_exceeded(state, config, "minute", 45)
+
+        assert result.allowed is False
+        assert result.retry_after_seconds >= 1
