@@ -7,7 +7,6 @@ Tests cover:
 - Edge cases and unknown models
 """
 
-
 from app.pricing import (
     DEFAULT_PRICING,
     MODEL_PRICING,
@@ -259,9 +258,9 @@ class TestPricingConsistency:
         """Test that prompt tokens are generally cheaper than completion."""
         for model, pricing in MODEL_PRICING.items():
             # For all models, prompt should be cheaper or equal
-            assert pricing["prompt_per_1k"] <= pricing["completion_per_1k"], (
-                f"{model}: prompt not cheaper than completion"
-            )
+            assert (
+                pricing["prompt_per_1k"] <= pricing["completion_per_1k"]
+            ), f"{model}: prompt not cheaper than completion"
 
     def test_pricing_values_reasonable(self):
         """Test that pricing values are within reasonable bounds."""

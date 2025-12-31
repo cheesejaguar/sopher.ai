@@ -333,9 +333,7 @@ class TestBookPipeline:
         )
 
         chapter_resp = MockResponse(
-            json.dumps(
-                {"number": 1, "title": "Ch1", "content": "Content", "word_count": 3000}
-            )
+            json.dumps({"number": 1, "title": "Ch1", "content": "Content", "word_count": 3000})
         )
 
         edited_resp = MockResponse(

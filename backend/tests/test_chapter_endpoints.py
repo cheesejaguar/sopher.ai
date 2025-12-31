@@ -955,7 +955,10 @@ class TestChapterSuccessPaths:
         mock_project_result.scalar_one_or_none.return_value = mock_project
 
         mock_artifacts_result = MagicMock()
-        mock_artifacts_result.scalars.return_value.all.return_value = [mock_artifact1, mock_artifact2]
+        mock_artifacts_result.scalars.return_value.all.return_value = [
+            mock_artifact1,
+            mock_artifact2,
+        ]
 
         mock_db.execute = AsyncMock(side_effect=[mock_project_result, mock_artifacts_result])
 

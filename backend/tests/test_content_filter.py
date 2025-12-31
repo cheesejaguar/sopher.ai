@@ -7,7 +7,6 @@ Tests cover:
 - Prompt building
 """
 
-
 from app.schemas import ProjectSettings
 from app.services.content_filter import (
     AudienceLevel,
@@ -22,16 +21,12 @@ class TestAudienceLevelParsing:
 
     def test_parse_children_explicit(self):
         """Test parsing explicit children audience."""
-        assert (
-            ContentFilterService.parse_target_audience("children")
-            == AudienceLevel.CHILDREN
-        )
+        assert ContentFilterService.parse_target_audience("children") == AudienceLevel.CHILDREN
 
     def test_parse_children_with_ages(self):
         """Test parsing children audience with age range."""
         assert (
-            ContentFilterService.parse_target_audience("kids ages 6-10")
-            == AudienceLevel.CHILDREN
+            ContentFilterService.parse_target_audience("kids ages 6-10") == AudienceLevel.CHILDREN
         )
 
     def test_parse_children_elementary(self):
@@ -44,8 +39,7 @@ class TestAudienceLevelParsing:
     def test_parse_middle_grade_explicit(self):
         """Test parsing explicit middle grade audience."""
         assert (
-            ContentFilterService.parse_target_audience("middle grade")
-            == AudienceLevel.MIDDLE_GRADE
+            ContentFilterService.parse_target_audience("middle grade") == AudienceLevel.MIDDLE_GRADE
         )
 
     def test_parse_middle_grade_hyphenated(self):
@@ -65,68 +59,44 @@ class TestAudienceLevelParsing:
     def test_parse_middle_grade_ages(self):
         """Test parsing middle grade with age range."""
         assert (
-            ContentFilterService.parse_target_audience("ages 10-14")
-            == AudienceLevel.MIDDLE_GRADE
+            ContentFilterService.parse_target_audience("ages 10-14") == AudienceLevel.MIDDLE_GRADE
         )
 
     def test_parse_young_adult_explicit(self):
         """Test parsing explicit young adult audience."""
         assert (
-            ContentFilterService.parse_target_audience("young adult")
-            == AudienceLevel.YOUNG_ADULT
+            ContentFilterService.parse_target_audience("young adult") == AudienceLevel.YOUNG_ADULT
         )
 
     def test_parse_young_adult_ya(self):
         """Test parsing YA abbreviation."""
-        assert (
-            ContentFilterService.parse_target_audience("YA fiction")
-            == AudienceLevel.YOUNG_ADULT
-        )
+        assert ContentFilterService.parse_target_audience("YA fiction") == AudienceLevel.YOUNG_ADULT
 
     def test_parse_young_adult_teen(self):
         """Test parsing teen audience."""
-        assert (
-            ContentFilterService.parse_target_audience("teenagers")
-            == AudienceLevel.YOUNG_ADULT
-        )
+        assert ContentFilterService.parse_target_audience("teenagers") == AudienceLevel.YOUNG_ADULT
 
     def test_parse_young_adult_ages(self):
         """Test parsing young adult with age range."""
-        assert (
-            ContentFilterService.parse_target_audience("ages 14-18")
-            == AudienceLevel.YOUNG_ADULT
-        )
+        assert ContentFilterService.parse_target_audience("ages 14-18") == AudienceLevel.YOUNG_ADULT
 
     def test_parse_adult_explicit(self):
         """Test parsing explicit adult audience."""
-        assert (
-            ContentFilterService.parse_target_audience("adult")
-            == AudienceLevel.ADULT
-        )
+        assert ContentFilterService.parse_target_audience("adult") == AudienceLevel.ADULT
 
     def test_parse_adult_general(self):
         """Test parsing general adult audience."""
-        assert (
-            ContentFilterService.parse_target_audience("general adult")
-            == AudienceLevel.ADULT
-        )
+        assert ContentFilterService.parse_target_audience("general adult") == AudienceLevel.ADULT
 
     def test_parse_adult_default(self):
         """Test default to adult for unknown audience."""
-        assert (
-            ContentFilterService.parse_target_audience("mature readers")
-            == AudienceLevel.ADULT
-        )
+        assert ContentFilterService.parse_target_audience("mature readers") == AudienceLevel.ADULT
 
     def test_parse_case_insensitive(self):
         """Test audience parsing is case insensitive."""
+        assert ContentFilterService.parse_target_audience("CHILDREN") == AudienceLevel.CHILDREN
         assert (
-            ContentFilterService.parse_target_audience("CHILDREN")
-            == AudienceLevel.CHILDREN
-        )
-        assert (
-            ContentFilterService.parse_target_audience("Young Adult")
-            == AudienceLevel.YOUNG_ADULT
+            ContentFilterService.parse_target_audience("Young Adult") == AudienceLevel.YOUNG_ADULT
         )
 
 
@@ -145,13 +115,13 @@ class TestContentGuidelinesGeneration:
     def test_children_violence_clamped(self):
         """Test violence level is clamped for children."""
         # Even with graphic setting, children get mild
-        settings = ProjectSettings(
-            target_audience="children", violence_level="graphic"
-        )
+        settings = ProjectSettings(target_audience="children", violence_level="graphic")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
-        assert "mild" in guidelines.violence_instruction.lower() or \
-               "no violence" in guidelines.violence_instruction.lower()
+        assert (
+            "mild" in guidelines.violence_instruction.lower()
+            or "no violence" in guidelines.violence_instruction.lower()
+        )
 
     def test_children_profanity_override(self):
         """Test profanity is always off for children."""
@@ -159,8 +129,10 @@ class TestContentGuidelinesGeneration:
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         # Children should never have actual profanity
-        assert "No profanity" in guidelines.profanity_instruction or \
-               "mild exclamations" in guidelines.profanity_instruction
+        assert (
+            "No profanity" in guidelines.profanity_instruction
+            or "mild exclamations" in guidelines.profanity_instruction
+        )
 
     def test_children_auto_avoid_topics(self):
         """Test children get auto-avoided topics."""
@@ -181,21 +153,22 @@ class TestContentGuidelinesGeneration:
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         assert guidelines.audience_level == AudienceLevel.MIDDLE_GRADE
-        assert "moderate" in guidelines.violence_instruction.lower() or \
-               "Some physical conflict" in guidelines.violence_instruction
+        assert (
+            "moderate" in guidelines.violence_instruction.lower()
+            or "Some physical conflict" in guidelines.violence_instruction
+        )
 
     def test_middle_grade_graphic_violence_clamped(self):
         """Test graphic violence is clamped to moderate for middle grade."""
-        settings = ProjectSettings(
-            target_audience="middle grade", violence_level="graphic"
-        )
+        settings = ProjectSettings(target_audience="middle grade", violence_level="graphic")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         # Should be clamped to moderate
-        assert "graphic" not in guidelines.violence_instruction.lower() or \
-               guidelines.violence_instruction != ContentFilterService.VIOLENCE_GUIDELINES[
-                   AudienceLevel.ADULT
-               ]["graphic"]
+        assert (
+            "graphic" not in guidelines.violence_instruction.lower()
+            or guidelines.violence_instruction
+            != ContentFilterService.VIOLENCE_GUIDELINES[AudienceLevel.ADULT]["graphic"]
+        )
 
     def test_young_adult_full_range(self):
         """Test young adult can access full violence range."""
@@ -208,8 +181,10 @@ class TestContentGuidelinesGeneration:
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         assert guidelines.audience_level == AudienceLevel.YOUNG_ADULT
-        assert "profanity acceptable" in guidelines.profanity_instruction.lower() or \
-               "Moderate profanity" in guidelines.profanity_instruction
+        assert (
+            "profanity acceptable" in guidelines.profanity_instruction.lower()
+            or "Moderate profanity" in guidelines.profanity_instruction
+        )
 
     def test_adult_settings(self):
         """Test adult audience with all options enabled."""
@@ -227,13 +202,13 @@ class TestContentGuidelinesGeneration:
 
     def test_adult_no_violence(self):
         """Test adult audience with no violence."""
-        settings = ProjectSettings(
-            target_audience="adult", violence_level="none"
-        )
+        settings = ProjectSettings(target_audience="adult", violence_level="none")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
-        assert "minimize" in guidelines.violence_instruction.lower() or \
-               "psychological" in guidelines.violence_instruction.lower()
+        assert (
+            "minimize" in guidelines.violence_instruction.lower()
+            or "psychological" in guidelines.violence_instruction.lower()
+        )
 
     def test_custom_avoid_topics(self):
         """Test custom avoid topics are preserved."""
@@ -258,8 +233,10 @@ class TestContentGuidelinesGeneration:
         settings = ProjectSettings(target_audience="adult")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
-        assert "full" in guidelines.vocabulary_level.lower() or \
-               "range" in guidelines.vocabulary_level.lower()
+        assert (
+            "full" in guidelines.vocabulary_level.lower()
+            or "range" in guidelines.vocabulary_level.lower()
+        )
 
 
 class TestContentGuidelinesPrompt:
@@ -293,9 +270,7 @@ class TestContentGuidelinesPrompt:
 
     def test_to_prompt_section_contains_avoid_topics(self):
         """Test prompt section contains avoid topics when present."""
-        settings = ProjectSettings(
-            target_audience="adult", avoid_topics=["spiders"]
-        )
+        settings = ProjectSettings(target_audience="adult", avoid_topics=["spiders"])
         guidelines = ContentFilterService.generate_guidelines(settings)
         prompt = guidelines.to_prompt_section()
 
@@ -349,9 +324,7 @@ class TestContentValidator:
 
     def test_validate_detects_graphic_violence(self):
         """Test validation detects graphic violence for mild settings."""
-        settings = ProjectSettings(
-            target_audience="children", violence_level="none"
-        )
+        settings = ProjectSettings(target_audience="children", violence_level="none")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         content = "Blood pooled on the floor as the villain fell."
@@ -362,9 +335,7 @@ class TestContentValidator:
 
     def test_validate_allows_violence_when_enabled(self):
         """Test validation allows violence for adult with graphic enabled."""
-        settings = ProjectSettings(
-            target_audience="adult", violence_level="graphic"
-        )
+        settings = ProjectSettings(target_audience="adult", violence_level="graphic")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         content = "Blood pooled on the floor as the villain fell."
@@ -385,9 +356,7 @@ class TestContentValidator:
 
     def test_validate_detects_avoided_topics(self):
         """Test validation detects avoided topics."""
-        settings = ProjectSettings(
-            target_audience="adult", avoid_topics=["spiders"]
-        )
+        settings = ProjectSettings(target_audience="adult", avoid_topics=["spiders"])
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         content = "A giant spiders crawled across the ceiling."
@@ -398,9 +367,7 @@ class TestContentValidator:
 
     def test_validate_moderate_violence_for_mild_setting(self):
         """Test moderate violence indicators flagged for mild setting."""
-        settings = ProjectSettings(
-            target_audience="middle grade", violence_level="mild"
-        )
+        settings = ProjectSettings(target_audience="middle grade", violence_level="mild")
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         # Use a clearly graphic violence indicator
@@ -558,8 +525,10 @@ class TestIntegrationScenarios:
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         assert guidelines.audience_level == AudienceLevel.ADULT
-        assert "Graphic violence" in guidelines.violence_instruction or \
-               "allowed" in guidelines.violence_instruction.lower()
+        assert (
+            "Graphic violence" in guidelines.violence_instruction
+            or "allowed" in guidelines.violence_instruction.lower()
+        )
 
         prompt = guidelines.to_prompt_section()
         assert "Adult" in prompt
@@ -575,5 +544,7 @@ class TestIntegrationScenarios:
         guidelines = ContentFilterService.generate_guidelines(settings)
 
         assert guidelines.audience_level == AudienceLevel.YOUNG_ADULT
-        assert "restraint" in guidelines.mature_content_instruction.lower() or \
-               "No explicit" in guidelines.mature_content_instruction
+        assert (
+            "restraint" in guidelines.mature_content_instruction.lower()
+            or "No explicit" in guidelines.mature_content_instruction
+        )

@@ -121,9 +121,9 @@ class TestCryptographicFailures:
             if secret.startswith("test-"):
                 pass  # Allow test secrets that start with "test-"
             else:
-                assert len(secret) >= min_length, (
-                    f"JWT_SECRET should be at least {min_length} characters for production"
-                )
+                assert (
+                    len(secret) >= min_length
+                ), f"JWT_SECRET should be at least {min_length} characters for production"
 
     def test_password_hashing_uses_secure_algorithm(self):
         """Passwords should be hashed with a secure algorithm."""

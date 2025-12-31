@@ -22,6 +22,7 @@ class BookCostEstimate(TypedDict):
     model: str
     chapters: int
 
+
 # Model pricing in USD per 1000 tokens
 # Based on public pricing as of 2024
 MODEL_PRICING: Dict[str, Dict[str, float]] = {

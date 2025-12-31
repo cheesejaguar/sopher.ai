@@ -839,11 +839,13 @@ async def parallel_generation_event_generator(
         # Stream progress updates
         yield {
             "event": "started",
-            "data": json.dumps({
-                "batch_id": str(batch_id),
-                "total_chapters": len(chapter_outlines),
-                "max_parallel": max_parallel,
-            }),
+            "data": json.dumps(
+                {
+                    "batch_id": str(batch_id),
+                    "total_chapters": len(chapter_outlines),
+                    "max_parallel": max_parallel,
+                }
+            ),
         }
 
         while not generation_task.done():
@@ -961,11 +963,13 @@ async def parallel_generation_event_generator(
         logger.error(f"Parallel generation failed: {e}", exc_info=True)
         yield {
             "event": "error",
-            "data": json.dumps({
-                "error_code": ChapterErrorCode.CHAPTER_GENERATION_FAILED,
-                "message": f"Parallel generation failed: {str(e)}",
-                "batch_id": str(batch_id),
-            }),
+            "data": json.dumps(
+                {
+                    "error_code": ChapterErrorCode.CHAPTER_GENERATION_FAILED,
+                    "message": f"Parallel generation failed: {str(e)}",
+                    "batch_id": str(batch_id),
+                }
+            ),
         }
     finally:
         active_sessions.dec()

@@ -198,6 +198,7 @@ def test_google_callback_creates_new_user(mock_db, mock_validate, mock_exchange,
 @patch("app.routers.auth.validate_oauth_state")
 def test_google_callback_invalid_state(mock_validate, mock_rate_limit, client):
     """Test Google OAuth callback with invalid state"""
+
     # Mock rate limit check to be a no-op async function
     async def noop(*args, **kwargs):
         pass

@@ -36,6 +36,7 @@ def check_stream_timeout(start_time: float, timeout: int = STREAM_TIMEOUT_SECOND
     elapsed = asyncio.get_event_loop().time() - start_time
     return elapsed > timeout
 
+
 router = APIRouter(prefix="/projects/{project_id}", tags=["outline"])
 
 logger = logging.getLogger(__name__)

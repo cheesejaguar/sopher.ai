@@ -731,16 +731,18 @@ class TestSummarizerCharacterContext:
 
     def test_summarize_character_long(self):
         """Test summarizing long character context."""
-        context = "\n".join([
-            "Name: John Smith",
-            "Role: Protagonist hero",
-            "Appearance: Tall with dark hair",
-            "Personality: Brave and kind",
-            "Motivation: Save the world",
-            "Relationship: Friend of Mary",
-            "Background: " + "x" * 500,  # Long background text
-            "Additional: " + "y" * 500,  # Extra content
-        ])
+        context = "\n".join(
+            [
+                "Name: John Smith",
+                "Role: Protagonist hero",
+                "Appearance: Tall with dark hair",
+                "Personality: Brave and kind",
+                "Motivation: Save the world",
+                "Relationship: Friend of Mary",
+                "Background: " + "x" * 500,  # Long background text
+                "Additional: " + "y" * 500,  # Extra content
+            ]
+        )
         result = SummarizerTemplate.summarize_character_context(context, max_chars=200)
         assert len(result) <= 300  # Some buffer allowed
         # Should keep key attributes
@@ -814,10 +816,7 @@ class TestSmartContextSelectorMethods:
         """Test selecting when characters fit in limit."""
         selector = SmartContextSelector()
         characters = [("hero", "Description of hero", 5), ("villain", "Description of villain", 3)]
-        result = selector.select_relevant_characters(
-            characters,
-            chapter_mentions=["hero"]
-        )
+        result = selector.select_relevant_characters(characters, chapter_mentions=["hero"])
         assert isinstance(result, list)
 
 
@@ -958,15 +957,17 @@ class TestSummarizerCharacterContextEdgeCases:
 
     def test_summarize_character_truncation(self):
         """Test character context that needs truncation."""
-        context = "\n".join([
-            "Name: John Smith",
-            "Role: Protagonist hero",
-            "Appearance: Tall with dark hair and piercing blue eyes",
-            "Personality: Brave, kind, and intelligent",
-            "Motivation: Save the world from destruction",
-            "Relationship: Friend of Mary and enemy of Bob",
-            "Background: Born in a small village, trained by masters, " + "x" * 1000,
-        ])
+        context = "\n".join(
+            [
+                "Name: John Smith",
+                "Role: Protagonist hero",
+                "Appearance: Tall with dark hair and piercing blue eyes",
+                "Personality: Brave, kind, and intelligent",
+                "Motivation: Save the world from destruction",
+                "Relationship: Friend of Mary and enemy of Bob",
+                "Background: Born in a small village, trained by masters, " + "x" * 1000,
+            ]
+        )
         result = SummarizerTemplate.summarize_character_context(context, max_chars=100)
         # Should truncate to near max_chars
         assert len(result) <= 200  # Some buffer for word boundaries

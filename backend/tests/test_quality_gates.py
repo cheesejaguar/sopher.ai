@@ -394,7 +394,10 @@ In the third paragraph, we see the consequences of what came before. The charact
         score = analyzer.analyze_pacing(text)
         assert score.dimension == QualityDimension.PACING
         # Should have suggestion to break up long paragraphs
-        assert any("Break up" in s or "long" in s.lower() for s in score.suggestions) or score.score < 1.0
+        assert (
+            any("Break up" in s or "long" in s.lower() for s in score.suggestions)
+            or score.score < 1.0
+        )
 
     def test_analyze_dialogue_varied_tags(self, analyzer):
         """Varied dialogue tags should score well."""

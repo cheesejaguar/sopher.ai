@@ -648,9 +648,7 @@ class TestVerifyProjectOwnership:
         with pytest.raises(HTTPException) as exc_info:
             from unittest.mock import patch
 
-            with patch(
-                "app.routers.editing.ProjectService"
-            ) as mock_project_service:
+            with patch("app.routers.editing.ProjectService") as mock_project_service:
                 mock_service = MagicMock()
                 mock_service.get_project = AsyncMock(return_value=None)
                 mock_project_service.return_value = mock_service
@@ -785,7 +783,13 @@ class TestProofreadRequestDocumentation:
         schema = ProofreadRequest.model_json_schema()
         props = schema.get("properties", {})
 
-        for field in ["check_grammar", "check_spelling", "check_punctuation", "check_formatting", "style_guide"]:
+        for field in [
+            "check_grammar",
+            "check_spelling",
+            "check_punctuation",
+            "check_formatting",
+            "style_guide",
+        ]:
             assert field in props
             assert "description" in props[field]
 

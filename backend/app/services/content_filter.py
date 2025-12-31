@@ -55,19 +55,23 @@ class ContentGuidelines:
         ]
 
         if self.avoid_topics:
-            sections.extend([
-                "",
-                "### Topics to Avoid",
-                "The following topics must NOT appear in the content:",
-            ])
+            sections.extend(
+                [
+                    "",
+                    "### Topics to Avoid",
+                    "The following topics must NOT appear in the content:",
+                ]
+            )
             for topic in self.avoid_topics:
                 sections.append(f"- {topic}")
 
-        sections.extend([
-            "",
-            "**IMPORTANT:** These content guidelines are mandatory. "
-            "Any content that violates these restrictions will be rejected.",
-        ])
+        sections.extend(
+            [
+                "",
+                "**IMPORTANT:** These content guidelines are mandatory. "
+                "Any content that violates these restrictions will be rejected.",
+            ]
+        )
 
         return "\n".join(sections)
 
@@ -137,12 +141,10 @@ class ContentFilterService:
         AudienceLevel.YOUNG_ADULT: {
             True: "Mature themes (relationships, identity, loss) allowed with "
             "restraint. No explicit sexual content.",
-            False: "Handle mature topics carefully. Fade to black for any "
-            "romantic intimacy.",
+            False: "Handle mature topics carefully. Fade to black for any " "romantic intimacy.",
         },
         AudienceLevel.ADULT: {
-            True: "Mature themes allowed including complex relationships and "
-            "adult situations.",
+            True: "Mature themes allowed including complex relationships and " "adult situations.",
             False: "Handle mature themes with discretion. No explicit content.",
         },
     }
@@ -162,8 +164,7 @@ class ContentFilterService:
             "are acceptable. Match vocabulary to character and genre."
         ),
         AudienceLevel.ADULT: (
-            "Full vocabulary range available. Match complexity to genre and "
-            "character voice."
+            "Full vocabulary range available. Match complexity to genre and " "character voice."
         ),
     }
 
@@ -268,9 +269,7 @@ class ContentFilterService:
             violence_level = "mild"
         elif audience == AudienceLevel.MIDDLE_GRADE and violence_level == "graphic":
             violence_level = "moderate"
-        violence_instruction = violence_options.get(
-            violence_level, violence_options["mild"]
-        )
+        violence_instruction = violence_options.get(violence_level, violence_options["mild"])
 
         # Get profanity instruction
         # Children never get profanity even if set to True
@@ -391,9 +390,7 @@ class ContentValidator:
             for level in ["graphic", "moderate"]:
                 for phrase in cls.VIOLENCE_INDICATORS[level]:
                     if phrase in content_lower:
-                        issues.append(
-                            f"Violence level exceeded: contains '{phrase}'"
-                        )
+                        issues.append(f"Violence level exceeded: contains '{phrase}'")
         elif guidelines.violence_level == "moderate":
             # Only check graphic indicators
             for phrase in cls.VIOLENCE_INDICATORS["graphic"]:

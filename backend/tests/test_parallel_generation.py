@@ -269,7 +269,12 @@ class TestParallelGenerationResultSchema:
             chapters=[
                 {"chapter_number": 1, "content": "Chapter 1...", "word_count": 3000, "error": None},
                 {"chapter_number": 2, "content": "Chapter 2...", "word_count": 2800, "error": None},
-                {"chapter_number": 3, "content": None, "word_count": 0, "error": "Generation failed"},
+                {
+                    "chapter_number": 3,
+                    "content": None,
+                    "word_count": 0,
+                    "error": "Generation failed",
+                },
             ],
             total_word_count=5800,
             duration_seconds=45.5,

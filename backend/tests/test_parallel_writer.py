@@ -422,6 +422,7 @@ class TestParallelChapterServiceInitialization:
 
     def test_service_attributes(self):
         """Test service has correct attributes after init."""
+
         async def mock_gen(*args) -> str:
             return "Content"
 
@@ -441,6 +442,7 @@ class TestParallelChapterServiceInitialization:
 
     def test_set_progress_callback_chainable(self):
         """Test set_progress_callback returns self for chaining."""
+
         async def mock_gen(*args) -> str:
             return "Content"
 
@@ -501,6 +503,7 @@ class TestNotifyProgress:
 
     def test_notify_progress_no_callback(self):
         """Test notify_progress does nothing without callback."""
+
         async def mock_gen(*args) -> str:
             return "Content"
 
@@ -510,6 +513,7 @@ class TestNotifyProgress:
 
     def test_notify_progress_no_queue(self):
         """Test notify_progress handles missing queue."""
+
         async def mock_gen(*args) -> str:
             return "Content"
 
@@ -553,6 +557,7 @@ class TestProgressWithQueue:
     @pytest.mark.asyncio
     async def test_get_current_progress_with_queue(self):
         """Test get_current_progress returns progress when queue exists."""
+
         async def mock_gen(*args):
             return "Content"
 
@@ -571,6 +576,7 @@ class TestProgressWithQueue:
     @pytest.mark.asyncio
     async def test_cancel_with_queue(self):
         """Test cancel returns count when queue exists."""
+
         async def mock_gen(*args):
             return "Content"
 
@@ -669,6 +675,7 @@ class TestRunJobBranches:
     @pytest.mark.asyncio
     async def test_run_job_success(self):
         """Test _run_job with successful generation."""
+
         async def mock_gen(ch_num, outline, style, char_bible, prev):
             return "Generated content here"
 
@@ -686,6 +693,7 @@ class TestRunJobBranches:
     @pytest.mark.asyncio
     async def test_run_job_failure_no_retry(self):
         """Test _run_job failure without retry."""
+
         async def failing_gen(*args):
             raise ValueError("Test error")
 
@@ -705,6 +713,7 @@ class TestRunJobBranches:
     @pytest.mark.asyncio
     async def test_run_job_failure_with_exhausted_retries(self):
         """Test _run_job fails after exhausting retries."""
+
         async def failing_gen(*args):
             raise ValueError("Persistent error")
 
