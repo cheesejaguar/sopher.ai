@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from datetime import datetime
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Callable, Optional
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, Path, Request, Response, status
@@ -721,7 +721,7 @@ async def list_chapters(
 def _create_chapter_generator(
     model: str,
     content_guidelines: str,
-) -> callable:
+) -> Callable[..., Any]:
     """Create a chapter generator function for the parallel writer service."""
 
     async def generate_chapter(
@@ -812,7 +812,7 @@ async def parallel_generation_event_generator(
         )
 
         # Convert outline items to the format expected by the service
-        outlines_for_service = [
+        outlines_for_service: list[dict[str, Any]] = [
             {"chapter_number": item.chapter_number, "outline": item.outline, "title": item.title}
             for item in chapter_outlines
         ]
