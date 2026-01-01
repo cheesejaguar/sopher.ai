@@ -1,0 +1,80 @@
+# Pre-commit configuration for sopher.ai
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Secret detection - prevents committing secrets
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+        name: Detect secrets with gitleaks
+        description: Detect hardcoded secrets in the repository
+
+  # Detect secrets (alternative/additional secret scanner)
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        name: Detect secrets with detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package-lock\.json|\.env\.example|\.env\..*\.template
+
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: detect-private-key
+        name: Detect private keys
+      - id: end-of-file-fixer
+        exclude: \.min\.(js|css)$
+      - id: trailing-whitespace
+        exclude: \.min\.(js|css)$|\.md$
+      - id: check-json
+        exclude: tsconfig\.json|package-lock\.json
+      - id: no-commit-to-branch
+        args: ['--branch', 'main', '--branch', 'master']
+
+  # Python formatting and linting (backend)
+  - repo: https://github.com/psf/black
+    rev: 24.3.0
+    hooks:
+      - id: black
+        files: ^backend/
+        args: ['--line-length=100']
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.3.4
+    hooks:
+      - id: ruff
+        files: ^backend/
+        args: ['--fix']
+
+  # Security scanning
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.8
+    hooks:
+      - id: bandit
+        files: ^backend/
+        args: ['-c', 'pyproject.toml', '-r', '-ll']
+        additional_dependencies: ['bandit[toml]']
+
+  # Validate GitHub Actions
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.6.27
+    hooks:
+      - id: actionlint
+        name: Lint GitHub Actions workflows
+
+# CI configuration
+ci:
+  autofix_commit_msg: 'style: auto-fixes from pre-commit hooks'
+  autoupdate_commit_msg: 'chore: pre-commit autoupdate'
+  skip:
+    - gitleaks  # Skip in CI as it runs separately with more options
