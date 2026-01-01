@@ -238,6 +238,32 @@ next-env.d.ts
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
+.env.staging
+
+# Secrets and credentials - NEVER commit these!
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+secrets.yaml
+secrets.yml
+secrets.json
+credentials.json
+service-account*.json
+*-credentials.json
+*-secrets.json
+*.keystore
+*.jks
+
+# API keys and tokens (if accidentally saved as files)
+api_keys.txt
+tokens.txt
+.secrets
+secrets/
 
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
