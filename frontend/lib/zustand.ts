@@ -44,7 +44,7 @@ export interface Project {
   target_chapters: number
   style_guide?: string
   settings: Record<string, unknown>
-  status: 'draft' | 'in_progress' | 'completed'
+  status: 'draft' | 'in_progress' | 'reviewing' | 'completed'
   created_at: string
   updated_at?: string
 }

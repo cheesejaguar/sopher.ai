@@ -195,7 +195,7 @@ def test_google_callback_creates_new_user(mock_db, mock_validate, mock_exchange,
 
 
 @patch("app.routers.auth.check_oauth_rate_limit", new_callable=lambda: MagicMock(return_value=None))
-@patch("app.routers.auth.validate_oauth_state")
+@patch("app.routers.auth.validate_sso_state")
 def test_google_callback_invalid_state(mock_validate, mock_rate_limit, client):
     """Test Google OAuth callback with invalid state"""
 
@@ -226,9 +226,11 @@ class TestAuthEndpoints:
         response = client.get("/auth/config/status")
         assert response.status_code == status.HTTP_200_OK
         data = response.json()
-        assert "google_oauth_configured" in data
+        # Now using WorkOS SSO instead of Google OAuth
+        assert "sso_provider" in data
+        assert "sso_configured" in data
         assert "client_id_set" in data
-        assert "client_secret_set" in data
+        assert "api_key_set" in data
         assert "redirect_uri" in data
         assert "message" in data
 
@@ -269,9 +271,9 @@ class TestAuthEndpoints:
             "/auth/callback/google?error=access_denied&error_description=User+denied+access",
             follow_redirects=False,
         )
-        # Should redirect to frontend with error
+        # Should redirect to frontend with error (WorkOS SSO now uses error=<error_type>)
         assert response.status_code == status.HTTP_302_FOUND
-        assert "oauth=error" in response.headers["location"]
+        assert "error=access_denied" in response.headers["location"]
 
     @patch("app.routers.auth.check_oauth_rate_limit")
     def test_google_callback_missing_code(self, mock_rate_limit, client):
@@ -305,92 +307,113 @@ class TestFrontendURLHelper:
 
     def test_localhost_detection(self):
         """Test localhost URL detection."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        # Test localhost
-        request = MagicMock()
-        request.headers = {"host": "localhost:3000"}
-        result = _get_frontend_url(request)
-        assert result == "http://localhost:3000/"
+        # Clear FRONTEND_URL to test host-based detection
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "localhost:3000"}
+            result = _get_frontend_url(request)
+            assert result == "http://localhost:3000/"
 
     def test_localhost_default_port(self):
         """Test localhost without port uses default."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {"host": "localhost"}
-        result = _get_frontend_url(request)
-        assert result == "http://localhost:3000/"
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "localhost"}
+            result = _get_frontend_url(request)
+            assert result == "http://localhost:3000/"
 
     def test_production_detection(self):
         """Test production URL detection."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {"host": "api.sopher.ai"}
-        result = _get_frontend_url(request)
-        assert result == "https://sopher.ai/"
+        # Clear FRONTEND_URL to test host-based detection
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "api.sopher.ai"}
+            result = _get_frontend_url(request)
+            assert result == "https://sopher.ai/"
 
     def test_unrecognized_host(self):
         """Test unrecognized host falls back to production."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {"host": "unknown.example.com"}
-        result = _get_frontend_url(request)
-        assert result == "https://sopher.ai/"
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "unknown.example.com"}
+            result = _get_frontend_url(request)
+            assert result == "https://sopher.ai/"
 
     def test_no_host_header(self):
         """Test missing host header falls back to production."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {}
-        result = _get_frontend_url(request)
-        assert result == "https://sopher.ai/"
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {}
+            result = _get_frontend_url(request)
+            assert result == "https://sopher.ai/"
 
     def test_invalid_port_number(self):
         """Test invalid port falls back to default localhost."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {"host": "localhost:invalid"}
-        result = _get_frontend_url(request)
-        assert result == "http://localhost:3000/"
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "localhost:invalid"}
+            result = _get_frontend_url(request)
+            assert result == "http://localhost:3000/"
 
     def test_port_out_of_range(self):
         """Test port out of valid range falls back to default."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {"host": "localhost:99999"}
-        result = _get_frontend_url(request)
-        assert result == "http://localhost:3000/"
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "localhost:99999"}
+            result = _get_frontend_url(request)
+            assert result == "http://localhost:3000/"
 
     def test_127_0_0_1_host(self):
         """Test 127.0.0.1 is treated as localhost."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
 
         from app.routers.auth import _get_frontend_url
 
-        request = MagicMock()
-        request.headers = {"host": "127.0.0.1:3000"}
-        result = _get_frontend_url(request)
-        assert result == "http://localhost:3000/"
+        with patch.dict("os.environ", {"FRONTEND_URL": ""}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "127.0.0.1:3000"}
+            result = _get_frontend_url(request)
+            assert result == "http://localhost:3000/"
+
+    def test_frontend_url_override(self):
+        """Test FRONTEND_URL environment variable takes precedence."""
+        from unittest.mock import MagicMock, patch
+
+        from app.routers.auth import _get_frontend_url
+
+        with patch.dict("os.environ", {"FRONTEND_URL": "https://custom.example.com"}, clear=False):
+            request = MagicMock()
+            request.headers = {"host": "localhost:3000"}
+            result = _get_frontend_url(request)
+            assert result == "https://custom.example.com/"
 
 
 class TestDevAuthBypass:

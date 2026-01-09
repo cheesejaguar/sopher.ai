@@ -31,7 +31,7 @@ class ProjectUpdate(BaseModel):
     target_chapters: Optional[int] = Field(None, ge=1, le=50)
     style_guide: Optional[str] = Field(None, max_length=5000)
     settings: Optional[Dict[str, Any]] = None
-    status: Optional[Literal["draft", "in_progress", "completed"]] = None
+    status: Optional[Literal["draft", "in_progress", "reviewing", "completed"]] = None
 
 
 class ProjectResponse(BaseModel):
@@ -302,6 +302,9 @@ class OutlineRequest(BaseModel):
     @classmethod
     def validate_model(cls, v: str) -> str:
         """Validate that the model is supported"""
+        # Allow any openrouter model for flexibility with new models
+        if v.startswith("openrouter/"):
+            return v
         if v not in SUPPORTED_MODELS_SET:
             supported = sorted(SUPPORTED_MODELS_SET)
             raise ValueError(f"Unsupported model: {v}. Supported models: {supported}")
@@ -330,6 +333,14 @@ class ChapterDraftRequest(BaseModel):
     style_guide: Optional[str] = None
     character_bible: Optional[Dict[str, Any]] = None
     previous_chapters: Optional[List[str]] = None
+
+
+class ChapterRegenerateRequest(BaseModel):
+    """Request to regenerate a chapter with edits"""
+
+    instructions: Optional[str] = Field(
+        None, max_length=5000, description="Edit instructions for regeneration"
+    )
 
 
 class ChapterOutlineItem(BaseModel):

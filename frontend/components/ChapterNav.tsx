@@ -32,26 +32,26 @@ function formatWordCount(count: number): string {
 function getStatusIcon(status: ChapterInfo['status'], progress: number) {
   switch (status) {
     case 'completed':
-      return <Check className="w-4 h-4 text-teal-500" aria-label="Completed" />
+      return <Check className="w-4 h-4 text-aurora-teal" aria-label="Completed" />
     case 'generating':
-      return <Loader className="w-4 h-4 text-amber-500 animate-spin" aria-label="Generating" />
+      return <Loader className="w-4 h-4 text-ember animate-spin" aria-label="Generating" />
     case 'error':
-      return <AlertCircle className="w-4 h-4 text-red-500" aria-label="Error" />
+      return <AlertCircle className="w-4 h-4 text-red-400" aria-label="Error" />
     default:
-      return <Circle className="w-4 h-4 text-gray-400" aria-label="Pending" />
+      return <Circle className="w-4 h-4 text-fog" aria-label="Pending" />
   }
 }
 
 function getStatusBadgeClass(status: ChapterInfo['status']): string {
   switch (status) {
     case 'completed':
-      return 'bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400'
+      return 'bg-aurora-teal/20 text-aurora-teal'
     case 'generating':
-      return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400'
+      return 'bg-ember/20 text-ember'
     case 'error':
-      return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+      return 'bg-red-500/20 text-red-400'
     default:
-      return 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+      return 'bg-slate/30 text-fog'
   }
 }
 
@@ -97,32 +97,32 @@ export default function ChapterNav({
 
   if (isCollapsed) {
     return (
-      <div className="flex flex-col items-center py-4 px-2 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 h-full">
+      <div className="flex flex-col items-center py-4 px-2 bg-charcoal-light border-r border-graphite h-full">
         <button
           onClick={() => onToggleCollapse?.(false)}
-          className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors mb-4"
+          className="p-2 rounded-lg hover:bg-charcoal transition-colors mb-4"
           aria-label="Expand navigation"
         >
-          <ChevronRight className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+          <ChevronRight className="w-5 h-5 text-mist" />
         </button>
 
         <div className="flex flex-col items-center gap-2 mb-4">
           {onNavigateHome && (
             <button
               onClick={onNavigateHome}
-              className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              className="p-2 rounded-lg hover:bg-charcoal transition-colors"
               aria-label="Go to project home"
             >
-              <Home className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <Home className="w-5 h-5 text-mist" />
             </button>
           )}
           {onNavigateToOutline && (
             <button
               onClick={onNavigateToOutline}
-              className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              className="p-2 rounded-lg hover:bg-charcoal transition-colors"
               aria-label="Go to outline"
             >
-              <BookOpen className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+              <BookOpen className="w-5 h-5 text-mist" />
             </button>
           )}
         </div>
@@ -134,13 +134,13 @@ export default function ChapterNav({
               onClick={() => onSelectChapter(chapter.number)}
               className={`p-2 rounded-lg transition-colors ${
                 chapter.number === currentChapter
-                  ? 'bg-teal-100 dark:bg-teal-900/30'
-                  : 'hover:bg-gray-200 dark:hover:bg-gray-800'
+                  ? 'bg-aurora-teal/20'
+                  : 'hover:bg-charcoal'
               }`}
               aria-label={`Chapter ${chapter.number}${chapter.title ? `: ${chapter.title}` : ''}`}
               aria-current={chapter.number === currentChapter ? 'page' : undefined}
             >
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+              <span className="text-sm font-medium text-cream">
                 {chapter.number}
               </span>
             </button>
@@ -151,18 +151,18 @@ export default function ChapterNav({
           <button
             onClick={handlePrevChapter}
             disabled={currentChapter <= 1}
-            className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-2 rounded-lg hover:bg-charcoal transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Previous chapter"
           >
-            <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <ChevronUp className="w-5 h-5 text-mist" />
           </button>
           <button
             onClick={handleNextChapter}
             disabled={currentChapter >= chapters.length}
-            className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-2 rounded-lg hover:bg-charcoal transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Next chapter"
           >
-            <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+            <ChevronDown className="w-5 h-5 text-mist" />
           </button>
         </div>
       </div>
@@ -171,24 +171,24 @@ export default function ChapterNav({
 
   return (
     <nav
-      className="w-64 bg-gray-50 dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 h-full flex flex-col"
+      className="w-64 bg-charcoal-light border-r border-graphite h-full flex flex-col"
       aria-label="Chapter navigation"
     >
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-b border-graphite">
         <div className="flex items-center justify-between mb-2">
           {projectTitle && (
-            <h2 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+            <h2 className="text-sm font-semibold text-cream truncate">
               {projectTitle}
             </h2>
           )}
           {onToggleCollapse && (
             <button
               onClick={() => onToggleCollapse(true)}
-              className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+              className="p-1 rounded hover:bg-charcoal transition-colors"
               aria-label="Collapse navigation"
             >
-              <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+              <ChevronLeft className="w-4 h-4 text-mist" />
             </button>
           )}
         </div>
@@ -198,7 +198,7 @@ export default function ChapterNav({
           {onNavigateHome && (
             <button
               onClick={onNavigateHome}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors"
+              className="flex items-center gap-1 px-2 py-1 text-xs text-mist hover:text-cream hover:bg-charcoal rounded transition-colors"
             >
               <Home className="w-3 h-3" />
               Project
@@ -207,7 +207,7 @@ export default function ChapterNav({
           {onNavigateToOutline && (
             <button
               onClick={onNavigateToOutline}
-              className="flex items-center gap-1 px-2 py-1 text-xs text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors"
+              className="flex items-center gap-1 px-2 py-1 text-xs text-mist hover:text-cream hover:bg-charcoal rounded transition-colors"
             >
               <BookOpen className="w-3 h-3" />
               Outline
@@ -217,14 +217,14 @@ export default function ChapterNav({
       </div>
 
       {/* Progress Summary */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+      <div className="p-4 border-b border-graphite">
+        <div className="flex justify-between text-xs text-mist mb-1">
           <span>Progress</span>
           <span>{completedCount}/{chapters.length} chapters</span>
         </div>
-        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+        <div className="w-full bg-graphite rounded-full h-2">
           <div
-            className="bg-teal-500 h-2 rounded-full transition-all duration-300"
+            className="bg-aurora-teal h-2 rounded-full transition-all duration-300"
             style={{ width: `${progressPercent}%` }}
             role="progressbar"
             aria-valuenow={progressPercent}
@@ -233,7 +233,7 @@ export default function ChapterNav({
             aria-label={`${progressPercent}% complete`}
           />
         </div>
-        <div className="flex justify-between text-xs text-gray-500 dark:text-gray-500 mt-1">
+        <div className="flex justify-between text-xs text-fog mt-1">
           <span>{progressPercent}%</span>
           <span>{formatWordCount(totalWords)} words</span>
         </div>
@@ -244,7 +244,7 @@ export default function ChapterNav({
         <div className="p-2">
           <button
             onClick={() => toggleSection('chapters')}
-            className="flex items-center justify-between w-full px-2 py-1 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors"
+            className="flex items-center justify-between w-full px-2 py-1 text-sm font-medium text-cream hover:bg-charcoal rounded transition-colors"
             aria-expanded={expandedSections.has('chapters')}
           >
             <span className="flex items-center gap-2">
@@ -266,8 +266,8 @@ export default function ChapterNav({
                   onClick={() => onSelectChapter(chapter.number)}
                   className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-left transition-colors ${
                     chapter.number === currentChapter
-                      ? 'bg-teal-100 dark:bg-teal-900/30 border-l-2 border-teal-500'
-                      : 'hover:bg-gray-200 dark:hover:bg-gray-800'
+                      ? 'bg-aurora-teal/10 border-l-2 border-aurora-teal'
+                      : 'hover:bg-charcoal'
                   }`}
                   aria-current={chapter.number === currentChapter ? 'page' : undefined}
                 >
@@ -276,10 +276,10 @@ export default function ChapterNav({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      <span className="text-sm font-medium text-cream">
                         {chapter.number}.
                       </span>
-                      <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                      <span className="text-sm text-mist truncate">
                         {chapter.title || `Chapter ${chapter.number}`}
                       </span>
                     </div>
@@ -288,7 +288,7 @@ export default function ChapterNav({
                         {chapter.status}
                       </span>
                       {chapter.wordCount !== undefined && chapter.wordCount > 0 && (
-                        <span className="text-xs text-gray-500 dark:text-gray-500">
+                        <span className="text-xs text-fog">
                           {formatWordCount(chapter.wordCount)} words
                         </span>
                       )}
@@ -302,24 +302,24 @@ export default function ChapterNav({
       </div>
 
       {/* Navigation Footer */}
-      <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+      <div className="p-4 border-t border-graphite">
         <div className="flex items-center justify-between">
           <button
             onClick={handlePrevChapter}
             disabled={currentChapter <= 1}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-mist hover:bg-charcoal rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Previous chapter"
           >
             <ChevronLeft className="w-4 h-4" />
             Prev
           </button>
-          <span className="text-sm text-gray-500 dark:text-gray-500">
+          <span className="text-sm text-fog">
             {currentChapter} of {chapters.length}
           </span>
           <button
             onClick={handleNextChapter}
             disabled={currentChapter >= chapters.length}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="flex items-center gap-1 px-3 py-1.5 text-sm text-mist hover:bg-charcoal rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             aria-label="Next chapter"
           >
             Next

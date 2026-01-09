@@ -46,45 +46,45 @@ function SuggestionTooltip({
   position: { top: number; left: number }
 }) {
   const severityColors = {
-    info: 'border-blue-300 bg-blue-50',
-    warning: 'border-yellow-300 bg-yellow-50',
-    error: 'border-red-300 bg-red-50',
+    info: 'border-nebula-blue/30 bg-nebula-blue/10',
+    warning: 'border-ember/30 bg-ember/10',
+    error: 'border-red-500/30 bg-red-500/10',
   }
 
   return (
     <div
-      className={`absolute z-50 w-80 p-3 rounded-lg border shadow-lg ${severityColors[suggestion.severity]}`}
+      className={`absolute z-50 w-80 p-3 rounded-lg border ${severityColors[suggestion.severity]}`}
       style={{ top: position.top + 24, left: position.left }}
       role="tooltip"
       aria-label={`Suggestion: ${suggestion.suggestion_type}`}
     >
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-xs font-medium uppercase text-gray-600">
+        <span className="text-xs font-medium uppercase text-fog">
           {suggestion.suggestion_type.replace(/_/g, ' ')}
         </span>
         <span
           className={`text-xs px-1.5 py-0.5 rounded ${
             suggestion.severity === 'error'
-              ? 'bg-red-200 text-red-700'
+              ? 'bg-red-500/20 text-red-400'
               : suggestion.severity === 'warning'
-              ? 'bg-yellow-200 text-yellow-700'
-              : 'bg-blue-200 text-blue-700'
+              ? 'bg-ember/20 text-ember'
+              : 'bg-nebula-blue/20 text-nebula-blue'
           }`}
         >
           {suggestion.severity}
         </span>
       </div>
 
-      <p className="text-sm text-gray-700 mb-3">{suggestion.explanation}</p>
+      <p className="text-sm text-mist mb-3">{suggestion.explanation}</p>
 
       <div className="text-sm mb-3 space-y-1">
         <div className="flex items-start gap-2">
-          <span className="text-gray-500 flex-shrink-0">Current:</span>
-          <span className="text-red-600 line-through">{suggestion.original_text}</span>
+          <span className="text-fog flex-shrink-0">Current:</span>
+          <span className="text-red-400 line-through">{suggestion.original_text}</span>
         </div>
         <div className="flex items-start gap-2">
-          <span className="text-gray-500 flex-shrink-0">Suggested:</span>
-          <span className="text-green-600">{suggestion.suggested_text}</span>
+          <span className="text-fog flex-shrink-0">Suggested:</span>
+          <span className="text-aurora-teal">{suggestion.suggested_text}</span>
         </div>
       </div>
 
@@ -92,14 +92,14 @@ function SuggestionTooltip({
         <div className="flex gap-2">
           <button
             onClick={onApply}
-            className="flex-1 px-3 py-1.5 text-sm bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+            className="flex-1 px-3 py-1.5 text-sm bg-aurora-teal text-charcoal rounded hover:bg-aurora-teal/90 focus:outline-none focus:ring-2 focus:ring-aurora-teal focus:ring-offset-2 focus:ring-offset-charcoal"
             aria-label="Apply suggestion"
           >
             Apply
           </button>
           <button
             onClick={onReject}
-            className="flex-1 px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2"
+            className="flex-1 px-3 py-1.5 text-sm bg-graphite text-cream rounded hover:bg-slate focus:outline-none focus:ring-2 focus:ring-nebula-blue focus:ring-offset-2 focus:ring-offset-charcoal"
             aria-label="Reject suggestion"
           >
             Reject
@@ -110,7 +110,7 @@ function SuggestionTooltip({
       {suggestion.status !== 'pending' && (
         <div
           className={`text-center text-sm font-medium ${
-            suggestion.status === 'applied' ? 'text-green-600' : 'text-gray-500'
+            suggestion.status === 'applied' ? 'text-aurora-teal' : 'text-fog'
           }`}
         >
           {suggestion.status === 'applied' ? 'Applied' : 'Rejected'}
@@ -149,9 +149,9 @@ function HighlightedSpan({
   }
 
   const severityStyles = {
-    info: 'bg-blue-100 border-b-2 border-blue-400',
-    warning: 'bg-yellow-100 border-b-2 border-yellow-400',
-    error: 'bg-red-100 border-b-2 border-red-400',
+    info: 'bg-nebula-blue/20 border-b-2 border-nebula-blue',
+    warning: 'bg-ember/20 border-b-2 border-ember',
+    error: 'bg-red-500/20 border-b-2 border-red-400',
   }
 
   const statusStyles = {
@@ -222,25 +222,25 @@ function SuggestionStats({
   }
 
   return (
-    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
+    <div className="bg-charcoal-light border border-graphite rounded-lg p-4 mb-4">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-6">
           <div className="text-sm">
-            <span className="font-medium">{suggestions.length}</span>
-            <span className="text-gray-500"> suggestions</span>
+            <span className="font-medium text-cream">{suggestions.length}</span>
+            <span className="text-mist"> suggestions</span>
           </div>
           <div className="flex items-center gap-3 text-sm">
             <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-yellow-400" />
-              <span className="text-gray-600">{stats.pending} pending</span>
+              <span className="w-2 h-2 rounded-full bg-ember" />
+              <span className="text-mist">{stats.pending} pending</span>
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-green-400" />
-              <span className="text-gray-600">{stats.applied} applied</span>
+              <span className="w-2 h-2 rounded-full bg-aurora-teal" />
+              <span className="text-mist">{stats.applied} applied</span>
             </span>
             <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-gray-400" />
-              <span className="text-gray-600">{stats.rejected} rejected</span>
+              <span className="w-2 h-2 rounded-full bg-slate" />
+              <span className="text-mist">{stats.rejected} rejected</span>
             </span>
           </div>
         </div>
@@ -248,17 +248,17 @@ function SuggestionStats({
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2 text-xs">
             {stats.bySeverity.error > 0 && (
-              <span className="px-2 py-1 rounded bg-red-100 text-red-700">
+              <span className="px-2 py-1 rounded bg-red-500/20 text-red-400">
                 {stats.bySeverity.error} errors
               </span>
             )}
             {stats.bySeverity.warning > 0 && (
-              <span className="px-2 py-1 rounded bg-yellow-100 text-yellow-700">
+              <span className="px-2 py-1 rounded bg-ember/20 text-ember">
                 {stats.bySeverity.warning} warnings
               </span>
             )}
             {stats.bySeverity.info > 0 && (
-              <span className="px-2 py-1 rounded bg-blue-100 text-blue-700">
+              <span className="px-2 py-1 rounded bg-nebula-blue/20 text-nebula-blue">
                 {stats.bySeverity.info} info
               </span>
             )}
@@ -268,14 +268,14 @@ function SuggestionStats({
             <div className="flex gap-2">
               <button
                 onClick={onApplyAll}
-                className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+                className="px-3 py-1 text-xs bg-aurora-teal text-charcoal rounded hover:bg-aurora-teal/90"
                 aria-label="Apply all pending suggestions"
               >
                 Apply All
               </button>
               <button
                 onClick={onRejectAll}
-                className="px-3 py-1 text-xs bg-gray-300 text-gray-700 rounded hover:bg-gray-400"
+                className="px-3 py-1 text-xs bg-graphite text-cream rounded hover:bg-slate"
                 aria-label="Reject all pending suggestions"
               >
                 Reject All
@@ -367,7 +367,7 @@ export default function InlineSuggestions({
       />
 
       <div
-        className="prose max-w-none p-4 bg-white border border-gray-200 rounded-lg leading-relaxed"
+        className="prose prose-invert max-w-none p-4 bg-charcoal-light border border-graphite rounded-lg leading-relaxed text-mist"
         data-testid="content-with-suggestions"
       >
         {segments.map((segment, index) => {

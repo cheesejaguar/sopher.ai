@@ -425,7 +425,7 @@ export default function OutlineEditorPage() {
     setError(null)
 
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/outline`, {
+      const response = await fetch(`/api/backend/v1/projects/${projectId}/outline`, {
         credentials: 'include',
       })
 
@@ -475,7 +475,7 @@ export default function OutlineEditorPage() {
         }
       }
 
-      const response = await fetch(`/api/v1/projects/${projectId}/outline`, {
+      const response = await fetch(`/api/backend/v1/projects/${projectId}/outline`, {
         method: 'PUT',
         credentials: 'include',
         headers: {
@@ -569,7 +569,9 @@ export default function OutlineEditorPage() {
     setError(null)
 
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/outline/revise/stream`, {
+      // Call backend directly for SSE streaming (Next.js rewrites buffer SSE responses)
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+      const response = await fetch(`${backendUrl}/api/v1/projects/${projectId}/outline/revise/stream`, {
         method: 'POST',
         credentials: 'include',
         headers: {

@@ -16,7 +16,9 @@ from app.security import get_current_user
 def mock_user():
     """Create a mock authenticated user."""
     user = MagicMock(spec=User)
-    user.id = uuid4()
+    test_user_id = uuid4()
+    user.id = test_user_id
+    user.user_id = test_user_id  # API routes use user_id attribute
     user.email = "test@example.com"
     user.name = "Test User"
     user.role = "author"

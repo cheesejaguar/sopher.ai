@@ -1,4 +1,10 @@
-"""Authentication routes for OAuth2 login"""
+"""Authentication routes using WorkOS SSO
+
+WorkOS provides enterprise-grade SSO with support for Google, Microsoft,
+Okta, and 50+ other identity providers.
+
+Docs: https://workos.com/docs/sso
+"""
 
 import logging
 import os
@@ -12,29 +18,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..cache import cache
 from ..db import get_db
 from ..models import User
-from ..oauth import (
-    clear_auth_cookies,
-    exchange_code_for_token,
-    generate_pkce_challenge,
-    generate_state,
-    get_google_auth_url,
-    set_auth_cookies,
-    store_oauth_state,
-    validate_oauth_state,
-)
 from ..security import TokenData, create_access_token, create_refresh_token, get_current_user
+from ..workos_sso import (
+    WORKOS_CLIENT_ID,
+    WORKOS_REDIRECT_URI,
+    clear_auth_cookies,
+    exchange_code_for_profile,
+    generate_state,
+    get_authorization_url,
+    set_auth_cookies,
+    store_sso_state,
+    validate_sso_state,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Rate limiting constants for OAuth endpoints
-OAUTH_RATE_LIMIT_REQUESTS = 10  # Max requests per window
-OAUTH_RATE_LIMIT_WINDOW = 60  # Window in seconds
+# Rate limiting constants
+OAUTH_RATE_LIMIT_REQUESTS = 10
+OAUTH_RATE_LIMIT_WINDOW = 60
 
 
 async def check_oauth_rate_limit(request: Request) -> None:
-    """Check rate limit for OAuth endpoints, raises HTTPException if exceeded"""
-    # Use client IP for rate limiting
+    """Check rate limit for OAuth endpoints"""
     forwarded_for = request.headers.get("x-forwarded-for")
     client_ip = (
         forwarded_for.split(",")[0].strip()
@@ -53,13 +59,12 @@ async def check_oauth_rate_limit(request: Request) -> None:
         )
 
 
-# Safe URL constants to avoid security scan false positives
+# URL constants
 LOCALHOST_URL_TEMPLATE = "http://localhost:{}/"
 DEFAULT_LOCALHOST_URL = "http://localhost:3000/"
 PRODUCTION_URL = "https://sopher.ai/"
 
-# Allowed hosts for OAuth redirects - loaded from environment for flexibility
-# Format: comma-separated list of hosts (e.g., "sopher.ai,api.sopher.ai,staging.sopher.ai")
+# Allowed hosts for redirects
 _extra_hosts = os.getenv("ALLOWED_OAUTH_HOSTS", "")
 _default_hosts = {
     "localhost:3000",
@@ -73,100 +78,103 @@ ALLOWED_OAUTH_HOSTS = _default_hosts | {h.strip() for h in _extra_hosts.split(",
 
 
 def _get_frontend_url(request: Request) -> str:
-    """Extract and validate frontend URL from request headers.
+    """Extract and validate frontend URL from request headers"""
+    # Check for explicit frontend URL override (useful in Docker/proxy environments)
+    frontend_url_override = os.getenv("FRONTEND_URL")
+    if frontend_url_override:
+        return frontend_url_override.rstrip("/") + "/"
 
-    This function implements strict URL validation to prevent open redirects.
-    Only whitelisted domains are allowed.
-    """
-    host = request.headers.get("host", "")
+    # Check X-Forwarded-Host first (set by reverse proxies like Next.js rewrites)
+    x_forwarded_host = request.headers.get("x-forwarded-host", "")
+    host = x_forwarded_host or request.headers.get("host", "")
 
-    # Don't log full URLs to prevent information disclosure
-    logger.info(f"Determining frontend URL - host_present: {bool(host)}")
-
-    # Use configurable allowed hosts to prevent SSRF attacks
-    allowed_hosts = ALLOWED_OAUTH_HOSTS
-
-    # Validate and determine the frontend URL
     if host:
-        # Extract hostname without port for validation
         hostname = host.split(":")[0] if ":" in host else host
 
-        # Check if it's a localhost development environment
         if hostname in ["localhost", "127.0.0.1"]:
-            # For localhost, preserve the port from the host header
             if ":" in host:
                 port = host.split(":")[1]
-                # Validate port is numeric and within valid range (1-65535)
                 try:
                     port_num = int(port)
                     if 1 <= port_num <= 65535:
-                        # port_num is validated as integer within safe range
-                        return f"http://localhost:{port_num}/"  # nosemgrep
-                    else:
-                        # Invalid port range, use default
-                        return DEFAULT_LOCALHOST_URL
+                        return f"http://localhost:{port_num}/"
                 except ValueError:
-                    # Non-numeric port, use default
-                    return DEFAULT_LOCALHOST_URL
-            else:
-                return DEFAULT_LOCALHOST_URL
+                    pass
+            return DEFAULT_LOCALHOST_URL
 
-        # Check if it's an allowed production host
-        elif host in allowed_hosts or hostname in ["sopher.ai", "api.sopher.ai"]:
-            # Always redirect to main domain for production
+        elif host in ALLOWED_OAUTH_HOSTS or hostname in ["sopher.ai", "api.sopher.ai"]:
             return PRODUCTION_URL
         else:
-            # Unrecognized host - use safe default
-            # Log without exposing the actual host value
-            logger.warning("Unrecognized host header detected, using default")
+            logger.warning(f"Unrecognized host header: {host}, using default")
             return PRODUCTION_URL
-    else:
-        # No host header - use production URL as fallback
-        return PRODUCTION_URL
+
+    return PRODUCTION_URL
 
 
 @router.get("/config/status")
 async def oauth_config_status():
-    """Check OAuth configuration status (for debugging)"""
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
-    google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    """Check SSO configuration status"""
+    workos_configured = bool(WORKOS_CLIENT_ID and os.getenv("WORKOS_API_KEY"))
 
     return {
-        "google_oauth_configured": bool(google_client_id and google_client_secret),
-        "client_id_set": bool(google_client_id),
-        "client_secret_set": bool(google_client_secret),
-        "redirect_uri": os.getenv(
-            "GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:3000/api/backend/auth/callback/google"
-        ),
+        "sso_provider": "workos",
+        "sso_configured": workos_configured,
+        "client_id_set": bool(WORKOS_CLIENT_ID),
+        "api_key_set": bool(os.getenv("WORKOS_API_KEY")),
+        "redirect_uri": WORKOS_REDIRECT_URI,
         "message": (
-            "OAuth is properly configured"
-            if google_client_id and google_client_secret
-            else "OAuth credentials are missing. See docs for setup instructions."
+            "WorkOS SSO is properly configured"
+            if workos_configured
+            else "WorkOS credentials are missing. See docs for setup instructions."
         ),
     }
 
 
 @router.get("/login/google")
 async def login_google(request: Request):
-    """Initiate Google OAuth2 login flow"""
-    # Rate limit OAuth login attempts
+    """Initiate Google OAuth login via WorkOS"""
     await check_oauth_rate_limit(request)
 
     state = generate_state()
-    verifier, challenge = generate_pkce_challenge()
+    await store_sso_state(state, provider="GoogleOAuth")
 
-    # Store state and verifier for validation
-    await store_oauth_state(state, verifier)
+    auth_url = get_authorization_url(state=state, provider="GoogleOAuth")
 
-    # Generate authorization URL
-    auth_url = get_google_auth_url(state, challenge)
-
+    logger.info("Initiating Google OAuth via WorkOS")
     return RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
 
 
-@router.get("/callback/google")
-@router.head("/callback/google")  # Support HEAD requests for health checks
-async def callback_google(
+@router.get("/login/microsoft")
+async def login_microsoft(request: Request):
+    """Initiate Microsoft OAuth login via WorkOS"""
+    await check_oauth_rate_limit(request)
+
+    state = generate_state()
+    await store_sso_state(state, provider="MicrosoftOAuth")
+
+    auth_url = get_authorization_url(state=state, provider="MicrosoftOAuth")
+
+    logger.info("Initiating Microsoft OAuth via WorkOS")
+    return RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/login/github")
+async def login_github(request: Request):
+    """Initiate GitHub OAuth login via WorkOS"""
+    await check_oauth_rate_limit(request)
+
+    state = generate_state()
+    await store_sso_state(state, provider="GitHubOAuth")
+
+    auth_url = get_authorization_url(state=state, provider="GitHubOAuth")
+
+    logger.info("Initiating GitHub OAuth via WorkOS")
+    return RedirectResponse(url=auth_url, status_code=status.HTTP_302_FOUND)
+
+
+@router.get("/callback")
+@router.head("/callback")
+async def sso_callback(
     request: Request,
     code: Optional[str] = None,
     state: Optional[str] = None,
@@ -174,126 +182,98 @@ async def callback_google(
     error_description: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    """Handle Google OAuth2 callback"""
-    # Handle HEAD requests (return empty response)
+    """Handle WorkOS SSO callback"""
+    # Handle HEAD requests
     if request.method == "HEAD":
         return Response(status_code=status.HTTP_200_OK)
 
-    # Rate limit OAuth callback attempts
     await check_oauth_rate_limit(request)
 
-    # Log all callback parameters for debugging
-    # Sanitize user-provided inputs to prevent log injection
+    # Log callback (sanitized)
     sanitized_error = (
-        error.replace("\r", "").replace("\n", "").replace("\t", "") if error else error
-    )
-    sanitized_error_desc = (
-        error_description.replace("\r", "").replace("\n", "").replace("\t", "")
-        if error_description
-        else error_description
+        error.replace("\r", "").replace("\n", "").replace("\t", "") if error else None
     )
     logger.info(
-        f"OAuth callback - code_present: {bool(code)}, "
+        f"SSO callback - code_present: {bool(code)}, "
         f"state_present: {bool(state)}, error: {sanitized_error}"
     )
 
-    # Handle OAuth errors from Google
+    # Handle OAuth errors
     if error:
-        logger.error(f"OAuth error from Google: {sanitized_error} - {sanitized_error_desc}")
-        # Redirect to frontend with error
+        logger.error(f"SSO error from WorkOS: {sanitized_error}")
         frontend_url = _get_frontend_url(request)
-        # URL encode the error to prevent injection
         from urllib.parse import quote
 
         error_param = quote(sanitized_error) if sanitized_error else ""
-        error_url = f"{frontend_url}?oauth=error&error={error_param}"
-        return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
-
-    # Validate required parameters
-    if not code or not state:
-        logger.warning(f"Missing OAuth parameters - code: {bool(code)}, state: {bool(state)}")
-        # Redirect to frontend with error instead of raising exception
-        frontend_url = _get_frontend_url(request)
-        error_url = f"{frontend_url}?oauth=error&error=missing_parameters"
-        return RedirectResponse(url=error_url, status_code=status.HTTP_302_FOUND)
-
-    # Validate state and get PKCE verifier
-    try:
-        verifier = await validate_oauth_state(state)
-    except Exception as e:
-        logger.error(f"Failed to validate OAuth state: {type(e).__name__}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to validate OAuth state. Please try logging in again.",
+        return RedirectResponse(
+            url=f"{frontend_url}login?error={error_param}",
+            status_code=status.HTTP_302_FOUND,
         )
 
-    if not verifier:
+    # Validate parameters
+    if not code or not state:
+        logger.warning(f"Missing SSO parameters - code: {bool(code)}, state: {bool(state)}")
+        frontend_url = _get_frontend_url(request)
+        return RedirectResponse(
+            url=f"{frontend_url}login?error=missing_parameters",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    # Validate state
+    state_data = await validate_sso_state(state)
+    if not state_data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired state parameter",
+            detail="Invalid or expired state parameter. Please try logging in again.",
         )
 
+    # Exchange code for profile
     try:
-        # Exchange code for tokens and get user info
-        token, userinfo = await exchange_code_for_token(code, verifier)
-    except HTTPException as http_e:
-        # Re-raise HTTPExceptions (like missing credentials) as-is
-        logger.error(f"OAuth HTTP error: {http_e.detail}")
+        user_info = await exchange_code_for_profile(code)
+    except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"OAuth token exchange failed: {type(e).__name__}", exc_info=True)
-        # Check if it's a configuration issue
-        if "GOOGLE_CLIENT_ID" in str(e) or "GOOGLE_CLIENT_SECRET" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Google OAuth is not properly configured. Please contact the administrator.",
-            )
-        # Check for common OAuth errors
-        error_msg = str(e).lower()
-        if "invalid_grant" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The authorization code has expired or is invalid. Please try again.",
-            )
-        elif "redirect_uri_mismatch" in error_msg:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth redirect URI mismatch. Please contact the administrator.",
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to authenticate with Google: {str(e)}",
-            )
+        logger.error(f"SSO profile exchange failed: {type(e).__name__}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to authenticate: {str(e)}",
+        )
 
     # Extract user information
-    provider_sub = userinfo.get("sub")
-    email = userinfo.get("email")
-    name = userinfo.get("name")
-    picture = userinfo.get("picture")
+    provider_sub = user_info.get("id") or user_info.get("idp_id")
+    email = user_info.get("email")
+    name = user_info.get("name")
+    picture = user_info.get("picture")
 
     if not provider_sub or not email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Incomplete user information from Google",
+            detail="Incomplete user information from identity provider",
         )
 
     # Find or create user
     result = await db.execute(select(User).where(User.provider_sub == provider_sub))
     user = result.scalar_one_or_none()
 
+    if not user:
+        # Check if user exists by email (migration from other providers)
+        result = await db.execute(select(User).where(User.email == email))
+        user = result.scalar_one_or_none()
+
     if user:
         # Update existing user
         user.email = email
-        user.name = name  # type: ignore[assignment]
-        user.picture = picture  # type: ignore[assignment]
+        user.name = name
+        user.picture = picture
+        user.provider = "workos"
+        user.provider_sub = provider_sub
     else:
         # Create new user
         user = User(
             email=email,
             name=name,
             picture=picture,
-            provider="google",
+            provider="workos",
             provider_sub=provider_sub,
             role="author",
         )
@@ -302,7 +282,7 @@ async def callback_google(
     await db.commit()
     await db.refresh(user)
 
-    # Create our own JWT tokens
+    # Create JWT tokens
     token_data = {
         "user_id": str(user.id),
         "email": user.email,
@@ -311,24 +291,16 @@ async def callback_google(
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
-    # Log successful authentication (user ID only, not PII like email)
-    logger.info(f"User {user.id} authenticated successfully via {user.provider}")
+    logger.info(f"User {user.id} authenticated successfully via WorkOS")
 
-    # Get frontend URL using helper function
+    # Redirect to frontend with auth cookies
     frontend_url = _get_frontend_url(request)
-    frontend_url += "?oauth=success"
+    redirect_url = f"{frontend_url}?oauth=success"
 
-    # Create redirect response and set cookies on it
-    redirect_response = RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
+    redirect_response = RedirectResponse(url=redirect_url, status_code=status.HTTP_302_FOUND)
     set_auth_cookies(redirect_response, access_token, refresh_token, request)
 
-    logger.info(f"OAuth flow complete - Setting cookies and redirecting to {frontend_url}")
-    logger.info(
-        f"Cookie details - Access token length: {len(access_token)}, "
-        f"Refresh token length: {len(refresh_token)}"
-    )
-
-    # Add debug headers in development
+    # Debug headers in development
     debug_mode = (
         os.getenv("ENVIRONMENT", "development") == "development"
         or os.getenv("DEBUG_AUTH") == "true"
@@ -338,6 +310,21 @@ async def callback_google(
         redirect_response.headers["X-User-Email"] = str(user.email)
 
     return redirect_response
+
+
+# Legacy callback for backwards compatibility
+@router.get("/callback/google")
+@router.head("/callback/google")
+async def callback_google_legacy(
+    request: Request,
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Legacy Google OAuth callback - redirects to main callback"""
+    return await sso_callback(request, code, state, error, error_description, db)
 
 
 @router.post("/logout")
@@ -352,10 +339,6 @@ async def verify_auth(request: Request):
     """Verify authentication cookies are present"""
     access_token = request.cookies.get("access_token")
     refresh_token = request.cookies.get("refresh_token")
-
-    logger.info(
-        f"Cookie verification - access: {bool(access_token)}, " f"refresh: {bool(refresh_token)}"
-    )
 
     return {
         "authenticated": access_token is not None,
@@ -394,12 +377,8 @@ async def get_me(
 # =============================================================================
 # Local Development Auth Bypass
 # =============================================================================
-# Enable with LOCAL_AUTH_BYPASS=true in .env
-# WARNING: Never enable this in production!
 
 LOCAL_AUTH_BYPASS = os.getenv("LOCAL_AUTH_BYPASS", "false").lower() == "true"
-
-# Default test user configuration
 DEV_TEST_EMAIL = os.getenv("DEV_TEST_EMAIL", "test@localhost.dev")
 DEV_TEST_NAME = os.getenv("DEV_TEST_NAME", "Test User")
 
@@ -409,43 +388,28 @@ async def dev_login(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Development-only login endpoint that bypasses OAuth.
-
-    This creates or retrieves a test user and sets authentication cookies,
-    allowing local development without requiring a public OAuth callback URL.
-
-    Only available when LOCAL_AUTH_BYPASS=true is set in environment.
-    """
+    """Development-only login endpoint that bypasses SSO"""
     if not LOCAL_AUTH_BYPASS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=(
-                "Dev login is not enabled. "
-                "Set LOCAL_AUTH_BYPASS=true in .env for local development."
-            ),
+            detail="Dev login is not enabled. Set LOCAL_AUTH_BYPASS=true in .env",
         )
 
-    # Check if we're in a safe environment
     environment = os.getenv("ENVIRONMENT", "development")
     if environment == "production":
-        logger.error("Attempted dev login in production environment!")
+        logger.error("Attempted dev login in production!")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Dev login is not available in production.",
         )
 
-    logger.warning(
-        f"Dev login bypass activated - Environment: {environment}. "
-        "This should never happen in production!"
-    )
+    logger.warning(f"Dev login bypass activated - Environment: {environment}")
 
-    # Find or create the test user
+    # Find or create test user
     result = await db.execute(select(User).where(User.email == DEV_TEST_EMAIL))
     user = result.scalar_one_or_none()
 
     if not user:
-        # Create the test user
         user = User(
             email=DEV_TEST_EMAIL,
             name=DEV_TEST_NAME,
@@ -460,7 +424,7 @@ async def dev_login(
     else:
         logger.info(f"Using existing dev test user: {user.id}")
 
-    # Create JWT tokens for the test user
+    # Create JWT tokens
     token_data = {
         "user_id": str(user.id),
         "email": user.email,
@@ -469,15 +433,14 @@ async def dev_login(
     access_token = create_access_token(token_data)
     refresh_token = create_refresh_token(token_data)
 
-    # Get frontend URL and redirect
+    # Redirect with cookies
     frontend_url = _get_frontend_url(request)
-    frontend_url += "?oauth=success&dev=true"
-
-    # Create redirect response with auth cookies
-    redirect_response = RedirectResponse(url=frontend_url, status_code=status.HTTP_302_FOUND)
+    redirect_response = RedirectResponse(
+        url=f"{frontend_url}?oauth=success&dev=true",
+        status_code=status.HTTP_302_FOUND,
+    )
     set_auth_cookies(redirect_response, access_token, refresh_token, request)
 
-    # Add debug headers
     redirect_response.headers["X-Auth-Status"] = "dev-bypass"
     redirect_response.headers["X-Dev-User"] = DEV_TEST_EMAIL
 
@@ -486,7 +449,7 @@ async def dev_login(
 
 @router.get("/dev/status")
 async def dev_auth_status():
-    """Check if dev auth bypass is enabled (for debugging/frontend)"""
+    """Check if dev auth bypass is enabled"""
     environment = os.getenv("ENVIRONMENT", "development")
     return {
         "dev_auth_enabled": LOCAL_AUTH_BYPASS,

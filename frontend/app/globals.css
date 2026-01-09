@@ -4,57 +4,57 @@
 
 @layer base {
   :root {
-    --ink: #0A0E1A;
-    --indigo: #1B2559;
-    --parchment: #F4EDE1;
-    --teal: #11C5B2;
-    --gold: #D4A017;
-    --slate: #3D4A66;
-    --snow: #FAFBFF;
-    --gradient-brand: linear-gradient(135deg, var(--indigo), var(--teal));
+    /* Core palette - Dark/Neutral Base */
+    --void: #0D0F14;
+    --charcoal: #141821;
+    --charcoal-light: #1C2029;
+    --graphite: #252A35;
+    --slate: #3A4252;
 
-    --background: var(--parchment);
-    --foreground: var(--ink);
-    --card: var(--snow);
-    --card-foreground: var(--ink);
-    --popover: var(--snow);
-    --popover-foreground: var(--ink);
-    --primary: var(--indigo);
-    --primary-foreground: var(--snow);
-    --secondary: var(--snow);
-    --secondary-foreground: var(--indigo);
+    /* Text colors */
+    --cream: #F8F9FC;
+    --mist: #B4BCD0;
+    --fog: #6B7280;
+
+    /* Accent colors - Soft Gradients & Glow */
+    --nebula-blue: #4A6CF7;
+    --nebula-purple: #7B5CF5;
+    --aurora-teal: #14B8A6;
+    --aurora-cyan: #22D3EE;
+    --ember: #F97316;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, #4A6CF7 0%, #7B5CF5 50%, #14B8A6 100%);
+    --gradient-glow: radial-gradient(ellipse at 50% 50%, rgba(74, 108, 247, 0.12) 0%, transparent 60%);
+    --gradient-card: linear-gradient(180deg, rgba(28, 32, 41, 0.9) 0%, rgba(20, 24, 33, 1) 100%);
+    --gradient-surface: linear-gradient(135deg, rgba(74, 108, 247, 0.05) 0%, rgba(123, 92, 245, 0.05) 100%);
+
+    /* Semantic mappings */
+    --background: var(--charcoal);
+    --foreground: var(--cream);
+    --card: var(--charcoal-light);
+    --card-foreground: var(--cream);
+    --popover: var(--charcoal-light);
+    --popover-foreground: var(--cream);
+    --primary: var(--nebula-blue);
+    --primary-foreground: var(--cream);
+    --secondary: var(--graphite);
+    --secondary-foreground: var(--mist);
     --muted: var(--slate);
-    --muted-foreground: var(--snow);
-    --accent: var(--teal);
-    --accent-foreground: var(--ink);
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: var(--snow);
-    --border: var(--slate);
-    --input: var(--slate);
-    --ring: var(--indigo);
-    --radius: 0.875rem;
-  }
+    --muted-foreground: var(--mist);
+    --accent: var(--aurora-teal);
+    --accent-foreground: var(--charcoal);
+    --destructive: #EF4444;
+    --destructive-foreground: var(--cream);
+    --border: var(--graphite);
+    --input: var(--graphite);
+    --ring: var(--nebula-blue);
+    --radius: 0.75rem;
 
-  .dark {
-    --background: var(--indigo);
-    --foreground: var(--snow);
-    --card: var(--slate);
-    --card-foreground: var(--snow);
-    --popover: var(--slate);
-    --popover-foreground: var(--snow);
-    --primary: var(--snow);
-    --primary-foreground: var(--indigo);
-    --secondary: var(--indigo);
-    --secondary-foreground: var(--snow);
-    --muted: var(--indigo);
-    --muted-foreground: var(--snow);
-    --accent: var(--teal);
-    --accent-foreground: var(--indigo);
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: var(--snow);
-    --border: var(--indigo);
-    --input: var(--indigo);
-    --ring: var(--snow);
+    /* Glow effects */
+    --glow-sm: 0 0 10px rgba(74, 108, 247, 0.3);
+    --glow-md: 0 0 20px rgba(74, 108, 247, 0.25);
+    --glow-lg: 0 0 40px rgba(74, 108, 247, 0.2);
   }
 }
 
@@ -62,7 +62,76 @@
   * {
     @apply border-border;
   }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    background-image: var(--gradient-glow);
+    background-attachment: fixed;
+  }
+
+  /* Selection styling */
+  ::selection {
+    background: rgba(74, 108, 247, 0.3);
+    color: var(--cream);
+  }
+}
+
+@layer utilities {
+  /* Glow utilities */
+  .glow-sm {
+    box-shadow: var(--glow-sm);
+  }
+  .glow-md {
+    box-shadow: var(--glow-md);
+  }
+  .glow-lg {
+    box-shadow: var(--glow-lg);
+  }
+  .glow-teal {
+    box-shadow: 0 0 20px rgba(20, 184, 166, 0.3);
+  }
+  .shadow-inner-glow {
+    box-shadow: inset 0 0 30px rgba(74, 108, 247, 0.1);
+  }
+
+  /* Text effects */
+  .text-glow {
+    text-shadow: 0 0 20px rgba(74, 108, 247, 0.5);
+  }
+
+  .gradient-text {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glass morphism */
+  .glass {
+    background: rgba(28, 32, 41, 0.7);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(58, 66, 82, 0.5);
+  }
+
+  .glass-light {
+    background: rgba(28, 32, 41, 0.5);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(58, 66, 82, 0.3);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

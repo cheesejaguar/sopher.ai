@@ -26,8 +26,9 @@ from .security import create_access_token
 # Configure structured logging early
 logger = setup_logging()
 
-# Configure LiteLLM
-# For LiteLLM 1.48.x, use string type for cache configuration
+# Configure LiteLLM for OpenRouter
+# OpenRouter provides unified access to multiple LLM providers
+# Docs: https://openrouter.ai/docs and https://docs.litellm.ai/docs/providers/openrouter
 litellm.cache = litellm.Cache(
     type="redis",  # type: ignore[arg-type]
     host=os.getenv("REDIS_HOST", "localhost"),
@@ -37,6 +38,13 @@ litellm.cache = litellm.Cache(
 litellm.success_callback = ["prometheus"]
 litellm.failure_callback = ["prometheus"]
 
+# Set OpenRouter API key for all openrouter/* model calls
+openrouter_key = os.getenv("OPENROUTER_API_KEY")
+if openrouter_key:
+    os.environ["OPENROUTER_API_KEY"] = openrouter_key
+    # Also set as generic key for litellm
+    litellm.openrouter_key = openrouter_key
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,14 +52,29 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting sopher.ai backend...")
 
-    # Check OAuth configuration
-    google_client_id = os.getenv("GOOGLE_CLIENT_ID", "")
-    google_client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "")
-    if not google_client_id or not google_client_secret:
+    # Check OAuth configuration (WorkOS SSO)
+    workos_client_id = os.getenv("WORKOS_CLIENT_ID", "")
+    workos_api_key = os.getenv("WORKOS_API_KEY", "")
+    local_bypass = os.getenv("LOCAL_AUTH_BYPASS", "false").lower() == "true"
+
+    if not workos_client_id or not workos_api_key:
+        if local_bypass:
+            logger.info(
+                "WorkOS SSO not configured but LOCAL_AUTH_BYPASS is enabled. "
+                "Use /auth/dev/login for local development authentication."
+            )
+        else:
+            logger.warning(
+                "WorkOS SSO credentials not configured. Authentication will not work. "
+                "Please set WORKOS_CLIENT_ID and WORKOS_API_KEY environment variables, "
+                "or enable LOCAL_AUTH_BYPASS=true for development."
+            )
+
+    # Check OpenRouter configuration
+    if not os.getenv("OPENROUTER_API_KEY"):
         logger.warning(
-            "Google OAuth credentials not configured. Authentication will not work. "
-            "Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables. "
-            "See docs/oauth-fix-guide.md for setup instructions."
+            "OPENROUTER_API_KEY not configured. LLM features will not work. "
+            "Get your API key from https://openrouter.ai/keys"
         )
 
     await init_db()
@@ -96,7 +119,31 @@ app.add_middleware(
 # Request ID handled by our logging middleware below
 
 # Add compression middleware for better performance
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# NOTE: GZipMiddleware buffers responses which breaks SSE streaming
+# We use a custom middleware that skips compression for SSE endpoints
+
+
+class SSEAwareGZipMiddleware(GZipMiddleware):
+    """GZip middleware that skips compression for SSE responses.
+
+    SSE (Server-Sent Events) requires unbuffered streaming, but GZip
+    buffers the entire response before compressing. This middleware
+    checks if the request is for an SSE endpoint and bypasses compression.
+    """
+
+    async def __call__(self, scope, receive, send):
+        # Skip compression for SSE endpoints (they have /stream in the path)
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if "/stream" in path:
+                # Bypass GZip completely for streaming endpoints
+                await self.app(scope, receive, send)
+                return
+        # Use normal GZip for other requests
+        await super().__call__(scope, receive, send)
+
+
+app.add_middleware(SSEAwareGZipMiddleware, minimum_size=1000)
 
 
 # Request size limit (10MB max for all requests)

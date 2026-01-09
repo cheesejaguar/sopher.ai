@@ -30,9 +30,13 @@ COPY . .
 # Ensure public directory exists for Next.js
 RUN mkdir -p public
 
+# Build arguments for configuration
+ARG BACKEND_URL=http://localhost:8000
+
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    NODE_ENV=production
+    NODE_ENV=production \
+    BACKEND_URL=${BACKEND_URL}
 
 # Build the application with optimizations
 RUN npm run build && \

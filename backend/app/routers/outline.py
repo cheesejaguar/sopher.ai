@@ -19,6 +19,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from ..agents import BookWritingAgents
 from ..cache import cache
+from ..config import DEFAULT_MODEL
 from ..db import get_db
 from ..errors import ErrorCode, api_error
 from ..metrics import MetricsTracker, active_sessions
@@ -284,6 +285,7 @@ async def stream_outline(
     style_guide: Optional[str] = None,
     genre: Optional[str] = None,
     target_chapters: int = 10,
+    model: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     user: TokenData = Depends(get_current_user),
     background_tasks: BackgroundTasks = BackgroundTasks(),
@@ -381,6 +383,7 @@ async def stream_outline(
         style_guide=style_guide,
         genre=genre,
         target_chapters=target_chapters,
+        model=model or DEFAULT_MODEL,
     )
 
     # Create session
@@ -692,7 +695,7 @@ async def revision_event_generator(
     active_sessions.inc()
     start_time = time.perf_counter()
     tokens_emitted = 0
-    model = "gpt-5"
+    model = DEFAULT_MODEL
     stream_start = asyncio.get_event_loop().time()
 
     try:

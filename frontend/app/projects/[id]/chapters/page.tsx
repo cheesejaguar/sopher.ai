@@ -101,7 +101,7 @@ export default function ChapterGenerationPage() {
   // Fetch outline to get chapter structure
   const fetchOutline = useCallback(async () => {
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/outline`, {
+      const response = await fetch(`/api/backend/v1/projects/${projectId}/outline`, {
         credentials: 'include',
       })
 
@@ -127,7 +127,7 @@ export default function ChapterGenerationPage() {
   // Fetch existing chapters
   const fetchChapters = useCallback(async () => {
     try {
-      const response = await fetch(`/api/v1/projects/${projectId}/chapters`, {
+      const response = await fetch(`/api/backend/v1/projects/${projectId}/chapters`, {
         credentials: 'include',
       })
 
@@ -179,8 +179,10 @@ export default function ChapterGenerationPage() {
       updateGenerationJob(chapterNumber, { status: 'running', progress: 0 })
 
       try {
+        // Call backend directly for SSE streaming (Next.js rewrites buffer SSE responses)
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
         const response = await fetch(
-          `/api/v1/projects/${projectId}/chapters/${chapterNumber}/generate/stream`,
+          `${backendUrl}/api/v1/projects/${projectId}/chapters/${chapterNumber}/generate/stream`,
           {
             method: 'POST',
             credentials: 'include',

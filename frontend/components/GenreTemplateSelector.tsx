@@ -559,21 +559,21 @@ export default function GenreTemplateSelector({
         onClick={() => handleGenreSelect(template)}
         className={`flex items-center gap-3 p-4 border rounded-lg text-left transition-all w-full ${
           isSelected
-            ? 'border-teal bg-teal/5 shadow-md'
-            : 'border-slate/20 hover:border-slate/40'
+            ? 'border-aurora-teal bg-aurora-teal/10 shadow-md shadow-aurora-teal/10'
+            : 'border-graphite hover:border-slate'
         }`}
       >
         <div
-          className={`p-2 rounded-lg ${isSelected ? 'bg-teal text-snow' : 'bg-slate/10 text-slate'}`}
+          className={`p-2 rounded-lg ${isSelected ? 'bg-aurora-teal text-charcoal' : 'bg-graphite text-mist'}`}
         >
           {template.icon}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="font-medium text-ink">{template.name}</span>
-            {isSelected && <Check className="h-4 w-4 text-teal" />}
+            <span className="font-medium text-cream">{template.name}</span>
+            {isSelected && <Check className="h-4 w-4 text-aurora-teal" />}
           </div>
-          <p className="text-xs text-slate truncate">{template.description}</p>
+          <p className="text-xs text-mist truncate">{template.description}</p>
         </div>
       </button>
     )
@@ -584,36 +584,36 @@ export default function GenreTemplateSelector({
 
     return (
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-ink">Required Elements</h3>
+        <h3 className="text-sm font-medium text-cream">Required Elements</h3>
         {selectedGenre.core_elements.map((element, index) => (
           <div
             key={index}
             className={`border rounded-lg p-3 ${
               element.importance === 'required'
-                ? 'border-teal/30 bg-teal/5'
-                : 'border-slate/20'
+                ? 'border-aurora-teal/30 bg-aurora-teal/10'
+                : 'border-graphite'
             }`}
           >
             <div className="flex items-start gap-2">
-              <Target className="h-4 w-4 text-teal mt-0.5" />
+              <Target className="h-4 w-4 text-aurora-teal mt-0.5" />
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm text-ink">{element.name}</span>
+                  <span className="font-medium text-sm text-cream">{element.name}</span>
                   {element.importance === 'required' && (
-                    <span className="text-xs bg-teal/20 text-teal px-1.5 py-0.5 rounded">
+                    <span className="text-xs bg-aurora-teal/20 text-aurora-teal px-1.5 py-0.5 rounded">
                       Required
                     </span>
                   )}
                 </div>
-                <p className="text-xs text-slate mt-1">{element.description}</p>
-                <p className="text-xs text-slate/70 mt-1">
+                <p className="text-xs text-mist mt-1">{element.description}</p>
+                <p className="text-xs text-fog mt-1">
                   <span className="font-medium">When:</span> {element.when_to_include}
                 </p>
                 {showDetails && element.tips.length > 0 && (
                   <ul className="mt-2 space-y-1">
                     {element.tips.map((tip, i) => (
-                      <li key={i} className="text-xs text-slate flex items-start gap-1">
-                        <span className="text-teal">-</span>
+                      <li key={i} className="text-xs text-mist flex items-start gap-1">
+                        <span className="text-aurora-teal">-</span>
                         {tip}
                       </li>
                     ))}
@@ -632,13 +632,13 @@ export default function GenreTemplateSelector({
 
     return (
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-ink flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-500" />
+        <h3 className="text-sm font-medium text-cream flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 text-ember" />
           Things to Avoid
         </h3>
         <ul className="space-y-2">
           {selectedGenre.avoid_list.map((item, index) => (
-            <li key={index} className="flex items-start gap-2 text-sm text-slate">
+            <li key={index} className="flex items-start gap-2 text-sm text-mist">
               <X className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
               {item}
             </li>
@@ -653,14 +653,14 @@ export default function GenreTemplateSelector({
 
     return (
       <div className="space-y-3">
-        <h3 className="text-sm font-medium text-ink flex items-center gap-2">
-          <Info className="h-4 w-4 text-blue-500" />
+        <h3 className="text-sm font-medium text-cream flex items-center gap-2">
+          <Info className="h-4 w-4 text-nebula-blue" />
           Reader Expectations
         </h3>
         <ul className="space-y-2">
           {selectedGenre.reader_expectations.map((item, index) => (
-            <li key={index} className="flex items-start gap-2 text-sm text-slate">
-              <Check className="h-4 w-4 text-teal mt-0.5 flex-shrink-0" />
+            <li key={index} className="flex items-start gap-2 text-sm text-mist">
+              <Check className="h-4 w-4 text-aurora-teal mt-0.5 flex-shrink-0" />
               {item}
             </li>
           ))}
@@ -670,12 +670,12 @@ export default function GenreTemplateSelector({
   }
 
   return (
-    <div className="bg-snow rounded-xl shadow-sm">
+    <div className="bg-charcoal-light rounded-xl border border-graphite shadow-lg">
       {/* Header */}
-      <div className="p-4 border-b border-slate/10">
+      <div className="p-4 border-b border-graphite">
         <div className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5 text-teal" />
-          <h2 className="text-lg font-medium text-ink">Genre Template</h2>
+          <BookOpen className="h-5 w-5 text-aurora-teal" />
+          <h2 className="text-lg font-medium text-cream">Genre Template</h2>
         </div>
       </div>
 
@@ -686,13 +686,13 @@ export default function GenreTemplateSelector({
             onClick={() =>
               setExpandedSection(expandedSection === 'genres' ? null : 'genres')
             }
-            className="flex items-center justify-between w-full text-sm font-medium text-ink mb-3"
+            className="flex items-center justify-between w-full text-sm font-medium text-cream mb-3"
           >
             <span>Select Genre</span>
             {expandedSection === 'genres' ? (
-              <ChevronUp className="h-4 w-4 text-slate" />
+              <ChevronUp className="h-4 w-4 text-mist" />
             ) : (
-              <ChevronDown className="h-4 w-4 text-slate" />
+              <ChevronDown className="h-4 w-4 text-mist" />
             )}
           </button>
           {expandedSection === 'genres' && (
@@ -711,13 +711,13 @@ export default function GenreTemplateSelector({
                 onClick={() =>
                   setExpandedSection(expandedSection === 'subgenres' ? null : 'subgenres')
                 }
-                className="flex items-center justify-between w-full text-sm font-medium text-ink mb-3"
+                className="flex items-center justify-between w-full text-sm font-medium text-cream mb-3"
               >
                 <span>Subgenre (Optional)</span>
                 {expandedSection === 'subgenres' ? (
-                  <ChevronUp className="h-4 w-4 text-slate" />
+                  <ChevronUp className="h-4 w-4 text-mist" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 text-slate" />
+                  <ChevronDown className="h-4 w-4 text-mist" />
                 )}
               </button>
               {expandedSection === 'subgenres' && (
@@ -728,8 +728,8 @@ export default function GenreTemplateSelector({
                       onClick={() => handleSubgenreSelect(subgenre)}
                       className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
                         selectedSubgenre === subgenre
-                          ? 'border-teal bg-teal/10 text-teal'
-                          : 'border-slate/20 text-slate hover:border-slate/40'
+                          ? 'border-aurora-teal bg-aurora-teal/15 text-aurora-teal'
+                          : 'border-graphite text-mist hover:border-slate'
                       }`}
                     >
                       {subgenre}
@@ -745,18 +745,18 @@ export default function GenreTemplateSelector({
                 onClick={() =>
                   setExpandedSection(expandedSection === 'tropes' ? null : 'tropes')
                 }
-                className="flex items-center justify-between w-full text-sm font-medium text-ink mb-3"
+                className="flex items-center justify-between w-full text-sm font-medium text-cream mb-3"
               >
                 <span>
                   Common Tropes{' '}
                   {selectedTropes.length > 0 && (
-                    <span className="text-teal">({selectedTropes.length} selected)</span>
+                    <span className="text-aurora-teal">({selectedTropes.length} selected)</span>
                   )}
                 </span>
                 {expandedSection === 'tropes' ? (
-                  <ChevronUp className="h-4 w-4 text-slate" />
+                  <ChevronUp className="h-4 w-4 text-mist" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 text-slate" />
+                  <ChevronDown className="h-4 w-4 text-mist" />
                 )}
               </button>
               {expandedSection === 'tropes' && (
@@ -767,8 +767,8 @@ export default function GenreTemplateSelector({
                       onClick={() => handleTropeToggle(trope)}
                       className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
                         selectedTropes.includes(trope)
-                          ? 'border-teal bg-teal/10 text-teal'
-                          : 'border-slate/20 text-slate hover:border-slate/40'
+                          ? 'border-aurora-teal bg-aurora-teal/15 text-aurora-teal'
+                          : 'border-graphite text-mist hover:border-slate'
                       }`}
                     >
                       {trope}
@@ -784,23 +784,23 @@ export default function GenreTemplateSelector({
                 onClick={() =>
                   setExpandedSection(expandedSection === 'elements' ? null : 'elements')
                 }
-                className="flex items-center justify-between w-full text-sm font-medium text-ink mb-3"
+                className="flex items-center justify-between w-full text-sm font-medium text-cream mb-3"
               >
                 <span>Core Elements</span>
                 {expandedSection === 'elements' ? (
-                  <ChevronUp className="h-4 w-4 text-slate" />
+                  <ChevronUp className="h-4 w-4 text-mist" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 text-slate" />
+                  <ChevronDown className="h-4 w-4 text-mist" />
                 )}
               </button>
               {expandedSection === 'elements' && (
                 <div className="space-y-4">
-                  <label className="flex items-center gap-2 text-sm text-slate">
+                  <label className="flex items-center gap-2 text-sm text-mist">
                     <input
                       type="checkbox"
                       checked={showDetails}
                       onChange={(e) => setShowDetails(e.target.checked)}
-                      className="rounded border-slate/30 text-teal focus:ring-teal"
+                      className="rounded border-graphite bg-charcoal text-aurora-teal focus:ring-aurora-teal focus:ring-offset-charcoal"
                     />
                     Show detailed tips
                   </label>
@@ -815,22 +815,22 @@ export default function GenreTemplateSelector({
                 onClick={() =>
                   setExpandedSection(expandedSection === 'guidance' ? null : 'guidance')
                 }
-                className="flex items-center justify-between w-full text-sm font-medium text-ink mb-3"
+                className="flex items-center justify-between w-full text-sm font-medium text-cream mb-3"
               >
                 <span>Writing Guidance</span>
                 {expandedSection === 'guidance' ? (
-                  <ChevronUp className="h-4 w-4 text-slate" />
+                  <ChevronUp className="h-4 w-4 text-mist" />
                 ) : (
-                  <ChevronDown className="h-4 w-4 text-slate" />
+                  <ChevronDown className="h-4 w-4 text-mist" />
                 )}
               </button>
               {expandedSection === 'guidance' && (
                 <div className="space-y-6">
                   {renderReaderExpectations()}
                   {renderAvoidList()}
-                  <div className="bg-slate/5 rounded-lg p-3">
-                    <h3 className="text-sm font-medium text-ink mb-2">Pacing Notes</h3>
-                    <p className="text-sm text-slate">{selectedGenre.pacing_notes}</p>
+                  <div className="bg-charcoal rounded-lg p-3 border border-graphite">
+                    <h3 className="text-sm font-medium text-cream mb-2">Pacing Notes</h3>
+                    <p className="text-sm text-mist">{selectedGenre.pacing_notes}</p>
                   </div>
                 </div>
               )}
@@ -841,22 +841,22 @@ export default function GenreTemplateSelector({
 
       {/* Summary Footer */}
       {selectedGenre && (
-        <div className="p-4 border-t border-slate/10 bg-slate/5">
+        <div className="p-4 border-t border-graphite bg-charcoal">
           <div className="text-sm space-y-1">
             <div>
-              <span className="text-slate">Genre: </span>
-              <span className="font-medium text-ink">{selectedGenre.name}</span>
+              <span className="text-mist">Genre: </span>
+              <span className="font-medium text-cream">{selectedGenre.name}</span>
             </div>
             {selectedSubgenre && (
               <div>
-                <span className="text-slate">Subgenre: </span>
-                <span className="font-medium text-ink">{selectedSubgenre}</span>
+                <span className="text-mist">Subgenre: </span>
+                <span className="font-medium text-cream">{selectedSubgenre}</span>
               </div>
             )}
             {selectedTropes.length > 0 && (
               <div>
-                <span className="text-slate">Tropes: </span>
-                <span className="font-medium text-ink">{selectedTropes.join(', ')}</span>
+                <span className="text-mist">Tropes: </span>
+                <span className="font-medium text-cream">{selectedTropes.join(', ')}</span>
               </div>
             )}
           </div>

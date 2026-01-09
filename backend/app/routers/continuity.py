@@ -3,12 +3,15 @@ Continuity router for checking and maintaining consistency across the book.
 
 Provides endpoints for:
 - Full continuity checking (character, timeline, world)
+- Literary review based on NYT and professional guidelines
 - Getting continuity reports
 - Auto-fixing continuity issues
 """
 
+import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -16,12 +19,20 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import Integer, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.errors import ErrorCode
+from app.models import Artifact, Project, Session
 from app.security import TokenData, get_current_user
-from app.services.project_service import ProjectService
+
+# Import LiteLLM for AI analysis
+try:
+    from litellm import acompletion
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +199,188 @@ class FixIssueResponse(BaseModel):
 
 
 # ============================================================================
+# Literary Review Configuration - Based on NYT Book Review Guidelines
+# ============================================================================
+
+# Review phases with descriptions based on professional book review standards
+REVIEW_PHASES = [
+    {
+        "id": "narrative_structure",
+        "name": "Narrative & Structure",
+        "description": "Evaluating plot coherence, chapter progression, and story pacing",
+        "weight": 0.20,
+    },
+    {
+        "id": "character_development",
+        "name": "Character Development",
+        "description": "Analyzing character consistency, motivations, arcs, and distinct voices",
+        "weight": 0.20,
+    },
+    {
+        "id": "writing_quality",
+        "name": "Writing Quality",
+        "description": "Assessing prose style, clarity, dialogue effectiveness, and show vs tell",
+        "weight": 0.20,
+    },
+    {
+        "id": "thematic_elements",
+        "name": "Thematic Elements",
+        "description": "Examining central themes, their development, and message clarity",
+        "weight": 0.15,
+    },
+    {
+        "id": "technical_consistency",
+        "name": "Technical Consistency",
+        "description": "Checking timeline coherence, world-building logic, and factual accuracy",
+        "weight": 0.15,
+    },
+    {
+        "id": "reader_experience",
+        "name": "Reader Experience",
+        "description": "Evaluating engagement, emotional resonance, and overall impact",
+        "weight": 0.10,
+    },
+]
+
+# Detailed review prompts for each phase
+REVIEW_PROMPTS = {
+    "narrative_structure": """You are a professional literary reviewer evaluating narrative structure.
+
+Analyze this manuscript for:
+1. **Plot Coherence**: Does the story have a clear beginning, middle, and end? Are there logical cause-and-effect relationships between events?
+2. **Chapter Progression**: Do chapters flow naturally into each other? Is there appropriate rising action and tension?
+3. **Pacing**: Is the story well-paced? Are there sections that drag or feel rushed?
+4. **Scene Construction**: Are scenes properly established with clear settings, transitions, and resolutions?
+5. **Story Arc**: Does the overall narrative arc feel complete and satisfying?
+
+Provide your analysis in JSON format:
+{
+    "score": <0.0-1.0>,
+    "strengths": ["strength1", "strength2", ...],
+    "weaknesses": ["weakness1", "weakness2", ...],
+    "specific_issues": [
+        {"chapter": <number>, "issue": "description", "suggestion": "how to fix"}
+    ],
+    "summary": "2-3 sentence overall assessment"
+}""",
+
+    "character_development": """You are a professional literary reviewer evaluating character development.
+
+Analyze this manuscript for:
+1. **Character Consistency**: Do characters behave consistently with their established traits throughout?
+2. **Motivations**: Are character motivations clear and believable?
+3. **Character Arcs**: Do main characters show growth or change over the course of the story?
+4. **Distinct Voices**: Does each character have a unique voice in dialogue and internal thoughts?
+5. **Relationships**: Are relationships between characters believable and well-developed?
+6. **Supporting Characters**: Do secondary characters feel three-dimensional or like cardboard cutouts?
+
+Provide your analysis in JSON format:
+{
+    "score": <0.0-1.0>,
+    "characters_analyzed": ["name1", "name2", ...],
+    "strengths": ["strength1", "strength2", ...],
+    "weaknesses": ["weakness1", "weakness2", ...],
+    "specific_issues": [
+        {"character": "name", "chapter": <number>, "issue": "description", "suggestion": "how to fix"}
+    ],
+    "summary": "2-3 sentence overall assessment"
+}""",
+
+    "writing_quality": """You are a professional literary reviewer evaluating writing quality.
+
+Analyze this manuscript for:
+1. **Prose Style**: Is the writing clear, engaging, and appropriate for the genre?
+2. **Show vs Tell**: Does the author effectively show emotions and events rather than just telling?
+3. **Dialogue**: Is dialogue natural, purposeful, and distinct for each character?
+4. **Description**: Are descriptions vivid without being purple prose?
+5. **Word Choice**: Is vocabulary appropriate and varied?
+6. **Sentence Structure**: Is there good variety in sentence length and structure?
+7. **Grammar & Mechanics**: Are there noticeable grammatical issues?
+
+Provide your analysis in JSON format:
+{
+    "score": <0.0-1.0>,
+    "strengths": ["strength1", "strength2", ...],
+    "weaknesses": ["weakness1", "weakness2", ...],
+    "notable_passages": [
+        {"chapter": <number>, "type": "strength|weakness", "excerpt": "brief quote", "comment": "why notable"}
+    ],
+    "summary": "2-3 sentence overall assessment"
+}""",
+
+    "thematic_elements": """You are a professional literary reviewer evaluating thematic elements.
+
+Analyze this manuscript for:
+1. **Central Themes**: What are the main themes? Are they clearly conveyed?
+2. **Theme Development**: How well are themes woven throughout the narrative?
+3. **Message Clarity**: Is there a clear message or takeaway without being heavy-handed?
+4. **Symbolic Elements**: Are symbols and motifs used effectively?
+5. **Emotional Resonance**: Do the themes create emotional impact?
+
+Provide your analysis in JSON format:
+{
+    "score": <0.0-1.0>,
+    "identified_themes": ["theme1", "theme2", ...],
+    "strengths": ["strength1", "strength2", ...],
+    "weaknesses": ["weakness1", "weakness2", ...],
+    "thematic_moments": [
+        {"chapter": <number>, "theme": "which theme", "effectiveness": "how well handled"}
+    ],
+    "summary": "2-3 sentence overall assessment"
+}""",
+
+    "technical_consistency": """You are a professional literary reviewer evaluating technical consistency.
+
+Analyze this manuscript for:
+1. **Timeline Coherence**: Do events happen in logical chronological order? Are there timeline errors?
+2. **World-Building Logic**: Are the rules of the story world consistent?
+3. **Factual Accuracy**: Are any factual claims accurate (historical, scientific, etc.)?
+4. **Continuity Errors**: Are there contradictions in descriptions, events, or character knowledge?
+5. **Setting Consistency**: Do locations and environments remain consistent?
+
+Provide your analysis in JSON format:
+{
+    "score": <0.0-1.0>,
+    "timeline_valid": true|false,
+    "continuity_errors": [
+        {"chapters": [<number>, <number>], "error": "description", "fix": "suggested correction"}
+    ],
+    "world_building_issues": [
+        {"chapter": <number>, "issue": "description", "impact": "low|medium|high"}
+    ],
+    "factual_concerns": [
+        {"chapter": <number>, "claim": "what was stated", "concern": "why problematic"}
+    ],
+    "summary": "2-3 sentence overall assessment"
+}""",
+
+    "reader_experience": """You are a professional literary reviewer evaluating reader experience.
+
+Analyze this manuscript for:
+1. **Engagement**: Does the story hook the reader and maintain interest?
+2. **Emotional Impact**: Does the story evoke appropriate emotional responses?
+3. **Satisfaction**: Is the ending satisfying? Are plot threads resolved?
+4. **Target Audience Fit**: Is the content appropriate for its intended audience?
+5. **Readability**: Is the book easy to follow and enjoyable to read?
+6. **Recommendation**: Would you recommend this book? To whom?
+
+Provide your analysis in JSON format:
+{
+    "score": <0.0-1.0>,
+    "engagement_level": "low|medium|high",
+    "emotional_moments": [
+        {"chapter": <number>, "moment": "description", "emotion": "what it evokes"}
+    ],
+    "strengths": ["strength1", "strength2", ...],
+    "weaknesses": ["weakness1", "weakness2", ...],
+    "target_audience": "description of ideal reader",
+    "recommendation": "overall recommendation with reasoning",
+    "summary": "2-3 sentence overall assessment"
+}"""
+}
+
+
+# ============================================================================
 # Helper Functions
 # ============================================================================
 
@@ -196,22 +389,127 @@ async def verify_project_ownership(
     project_id: UUID,
     current_user: TokenData,
     db: AsyncSession,
-) -> None:
-    """Verify that the current user owns the project."""
-    project_service = ProjectService(db)
-    project = await project_service.get_project(project_id)
+) -> Project:
+    """Verify that the current user owns the project. Returns the project."""
+    result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.user_id == current_user.user_id,
+        )
+    )
+    project = result.scalar_one_or_none()
 
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error_code": ErrorCode.PROJECT_NOT_FOUND, "message": "Project not found"},
+            detail={"error_code": ErrorCode.PROJECT_NOT_FOUND, "message": "Project not found or you don't have access"},
+        )
+    return project
+
+
+async def get_all_chapters(db: AsyncSession, project_id: UUID) -> list[dict]:
+    """Fetch all chapters for a project, ordered by chapter number."""
+    result = await db.execute(
+        select(Artifact)
+        .join(Session, Session.id == Artifact.session_id)
+        .where(Session.project_id == project_id)
+        .where(Artifact.kind == "chapter")
+        .order_by(Artifact.meta["chapter_number"].astext.cast(Integer))
+    )
+    artifacts = result.scalars().all()
+
+    chapters = []
+    for artifact in artifacts:
+        if artifact.blob:
+            chapter_num = artifact.meta.get("chapter_number", 0)
+            title = artifact.meta.get("title", f"Chapter {chapter_num}")
+            content = artifact.blob.decode("utf-8")
+            chapters.append({
+                "number": chapter_num,
+                "title": title,
+                "content": content,
+                "word_count": len(content.split())
+            })
+
+    return chapters
+
+
+async def get_project_outline(db: AsyncSession, project_id: UUID) -> Optional[str]:
+    """Retrieve the latest outline artifact for a project."""
+    result = await db.execute(
+        select(Artifact)
+        .join(Session, Session.id == Artifact.session_id)
+        .where(Session.project_id == project_id)
+        .where(Artifact.kind == "outline")
+        .order_by(Artifact.created_at.desc())
+        .limit(1)
+    )
+    artifact = result.scalar_one_or_none()
+    if artifact and artifact.blob:
+        return artifact.blob.decode("utf-8")
+    return None
+
+
+async def run_llm_review(
+    manuscript_text: str,
+    phase_id: str,
+    model: str = None,
+) -> dict:
+    """Run LLM analysis for a specific review phase."""
+    if not LITELLM_AVAILABLE:
+        return {
+            "score": 0.8,
+            "summary": "LiteLLM not available - mock review returned",
+            "strengths": ["Unable to perform real analysis"],
+            "weaknesses": [],
+        }
+
+    from app.config import DEFAULT_MODEL
+    model = model or DEFAULT_MODEL
+    prompt = REVIEW_PROMPTS.get(phase_id, "")
+
+    if not prompt:
+        return {"score": 0.0, "error": f"Unknown review phase: {phase_id}"}
+
+    try:
+        response = await acompletion(
+            model=model,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Please review this manuscript:\n\n{manuscript_text}"},
+            ],
+            temperature=0.3,
+            max_tokens=2000,
         )
 
-    if str(project.user_id) != current_user.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You don't have access to this project",
-        )
+        content = response.choices[0].message.content
+
+        # Try to parse JSON from response
+        try:
+            # Find JSON in response (may be wrapped in markdown code blocks)
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                return json.loads(json_match.group())
+            else:
+                return {
+                    "score": 0.7,
+                    "summary": content[:500],
+                    "parse_error": "Could not extract JSON from response"
+                }
+        except json.JSONDecodeError:
+            return {
+                "score": 0.7,
+                "summary": content[:500],
+                "parse_error": "Invalid JSON in response"
+            }
+
+    except Exception as e:
+        logger.error(f"LLM review failed for phase {phase_id}: {e}")
+        return {
+            "score": 0.0,
+            "error": str(e),
+            "summary": f"Review failed: {str(e)}"
+        }
 
 
 # ============================================================================
@@ -227,42 +525,133 @@ async def run_continuity_check(
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     """
-    Run a full continuity check on the project with SSE streaming.
+    Run a comprehensive literary review on the project with SSE streaming.
 
-    Checks for:
-    - Character consistency (descriptions, traits, knowledge, locations)
-    - Timeline consistency (event sequencing, time passage, day/night)
-    - World consistency (rules, geography, culture)
+    Based on NYT Book Review guidelines and professional literary standards.
+    Evaluates:
+    - Narrative structure and pacing
+    - Character development and consistency
+    - Writing quality and prose style
+    - Thematic elements and message clarity
+    - Technical consistency (timeline, world-building)
+    - Overall reader experience
     """
     await verify_project_ownership(project_id, current_user, db)
 
+    # Fetch all chapters for the review
+    chapters = await get_all_chapters(db, project_id)
+
     async def generate():
-        """Generate SSE events for continuity checking."""
+        """Generate SSE events for literary review."""
         try:
-            yield f"data: {json.dumps({'event': 'start', 'check_types': request.check_types})}\n\n"
+            # Start event with metadata
+            yield f"data: {json.dumps({'event': 'start', 'phases': [p['name'] for p in REVIEW_PHASES], 'chapter_count': len(chapters)})}\n\n"
 
-            # Simulate continuity checking phases
-            total_steps = len(request.check_types) * 3  # Extract, analyze, report per type
-            current_step = 0
+            if not chapters:
+                yield f"data: {json.dumps({'event': 'error', 'message': 'No chapters found. Generate chapters before running a review.'})}\n\n"
+                return
 
-            for check_type in request.check_types:
-                # Phase 1: Extract data
-                current_step += 1
-                yield f"data: {json.dumps({'event': 'progress', 'phase': 'extracting', 'check_type': check_type, 'progress': current_step / total_steps})}\n\n"
+            # Compile full manuscript for review
+            manuscript_parts = []
+            for chapter in chapters:
+                manuscript_parts.append(f"## Chapter {chapter['number']}: {chapter['title']}\n\n{chapter['content']}")
 
-                # Phase 2: Analyze
-                current_step += 1
-                yield f"data: {json.dumps({'event': 'progress', 'phase': 'analyzing', 'check_type': check_type, 'progress': current_step / total_steps})}\n\n"
+            full_manuscript = "\n\n---\n\n".join(manuscript_parts)
+            total_words = sum(ch['word_count'] for ch in chapters)
 
-                # Phase 3: Report
-                current_step += 1
-                yield f"data: {json.dumps({'event': 'progress', 'phase': 'reporting', 'check_type': check_type, 'progress': current_step / total_steps})}\n\n"
+            yield f"data: {json.dumps({'event': 'progress', 'phase': 'Preparing manuscript', 'progress': 0.05, 'detail': f'Compiled {len(chapters)} chapters ({total_words:,} words)'})}\n\n"
 
-            # Complete with sample report
-            yield f"data: {json.dumps({'event': 'complete', 'issues_found': 0, 'overall_score': 1.0})}\n\n"
+            # Run each review phase
+            phase_results = {}
+            total_phases = len(REVIEW_PHASES)
+
+            for idx, phase in enumerate(REVIEW_PHASES):
+                phase_id = phase["id"]
+                phase_name = phase["name"]
+                phase_description = phase["description"]
+
+                # Progress update: starting phase
+                progress = 0.1 + (idx / total_phases) * 0.85
+                yield f"data: {json.dumps({'event': 'progress', 'phase': phase_name, 'progress': progress, 'detail': phase_description})}\n\n"
+
+                # Run LLM analysis for this phase
+                result = await run_llm_review(full_manuscript, phase_id)
+                phase_results[phase_id] = result
+
+                # Send phase result
+                yield f"data: {json.dumps({'event': 'phase_complete', 'phase': phase_name, 'phase_id': phase_id, 'score': result.get('score', 0), 'summary': result.get('summary', ''), 'details': result})}\n\n"
+
+                # Small delay to prevent overwhelming the client
+                await asyncio.sleep(0.5)
+
+            # Calculate overall score (weighted average)
+            overall_score = 0.0
+            for phase in REVIEW_PHASES:
+                phase_id = phase["id"]
+                weight = phase["weight"]
+                phase_score = phase_results.get(phase_id, {}).get("score", 0)
+                overall_score += phase_score * weight
+
+            # Compile all issues from all phases
+            all_issues = []
+            for phase_id, result in phase_results.items():
+                # Collect specific issues from different result formats
+                if "specific_issues" in result:
+                    for issue in result["specific_issues"]:
+                        all_issues.append({
+                            "phase": phase_id,
+                            "type": "specific",
+                            **issue
+                        })
+                if "continuity_errors" in result:
+                    for error in result["continuity_errors"]:
+                        all_issues.append({
+                            "phase": phase_id,
+                            "type": "continuity",
+                            **error
+                        })
+                if "world_building_issues" in result:
+                    for issue in result["world_building_issues"]:
+                        all_issues.append({
+                            "phase": phase_id,
+                            "type": "world_building",
+                            **issue
+                        })
+
+            # Generate overall recommendation
+            if overall_score >= 0.85:
+                recommendation = "This manuscript is publication-ready with minor polish needed."
+            elif overall_score >= 0.70:
+                recommendation = "This manuscript shows strong potential and would benefit from targeted revisions."
+            elif overall_score >= 0.55:
+                recommendation = "This manuscript needs significant revision in several areas before publication."
+            else:
+                recommendation = "This manuscript requires substantial rework across multiple dimensions."
+
+            # Complete event with full report
+            complete_data = {
+                "event": "complete",
+                "overall_score": round(overall_score, 3),
+                "issues_found": len(all_issues),
+                "chapter_count": len(chapters),
+                "total_words": total_words,
+                "recommendation": recommendation,
+                "phase_scores": {
+                    phase["id"]: phase_results.get(phase["id"], {}).get("score", 0)
+                    for phase in REVIEW_PHASES
+                },
+                "phase_summaries": {
+                    phase["id"]: phase_results.get(phase["id"], {}).get("summary", "")
+                    for phase in REVIEW_PHASES
+                },
+                "all_issues": all_issues[:20],  # Limit to top 20 issues
+                "full_report": phase_results,
+            }
+
+            yield f"data: {json.dumps(complete_data)}\n\n"
 
         except Exception as e:
-            logger.error(f"Error during continuity check: {e}")
+            logger.error(f"Error during literary review: {e}")
             yield f"data: {json.dumps({'event': 'error', 'message': str(e)})}\n\n"
 
     return StreamingResponse(

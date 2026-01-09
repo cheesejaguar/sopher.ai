@@ -9,9 +9,6 @@ import {
   Italic,
   Quote,
   List,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
   Eye,
   EyeOff,
   FileText,
@@ -292,15 +289,15 @@ export default function ChapterEditor({
   }, [handleSave, handleUndo, handleRedo, insertFormatting])
 
   return (
-    <div className="flex flex-col h-full bg-charcoal-light rounded-lg overflow-hidden">
+    <div className="flex flex-col h-full bg-charcoal-light rounded-lg overflow-hidden border border-graphite">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate/20">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-graphite bg-charcoal">
         <div className="flex items-center gap-1">
           {/* Undo/Redo */}
           <button
             onClick={handleUndo}
             disabled={historyIndex === 0 || isReadOnly}
-            className="p-2 text-slate hover:text-cream disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-2 text-fog hover:text-cream hover:bg-charcoal-light rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title="Undo (Cmd+Z)"
             aria-label="Undo"
           >
@@ -309,20 +306,20 @@ export default function ChapterEditor({
           <button
             onClick={handleRedo}
             disabled={historyIndex >= history.length - 1 || isReadOnly}
-            className="p-2 text-slate hover:text-cream disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-2 text-fog hover:text-cream hover:bg-charcoal-light rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             title="Redo (Cmd+Shift+Z)"
             aria-label="Redo"
           >
             <Redo className="h-4 w-4" />
           </button>
 
-          <div className="w-px h-6 bg-slate/20 mx-1" />
+          <div className="w-px h-6 bg-graphite mx-1" />
 
           {/* Formatting */}
           <button
             onClick={() => insertFormatting('**')}
             disabled={isReadOnly}
-            className="p-2 text-slate hover:text-cream disabled:opacity-50 transition-colors"
+            className="p-2 text-fog hover:text-cream hover:bg-charcoal-light rounded disabled:opacity-50 transition-colors"
             title="Bold (Cmd+B)"
             aria-label="Bold"
           >
@@ -331,7 +328,7 @@ export default function ChapterEditor({
           <button
             onClick={() => insertFormatting('*')}
             disabled={isReadOnly}
-            className="p-2 text-slate hover:text-cream disabled:opacity-50 transition-colors"
+            className="p-2 text-fog hover:text-cream hover:bg-charcoal-light rounded disabled:opacity-50 transition-colors"
             title="Italic (Cmd+I)"
             aria-label="Italic"
           >
@@ -340,7 +337,7 @@ export default function ChapterEditor({
           <button
             onClick={() => insertFormatting('> ', '')}
             disabled={isReadOnly}
-            className="p-2 text-slate hover:text-cream disabled:opacity-50 transition-colors"
+            className="p-2 text-fog hover:text-cream hover:bg-charcoal-light rounded disabled:opacity-50 transition-colors"
             title="Quote"
             aria-label="Quote"
           >
@@ -349,20 +346,20 @@ export default function ChapterEditor({
           <button
             onClick={() => insertFormatting('- ', '')}
             disabled={isReadOnly}
-            className="p-2 text-slate hover:text-cream disabled:opacity-50 transition-colors"
+            className="p-2 text-fog hover:text-cream hover:bg-charcoal-light rounded disabled:opacity-50 transition-colors"
             title="List"
             aria-label="List"
           >
             <List className="h-4 w-4" />
           </button>
 
-          <div className="w-px h-6 bg-slate/20 mx-1" />
+          <div className="w-px h-6 bg-graphite mx-1" />
 
           {/* View toggles */}
           <button
             onClick={() => setShowPreview(!showPreview)}
-            className={`p-2 transition-colors ${
-              showPreview ? 'text-teal' : 'text-slate hover:text-cream'
+            className={`p-2 rounded transition-colors ${
+              showPreview ? 'text-aurora-teal bg-aurora-teal/10' : 'text-fog hover:text-cream hover:bg-charcoal-light'
             }`}
             title={showPreview ? 'Hide Preview' : 'Show Preview'}
             aria-label={showPreview ? 'Hide Preview' : 'Show Preview'}
@@ -375,15 +372,15 @@ export default function ChapterEditor({
           </button>
           <button
             onClick={() => setShowComments(!showComments)}
-            className={`p-2 transition-colors ${
-              showComments ? 'text-teal' : 'text-slate hover:text-cream'
+            className={`p-2 rounded transition-colors relative ${
+              showComments ? 'text-aurora-teal bg-aurora-teal/10' : 'text-fog hover:text-cream hover:bg-charcoal-light'
             }`}
             title={showComments ? 'Hide Comments' : 'Show Comments'}
             aria-label={showComments ? 'Hide Comments' : 'Show Comments'}
           >
             <MessageSquare className="h-4 w-4" />
             {comments.filter((c) => !c.resolved).length > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-teal text-charcoal text-xs rounded-full flex items-center justify-center">
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-aurora-teal text-charcoal text-xs rounded-full flex items-center justify-center">
                 {comments.filter((c) => !c.resolved).length}
               </span>
             )}
@@ -393,15 +390,15 @@ export default function ChapterEditor({
         <div className="flex items-center gap-4">
           {/* Word count */}
           <div className="flex items-center gap-2 text-sm">
-            <FileText className="h-4 w-4 text-slate" />
-            <span className="text-slate">
+            <FileText className="h-4 w-4 text-fog" />
+            <span className="text-mist">
               {wordCount.toLocaleString()} / {wordCountTarget.toLocaleString()}{' '}
               words
             </span>
-            <div className="w-20 h-2 bg-slate/20 rounded-full overflow-hidden">
+            <div className="w-20 h-2 bg-graphite rounded-full overflow-hidden">
               <div
                 className={`h-full transition-all ${
-                  wordCountProgress >= 100 ? 'bg-gold' : 'bg-teal'
+                  wordCountProgress >= 100 ? 'bg-ember' : 'bg-aurora-teal'
                 }`}
                 style={{ width: `${wordCountProgress}%` }}
               />
@@ -411,10 +408,10 @@ export default function ChapterEditor({
           {/* Save status */}
           <div className="flex items-center gap-2">
             {isSaving && (
-              <Loader2 className="h-4 w-4 animate-spin text-teal" />
+              <Loader2 className="h-4 w-4 animate-spin text-aurora-teal" />
             )}
             {!isSaving && saveStatus === 'saved' && (
-              <Check className="h-4 w-4 text-gold" />
+              <Check className="h-4 w-4 text-aurora-teal" />
             )}
             {!isSaving && saveStatus === 'error' && (
               <X className="h-4 w-4 text-red-400" />
@@ -422,10 +419,10 @@ export default function ChapterEditor({
             <span
               className={`text-sm ${
                 saveStatus === 'saved'
-                  ? 'text-slate'
+                  ? 'text-mist'
                   : saveStatus === 'error'
                   ? 'text-red-400'
-                  : 'text-gold'
+                  : 'text-ember'
               }`}
             >
               {isSaving
@@ -442,7 +439,7 @@ export default function ChapterEditor({
           <button
             onClick={handleSave}
             disabled={isSaving || isReadOnly || saveStatus === 'saved'}
-            className="flex items-center gap-2 px-3 py-1.5 bg-teal text-charcoal rounded-lg hover:bg-teal/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 bg-aurora-teal text-charcoal rounded-lg hover:bg-aurora-teal/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
           >
             <Save className="h-4 w-4" />
             <span>Save</span>
@@ -461,7 +458,7 @@ export default function ChapterEditor({
             onChange={handleTitleChange}
             placeholder="Chapter Title"
             disabled={isReadOnly}
-            className="px-4 py-3 bg-transparent border-b border-slate/20 text-xl font-semibold text-cream placeholder-slate/50 focus:outline-none focus:border-teal disabled:cursor-not-allowed"
+            className="px-4 py-3 bg-transparent border-b border-graphite text-xl font-semibold text-cream placeholder-fog focus:outline-none focus:border-aurora-teal disabled:cursor-not-allowed transition-colors"
           />
 
           {/* Content editor */}
@@ -472,13 +469,13 @@ export default function ChapterEditor({
             onSelect={handleTextSelect}
             placeholder="Start writing your chapter..."
             disabled={isReadOnly}
-            className="flex-1 px-4 py-4 bg-transparent text-cream placeholder-slate/50 resize-none focus:outline-none font-mono text-sm leading-relaxed disabled:cursor-not-allowed"
+            className="flex-1 px-4 py-4 bg-transparent text-cream placeholder-fog resize-none focus:outline-none font-mono text-sm leading-relaxed disabled:cursor-not-allowed"
           />
         </div>
 
         {/* Preview panel */}
         {showPreview && (
-          <div className="w-1/2 border-l border-slate/20 overflow-auto">
+          <div className="w-1/2 border-l border-graphite overflow-auto bg-charcoal">
             <div className="p-4">
               <h2 className="text-xl font-semibold text-cream mb-4">
                 {localTitle || 'Untitled Chapter'}
@@ -486,7 +483,7 @@ export default function ChapterEditor({
               <div className="prose prose-invert prose-sm max-w-none">
                 {/* Simple markdown-like rendering */}
                 {localContent.split('\n\n').map((paragraph, i) => (
-                  <p key={i} className="text-cream/90 mb-4 leading-relaxed">
+                  <p key={i} className="text-mist mb-4 leading-relaxed">
                     {paragraph
                       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
                       .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -505,21 +502,21 @@ export default function ChapterEditor({
 
         {/* Comments panel */}
         {showComments && (
-          <div className="w-64 border-l border-slate/20 overflow-auto">
+          <div className="w-64 border-l border-graphite overflow-auto bg-charcoal">
             <div className="p-4">
               <h3 className="font-semibold text-cream mb-4">Comments</h3>
 
               {/* Add comment form */}
               {selectedText && (
-                <div className="mb-4 p-3 bg-charcoal rounded-lg">
-                  <p className="text-sm text-slate mb-2">
+                <div className="mb-4 p-3 bg-charcoal-light rounded-lg border border-graphite">
+                  <p className="text-sm text-mist mb-2">
                     Selected: &quot;{selectedText.substring(0, 50)}
                     {selectedText.length > 50 ? '...' : ''}&quot;
                   </p>
                   <input
                     type="text"
                     placeholder="Add a comment..."
-                    className="w-full px-2 py-1 bg-slate/20 text-cream rounded text-sm focus:outline-none focus:ring-1 focus:ring-teal"
+                    className="w-full px-2 py-1 bg-charcoal border border-graphite text-cream rounded text-sm focus:outline-none focus:ring-1 focus:ring-aurora-teal placeholder-fog"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && e.currentTarget.value) {
                         addComment(e.currentTarget.value)
@@ -532,7 +529,7 @@ export default function ChapterEditor({
 
               {/* Comment list */}
               {comments.filter((c) => !c.resolved).length === 0 ? (
-                <p className="text-sm text-slate">No comments yet.</p>
+                <p className="text-sm text-fog">No comments yet.</p>
               ) : (
                 <div className="space-y-3">
                   {comments
@@ -540,17 +537,17 @@ export default function ChapterEditor({
                     .map((comment) => (
                       <div
                         key={comment.id}
-                        className="p-3 bg-charcoal rounded-lg"
+                        className="p-3 bg-charcoal-light rounded-lg border border-graphite"
                       >
                         <p className="text-sm text-cream mb-2">{comment.text}</p>
-                        <p className="text-xs text-slate mb-2">
+                        <p className="text-xs text-fog mb-2">
                           {comment.author} •{' '}
                           {comment.timestamp.toLocaleDateString()}
                         </p>
                         <div className="flex gap-2">
                           <button
                             onClick={() => resolveComment(comment.id)}
-                            className="text-xs text-teal hover:text-teal/80"
+                            className="text-xs text-aurora-teal hover:text-aurora-teal/80"
                           >
                             Resolve
                           </button>

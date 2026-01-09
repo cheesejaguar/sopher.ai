@@ -36,7 +36,7 @@ class BudgetUpdateRequest(BaseModel):
 class EstimateRequest(BaseModel):
     """Request for cost estimation"""
 
-    model: str = "gpt-5"
+    model: str = "openrouter/openai/chatgpt-5.2"
     target_chapters: int = 12
     avg_prompt_tokens: int = 2000
     avg_completion_tokens: int = 4000

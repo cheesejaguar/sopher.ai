@@ -10,8 +10,6 @@ import {
   List,
   X,
   Menu,
-  Loader2,
-  AlertCircle,
   BookText,
   FileText,
   User,
@@ -141,7 +139,7 @@ function renderContent(content: string): React.ReactNode {
     // Check for scene breaks
     if (paragraph.trim().match(/^(\* \* \*|# # #|~ ~ ~|---|\*\*\*)$/)) {
       return (
-        <div key={index} className="text-center text-slate my-8" data-testid="scene-break">
+        <div key={index} className="text-center text-fog my-8" data-testid="scene-break">
           * * *
         </div>
       )
@@ -157,7 +155,7 @@ function renderContent(content: string): React.ReactNode {
     return (
       <p
         key={index}
-        className="mb-4 leading-relaxed text-charcoal indent-8 first:indent-0"
+        className="mb-4 leading-relaxed text-mist indent-8 first:indent-0"
         dangerouslySetInnerHTML={{ __html: processedText }}
       />
     )
@@ -177,8 +175,8 @@ function SectionHeader({
   return (
     <div className="text-center mb-12" data-testid="section-header">
       {icon && <div className="flex justify-center mb-4">{icon}</div>}
-      <h2 className="text-3xl font-serif font-bold text-charcoal mb-2">{title}</h2>
-      {subtitle && <p className="text-lg text-slate">{subtitle}</p>}
+      <h2 className="text-3xl font-bold text-cream mb-2">{title}</h2>
+      {subtitle && <p className="text-lg text-mist">{subtitle}</p>}
     </div>
   )
 }
@@ -372,27 +370,27 @@ export default function ManuscriptPreview({
       case 'title_page':
         return manuscript.title_page ? (
           <div className="text-center" data-testid="title-page-content">
-            <h1 className="text-5xl font-serif font-bold text-charcoal mb-4">
+            <h1 className="text-5xl font-bold text-cream mb-4">
               {manuscript.title_page.title}
             </h1>
             {manuscript.title_page.subtitle && (
-              <h2 className="text-2xl text-slate mb-8">{manuscript.title_page.subtitle}</h2>
+              <h2 className="text-2xl text-mist mb-8">{manuscript.title_page.subtitle}</h2>
             )}
             {manuscript.title_page.author_name && (
-              <p className="text-xl text-charcoal mb-12">by {manuscript.title_page.author_name}</p>
+              <p className="text-xl text-cream mb-12">by {manuscript.title_page.author_name}</p>
             )}
             {manuscript.title_page.publisher && (
-              <p className="text-slate mt-16">{manuscript.title_page.publisher}</p>
+              <p className="text-fog mt-16">{manuscript.title_page.publisher}</p>
             )}
             {manuscript.title_page.edition && (
-              <p className="text-sm text-slate">{manuscript.title_page.edition}</p>
+              <p className="text-sm text-fog">{manuscript.title_page.edition}</p>
             )}
           </div>
         ) : null
 
       case 'copyright':
         return manuscript.copyright_page ? (
-          <div className="text-center text-sm text-slate space-y-4" data-testid="copyright-content">
+          <div className="text-center text-sm text-fog space-y-4" data-testid="copyright-content">
             <p>
               Copyright {manuscript.copyright_page.year} {manuscript.copyright_page.author_name}
             </p>
@@ -411,18 +409,18 @@ export default function ManuscriptPreview({
       case 'dedication':
         return manuscript.dedication ? (
           <div className="text-center" data-testid="dedication-content">
-            <p className="text-xl italic text-charcoal">{manuscript.dedication.text}</p>
+            <p className="text-xl italic text-cream">{manuscript.dedication.text}</p>
           </div>
         ) : null
 
       case 'epigraph':
         return manuscript.epigraph ? (
           <div className="text-center max-w-xl mx-auto" data-testid="epigraph-content">
-            <blockquote className="text-lg italic text-charcoal border-l-4 border-teal pl-6 text-left">
+            <blockquote className="text-lg italic text-cream border-l-4 border-aurora-teal pl-6 text-left">
               {manuscript.epigraph.text}
             </blockquote>
             {(manuscript.epigraph.attribution || manuscript.epigraph.source) && (
-              <p className="text-slate mt-4 text-right">
+              <p className="text-fog mt-4 text-right">
                 {manuscript.epigraph.attribution && <span>— {manuscript.epigraph.attribution}</span>}
                 {manuscript.epigraph.source && (
                   <span className="italic">, {manuscript.epigraph.source}</span>
@@ -436,7 +434,7 @@ export default function ManuscriptPreview({
         return manuscript.acknowledgments ? (
           <div data-testid="acknowledgments-content">
             <SectionHeader title="Acknowledgments" />
-            <div className="prose prose-lg max-w-none">
+            <div className="prose prose-invert max-w-none">
               {renderContent(manuscript.acknowledgments)}
             </div>
           </div>
@@ -450,10 +448,10 @@ export default function ManuscriptPreview({
               {manuscript.table_of_contents.map((entry, index) => (
                 <li
                   key={index}
-                  className="flex items-center justify-between py-2 border-b border-slate/10 last:border-0"
+                  className="flex items-center justify-between py-2 border-b border-graphite last:border-0"
                   style={{ paddingLeft: `${(entry.level - 1) * 1.5}rem` }}
                 >
-                  <span className="text-charcoal">
+                  <span className="text-cream">
                     {entry.chapter_number !== undefined && entry.chapter_number !== null
                       ? `Chapter ${entry.chapter_number}: `
                       : ''}
@@ -472,10 +470,10 @@ export default function ManuscriptPreview({
               title={`Chapter ${currentChapter.number}`}
               subtitle={currentChapter.title}
             />
-            <div className="prose prose-lg max-w-none">
+            <div className="prose prose-invert max-w-none">
               {renderContent(currentChapter.content)}
             </div>
-            <div className="mt-8 pt-4 border-t border-slate/10 flex justify-between text-sm text-slate">
+            <div className="mt-8 pt-4 border-t border-graphite flex justify-between text-sm text-fog">
               <span>{currentChapter.word_count.toLocaleString()} words</span>
               <span>{formatReadingTime(calculateReadingTime(currentChapter.word_count))} read</span>
             </div>
@@ -487,16 +485,16 @@ export default function ManuscriptPreview({
           <div data-testid="author-bio-content">
             <SectionHeader
               title="About the Author"
-              icon={<User className="h-8 w-8 text-teal" />}
+              icon={<User className="h-8 w-8 text-aurora-teal" />}
             />
-            <div className="prose prose-lg max-w-none">
+            <div className="prose prose-invert max-w-none">
               {renderContent(manuscript.author_bio.text)}
             </div>
             {manuscript.author_bio.website && (
               <p className="mt-6 text-center">
                 <a
                   href={manuscript.author_bio.website}
-                  className="text-teal hover:underline"
+                  className="text-aurora-teal hover:underline"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -507,7 +505,7 @@ export default function ManuscriptPreview({
             {manuscript.author_bio.social_media && (
               <div className="mt-4 flex justify-center gap-4">
                 {Object.entries(manuscript.author_bio.social_media).map(([platform, handle]) => (
-                  <span key={platform} className="text-slate">
+                  <span key={platform} className="text-fog">
                     {platform}: {handle}
                   </span>
                 ))}
@@ -523,8 +521,8 @@ export default function ManuscriptPreview({
             {manuscript.also_by.series_info &&
               Object.entries(manuscript.also_by.series_info).map(([series, titles]) => (
                 <div key={series} className="mb-6">
-                  <h3 className="text-lg font-semibold text-charcoal mb-2">{series} Series</h3>
-                  <ul className="list-disc list-inside text-slate">
+                  <h3 className="text-lg font-semibold text-cream mb-2">{series} Series</h3>
+                  <ul className="list-disc list-inside text-mist">
                     {titles.map((title) => (
                       <li key={title} className="italic">
                         {title}
@@ -535,8 +533,8 @@ export default function ManuscriptPreview({
               ))}
             {manuscript.also_by.titles.length > 0 && (
               <div>
-                <h3 className="text-lg font-semibold text-charcoal mb-2">Standalone Novels</h3>
-                <ul className="list-disc list-inside text-slate">
+                <h3 className="text-lg font-semibold text-cream mb-2">Standalone Novels</h3>
+                <ul className="list-disc list-inside text-mist">
                   {manuscript.also_by.titles.map((title) => (
                     <li key={title} className="italic">
                       {title}
@@ -552,7 +550,7 @@ export default function ManuscriptPreview({
         return manuscript.excerpt ? (
           <div data-testid="excerpt-content">
             {manuscript.excerpt.coming_soon_date && (
-              <p className="text-center text-gold mb-4">
+              <p className="text-center text-ember mb-4">
                 Coming {manuscript.excerpt.coming_soon_date}
               </p>
             )}
@@ -560,7 +558,7 @@ export default function ManuscriptPreview({
               title={manuscript.excerpt.book_title}
               subtitle={manuscript.excerpt.chapter_title}
             />
-            <div className="prose prose-lg max-w-none">
+            <div className="prose prose-invert max-w-none">
               {renderContent(manuscript.excerpt.text)}
             </div>
           </div>
@@ -572,9 +570,9 @@ export default function ManuscriptPreview({
   }
 
   return (
-    <div className="min-h-screen bg-cream" data-testid="manuscript-preview">
+    <div className="min-h-screen bg-charcoal" data-testid="manuscript-preview">
       {/* Header */}
-      <header className="bg-white border-b border-slate/20 sticky top-0 z-40">
+      <header className="bg-charcoal-light border-b border-graphite sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3">
           <div className="flex items-center justify-between">
             {/* Left: Back & Menu */}
@@ -582,35 +580,35 @@ export default function ManuscriptPreview({
               {onBack ? (
                 <button
                   onClick={onBack}
-                  className="p-2 hover:bg-slate/10 rounded-lg transition-colors"
+                  className="p-2 hover:bg-charcoal rounded-lg transition-colors"
                   data-testid="back-button"
                 >
-                  <ChevronLeft className="h-5 w-5 text-charcoal" />
+                  <ChevronLeft className="h-5 w-5 text-cream" />
                 </button>
               ) : (
                 <Link
                   href={`/projects/${projectId}/export`}
-                  className="p-2 hover:bg-slate/10 rounded-lg transition-colors"
+                  className="p-2 hover:bg-charcoal rounded-lg transition-colors"
                   data-testid="back-link"
                 >
-                  <ChevronLeft className="h-5 w-5 text-charcoal" />
+                  <ChevronLeft className="h-5 w-5 text-cream" />
                 </Link>
               )}
               <button
                 onClick={() => setSidebarOpen(true)}
-                className="p-2 hover:bg-slate/10 rounded-lg transition-colors lg:hidden"
+                className="p-2 hover:bg-charcoal rounded-lg transition-colors lg:hidden"
                 data-testid="menu-button"
               >
-                <Menu className="h-5 w-5 text-charcoal" />
+                <Menu className="h-5 w-5 text-cream" />
               </button>
             </div>
 
             {/* Center: Title & Progress */}
             <div className="text-center">
-              <h1 className="text-sm font-medium text-charcoal truncate max-w-[200px] sm:max-w-none">
+              <h1 className="text-sm font-medium text-cream truncate max-w-[200px] sm:max-w-none">
                 {manuscript.title}
               </h1>
-              <div className="flex items-center justify-center gap-2 text-xs text-slate">
+              <div className="flex items-center justify-center gap-2 text-xs text-fog">
                 <span>{readingProgress}% complete</span>
                 <span>|</span>
                 <span className="flex items-center gap-1">
@@ -625,26 +623,26 @@ export default function ManuscriptPreview({
               <button
                 onClick={goToPrevious}
                 disabled={currentSectionIndex === 0}
-                className="p-2 hover:bg-slate/10 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-2 hover:bg-charcoal rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 data-testid="prev-button"
               >
-                <ChevronLeft className="h-5 w-5 text-charcoal" />
+                <ChevronLeft className="h-5 w-5 text-cream" />
               </button>
               <button
                 onClick={goToNext}
                 disabled={currentSectionIndex === navigationSections.length - 1}
-                className="p-2 hover:bg-slate/10 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                className="p-2 hover:bg-charcoal rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                 data-testid="next-button"
               >
-                <ChevronRight className="h-5 w-5 text-charcoal" />
+                <ChevronRight className="h-5 w-5 text-cream" />
               </button>
             </div>
           </div>
 
           {/* Progress Bar */}
-          <div className="h-0.5 bg-slate/10 mt-3 -mx-4">
+          <div className="h-0.5 bg-graphite mt-3 -mx-4">
             <div
-              className="h-full bg-teal transition-all duration-300"
+              className="h-full bg-aurora-teal transition-all duration-300"
               style={{ width: `${readingProgress}%` }}
             />
           </div>
@@ -654,9 +652,9 @@ export default function ManuscriptPreview({
       {/* Main Content */}
       <div className="flex">
         {/* Sidebar - Desktop */}
-        <aside className="hidden lg:block w-72 bg-white border-r border-slate/20 h-[calc(100vh-4rem)] sticky top-16 overflow-y-auto">
+        <aside className="hidden lg:block w-72 bg-charcoal-light border-r border-graphite h-[calc(100vh-4rem)] sticky top-16 overflow-y-auto">
           <div className="p-4">
-            <h2 className="text-sm font-semibold text-slate uppercase tracking-wide mb-4">
+            <h2 className="text-sm font-semibold text-fog uppercase tracking-wide mb-4">
               Contents
             </h2>
             <nav className="space-y-1">
@@ -666,8 +664,8 @@ export default function ManuscriptPreview({
                   onClick={() => goToSection(section)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
                     index === currentSectionIndex
-                      ? 'bg-teal/10 text-teal'
-                      : 'text-charcoal hover:bg-slate/10'
+                      ? 'bg-aurora-teal/10 text-aurora-teal'
+                      : 'text-mist hover:bg-charcoal'
                   }`}
                   data-testid={`nav-item-${section.type}-${section.chapterNumber || ''}`}
                 >
@@ -683,22 +681,22 @@ export default function ManuscriptPreview({
         {sidebarOpen && (
           <>
             <div
-              className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+              className="fixed inset-0 bg-void/80 z-40 lg:hidden"
               onClick={() => setSidebarOpen(false)}
             />
             <aside
-              className="fixed left-0 top-0 bottom-0 w-80 bg-white z-50 overflow-y-auto lg:hidden"
+              className="fixed left-0 top-0 bottom-0 w-80 bg-charcoal-light z-50 overflow-y-auto lg:hidden"
               data-testid="mobile-sidebar"
             >
               <div className="p-4">
                 <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-lg font-semibold text-charcoal">Contents</h2>
+                  <h2 className="text-lg font-semibold text-cream">Contents</h2>
                   <button
                     onClick={() => setSidebarOpen(false)}
-                    className="p-2 hover:bg-slate/10 rounded-lg"
+                    className="p-2 hover:bg-charcoal rounded-lg"
                     data-testid="close-sidebar"
                   >
-                    <X className="h-5 w-5 text-charcoal" />
+                    <X className="h-5 w-5 text-cream" />
                   </button>
                 </div>
                 <nav className="space-y-1">
@@ -708,8 +706,8 @@ export default function ManuscriptPreview({
                       onClick={() => goToSection(section)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
                         index === currentSectionIndex
-                          ? 'bg-teal/10 text-teal'
-                          : 'text-charcoal hover:bg-slate/10'
+                          ? 'bg-aurora-teal/10 text-aurora-teal'
+                          : 'text-mist hover:bg-charcoal'
                       }`}
                     >
                       {section.icon}
@@ -731,22 +729,22 @@ export default function ManuscriptPreview({
       </div>
 
       {/* Footer Navigation - Mobile */}
-      <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate/20 p-3 lg:hidden">
+      <footer className="fixed bottom-0 left-0 right-0 bg-charcoal-light border-t border-graphite p-3 lg:hidden">
         <div className="flex items-center justify-between">
           <button
             onClick={goToPrevious}
             disabled={currentSectionIndex === 0}
-            className="flex items-center gap-2 px-4 py-2 text-charcoal disabled:opacity-30"
+            className="flex items-center gap-2 px-4 py-2 text-cream disabled:opacity-30"
             data-testid="footer-prev"
           >
             <ChevronLeft className="h-5 w-5" />
             <span className="text-sm">Previous</span>
           </button>
-          <span className="text-sm text-slate">{readingProgress}%</span>
+          <span className="text-sm text-fog">{readingProgress}%</span>
           <button
             onClick={goToNext}
             disabled={currentSectionIndex === navigationSections.length - 1}
-            className="flex items-center gap-2 px-4 py-2 text-charcoal disabled:opacity-30"
+            className="flex items-center gap-2 px-4 py-2 text-cream disabled:opacity-30"
             data-testid="footer-next"
           >
             <span className="text-sm">Next</span>

@@ -21,26 +21,27 @@ class TestGetModelPricing:
 
     def test_known_model_pricing(self):
         """Test pricing lookup for known models."""
-        pricing = get_model_pricing("gpt-5")
+        # OpenAI chatgpt-5.2 pricing via OpenRouter
+        pricing = get_model_pricing("openrouter/openai/chatgpt-5.2")
 
         assert "prompt_per_1k" in pricing
         assert "completion_per_1k" in pricing
-        assert pricing["prompt_per_1k"] == 0.015
-        assert pricing["completion_per_1k"] == 0.045
+        assert pricing["prompt_per_1k"] == 0.0105
+        assert pricing["completion_per_1k"] == 0.0315
 
     def test_claude_model_pricing(self):
         """Test pricing lookup for Claude models."""
-        pricing = get_model_pricing("claude-sonnet-4-20250514")
+        pricing = get_model_pricing("openrouter/anthropic/claude-sonnet-4.5")
 
-        assert pricing["prompt_per_1k"] == 0.003
-        assert pricing["completion_per_1k"] == 0.015
+        assert pricing["prompt_per_1k"] == 0.00315
+        assert pricing["completion_per_1k"] == 0.01575
 
     def test_gemini_model_pricing(self):
         """Test pricing lookup for Gemini models."""
-        pricing = get_model_pricing("gemini-2.5-pro")
+        pricing = get_model_pricing("openrouter/google/gemini-2.5-pro")
 
-        assert pricing["prompt_per_1k"] == 0.00035
-        assert pricing["completion_per_1k"] == 0.0014
+        assert pricing["prompt_per_1k"] == 0.000525
+        assert pricing["completion_per_1k"] == 0.00157
 
     def test_unknown_model_returns_default(self):
         """Test that unknown models return default pricing."""
@@ -52,7 +53,7 @@ class TestGetModelPricing:
 
     def test_partial_match_gpt4_variant(self):
         """Test partial matching for GPT-4 variants."""
-        pricing = get_model_pricing("gpt-4-0125-preview")
+        pricing = get_model_pricing("openrouter/openai/gpt-4-0125-preview")
 
         # Should match gpt-4 pricing
         assert "prompt_per_1k" in pricing
@@ -71,51 +72,52 @@ class TestCalculateCostUSD:
 
     def test_zero_tokens(self):
         """Test cost calculation with zero tokens."""
-        cost = calculate_cost_usd("gpt-5", 0, 0)
+        cost = calculate_cost_usd("openrouter/openai/chatgpt-5.2", 0, 0)
         assert cost == 0.0
 
     def test_simple_calculation(self):
         """Test simple cost calculation."""
-        # GPT-5: $0.015/1k prompt, $0.045/1k completion
-        # 1000 prompt tokens = $0.015
-        # 1000 completion tokens = $0.045
-        # Total = $0.06
-        cost = calculate_cost_usd("gpt-5", 1000, 1000)
-        assert cost == 0.06
+        # chatgpt-5.2: $0.0105/1k prompt, $0.0315/1k completion
+        # 1000 prompt tokens = $0.0105
+        # 1000 completion tokens = $0.0315
+        # Total = $0.042
+        cost = calculate_cost_usd("openrouter/openai/chatgpt-5.2", 1000, 1000)
+        assert cost == 0.042
 
     def test_fractional_tokens(self):
         """Test cost calculation with fractional token counts."""
-        # 500 prompt tokens = $0.0075
-        # 500 completion tokens = $0.0225
-        # Total = $0.03
-        cost = calculate_cost_usd("gpt-5", 500, 500)
-        assert cost == 0.03
+        # 500 prompt tokens = $0.00525
+        # 500 completion tokens = $0.01575
+        # Total = $0.021
+        cost = calculate_cost_usd("openrouter/openai/chatgpt-5.2", 500, 500)
+        assert cost == 0.021
 
     def test_large_token_counts(self):
         """Test cost calculation with large token counts."""
-        # 100k prompt tokens at $0.015/1k = $1.50
-        # 50k completion tokens at $0.045/1k = $2.25
-        # Total = $3.75
-        cost = calculate_cost_usd("gpt-5", 100000, 50000)
-        assert cost == 3.75
+        # chatgpt-5.2 pricing
+        # 100k prompt tokens at $0.0105/1k = $1.05
+        # 50k completion tokens at $0.0315/1k = $1.575
+        # Total = $2.625
+        cost = calculate_cost_usd("openrouter/openai/chatgpt-5.2", 100000, 50000)
+        assert cost == 2.625
 
-    def test_haiku_very_cheap(self):
-        """Test that Haiku is very cheap."""
-        # Claude Haiku: $0.00025/1k prompt, $0.00125/1k completion
-        cost = calculate_cost_usd("claude-3-haiku-20240307", 1000, 1000)
-        expected = 0.00025 + 0.00125
+    def test_deepseek_very_cheap(self):
+        """Test that DeepSeek is very cheap."""
+        # DeepSeek: $0.00029/1k prompt, $0.00115/1k completion
+        cost = calculate_cost_usd("openrouter/deepseek/deepseek-chat", 1000, 1000)
+        expected = 0.00029 + 0.00115
         assert abs(cost - expected) < 0.0001
 
     def test_opus_expensive(self):
         """Test that Opus is expensive."""
-        # Claude Opus: $0.015/1k prompt, $0.075/1k completion
-        cost = calculate_cost_usd("claude-3-opus-20240229", 1000, 1000)
-        expected = 0.015 + 0.075
-        assert cost == expected
+        # Claude Opus: $0.01575/1k prompt, $0.07875/1k completion
+        cost = calculate_cost_usd("openrouter/anthropic/claude-3-opus", 1000, 1000)
+        expected = 0.01575 + 0.07875
+        assert abs(cost - expected) < 0.0001
 
     def test_cost_rounding(self):
         """Test that costs are rounded appropriately."""
-        cost = calculate_cost_usd("gpt-5", 1, 1)
+        cost = calculate_cost_usd("openrouter/openai/chatgpt-5.2", 1, 1)
         # Very small cost should still be precise
         assert isinstance(cost, float)
         assert cost > 0
@@ -133,7 +135,7 @@ class TestEstimateBookCost:
     def test_basic_estimate(self):
         """Test basic book cost estimation."""
         estimate = estimate_book_cost(
-            model="gpt-5",
+            model="openrouter/openai/chatgpt-5.2",
             target_chapters=10,
             avg_prompt_tokens_per_chapter=2000,
             avg_completion_tokens_per_chapter=4000,
@@ -146,12 +148,12 @@ class TestEstimateBookCost:
         assert "model" in estimate
         assert "chapters" in estimate
 
-        assert estimate["model"] == "gpt-5"
+        assert estimate["model"] == "openrouter/openai/chatgpt-5.2"
         assert estimate["chapters"] == 10
 
     def test_estimate_breakdown(self):
         """Test that breakdown contains expected categories."""
-        estimate = estimate_book_cost("gpt-5", target_chapters=12)
+        estimate = estimate_book_cost("openrouter/openai/chatgpt-5.2", target_chapters=12)
 
         breakdown = estimate["breakdown"]
         assert "chapters" in breakdown
@@ -162,7 +164,7 @@ class TestEstimateBookCost:
     def test_estimate_without_optional_features(self):
         """Test estimate with optional features disabled."""
         estimate = estimate_book_cost(
-            "gpt-5",
+            "openrouter/openai/chatgpt-5.2",
             target_chapters=10,
             include_outline=False,
             include_editing=False,
@@ -177,7 +179,7 @@ class TestEstimateBookCost:
     def test_estimate_token_totals(self):
         """Test that token totals are calculated correctly."""
         estimate = estimate_book_cost(
-            "gpt-5",
+            "openrouter/openai/chatgpt-5.2",
             target_chapters=10,
             avg_prompt_tokens_per_chapter=2000,
             avg_completion_tokens_per_chapter=4000,
@@ -192,8 +194,12 @@ class TestEstimateBookCost:
 
     def test_estimate_with_outline(self):
         """Test that outline adds appropriate tokens."""
-        base = estimate_book_cost("gpt-5", target_chapters=10, include_outline=False)
-        with_outline = estimate_book_cost("gpt-5", target_chapters=10, include_outline=True)
+        base = estimate_book_cost(
+            "openrouter/openai/chatgpt-5.2", target_chapters=10, include_outline=False
+        )
+        with_outline = estimate_book_cost(
+            "openrouter/openai/chatgpt-5.2", target_chapters=10, include_outline=True
+        )
 
         assert with_outline["total_prompt_tokens"] > base["total_prompt_tokens"]
         assert with_outline["total_completion_tokens"] > base["total_completion_tokens"]
@@ -202,14 +208,14 @@ class TestEstimateBookCost:
         """Test that editing adds 60% of original tokens."""
         # Editing is 60% of original generation
         base = estimate_book_cost(
-            "gpt-5",
+            "openrouter/openai/chatgpt-5.2",
             target_chapters=10,
             include_outline=False,
             include_editing=False,
             include_continuity=False,
         )
         with_editing = estimate_book_cost(
-            "gpt-5",
+            "openrouter/openai/chatgpt-5.2",
             target_chapters=10,
             include_outline=False,
             include_editing=True,
@@ -222,8 +228,8 @@ class TestEstimateBookCost:
 
     def test_estimate_total_cost_increases_with_chapters(self):
         """Test that cost scales with chapter count."""
-        small = estimate_book_cost("gpt-5", target_chapters=5)
-        large = estimate_book_cost("gpt-5", target_chapters=20)
+        small = estimate_book_cost("openrouter/openai/chatgpt-5.2", target_chapters=5)
+        large = estimate_book_cost("openrouter/openai/chatgpt-5.2", target_chapters=20)
 
         assert large["estimated_usd"] > small["estimated_usd"]
         # Should be roughly proportional
@@ -233,15 +239,15 @@ class TestEstimateBookCost:
 
     def test_different_models_different_costs(self):
         """Test that different models have different costs."""
-        gpt5 = estimate_book_cost("gpt-5", target_chapters=10)
-        haiku = estimate_book_cost("claude-3-haiku-20240307", target_chapters=10)
+        gpt5 = estimate_book_cost("openrouter/openai/chatgpt-5.2", target_chapters=10)
+        deepseek = estimate_book_cost("openrouter/deepseek/deepseek-chat", target_chapters=10)
 
-        # Haiku should be much cheaper
-        assert haiku["estimated_usd"] < gpt5["estimated_usd"]
+        # DeepSeek should be much cheaper
+        assert deepseek["estimated_usd"] < gpt5["estimated_usd"]
 
     def test_estimate_returns_typed_dict(self):
         """Test that estimate returns properly typed result."""
-        estimate = estimate_book_cost("gpt-5", target_chapters=10)
+        estimate = estimate_book_cost("openrouter/openai/chatgpt-5.2", target_chapters=10)
 
         assert isinstance(estimate["estimated_usd"], float)
         assert isinstance(estimate["total_prompt_tokens"], int)

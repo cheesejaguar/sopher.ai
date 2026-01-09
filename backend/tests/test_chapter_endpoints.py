@@ -787,6 +787,7 @@ class TestChapterEndpointValidation:
         from fastapi import Request
 
         from app.routers.chapters import stream_chapter_regeneration
+        from app.schemas import ChapterRegenerateRequest
         from app.security import TokenData
 
         mock_db = AsyncMock()
@@ -801,7 +802,7 @@ class TestChapterEndpointValidation:
             request=mock_request,
             project_id=uuid4(),
             chapter_number=1,
-            instructions=None,
+            body=ChapterRegenerateRequest(),
             db=mock_db,
             user=mock_user,
         )
@@ -816,6 +817,7 @@ class TestChapterEndpointValidation:
         from fastapi import Request
 
         from app.routers.chapters import stream_chapter_regeneration
+        from app.schemas import ChapterRegenerateRequest
         from app.security import TokenData
 
         mock_db = AsyncMock()
@@ -837,7 +839,7 @@ class TestChapterEndpointValidation:
                 request=mock_request,
                 project_id=uuid4(),
                 chapter_number=1,
-                instructions=None,
+                body=ChapterRegenerateRequest(),
                 db=mock_db,
                 user=mock_user,
             )

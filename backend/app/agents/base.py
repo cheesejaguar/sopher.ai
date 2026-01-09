@@ -29,11 +29,17 @@ class AgentConfig:
 
     role: str
     system_prompt: str
-    model: str = "gpt-4"
+    model: str = ""  # Set at runtime from config.DEFAULT_MODEL
     temperature: float = 0.7
     max_tokens: int = 4000
     fallback_models: list[str] = field(default_factory=list)
     timeout: float = 120.0
+
+    def __post_init__(self):
+        """Set default model from config if not provided."""
+        if not self.model:
+            import os
+            self.model = os.getenv("PRIMARY_MODEL", "openrouter/openai/chatgpt-5.2")
 
 
 class AgentError(Exception):

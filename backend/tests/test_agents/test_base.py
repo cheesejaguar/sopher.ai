@@ -48,7 +48,8 @@ class TestAgentConfig:
 
         assert config.role == "test"
         assert config.system_prompt == "You are a test agent"
-        assert config.model == "gpt-4"
+        # Default model is set from PRIMARY_MODEL env var or openrouter default
+        assert config.model.startswith("openrouter/") or config.model in ["gpt-4", "gpt-4-turbo"]
         assert config.temperature == 0.7
         assert config.max_tokens == 4000
         assert config.fallback_models == []

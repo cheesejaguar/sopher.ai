@@ -71,7 +71,7 @@ function highlightCharacters(text: string, characters: string[]): React.ReactNod
           result.push(
             <span
               key={keyIndex++}
-              className="bg-blue-100 text-blue-800 px-1 rounded font-medium"
+              className="bg-nebula-blue/20 text-nebula-blue px-1 rounded font-medium"
               data-testid="character-highlight"
             >
               {currentWord}
@@ -113,24 +113,24 @@ function ChapterPreviewCard({
     : null;
 
   return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden" data-testid={`chapter-preview-${chapter.number}`}>
+    <div className="border border-graphite rounded-lg overflow-hidden bg-charcoal-light" data-testid={`chapter-preview-${chapter.number}`}>
       {/* Header - always visible */}
       <button
         onClick={onToggle}
-        className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+        className="w-full px-4 py-3 flex items-center justify-between bg-charcoal hover:bg-charcoal-light transition-colors text-left"
         aria-expanded={isExpanded}
         data-testid={`chapter-toggle-${chapter.number}`}
       >
         <div className="flex items-center gap-3">
           {isExpanded ? (
-            <ChevronDown className="w-5 h-5 text-gray-500" data-testid="chevron-down" />
+            <ChevronDown className="w-5 h-5 text-fog" data-testid="chevron-down" />
           ) : (
-            <ChevronRight className="w-5 h-5 text-gray-500" data-testid="chevron-right" />
+            <ChevronRight className="w-5 h-5 text-fog" data-testid="chevron-right" />
           )}
-          <span className="text-sm font-medium text-gray-500">Chapter {chapter.number}</span>
-          <span className="font-semibold text-gray-900">{chapter.title}</span>
+          <span className="text-sm font-medium text-fog">Chapter {chapter.number}</span>
+          <span className="font-semibold text-cream">{chapter.title}</span>
         </div>
-        <div className="flex items-center gap-4 text-sm text-gray-500">
+        <div className="flex items-center gap-4 text-sm text-fog">
           {chapter.emotional_arc && (
             <span className="capitalize">{chapter.emotional_arc.replace('_', ' ')}</span>
           )}
@@ -145,30 +145,30 @@ function ChapterPreviewCard({
 
       {/* Expanded content */}
       {isExpanded && (
-        <div className="px-4 py-4 space-y-4 bg-white" data-testid={`chapter-content-${chapter.number}`}>
+        <div className="px-4 py-4 space-y-4 bg-charcoal-light" data-testid={`chapter-content-${chapter.number}`}>
           {/* Summary */}
           <div>
-            <h4 className="text-sm font-medium text-gray-500 mb-1">Summary</h4>
-            <p className="text-gray-700">{highlightCharacters(chapter.summary, characters)}</p>
+            <h4 className="text-sm font-medium text-fog mb-1">Summary</h4>
+            <p className="text-mist">{highlightCharacters(chapter.summary, characters)}</p>
           </div>
 
           {/* Setting */}
           {chapter.setting && (
             <div>
-              <h4 className="text-sm font-medium text-gray-500 mb-1">Setting</h4>
-              <p className="text-gray-700">{chapter.setting}</p>
+              <h4 className="text-sm font-medium text-fog mb-1">Setting</h4>
+              <p className="text-mist">{chapter.setting}</p>
             </div>
           )}
 
           {/* Characters Involved */}
           {chapter.characters_involved && chapter.characters_involved.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-gray-500 mb-1">Characters</h4>
+              <h4 className="text-sm font-medium text-fog mb-1">Characters</h4>
               <div className="flex flex-wrap gap-2">
                 {chapter.characters_involved.map((char, idx) => (
                   <span
                     key={idx}
-                    className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-sm"
+                    className="px-2 py-1 bg-nebula-blue/10 text-nebula-blue rounded-full text-sm"
                   >
                     {char}
                   </span>
@@ -180,8 +180,8 @@ function ChapterPreviewCard({
           {/* Key Events */}
           {chapter.key_events && chapter.key_events.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-gray-500 mb-1">Key Events</h4>
-              <ul className="list-disc list-inside text-gray-700 space-y-1">
+              <h4 className="text-sm font-medium text-fog mb-1">Key Events</h4>
+              <ul className="list-disc list-inside text-mist space-y-1">
                 {chapter.key_events.map((event, idx) => (
                   <li key={idx}>{highlightCharacters(event, characters)}</li>
                 ))}
@@ -191,7 +191,7 @@ function ChapterPreviewCard({
 
           {/* Word count */}
           {chapter.estimated_word_count && (
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-fog">
               Estimated: {chapter.estimated_word_count.toLocaleString()} words
             </div>
           )}
@@ -253,16 +253,16 @@ export default function OutlinePreview({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-charcoal">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
+      <div className="bg-charcoal-light border-b border-graphite sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               {onBack ? (
                 <button
                   onClick={onBack}
-                  className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+                  className="flex items-center gap-2 text-mist hover:text-cream transition-colors"
                   data-testid="back-button"
                 >
                   <ArrowLeft className="w-5 h-5" />
@@ -271,7 +271,7 @@ export default function OutlinePreview({
               ) : (
                 <Link
                   href={`/projects/${projectId}/outline`}
-                  className="flex items-center gap-2 text-gray-600 hover:text-gray-900"
+                  className="flex items-center gap-2 text-mist hover:text-cream transition-colors"
                   data-testid="back-link"
                 >
                   <ArrowLeft className="w-5 h-5" />
@@ -279,10 +279,10 @@ export default function OutlinePreview({
                 </Link>
               )}
             </div>
-            <h1 className="text-xl font-bold text-gray-900">{title}</h1>
+            <h1 className="text-xl font-bold text-cream">{title}</h1>
             <button
               onClick={toggleAll}
-              className="text-sm text-blue-600 hover:text-blue-800"
+              className="text-sm text-aurora-teal hover:text-aurora-teal/80 transition-colors"
               data-testid="toggle-all-button"
             >
               {isAllExpanded ? 'Collapse All' : 'Expand All'}
@@ -292,21 +292,21 @@ export default function OutlinePreview({
       </div>
 
       {/* Stats Bar */}
-      <div className="bg-white border-b border-gray-200">
+      <div className="bg-charcoal-light border-b border-graphite">
         <div className="max-w-4xl mx-auto px-4 py-3">
           <div className="flex items-center justify-around text-sm">
-            <div className="flex items-center gap-2 text-gray-600" data-testid="chapter-count">
+            <div className="flex items-center gap-2 text-mist" data-testid="chapter-count">
               <BookOpen className="w-4 h-4" />
               <span>{stats.chapterCount} Chapters</span>
             </div>
-            <div className="flex items-center gap-2 text-gray-600" data-testid="word-count">
+            <div className="flex items-center gap-2 text-mist" data-testid="word-count">
               <span>{stats.totalWords.toLocaleString()} Words</span>
             </div>
-            <div className="flex items-center gap-2 text-gray-600" data-testid="reading-time">
+            <div className="flex items-center gap-2 text-mist" data-testid="reading-time">
               <Clock className="w-4 h-4" />
               <span>{stats.totalReadingTime} reading time</span>
             </div>
-            <div className="flex items-center gap-2 text-gray-600" data-testid="character-count">
+            <div className="flex items-center gap-2 text-mist" data-testid="character-count">
               <Users className="w-4 h-4" />
               <span>{stats.uniqueCharacters.length} Characters</span>
             </div>
@@ -316,14 +316,14 @@ export default function OutlinePreview({
 
       {/* Character Legend (if characters provided) */}
       {stats.uniqueCharacters.length > 0 && (
-        <div className="bg-white border-b border-gray-200">
+        <div className="bg-charcoal-light border-b border-graphite">
           <div className="max-w-4xl mx-auto px-4 py-3">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-gray-500">Characters:</span>
+              <span className="text-sm text-fog">Characters:</span>
               {stats.uniqueCharacters.map((char, idx) => (
                 <span
                   key={idx}
-                  className="px-2 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium"
+                  className="px-2 py-1 bg-nebula-blue/20 text-nebula-blue rounded-full text-sm font-medium"
                   data-testid={`character-legend-${char}`}
                 >
                   {char}
@@ -349,12 +349,12 @@ export default function OutlinePreview({
         </div>
 
         {chapters.length === 0 && (
-          <div className="text-center py-12 text-gray-500" data-testid="empty-state">
-            <BookOpen className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+          <div className="text-center py-12 text-fog" data-testid="empty-state">
+            <BookOpen className="w-12 h-12 mx-auto mb-4 text-graphite" />
             <p>No chapters in this outline yet.</p>
             <Link
               href={`/projects/${projectId}/outline`}
-              className="text-blue-600 hover:text-blue-800 mt-2 inline-block"
+              className="text-aurora-teal hover:text-aurora-teal/80 mt-2 inline-block"
             >
               Go to Outline Editor
             </Link>

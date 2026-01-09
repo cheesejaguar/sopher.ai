@@ -3,43 +3,25 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '@/lib/zustand'
 import type { AppState, User, Project } from '@/lib/zustand'
+import { MeshGradient } from '@/components/BackgroundEffects'
 import {
   BookOpen,
   LogOut,
   User as UserIcon,
   ChevronLeft,
-  ChevronRight,
-  Check,
   AlertCircle,
   Loader2,
   Sparkles,
-  Palette,
-  Layout,
-  Settings,
+  Cpu,
+  Check,
 } from 'lucide-react'
 
-// Wizard step types
-type WizardStep = 'basic' | 'style' | 'structure' | 'advanced'
-
 interface FormData {
-  // Step 1: Basic Info
   name: string
-  description: string
+  brief: string
   genre: string
-  target_audience: string
-  // Step 2: Style Settings
-  tone: string
-  pov: string
-  tense: string
-  dialogue_style: string
-  prose_style: string
-  // Step 3: Structure
   target_chapters: number
-  chapter_length_target: number
-  // Step 4: Advanced (optional)
-  character_bible: string
-  world_building: string
-  style_guide: string
+  model: string
 }
 
 interface FormErrors {
@@ -56,94 +38,59 @@ const GENRES = [
   'Literary Fiction',
   'Horror',
   'Young Adult',
-  'Middle Grade',
   'Non-Fiction',
   'Biography',
   'Self-Help',
   'Other',
 ]
 
-const TONES = [
-  { value: 'humorous', label: 'Humorous' },
-  { value: 'serious', label: 'Serious' },
-  { value: 'dramatic', label: 'Dramatic' },
-  { value: 'lighthearted', label: 'Lighthearted' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'inspirational', label: 'Inspirational' },
-  { value: 'suspenseful', label: 'Suspenseful' },
-  { value: 'romantic', label: 'Romantic' },
-]
-
-const POV_OPTIONS = [
-  { value: 'first_person', label: 'First Person' },
-  { value: 'third_person_limited', label: 'Third Person Limited' },
-  { value: 'third_person_omniscient', label: 'Third Person Omniscient' },
-  { value: 'second_person', label: 'Second Person' },
-]
-
-const TENSE_OPTIONS = [
-  { value: 'past', label: 'Past Tense' },
-  { value: 'present', label: 'Present Tense' },
-]
-
-const DIALOGUE_STYLES = [
-  { value: 'sparse', label: 'Sparse - Minimal dialogue' },
-  { value: 'moderate', label: 'Moderate - Balanced dialogue' },
-  { value: 'heavy', label: 'Heavy - Dialogue-driven' },
-]
-
-const PROSE_STYLES = [
-  { value: 'minimal', label: 'Minimal - Clean, direct prose' },
-  { value: 'descriptive', label: 'Descriptive - Rich descriptions' },
-  { value: 'literary', label: 'Literary - Stylized, artistic' },
-]
-
-const STEPS: { id: WizardStep; title: string; description: string; icon: React.ReactNode }[] = [
+const MODELS = [
   {
-    id: 'basic',
-    title: 'Basic Info',
-    description: 'Title, genre, and audience',
-    icon: <Sparkles className="h-5 w-5" />,
+    id: 'openrouter/openai/chatgpt-5.2',
+    name: 'ChatGPT 5.2',
+    provider: 'OpenAI',
+    description: 'Most capable, best for complex narratives',
+    tier: 'premium',
   },
   {
-    id: 'style',
-    title: 'Style',
-    description: 'Tone, POV, and voice',
-    icon: <Palette className="h-5 w-5" />,
+    id: 'openrouter/anthropic/claude-sonnet-4.5',
+    name: 'Claude Sonnet 4.5',
+    provider: 'Anthropic',
+    description: 'Excellent writing quality, nuanced prose',
+    tier: 'premium',
   },
   {
-    id: 'structure',
-    title: 'Structure',
-    description: 'Chapters and length',
-    icon: <Layout className="h-5 w-5" />,
+    id: 'openrouter/google/gemini-3-pro-preview',
+    name: 'Gemini 3 Pro',
+    provider: 'Google',
+    description: 'Fast and cost-effective',
+    tier: 'standard',
   },
   {
-    id: 'advanced',
-    title: 'Advanced',
-    description: 'Optional extras',
-    icon: <Settings className="h-5 w-5" />,
+    id: 'openrouter/x-ai/grok-4.1-fast',
+    name: 'Grok 4.1 Fast',
+    provider: 'xAI',
+    description: 'Quick generation, good quality',
+    tier: 'standard',
+  },
+  {
+    id: 'openrouter/deepseek/deepseek-v3.2',
+    name: 'DeepSeek V3.2',
+    provider: 'DeepSeek',
+    description: 'Most affordable option',
+    tier: 'economy',
   },
 ]
 
 const initialFormData: FormData = {
   name: '',
-  description: '',
+  brief: '',
   genre: '',
-  target_audience: 'general adult',
-  tone: 'serious',
-  pov: 'third_person_limited',
-  tense: 'past',
-  dialogue_style: 'moderate',
-  prose_style: 'descriptive',
   target_chapters: 12,
-  chapter_length_target: 3000,
-  character_bible: '',
-  world_building: '',
-  style_guide: '',
+  model: 'openrouter/openai/chatgpt-5.2',
 }
 
 export default function NewProjectPage() {
-  const [currentStep, setCurrentStep] = useState<WizardStep>('basic')
   const [formData, setFormData] = useState<FormData>(initialFormData)
   const [errors, setErrors] = useState<FormErrors>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -188,11 +135,8 @@ export default function NewProjectPage() {
     const { name, value } = e.target
     setFormData((prev) => ({
       ...prev,
-      [name]: name === 'target_chapters' || name === 'chapter_length_target'
-        ? parseInt(value) || 0
-        : value,
+      [name]: name === 'target_chapters' ? parseInt(value) || 0 : value,
     }))
-    // Clear error when field is modified
     if (errors[name]) {
       setErrors((prev) => {
         const newErrors = { ...prev }
@@ -202,64 +146,41 @@ export default function NewProjectPage() {
     }
   }
 
-  const validateStep = (step: WizardStep): boolean => {
+  const validateForm = (): boolean => {
     const newErrors: FormErrors = {}
 
-    switch (step) {
-      case 'basic':
-        if (!formData.name.trim()) {
-          newErrors.name = 'Project name is required'
-        } else if (formData.name.length < 3) {
-          newErrors.name = 'Project name must be at least 3 characters'
-        } else if (formData.name.length > 100) {
-          newErrors.name = 'Project name must be less than 100 characters'
-        }
-        if (!formData.genre) {
-          newErrors.genre = 'Please select a genre'
-        }
-        break
-      case 'structure':
-        if (formData.target_chapters < 1) {
-          newErrors.target_chapters = 'Must have at least 1 chapter'
-        } else if (formData.target_chapters > 100) {
-          newErrors.target_chapters = 'Maximum 100 chapters allowed'
-        }
-        if (formData.chapter_length_target < 500) {
-          newErrors.chapter_length_target = 'Chapter length must be at least 500 words'
-        } else if (formData.chapter_length_target > 10000) {
-          newErrors.chapter_length_target = 'Chapter length must be less than 10,000 words'
-        }
-        break
+    if (!formData.name.trim()) {
+      newErrors.name = 'Project name is required'
+    } else if (formData.name.length < 3) {
+      newErrors.name = 'Project name must be at least 3 characters'
+    }
+
+    if (!formData.brief.trim()) {
+      newErrors.brief = 'Please describe your book idea'
+    } else if (formData.brief.length < 50) {
+      newErrors.brief = 'Please provide more detail (at least 50 characters)'
+    }
+
+    if (!formData.genre) {
+      newErrors.genre = 'Please select a genre'
+    }
+
+    if (formData.target_chapters < 1 || formData.target_chapters > 50) {
+      newErrors.target_chapters = 'Chapters must be between 1 and 50'
+    }
+
+    if (!formData.model) {
+      newErrors.model = 'Please select a model'
     }
 
     setErrors(newErrors)
     return Object.keys(newErrors).length === 0
   }
 
-  const getCurrentStepIndex = (): number => {
-    return STEPS.findIndex((s) => s.id === currentStep)
-  }
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
 
-  const goToNextStep = () => {
-    if (!validateStep(currentStep)) return
-
-    const currentIndex = getCurrentStepIndex()
-    if (currentIndex < STEPS.length - 1) {
-      setCurrentStep(STEPS[currentIndex + 1].id)
-    }
-  }
-
-  const goToPreviousStep = () => {
-    const currentIndex = getCurrentStepIndex()
-    if (currentIndex > 0) {
-      setCurrentStep(STEPS[currentIndex - 1].id)
-    }
-  }
-
-  const handleSubmit = async () => {
-    // Validate all required steps
-    if (!validateStep('basic') || !validateStep('structure')) {
-      setSubmitError('Please fix the errors before submitting')
+    if (!validateForm()) {
       return
     }
 
@@ -267,32 +188,14 @@ export default function NewProjectPage() {
     setSubmitError(null)
 
     try {
-      // Build settings object
-      const settings: Record<string, unknown> = {
-        target_audience: formData.target_audience,
-        tone: formData.tone,
-        pov: formData.pov,
-        tense: formData.tense,
-        dialogue_style: formData.dialogue_style,
-        prose_style: formData.prose_style,
-        chapter_length_target: formData.chapter_length_target,
-      }
-
-      // Add optional fields if provided
-      if (formData.character_bible.trim()) {
-        settings.character_bible_text = formData.character_bible
-      }
-      if (formData.world_building.trim()) {
-        settings.world_building_text = formData.world_building
-      }
-
       const projectPayload = {
         name: formData.name,
-        description: formData.description || undefined,
+        brief: formData.brief,
         genre: formData.genre,
         target_chapters: formData.target_chapters,
-        style_guide: formData.style_guide || undefined,
-        settings,
+        settings: {
+          model: formData.model,
+        },
       }
 
       const response = await fetch('/api/backend/v1/projects', {
@@ -322,382 +225,16 @@ export default function NewProjectPage() {
     }
   }
 
-  const renderStepIndicator = () => (
-    <div className="flex items-center justify-center mb-8">
-      {STEPS.map((step, index) => {
-        const isActive = step.id === currentStep
-        const isCompleted = getCurrentStepIndex() > index
-        const isPast = index < getCurrentStepIndex()
-
-        return (
-          <div key={step.id} className="flex items-center">
-            <button
-              onClick={() => isPast && setCurrentStep(step.id)}
-              disabled={!isPast}
-              className={`flex items-center justify-center w-10 h-10 rounded-full transition-colors ${
-                isActive
-                  ? 'bg-gradient-to-r from-indigo to-teal text-snow'
-                  : isCompleted
-                  ? 'bg-teal text-snow'
-                  : 'bg-slate/20 text-slate'
-              } ${isPast ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-            >
-              {isCompleted ? <Check className="h-5 w-5" /> : step.icon}
-            </button>
-            <div className="hidden sm:block ml-2 mr-4">
-              <p className={`text-sm font-medium ${isActive ? 'text-ink' : 'text-slate'}`}>
-                {step.title}
-              </p>
-              <p className="text-xs text-slate/70">{step.description}</p>
-            </div>
-            {index < STEPS.length - 1 && (
-              <div
-                className={`w-8 sm:w-12 h-1 mx-2 rounded ${
-                  isPast ? 'bg-teal' : 'bg-slate/20'
-                }`}
-              />
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-
-  const renderBasicStep = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Project Name <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          name="name"
-          value={formData.name}
-          onChange={handleInputChange}
-          className={`w-full px-4 py-3 border rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent ${
-            errors.name ? 'border-red-500' : 'border-slate/30'
-          }`}
-          placeholder="Enter your book title"
-        />
-        {errors.name && (
-          <p className="mt-1 text-sm text-red-500 flex items-center gap-1">
-            <AlertCircle className="h-4 w-4" />
-            {errors.name}
-          </p>
-        )}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Description
-        </label>
-        <textarea
-          name="description"
-          value={formData.description}
-          onChange={handleInputChange}
-          rows={3}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent resize-none"
-          placeholder="A brief description of your book (optional)"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Genre <span className="text-red-500">*</span>
-        </label>
-        <select
-          name="genre"
-          value={formData.genre}
-          onChange={handleInputChange}
-          className={`w-full px-4 py-3 border rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent ${
-            errors.genre ? 'border-red-500' : 'border-slate/30'
-          }`}
-        >
-          <option value="">Select a genre</option>
-          {GENRES.map((genre) => (
-            <option key={genre} value={genre}>
-              {genre}
-            </option>
-          ))}
-        </select>
-        {errors.genre && (
-          <p className="mt-1 text-sm text-red-500 flex items-center gap-1">
-            <AlertCircle className="h-4 w-4" />
-            {errors.genre}
-          </p>
-        )}
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Target Audience
-        </label>
-        <input
-          type="text"
-          name="target_audience"
-          value={formData.target_audience}
-          onChange={handleInputChange}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent"
-          placeholder="e.g., Young adults, General adult, Children 8-12"
-        />
-      </div>
-    </div>
-  )
-
-  const renderStyleStep = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">Tone</label>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {TONES.map((tone) => (
-            <button
-              key={tone.value}
-              type="button"
-              onClick={() => setFormData((prev) => ({ ...prev, tone: tone.value }))}
-              className={`px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
-                formData.tone === tone.value
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/30 hover:border-slate/50'
-              }`}
-            >
-              {tone.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Point of View
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          {POV_OPTIONS.map((pov) => (
-            <button
-              key={pov.value}
-              type="button"
-              onClick={() => setFormData((prev) => ({ ...prev, pov: pov.value }))}
-              className={`px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
-                formData.pov === pov.value
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/30 hover:border-slate/50'
-              }`}
-            >
-              {pov.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">Tense</label>
-        <div className="grid grid-cols-2 gap-3">
-          {TENSE_OPTIONS.map((tense) => (
-            <button
-              key={tense.value}
-              type="button"
-              onClick={() => setFormData((prev) => ({ ...prev, tense: tense.value }))}
-              className={`px-4 py-3 rounded-lg border text-sm font-medium transition-colors ${
-                formData.tense === tense.value
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/30 hover:border-slate/50'
-              }`}
-            >
-              {tense.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Dialogue Style
-        </label>
-        <select
-          name="dialogue_style"
-          value={formData.dialogue_style}
-          onChange={handleInputChange}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent"
-        >
-          {DIALOGUE_STYLES.map((style) => (
-            <option key={style.value} value={style.value}>
-              {style.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Prose Style
-        </label>
-        <select
-          name="prose_style"
-          value={formData.prose_style}
-          onChange={handleInputChange}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent"
-        >
-          {PROSE_STYLES.map((style) => (
-            <option key={style.value} value={style.value}>
-              {style.label}
-            </option>
-          ))}
-        </select>
-      </div>
-    </div>
-  )
-
-  const renderStructureStep = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Number of Chapters <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="number"
-          name="target_chapters"
-          value={formData.target_chapters}
-          onChange={handleInputChange}
-          min={1}
-          max={100}
-          className={`w-full px-4 py-3 border rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent ${
-            errors.target_chapters ? 'border-red-500' : 'border-slate/30'
-          }`}
-        />
-        {errors.target_chapters && (
-          <p className="mt-1 text-sm text-red-500 flex items-center gap-1">
-            <AlertCircle className="h-4 w-4" />
-            {errors.target_chapters}
-          </p>
-        )}
-        <p className="mt-1 text-xs text-slate/70">
-          Recommended: 10-20 chapters for a standard novel
-        </p>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Target Chapter Length (words) <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="number"
-          name="chapter_length_target"
-          value={formData.chapter_length_target}
-          onChange={handleInputChange}
-          min={500}
-          max={10000}
-          step={100}
-          className={`w-full px-4 py-3 border rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent ${
-            errors.chapter_length_target ? 'border-red-500' : 'border-slate/30'
-          }`}
-        />
-        {errors.chapter_length_target && (
-          <p className="mt-1 text-sm text-red-500 flex items-center gap-1">
-            <AlertCircle className="h-4 w-4" />
-            {errors.chapter_length_target}
-          </p>
-        )}
-        <p className="mt-1 text-xs text-slate/70">
-          Recommended: 2,000-4,000 words per chapter
-        </p>
-      </div>
-
-      <div className="bg-parchment rounded-lg p-4 border border-slate/20">
-        <h4 className="font-medium text-ink mb-2">Estimated Book Length</h4>
-        <p className="text-2xl font-bold text-teal">
-          {(formData.target_chapters * formData.chapter_length_target).toLocaleString()} words
-        </p>
-        <p className="text-sm text-slate/70 mt-1">
-          Approximately {Math.ceil((formData.target_chapters * formData.chapter_length_target) / 250)} pages
-        </p>
-      </div>
-    </div>
-  )
-
-  const renderAdvancedStep = () => (
-    <div className="space-y-6">
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-        <p className="text-sm text-amber-800">
-          These fields are optional but can help the AI create more consistent and detailed content.
-        </p>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Character Bible
-        </label>
-        <textarea
-          name="character_bible"
-          value={formData.character_bible}
-          onChange={handleInputChange}
-          rows={5}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent resize-none"
-          placeholder="Describe your main characters: names, appearances, personalities, backgrounds, relationships..."
-        />
-        <p className="mt-1 text-xs text-slate/70">
-          Include details about protagonists, antagonists, and supporting characters
-        </p>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          World Building
-        </label>
-        <textarea
-          name="world_building"
-          value={formData.world_building}
-          onChange={handleInputChange}
-          rows={5}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent resize-none"
-          placeholder="Describe your story's setting: locations, time period, cultures, magic systems, technology..."
-        />
-        <p className="mt-1 text-xs text-slate/70">
-          Especially useful for fantasy, sci-fi, and historical fiction
-        </p>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-2 text-slate">
-          Style Guide
-        </label>
-        <textarea
-          name="style_guide"
-          value={formData.style_guide}
-          onChange={handleInputChange}
-          rows={4}
-          className="w-full px-4 py-3 border border-slate/30 rounded-lg bg-parchment focus:ring-2 focus:ring-teal focus:border-transparent resize-none"
-          placeholder="Any specific writing rules, vocabulary preferences, or stylistic guidelines..."
-        />
-        <p className="mt-1 text-xs text-slate/70">
-          E.g., &quot;Avoid passive voice&quot;, &quot;Use British English spelling&quot;, &quot;Short, punchy sentences&quot;
-        </p>
-      </div>
-    </div>
-  )
-
-  const renderCurrentStep = () => {
-    switch (currentStep) {
-      case 'basic':
-        return renderBasicStep()
-      case 'style':
-        return renderStyleStep()
-      case 'structure':
-        return renderStructureStep()
-      case 'advanced':
-        return renderAdvancedStep()
-    }
-  }
-
-  const isLastStep = getCurrentStepIndex() === STEPS.length - 1
-  const isFirstStep = getCurrentStepIndex() === 0
-
   return (
-    <div className="flex min-h-screen flex-col bg-parchment dark:bg-indigo">
+    <div className="flex min-h-screen flex-col bg-charcoal">
+      <MeshGradient />
+
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-slate bg-indigo text-snow">
+      <header className="sticky top-0 z-10 border-b border-graphite bg-charcoal/80 backdrop-blur-xl">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BookOpen className="h-6 w-6 text-gold" />
-            <h1 className="text-2xl font-serif font-bold">sopher.ai</h1>
+            <BookOpen className="h-6 w-6 text-aurora-teal" />
+            <h1 className="text-2xl font-bold gradient-text">sopher.ai</h1>
           </div>
 
           <div className="flex items-center gap-4">
@@ -708,16 +245,16 @@ export default function NewProjectPage() {
                     <img
                       src={user.picture}
                       alt={user.name || user.email}
-                      className="h-8 w-8 rounded-full border border-gold"
+                      className="h-8 w-8 rounded-full border border-aurora-teal/50"
                     />
                   ) : (
-                    <UserIcon className="h-5 w-5 text-gold" />
+                    <UserIcon className="h-5 w-5 text-aurora-teal" />
                   )}
-                  <span className="hidden sm:inline">{user.name || user.email}</span>
+                  <span className="hidden sm:inline text-cream">{user.name || user.email}</span>
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="p-2 hover:bg-indigo-700 rounded-lg transition-colors"
+                  className="p-2 hover:bg-charcoal-light rounded-lg transition-colors text-mist hover:text-cream"
                   title="Logout"
                 >
                   <LogOut className="h-4 w-4" />
@@ -733,7 +270,7 @@ export default function NewProjectPage() {
         {/* Back to Projects Link */}
         <button
           onClick={() => (window.location.href = '/projects')}
-          className="flex items-center gap-1 text-slate hover:text-ink mb-6 transition-colors"
+          className="flex items-center gap-1 text-mist hover:text-cream mb-6 transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
           Back to Projects
@@ -741,88 +278,220 @@ export default function NewProjectPage() {
 
         {/* Page Title */}
         <div className="text-center mb-8">
-          <h2 className="text-3xl font-serif font-bold text-ink">Create New Project</h2>
-          <p className="text-slate mt-2">Set up your book&apos;s foundation</p>
+          <div className="flex justify-center mb-4">
+            <div className="p-3 rounded-full bg-nebula-blue/10 glow-sm">
+              <Sparkles className="h-8 w-8 text-aurora-teal" />
+            </div>
+          </div>
+          <h2 className="text-3xl font-bold text-cream">Start a New Book</h2>
+          <p className="text-mist mt-2">Describe your book idea and select an AI model</p>
         </div>
 
-        {/* Step Indicator */}
-        {renderStepIndicator()}
-
         {/* Form Card */}
-        <div className="bg-snow rounded-xl shadow-sm p-6 sm:p-8">
+        <form onSubmit={handleSubmit} className="glass rounded-xl p-6 sm:p-8">
           {/* Error Message */}
           {submitError && (
-            <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-2">
-              <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-red-800">{submitError}</p>
+            <div className="mb-6 bg-red-500/10 border border-red-500/30 rounded-lg p-4 flex items-start gap-2">
+              <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-red-300">{submitError}</p>
             </div>
           )}
 
-          {/* Step Content */}
-          {renderCurrentStep()}
+          <div className="space-y-6">
+            {/* Project Name */}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-mist">
+                Book Title <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="text"
+                name="name"
+                value={formData.name}
+                onChange={handleInputChange}
+                className={`w-full px-4 py-3 border rounded-lg bg-charcoal text-cream placeholder-fog focus:ring-2 focus:ring-nebula-blue/50 focus:border-nebula-blue transition-all ${
+                  errors.name ? 'border-red-500' : 'border-graphite'
+                }`}
+                placeholder="Enter your book title"
+              />
+              {errors.name && (
+                <p className="mt-1 text-sm text-red-400 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />
+                  {errors.name}
+                </p>
+              )}
+            </div>
 
-          {/* Navigation Buttons */}
-          <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate/10">
-            <button
-              onClick={goToPreviousStep}
-              disabled={isFirstStep}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-                isFirstStep
-                  ? 'opacity-50 cursor-not-allowed text-slate'
-                  : 'text-slate hover:bg-slate/10'
-              }`}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              Previous
-            </button>
+            {/* Book Brief */}
+            <div>
+              <label className="block text-sm font-medium mb-2 text-mist">
+                Describe Your Book <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                name="brief"
+                value={formData.brief}
+                onChange={handleInputChange}
+                rows={6}
+                className={`w-full px-4 py-3 border rounded-lg bg-charcoal text-cream placeholder-fog focus:ring-2 focus:ring-nebula-blue/50 focus:border-nebula-blue transition-all resize-none ${
+                  errors.brief ? 'border-red-500' : 'border-graphite'
+                }`}
+                placeholder="Describe your book idea in detail. Include the main plot, characters, setting, themes, and any specific elements you want. The more detail you provide, the better the AI can help you write your book."
+              />
+              {errors.brief && (
+                <p className="mt-1 text-sm text-red-400 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />
+                  {errors.brief}
+                </p>
+              )}
+              <p className="mt-1 text-xs text-fog">
+                {formData.brief.length} characters
+              </p>
+            </div>
 
-            {isLastStep ? (
-              <button
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-indigo to-teal text-snow rounded-lg font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  <>
-                    Create Project
-                    <Check className="h-4 w-4" />
-                  </>
+            {/* Genre and Chapters Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-mist">
+                  Genre <span className="text-red-400">*</span>
+                </label>
+                <select
+                  name="genre"
+                  value={formData.genre}
+                  onChange={handleInputChange}
+                  className={`w-full px-4 py-3 border rounded-lg bg-charcoal text-cream focus:ring-2 focus:ring-nebula-blue/50 focus:border-nebula-blue transition-all ${
+                    errors.genre ? 'border-red-500' : 'border-graphite'
+                  }`}
+                >
+                  <option value="">Select a genre</option>
+                  {GENRES.map((genre) => (
+                    <option key={genre} value={genre}>
+                      {genre}
+                    </option>
+                  ))}
+                </select>
+                {errors.genre && (
+                  <p className="mt-1 text-sm text-red-400 flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4" />
+                    {errors.genre}
+                  </p>
                 )}
-              </button>
-            ) : (
-              <button
-                onClick={goToNextStep}
-                className="flex items-center gap-2 px-6 py-2 bg-gradient-to-r from-indigo to-teal text-snow rounded-lg font-medium hover:opacity-90 transition-opacity"
-              >
-                Next
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2 text-mist">
+                  Target Chapters
+                </label>
+                <input
+                  type="number"
+                  name="target_chapters"
+                  value={formData.target_chapters}
+                  onChange={handleInputChange}
+                  min={1}
+                  max={50}
+                  className={`w-full px-4 py-3 border rounded-lg bg-charcoal text-cream focus:ring-2 focus:ring-nebula-blue/50 focus:border-nebula-blue transition-all ${
+                    errors.target_chapters ? 'border-red-500' : 'border-graphite'
+                  }`}
+                />
+                {errors.target_chapters && (
+                  <p className="mt-1 text-sm text-red-400 flex items-center gap-1">
+                    <AlertCircle className="h-4 w-4" />
+                    {errors.target_chapters}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Model Selection */}
+            <div>
+              <label className="block text-sm font-medium mb-3 text-mist">
+                <Cpu className="h-4 w-4 inline mr-1" />
+                Select AI Model <span className="text-red-400">*</span>
+              </label>
+              <div className="grid gap-3">
+                {MODELS.map((model) => (
+                  <button
+                    key={model.id}
+                    type="button"
+                    onClick={() => setFormData((prev) => ({ ...prev, model: model.id }))}
+                    className={`w-full p-4 rounded-lg border text-left transition-all ${
+                      formData.model === model.id
+                        ? 'border-aurora-teal bg-aurora-teal/10 shadow-inner-glow'
+                        : 'border-graphite hover:border-nebula-blue/50 hover:bg-charcoal-light'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-cream">{model.name}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${
+                            model.tier === 'premium'
+                              ? 'bg-nebula-purple/20 text-nebula-purple border border-nebula-purple/30'
+                              : model.tier === 'economy'
+                              ? 'bg-aurora-teal/20 text-aurora-teal border border-aurora-teal/30'
+                              : 'bg-slate/20 text-mist border border-slate/30'
+                          }`}>
+                            {model.tier}
+                          </span>
+                        </div>
+                        <p className="text-xs text-fog mt-1">{model.provider}</p>
+                        <p className="text-sm text-mist mt-1">{model.description}</p>
+                      </div>
+                      {formData.model === model.id && (
+                        <Check className="h-5 w-5 text-aurora-teal flex-shrink-0" />
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {errors.model && (
+                <p className="mt-2 text-sm text-red-400 flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />
+                  {errors.model}
+                </p>
+              )}
+            </div>
           </div>
-        </div>
+
+          {/* Submit Button */}
+          <div className="mt-8 pt-6 border-t border-graphite">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full py-3 px-4 text-cream rounded-lg font-medium bg-gradient-to-r from-nebula-blue via-nebula-purple to-aurora-teal hover:shadow-glow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 transition-all duration-300 hover:scale-[1.02]"
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Creating Project...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-5 w-5" />
+                  Create Project
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </main>
 
       {/* Footer */}
-      <footer className="bg-indigo text-snow text-center text-sm py-4">
-        © 2025 sopher.ai •{' '}
-        <a
-          href="https://github.com/cheesejaguar/sopher.ai/blob/main/LICENSE"
-          className="underline"
-        >
-          MIT License
-        </a>{' '}
-        •{' '}
-        <a
-          href="https://github.com/cheesejaguar/sopher.ai"
-          className="underline"
-        >
-          GitHub Repository
-        </a>
+      <footer className="bg-void border-t border-graphite text-center text-sm py-4">
+        <span className="text-fog">
+          © 2025 sopher.ai •{' '}
+          <a
+            href="https://github.com/cheesejaguar/sopher.ai/blob/main/LICENSE"
+            className="text-mist hover:text-aurora-teal transition-colors"
+          >
+            MIT License
+          </a>{' '}
+          •{' '}
+          <a
+            href="https://github.com/cheesejaguar/sopher.ai"
+            className="text-mist hover:text-aurora-teal transition-colors"
+          >
+            GitHub Repository
+          </a>
+        </span>
       </footer>
     </div>
   )

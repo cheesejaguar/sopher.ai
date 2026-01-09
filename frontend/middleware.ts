@@ -140,11 +140,11 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - api/backend/auth (auth endpoints)
+     * - api/backend (all backend API routes - they handle their own auth)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      */
-    '/((?!api/backend/auth|_next/static|_next/image|favicon.ico).*)',
+    '/((?!api/backend|_next/static|_next/image|favicon.ico).*)',
   ],
 }

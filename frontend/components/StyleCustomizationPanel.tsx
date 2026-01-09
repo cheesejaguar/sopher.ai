@@ -366,8 +366,8 @@ export default function StyleCustomizationPanel({
         key={profile.id}
         className={`border rounded-lg transition-all ${
           isSelected
-            ? 'border-teal bg-teal/5 shadow-md'
-            : 'border-slate/20 hover:border-slate/40'
+            ? 'border-aurora-teal bg-aurora-teal/5 shadow-glow-teal'
+            : 'border-graphite hover:border-nebula-blue/50'
         }`}
       >
         <div
@@ -377,55 +377,55 @@ export default function StyleCustomizationPanel({
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <div className="flex items-center gap-2">
-                <User className="h-4 w-4 text-slate" />
-                <h3 className="font-medium text-ink">{profile.name}</h3>
-                {isSelected && <Check className="h-4 w-4 text-teal" />}
+                <User className="h-4 w-4 text-mist" />
+                <h3 className="font-medium text-cream">{profile.name}</h3>
+                {isSelected && <Check className="h-4 w-4 text-aurora-teal" />}
               </div>
-              <p className="text-sm text-slate mt-1">{profile.description}</p>
+              <p className="text-sm text-mist mt-1">{profile.description}</p>
             </div>
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 setExpandedProfile(isExpanded ? null : profile.id)
               }}
-              className="p-1 hover:bg-slate/10 rounded"
+              className="p-1 hover:bg-charcoal rounded"
             >
               {isExpanded ? (
-                <ChevronUp className="h-4 w-4 text-slate" />
+                <ChevronUp className="h-4 w-4 text-mist" />
               ) : (
-                <ChevronDown className="h-4 w-4 text-slate" />
+                <ChevronDown className="h-4 w-4 text-mist" />
               )}
             </button>
           </div>
 
           {isExpanded && (
-            <div className="mt-4 pt-4 border-t border-slate/10">
-              <h4 className="text-sm font-medium text-slate mb-2">Characteristics:</h4>
-              <ul className="text-sm text-slate space-y-1">
+            <div className="mt-4 pt-4 border-t border-graphite">
+              <h4 className="text-sm font-medium text-mist mb-2">Characteristics:</h4>
+              <ul className="text-sm text-mist space-y-1">
                 {profile.characteristics.map((char, i) => (
                   <li key={i} className="flex items-center gap-2">
-                    <span className="w-1 h-1 bg-teal rounded-full" />
+                    <span className="w-1 h-1 bg-aurora-teal rounded-full" />
                     {char}
                   </li>
                 ))}
               </ul>
 
               <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
-                <div className="bg-slate/5 rounded p-2">
-                  <span className="text-slate">Rhythm:</span>{' '}
-                  <span className="font-medium">{profile.parameters.sentence_rhythm}</span>
+                <div className="bg-charcoal rounded p-2">
+                  <span className="text-fog">Rhythm:</span>{' '}
+                  <span className="font-medium text-cream">{profile.parameters.sentence_rhythm}</span>
                 </div>
-                <div className="bg-slate/5 rounded p-2">
-                  <span className="text-slate">Vocabulary:</span>{' '}
-                  <span className="font-medium">{profile.parameters.vocabulary_level}</span>
+                <div className="bg-charcoal rounded p-2">
+                  <span className="text-fog">Vocabulary:</span>{' '}
+                  <span className="font-medium text-cream">{profile.parameters.vocabulary_level}</span>
                 </div>
-                <div className="bg-slate/5 rounded p-2">
-                  <span className="text-slate">Emotion:</span>{' '}
-                  <span className="font-medium">{profile.parameters.emotional_intensity}</span>
+                <div className="bg-charcoal rounded p-2">
+                  <span className="text-fog">Emotion:</span>{' '}
+                  <span className="font-medium text-cream">{profile.parameters.emotional_intensity}</span>
                 </div>
-                <div className="bg-slate/5 rounded p-2">
-                  <span className="text-slate">Imagery:</span>{' '}
-                  <span className="font-medium">{profile.parameters.imagery_density}</span>
+                <div className="bg-charcoal rounded p-2">
+                  <span className="text-fog">Imagery:</span>{' '}
+                  <span className="font-medium text-cream">{profile.parameters.imagery_density}</span>
                 </div>
               </div>
 
@@ -435,7 +435,7 @@ export default function StyleCustomizationPanel({
                     e.stopPropagation()
                     handleAddToBlend(profile)
                   }}
-                  className="mt-4 w-full py-2 text-sm font-medium text-teal border border-teal rounded-lg hover:bg-teal/5"
+                  className="mt-4 w-full py-2 text-sm font-medium text-aurora-teal border border-aurora-teal rounded-lg hover:bg-aurora-teal/10"
                 >
                   Add to Blend
                 </button>
@@ -449,7 +449,7 @@ export default function StyleCustomizationPanel({
 
   const renderProfilesTab = () => (
     <div className="space-y-4">
-      <p className="text-sm text-slate">
+      <p className="text-sm text-mist">
         Select a voice profile inspired by famous authors to guide your writing style.
       </p>
       <div className="grid gap-3">
@@ -461,10 +461,10 @@ export default function StyleCustomizationPanel({
   const renderCustomTab = () => (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate">Fine-tune your writing style with custom settings.</p>
+        <p className="text-sm text-mist">Fine-tune your writing style with custom settings.</p>
         <button
           onClick={resetCustomSettings}
-          className="flex items-center gap-1 text-sm text-slate hover:text-ink"
+          className="flex items-center gap-1 text-sm text-mist hover:text-cream"
         >
           <RefreshCw className="h-3 w-3" />
           Reset
@@ -473,7 +473,7 @@ export default function StyleCustomizationPanel({
 
       {/* Sentence Length */}
       <div>
-        <label className="block text-sm font-medium text-slate mb-2">Sentence Length</label>
+        <label className="block text-sm font-medium text-mist mb-2">Sentence Length</label>
         <div className="grid grid-cols-4 gap-2">
           {(['short', 'medium', 'long', 'varied'] as const).map((option) => (
             <button
@@ -481,8 +481,8 @@ export default function StyleCustomizationPanel({
               onClick={() => handleCustomSettingChange('sentenceLength', option)}
               className={`py-2 px-3 text-sm rounded-lg border transition-colors capitalize ${
                 customSettings.sentenceLength === option
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/20 hover:border-slate/40'
+                  ? 'border-aurora-teal bg-aurora-teal/10 text-aurora-teal'
+                  : 'border-graphite hover:border-nebula-blue/50 text-mist'
               }`}
             >
               {option}
@@ -493,7 +493,7 @@ export default function StyleCustomizationPanel({
 
       {/* Vocabulary Complexity */}
       <div>
-        <label className="block text-sm font-medium text-slate mb-2">Vocabulary Complexity</label>
+        <label className="block text-sm font-medium text-mist mb-2">Vocabulary Complexity</label>
         <div className="grid grid-cols-3 gap-2">
           {(['simple', 'moderate', 'complex'] as const).map((option) => (
             <button
@@ -501,8 +501,8 @@ export default function StyleCustomizationPanel({
               onClick={() => handleCustomSettingChange('vocabularyComplexity', option)}
               className={`py-2 px-3 text-sm rounded-lg border transition-colors capitalize ${
                 customSettings.vocabularyComplexity === option
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/20 hover:border-slate/40'
+                  ? 'border-aurora-teal bg-aurora-teal/10 text-aurora-teal'
+                  : 'border-graphite hover:border-nebula-blue/50 text-mist'
               }`}
             >
               {option}
@@ -513,7 +513,7 @@ export default function StyleCustomizationPanel({
 
       {/* Emotional Depth */}
       <div>
-        <label className="block text-sm font-medium text-slate mb-2">Emotional Depth</label>
+        <label className="block text-sm font-medium text-mist mb-2">Emotional Depth</label>
         <div className="grid grid-cols-3 gap-2">
           {(['surface', 'moderate', 'deep'] as const).map((option) => (
             <button
@@ -521,8 +521,8 @@ export default function StyleCustomizationPanel({
               onClick={() => handleCustomSettingChange('emotionalDepth', option)}
               className={`py-2 px-3 text-sm rounded-lg border transition-colors capitalize ${
                 customSettings.emotionalDepth === option
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/20 hover:border-slate/40'
+                  ? 'border-aurora-teal bg-aurora-teal/10 text-aurora-teal'
+                  : 'border-graphite hover:border-nebula-blue/50 text-mist'
               }`}
             >
               {option}
@@ -533,7 +533,7 @@ export default function StyleCustomizationPanel({
 
       {/* Description Level */}
       <div>
-        <label className="block text-sm font-medium text-slate mb-2">Description Level</label>
+        <label className="block text-sm font-medium text-mist mb-2">Description Level</label>
         <div className="grid grid-cols-3 gap-2">
           {(['minimal', 'balanced', 'rich'] as const).map((option) => (
             <button
@@ -541,8 +541,8 @@ export default function StyleCustomizationPanel({
               onClick={() => handleCustomSettingChange('descriptionLevel', option)}
               className={`py-2 px-3 text-sm rounded-lg border transition-colors capitalize ${
                 customSettings.descriptionLevel === option
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/20 hover:border-slate/40'
+                  ? 'border-aurora-teal bg-aurora-teal/10 text-aurora-teal'
+                  : 'border-graphite hover:border-nebula-blue/50 text-mist'
               }`}
             >
               {option}
@@ -554,8 +554,8 @@ export default function StyleCustomizationPanel({
       {/* Dialogue Ratio Slider */}
       <div>
         <div className="flex items-center justify-between mb-2">
-          <label className="text-sm font-medium text-slate">Dialogue vs. Narrative</label>
-          <span className="text-sm text-slate">{customSettings.dialogueRatio}%</span>
+          <label className="text-sm font-medium text-mist">Dialogue vs. Narrative</label>
+          <span className="text-sm text-mist">{customSettings.dialogueRatio}%</span>
         </div>
         <input
           type="range"
@@ -565,9 +565,9 @@ export default function StyleCustomizationPanel({
           onChange={(e) =>
             handleCustomSettingChange('dialogueRatio', parseInt(e.target.value))
           }
-          className="w-full h-2 bg-slate/20 rounded-lg appearance-none cursor-pointer accent-teal"
+          className="w-full h-2 bg-graphite rounded-lg appearance-none cursor-pointer accent-aurora-teal"
         />
-        <div className="flex justify-between text-xs text-slate mt-1">
+        <div className="flex justify-between text-xs text-fog mt-1">
           <span>More Narrative</span>
           <span>More Dialogue</span>
         </div>
@@ -575,7 +575,7 @@ export default function StyleCustomizationPanel({
 
       {/* Pacing Speed */}
       <div>
-        <label className="block text-sm font-medium text-slate mb-2">Pacing Speed</label>
+        <label className="block text-sm font-medium text-mist mb-2">Pacing Speed</label>
         <div className="grid grid-cols-3 gap-2">
           {(['slow', 'moderate', 'fast'] as const).map((option) => (
             <button
@@ -583,8 +583,8 @@ export default function StyleCustomizationPanel({
               onClick={() => handleCustomSettingChange('pacingSpeed', option)}
               className={`py-2 px-3 text-sm rounded-lg border transition-colors capitalize ${
                 customSettings.pacingSpeed === option
-                  ? 'border-teal bg-teal/10 text-teal'
-                  : 'border-slate/20 hover:border-slate/40'
+                  ? 'border-aurora-teal bg-aurora-teal/10 text-aurora-teal'
+                  : 'border-graphite hover:border-nebula-blue/50 text-mist'
               }`}
             >
               {option}
@@ -598,19 +598,19 @@ export default function StyleCustomizationPanel({
   const renderBlendTab = () => (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
-        <p className="text-sm text-slate">
+        <p className="text-sm text-mist">
           Blend up to 3 voice profiles to create a unique style combination.
         </p>
         <button
           onClick={() => setShowBlendInfo(!showBlendInfo)}
-          className="p-1 hover:bg-slate/10 rounded"
+          className="p-1 hover:bg-charcoal rounded"
         >
-          <Info className="h-4 w-4 text-slate" />
+          <Info className="h-4 w-4 text-mist" />
         </button>
       </div>
 
       {showBlendInfo && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
+        <div className="bg-ember/10 border border-ember/30 rounded-lg p-4 text-sm text-ember">
           Blending combines characteristics from multiple authors. Adjust the weight of each
           profile to control how much influence it has on the final style.
         </div>
@@ -619,26 +619,26 @@ export default function StyleCustomizationPanel({
       {/* Selected Blend Profiles */}
       {blendProfiles.length > 0 && (
         <div className="space-y-3">
-          <h3 className="text-sm font-medium text-ink">Your Blend</h3>
+          <h3 className="text-sm font-medium text-cream">Your Blend</h3>
           {blendProfiles.map(({ profile, weight }) => (
             <div
               key={profile.id}
-              className="border border-teal/30 bg-teal/5 rounded-lg p-4"
+              className="border border-aurora-teal/30 bg-aurora-teal/5 rounded-lg p-4"
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <User className="h-4 w-4 text-teal" />
-                  <span className="font-medium text-ink">{profile.name}</span>
+                  <User className="h-4 w-4 text-aurora-teal" />
+                  <span className="font-medium text-cream">{profile.name}</span>
                 </div>
                 <button
                   onClick={() => handleRemoveFromBlend(profile.id)}
-                  className="p-1 hover:bg-slate/10 rounded text-slate hover:text-ink"
+                  className="p-1 hover:bg-charcoal rounded text-mist hover:text-cream"
                 >
                   <X className="h-4 w-4" />
                 </button>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-sm text-slate w-16">{weight}%</span>
+                <span className="text-sm text-mist w-16">{weight}%</span>
                 <input
                   type="range"
                   min={10}
@@ -647,7 +647,7 @@ export default function StyleCustomizationPanel({
                   onChange={(e) =>
                     handleBlendWeightChange(profile.id, parseInt(e.target.value))
                   }
-                  className="flex-1 h-2 bg-slate/20 rounded-lg appearance-none cursor-pointer accent-teal"
+                  className="flex-1 h-2 bg-graphite rounded-lg appearance-none cursor-pointer accent-aurora-teal"
                 />
               </div>
             </div>
@@ -657,7 +657,7 @@ export default function StyleCustomizationPanel({
 
       {blendProfiles.length < 3 && (
         <div>
-          <h3 className="text-sm font-medium text-ink mb-3">
+          <h3 className="text-sm font-medium text-cream mb-3">
             Add profiles ({3 - blendProfiles.length} remaining)
           </h3>
           <div className="grid gap-3">
@@ -669,8 +669,8 @@ export default function StyleCustomizationPanel({
       )}
 
       {blendProfiles.length === 0 && (
-        <div className="text-center py-8 text-slate">
-          <Sparkles className="h-8 w-8 mx-auto mb-2 opacity-50" />
+        <div className="text-center py-8 text-mist">
+          <Sparkles className="h-8 w-8 mx-auto mb-2 text-graphite" />
           <p>Select profiles from below to start blending</p>
         </div>
       )}
@@ -678,23 +678,23 @@ export default function StyleCustomizationPanel({
   )
 
   return (
-    <div className="bg-snow rounded-xl shadow-sm">
+    <div className="bg-charcoal-light rounded-xl border border-graphite">
       {/* Header */}
-      <div className="p-4 border-b border-slate/10">
+      <div className="p-4 border-b border-graphite">
         <div className="flex items-center gap-2">
-          <Palette className="h-5 w-5 text-teal" />
-          <h2 className="text-lg font-medium text-ink">Style Customization</h2>
+          <Palette className="h-5 w-5 text-aurora-teal" />
+          <h2 className="text-lg font-medium text-cream">Style Customization</h2>
         </div>
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex border-b border-slate/10">
+      <div className="flex border-b border-graphite">
         <button
           onClick={() => setActiveTab('profiles')}
           className={`flex-1 py-3 text-sm font-medium transition-colors ${
             activeTab === 'profiles'
-              ? 'text-teal border-b-2 border-teal'
-              : 'text-slate hover:text-ink'
+              ? 'text-aurora-teal border-b-2 border-aurora-teal'
+              : 'text-mist hover:text-cream'
           }`}
         >
           <div className="flex items-center justify-center gap-2">
@@ -706,8 +706,8 @@ export default function StyleCustomizationPanel({
           onClick={() => setActiveTab('custom')}
           className={`flex-1 py-3 text-sm font-medium transition-colors ${
             activeTab === 'custom'
-              ? 'text-teal border-b-2 border-teal'
-              : 'text-slate hover:text-ink'
+              ? 'text-aurora-teal border-b-2 border-aurora-teal'
+              : 'text-mist hover:text-cream'
           }`}
         >
           <div className="flex items-center justify-center gap-2">
@@ -719,8 +719,8 @@ export default function StyleCustomizationPanel({
           onClick={() => setActiveTab('blend')}
           className={`flex-1 py-3 text-sm font-medium transition-colors ${
             activeTab === 'blend'
-              ? 'text-teal border-b-2 border-teal'
-              : 'text-slate hover:text-ink'
+              ? 'text-aurora-teal border-b-2 border-aurora-teal'
+              : 'text-mist hover:text-cream'
           }`}
         >
           <div className="flex items-center justify-center gap-2">
@@ -739,10 +739,10 @@ export default function StyleCustomizationPanel({
 
       {/* Summary Footer */}
       {(selectedProfile || blendProfiles.length > 0) && (
-        <div className="p-4 border-t border-slate/10 bg-slate/5">
+        <div className="p-4 border-t border-graphite bg-charcoal">
           <div className="text-sm">
-            <span className="text-slate">Current Style: </span>
-            <span className="font-medium text-ink">
+            <span className="text-mist">Current Style: </span>
+            <span className="font-medium text-cream">
               {blendProfiles.length > 0
                 ? `Blend: ${blendProfiles.map((bp) => bp.profile.name).join(' + ')}`
                 : selectedProfile?.name || 'None selected'}

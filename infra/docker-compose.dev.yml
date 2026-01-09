@@ -49,11 +49,17 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/sopherai
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-key-change-in-production
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      PRIMARY_MODEL: gpt-5
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID}
+      WORKOS_API_KEY: ${WORKOS_API_KEY}
+      WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-http://localhost:3000/api/backend/auth/callback}
+      LOCAL_AUTH_BYPASS: ${LOCAL_AUTH_BYPASS:-false}
+      FERNET_KEY: ${FERNET_KEY:-l0uQjBDS9SEum5gQtVuODNH74FY4zikKT-NIhX95VCo=}
+      PRIMARY_MODEL: openrouter/openai/gpt-5.2
+      SECONDARY_MODEL: openrouter/anthropic/claude-sonnet-4.5
+      OVERFLOW_MODEL: openrouter/google/gemini-3-pro-preview
       CORS_ORIGINS: "http://localhost:3000,http://frontend:3000"
+      FRONTEND_URL: "http://localhost:3000"
       LOG_LEVEL: INFO
     ports:
       - "8000:8000"
@@ -69,19 +75,26 @@ services:
       retries: 5
     volumes:
       - ../backend/app:/app/app:ro
+      - ../backend/tests:/app/tests:ro
+      - ../backend/pyproject.toml:/app/pyproject.toml:ro
 
   frontend:
     build:
       context: ../frontend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     environment:
       BACKEND_URL: http://backend:8000
       NEXT_PUBLIC_BACKEND_URL: http://localhost:8000
+      NODE_ENV: development
     ports:
       - "3000:3000"
     depends_on:
       backend:
         condition: service_healthy
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 10s

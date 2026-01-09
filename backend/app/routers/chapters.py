@@ -11,11 +11,12 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Body, Depends, Path, Request, Response, status
 from litellm import acompletion
-from sqlalchemy import select
+from sqlalchemy import Integer, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from ..cache import cache
+from ..config import DEFAULT_MODEL
 from ..db import get_db
 from ..errors import ErrorCode, api_error
 from ..metrics import MetricsTracker, active_sessions
@@ -25,6 +26,7 @@ from ..schemas import (
     ChapterDraftRequest,
     ChapterJobStatus,
     ChapterOutlineItem,
+    ChapterRegenerateRequest,
     ParallelChapterRequest,
     ParallelGenerationProgress,
     ParallelGenerationResult,
@@ -81,7 +83,7 @@ async def get_chapter_artifact(
         .join(Session, Session.id == Artifact.session_id)
         .where(Session.project_id == project_id)
         .where(Artifact.kind == "chapter")
-        .where(Artifact.meta["chapter_number"].astext.cast(int) == chapter_number)
+        .where(Artifact.meta["chapter_number"].astext.cast(Integer) == chapter_number)
         .order_by(Artifact.created_at.desc())
         .limit(1)
     )
@@ -115,7 +117,7 @@ async def chapter_event_generator(
     db: AsyncSession,
     user: TokenData,
     project_settings: Optional[ProjectSettings] = None,
-    model: str = "gpt-4o",
+    model: str | None = None,  # Uses DEFAULT_MODEL from config if not specified
 ) -> AsyncIterator[dict]:
     """Generate SSE events for chapter streaming
 
@@ -131,8 +133,13 @@ async def chapter_event_generator(
         db: The async database session
         user: The authenticated user's token data
         project_settings: Optional project settings for content filtering
-        model: The LLM model to use
+        model: The LLM model to use (defaults to DEFAULT_MODEL from config)
     """
+    # Use default model if not specified
+    model = model or DEFAULT_MODEL
+
+    logger.info(f"[ChapterGen] Starting chapter {chapter_number} generation with model: {model}")
+    logger.info(f"[ChapterGen] Outline length: {len(outline)} chars")
 
     active_sessions.inc()
     start_time = time.perf_counter()
@@ -146,9 +153,11 @@ async def chapter_event_generator(
             str(chapter_number),
             hashlib.md5(outline.encode()).hexdigest()[:16],
         )
+        logger.info(f"[ChapterGen] Cache key: {cache_key}")
 
         cached_result = await cache.get(cache_key)
         if cached_result:
+            logger.info("[ChapterGen] Cache HIT - returning cached content")
             MetricsTracker.track_cache(hit=True, cache_type="chapter")
             yield {
                 "event": "checkpoint",
@@ -158,6 +167,7 @@ async def chapter_event_generator(
             return
 
         MetricsTracker.track_cache(hit=False, cache_type="chapter")
+        logger.info("[ChapterGen] Cache MISS - will generate new content")
 
         # Build context from previous chapters
         context = ""
@@ -205,6 +215,7 @@ Begin writing the chapter now:"""
 
         # Stream chapter generation
         buffer: list[str] = []
+        logger.info(f"[ChapterGen] Starting LLM call to model: {model}")
 
         with MetricsTracker.track_inference(model, "writer", "chapter_generation"):
             response = await acompletion(
@@ -219,8 +230,14 @@ Begin writing the chapter now:"""
                 stream=True,
             )
 
+            logger.info("[ChapterGen] Got response object, starting to iterate chunks")
+            chunk_count = 0
             async for chunk in response:
+                chunk_count += 1
+                if chunk_count == 1:
+                    logger.info(f"[ChapterGen] First chunk received: {type(chunk)}")
                 if await request.is_disconnected():
+                    logger.warning(f"[ChapterGen] Client disconnected after {chunk_count} chunks")
                     break
 
                 if hasattr(chunk, "choices") and chunk.choices:
@@ -228,7 +245,10 @@ Begin writing the chapter now:"""
                     if content:
                         buffer.append(content)
                         tokens_emitted += 1
-                        yield {"event": "token", "data": content}
+                        # JSON-encode token to preserve whitespace exactly
+                        yield {"event": "token", "data": json.dumps(content)}
+                        if tokens_emitted == 1:
+                            logger.info(f"[ChapterGen] First token emitted: {repr(content)}")
 
                         # Progress updates every 500 tokens
                         if tokens_emitted % 500 == 0:
@@ -243,6 +263,8 @@ Begin writing the chapter now:"""
                                     }
                                 ),
                             }
+
+            logger.info(f"[ChapterGen] Streaming complete. Chunks: {chunk_count}, Tokens emitted: {tokens_emitted}")
 
             # Calculate and track costs
             prompt_tokens = len(prompt.split())
@@ -378,14 +400,14 @@ async def stream_chapter_generation(
     session_result = await db.execute(
         select(Session)
         .where(Session.project_id == project_id)
-        .where(Session.ended_at.is_(None))
-        .order_by(Session.started_at.desc())
+        .where(Session.user_id == user.user_id)
+        .order_by(Session.created_at.desc())
         .limit(1)
     )
     session = session_result.scalar_one_or_none()
 
     if not session:
-        session = Session(project_id=project_id)
+        session = Session(project_id=project_id, user_id=user.user_id)
         db.add(session)
         await db.flush()
 
@@ -505,14 +527,14 @@ async def update_chapter(
     session_result = await db.execute(
         select(Session)
         .where(Session.project_id == project_id)
-        .where(Session.ended_at.is_(None))
-        .order_by(Session.started_at.desc())
+        .where(Session.user_id == user.user_id)
+        .order_by(Session.created_at.desc())
         .limit(1)
     )
     session = session_result.scalar_one_or_none()
 
     if not session:
-        session = Session(project_id=project_id)
+        session = Session(project_id=project_id, user_id=user.user_id)
         db.add(session)
         await db.flush()
 
@@ -561,12 +583,99 @@ async def update_chapter(
     )
 
 
+@router.delete("/chapters/{chapter_number}")
+async def delete_chapter(
+    project_id: UUID,
+    chapter_number: int = Path(..., ge=1, description="Chapter number (must be >= 1)"),
+    db: AsyncSession = Depends(get_db),
+    user: TokenData = Depends(get_current_user),
+) -> Response:
+    """Delete a chapter from the project"""
+    # Verify project access
+    project_result = await db.execute(
+        select(Project).where(Project.id == project_id).where(Project.user_id == user.user_id)
+    )
+    project = project_result.scalar_one_or_none()
+
+    if not project:
+        return api_error(
+            ErrorCode.PROJECT_NOT_FOUND.value,
+            "Project not found or you don't have access.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Find all chapter artifacts with this number (there may be multiple versions)
+    result = await db.execute(
+        select(Artifact)
+        .join(Session, Session.id == Artifact.session_id)
+        .where(Session.project_id == project_id)
+        .where(Artifact.kind == "chapter")
+        .where(Artifact.meta["chapter_number"].astext.cast(Integer) == chapter_number)
+    )
+    artifacts = result.scalars().all()
+
+    if not artifacts:
+        return api_error(
+            ChapterErrorCode.CHAPTER_NOT_FOUND,
+            f"Chapter {chapter_number} not found.",
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    # Delete all versions of this chapter
+    deleted_count = 0
+    for artifact in artifacts:
+        await db.delete(artifact)
+        deleted_count += 1
+
+    # Log deletion event
+    session_result = await db.execute(
+        select(Session)
+        .where(Session.project_id == project_id)
+        .where(Session.user_id == user.user_id)
+        .order_by(Session.created_at.desc())
+        .limit(1)
+    )
+    session = session_result.scalar_one_or_none()
+
+    if session:
+        event = Event(
+            session_id=session.id,
+            type="chapter_deleted",
+            payload={
+                "chapter_number": chapter_number,
+                "artifacts_deleted": deleted_count,
+            },
+        )
+        db.add(event)
+
+    await db.commit()
+
+    # Invalidate cache
+    cache_key = cache.cache_key(
+        "chapter",
+        str(project_id),
+        str(chapter_number),
+    )
+    await cache.delete(cache_key)
+
+    return Response(
+        content=json.dumps(
+            {
+                "chapter_number": chapter_number,
+                "deleted": True,
+                "artifacts_deleted": deleted_count,
+            }
+        ),
+        media_type="application/json",
+    )
+
+
 @router.post("/chapters/{chapter_number}/regenerate/stream")
 async def stream_chapter_regeneration(
     request: Request,
     project_id: UUID,
     chapter_number: int = Path(..., ge=1, description="Chapter number (must be >= 1)"),
-    instructions: Optional[str] = Body(None),
+    body: ChapterRegenerateRequest = Body(default_factory=ChapterRegenerateRequest),
     db: AsyncSession = Depends(get_db),
     user: TokenData = Depends(get_current_user),
 ) -> Response:
@@ -574,6 +683,8 @@ async def stream_chapter_regeneration(
 
     Uses the project's outline and previous chapters for context.
     """
+    instructions = body.instructions
+
     # Note: chapter_number validation handled by Path(ge=1)
     if chapter_number < 1:
         return api_error(
@@ -608,14 +719,14 @@ async def stream_chapter_regeneration(
     session_result = await db.execute(
         select(Session)
         .where(Session.project_id == project_id)
-        .where(Session.ended_at.is_(None))
-        .order_by(Session.started_at.desc())
+        .where(Session.user_id == user.user_id)
+        .order_by(Session.created_at.desc())
         .limit(1)
     )
     session = session_result.scalar_one_or_none()
 
     if not session:
-        session = Session(project_id=project_id)
+        session = Session(project_id=project_id, user_id=user.user_id)
         db.add(session)
         await db.flush()
 
@@ -687,7 +798,7 @@ async def list_chapters(
         .join(Session, Session.id == Artifact.session_id)
         .where(Session.project_id == project_id)
         .where(Artifact.kind == "chapter")
-        .order_by(Artifact.meta["chapter_number"].astext.cast(int))
+        .order_by(Artifact.meta["chapter_number"].astext.cast(Integer))
     )
     artifacts = result.scalars().all()
 
@@ -790,9 +901,12 @@ async def parallel_generation_event_generator(
     session: Session,
     db: AsyncSession,
     user: TokenData,
-    model: str = "gpt-4o",
+    model: str | None = None,  # Uses DEFAULT_MODEL from config if not specified
 ) -> AsyncIterator[dict]:
     """Generate SSE events for parallel chapter generation."""
+    # Use default model if not specified
+    model = model or DEFAULT_MODEL
+
     active_sessions.inc()
     start_time = time.perf_counter()
 
@@ -1011,14 +1125,14 @@ async def stream_parallel_chapter_generation(
     session_result = await db.execute(
         select(Session)
         .where(Session.project_id == project_id)
-        .where(Session.ended_at.is_(None))
-        .order_by(Session.started_at.desc())
+        .where(Session.user_id == user.user_id)
+        .order_by(Session.created_at.desc())
         .limit(1)
     )
     session = session_result.scalar_one_or_none()
 
     if not session:
-        session = Session(project_id=project_id)
+        session = Session(project_id=project_id, user_id=user.user_id)
         db.add(session)
         await db.flush()
 

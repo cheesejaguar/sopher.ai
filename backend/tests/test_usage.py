@@ -64,7 +64,8 @@ class TestUsageSchemas:
     def test_estimate_request_defaults(self):
         """Test EstimateRequest default values."""
         request = EstimateRequest()
-        assert request.model == "gpt-5"
+        # Default model is now openrouter/openai/chatgpt-5.2
+        assert request.model.startswith("openrouter/")
         assert request.target_chapters == 12
         assert request.avg_prompt_tokens == 2000
         assert request.avg_completion_tokens == 4000
@@ -72,12 +73,12 @@ class TestUsageSchemas:
     def test_estimate_request_custom_values(self):
         """Test EstimateRequest with custom values."""
         request = EstimateRequest(
-            model="claude-sonnet-4-20250514",
+            model="openrouter/anthropic/claude-sonnet-4.5",
             target_chapters=20,
             avg_prompt_tokens=3000,
             avg_completion_tokens=5000,
         )
-        assert request.model == "claude-sonnet-4-20250514"
+        assert request.model == "openrouter/anthropic/claude-sonnet-4.5"
         assert request.target_chapters == 20
 
     def test_estimate_response_model(self):
