@@ -1,0 +1,25 @@
+{
+  "active": true,
+  "spec": "003-projects-page-becomes-default",
+  "state": "building",
+  "subtasks": {
+    "completed": 0,
+    "total": 1,
+    "in_progress": 1,
+    "failed": 0
+  },
+  "phase": {
+    "current": "Implementation",
+    "id": 1,
+    "total": 1
+  },
+  "workers": {
+    "active": 0,
+    "max": 1
+  },
+  "session": {
+    "number": 1,
+    "started_at": "2026-01-08T16:03:29.003809"
+  },
+  "last_update": "2026-01-08T16:03:29.007124"
+}

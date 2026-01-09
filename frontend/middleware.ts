@@ -43,10 +43,11 @@ export function middleware(request: NextRequest) {
       })
     }
     
-    // For OAuth success, always allow through and let client-side handle verification
+    // For OAuth success, redirect to /projects (the new default landing page)
     if (searchParams.get('oauth') === 'success') {
-      // Don't remove the parameter yet - let the client handle it
-      return NextResponse.next()
+      const projectsUrl = new URL('/projects', request.url)
+      projectsUrl.searchParams.set('oauth', 'success')
+      return NextResponse.redirect(projectsUrl)
     }
     return NextResponse.next()
   }

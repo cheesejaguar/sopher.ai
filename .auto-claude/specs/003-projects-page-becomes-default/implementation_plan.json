@@ -1,0 +1,40 @@
+{
+  "feature": "Projects Page Default Landing",
+  "spec_name": "003-projects-page-becomes-default",
+  "workflow_type": "simple",
+  "total_phases": 1,
+  "recommended_workers": 1,
+  "phases": [
+    {
+      "phase": 1,
+      "name": "Implementation",
+      "description": "Update middleware to redirect OAuth success to /projects",
+      "depends_on": [],
+      "subtasks": [
+        {
+          "id": "subtask-1-1",
+          "description": "Update OAuth success handler in middleware.ts to redirect to /projects instead of allowing through to /",
+          "service": "frontend",
+          "status": "pending",
+          "files_to_create": [],
+          "files_to_modify": ["frontend/middleware.ts"],
+          "patterns_from": [],
+          "verification": {
+            "type": "manual",
+            "run": "Login via OAuth and verify landing on /projects page"
+          }
+        }
+      ]
+    }
+  ],
+  "qa_signoff": {
+    "status": "pending",
+    "issues": "",
+    "tests_passed": ""
+  },
+  "metadata": {
+    "created_at": "2026-01-08T23:58:21.841Z",
+    "complexity": "simple",
+    "estimated_sessions": 1
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "task_description": "Make the projects page (/projects) the default landing page for authenticated users after OAuth login by modifying the middleware to redirect OAuth success handler to /projects instead of /",
+  "scoped_services": ["frontend"],
+  "files_to_modify": ["frontend/middleware.ts"],
+  "files_to_reference": [],
+  "patterns": {},
+  "service_contexts": {
+    "frontend": {
+      "description": "Next.js frontend with middleware handling authentication and routing"
+    }
+  },
+  "created_at": "2026-01-08T23:58:21.841Z"
+}
