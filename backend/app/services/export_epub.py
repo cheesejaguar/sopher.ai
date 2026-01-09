@@ -2,12 +2,18 @@
 
 Uses EbookLib to generate valid EPUB3 files with proper structure,
 metadata, and navigation. Content is converted to valid XHTML.
+Optionally validates EPUB3 compliance using EPUBCheck.
 """
 
 import html
 import io
+import logging
+import os
 import re
+import subprocess
+import tempfile
 import uuid
+from dataclasses import dataclass, field
 from typing import Optional
 
 from ebooklib import epub
@@ -22,6 +28,184 @@ from app.services.manuscript_assembly import (
 )
 
 from .exporters.base import BaseExporter, ExporterRegistry, ExportFormat, ExportResult
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class EPUBValidationMessage:
+    """A single validation message from EPUBCheck."""
+
+    id: str
+    level: str
+    location: str
+    message: str
+    suggestion: Optional[str] = None
+
+    @property
+    def is_error(self) -> bool:
+        """Check if this message is an error or fatal."""
+        return self.level.upper() in ("ERROR", "FATAL")
+
+    @property
+    def is_warning(self) -> bool:
+        """Check if this message is a warning."""
+        return self.level.upper() == "WARNING"
+
+
+@dataclass
+class EPUBValidationResult:
+    """Result of EPUB validation."""
+
+    valid: bool
+    messages: list[EPUBValidationMessage] = field(default_factory=list)
+    fatal_count: int = 0
+    error_count: int = 0
+    warning_count: int = 0
+    epub_version: Optional[str] = None
+
+    @property
+    def has_errors(self) -> bool:
+        """Check if there are any fatal or error level messages."""
+        return self.fatal_count > 0 or self.error_count > 0
+
+    def get_errors(self) -> list[EPUBValidationMessage]:
+        """Get only error and fatal messages."""
+        return [m for m in self.messages if m.is_error]
+
+    def get_warnings(self) -> list[EPUBValidationMessage]:
+        """Get only warning messages."""
+        return [m for m in self.messages if m.is_warning]
+
+
+class EPUBValidator:
+    """Validates EPUB files using EPUBCheck.
+
+    EPUBCheck requires Java JRE 8+ to be installed.
+    Validation is optional and degrades gracefully if Java is unavailable.
+    """
+
+    _epubcheck_available: Optional[bool] = None
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if EPUBCheck is available (Java installed)."""
+        if cls._epubcheck_available is not None:
+            return cls._epubcheck_available
+
+        try:
+            from epubcheck import EpubCheck  # noqa: F401
+
+            # Check if Java is available
+            result = subprocess.run(
+                ["java", "-version"],
+                capture_output=True,
+                timeout=5,
+            )
+            cls._epubcheck_available = result.returncode == 0
+        except (ImportError, FileNotFoundError, subprocess.TimeoutExpired, Exception):
+            cls._epubcheck_available = False
+
+        if not cls._epubcheck_available:
+            logger.warning(
+                "EPUBCheck validation not available. Install Java JRE 8+ for EPUB validation."
+            )
+
+        return cls._epubcheck_available
+
+    @classmethod
+    def validate(cls, epub_content: bytes) -> EPUBValidationResult:
+        """Validate EPUB content.
+
+        Args:
+            epub_content: The raw bytes of the EPUB file.
+
+        Returns:
+            EPUBValidationResult with validation status and messages.
+
+        Raises:
+            EPUBExportError: If validation fails catastrophically.
+        """
+        if not cls.is_available():
+            logger.info("EPUBCheck not available, skipping validation")
+            return EPUBValidationResult(
+                valid=True,
+                messages=[
+                    EPUBValidationMessage(
+                        id="SKIP-001",
+                        level="INFO",
+                        location="",
+                        message="Validation skipped: Java not available",
+                    )
+                ],
+            )
+
+        try:
+            from epubcheck import EpubCheck
+
+            # Write EPUB to temporary file for validation
+            with tempfile.NamedTemporaryFile(
+                suffix=".epub", delete=False
+            ) as temp_file:
+                temp_file.write(epub_content)
+                temp_path = temp_file.name
+
+            try:
+                # Run EPUBCheck
+                checker = EpubCheck(temp_path, autorun=True)
+
+                # Convert messages to our format
+                messages = []
+                if checker.messages:
+                    for msg in checker.messages:
+                        messages.append(
+                            EPUBValidationMessage(
+                                id=msg.id,
+                                level=msg.level,
+                                location=msg.location,
+                                message=msg.message,
+                                suggestion=msg.suggestion,
+                            )
+                        )
+
+                # Extract version if available
+                epub_version = None
+                if checker.meta and hasattr(checker.meta, "ePubVersion"):
+                    epub_version = checker.meta.ePubVersion
+
+                # Get counts from checker
+                fatal_count = checker.checker.nFatal if checker.checker else 0
+                error_count = checker.checker.nError if checker.checker else 0
+                warning_count = checker.checker.nWarning if checker.checker else 0
+
+                return EPUBValidationResult(
+                    valid=checker.valid,
+                    messages=messages,
+                    fatal_count=fatal_count,
+                    error_count=error_count,
+                    warning_count=warning_count,
+                    epub_version=epub_version,
+                )
+
+            finally:
+                # Clean up temp file
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+        except Exception as e:
+            logger.error(f"EPUB validation error: {e}")
+            return EPUBValidationResult(
+                valid=False,
+                messages=[
+                    EPUBValidationMessage(
+                        id="INTERNAL-001",
+                        level="ERROR",
+                        location="",
+                        message=f"Validation failed: {str(e)}",
+                    )
+                ],
+                error_count=1,
+            )
 
 
 class EPUBExportError(Exception):
@@ -172,13 +356,22 @@ p.center {
 }
 """
 
-    def __init__(self, css: Optional[str] = None):
+    def __init__(self, css: Optional[str] = None, validate: bool = True):
         """Initialize the EPUB export service.
 
         Args:
             css: Optional custom CSS for styling. Uses DEFAULT_CSS if not provided.
+            validate: Whether to run EPUBCheck validation after generation.
+                     Requires Java JRE 8+ to be installed. Defaults to True.
         """
         self.css = css or self.DEFAULT_CSS
+        self.validate = validate
+        self._last_validation_result: Optional[EPUBValidationResult] = None
+
+    @property
+    def last_validation_result(self) -> Optional[EPUBValidationResult]:
+        """Get the validation result from the last export."""
+        return self._last_validation_result
 
     def export(self, manuscript: Manuscript) -> ExportResult:
         """Export the manuscript as an EPUB3 file.
@@ -189,12 +382,63 @@ p.center {
         Returns:
             ExportResult with the EPUB content and metadata.
         """
+        self._last_validation_result = None
+
         try:
             book = self._create_book(manuscript)
             content = self._write_book_to_bytes(book)
+
+            # Run validation if enabled
+            if self.validate:
+                self._last_validation_result = EPUBValidator.validate(content)
+
+                if self._last_validation_result.has_errors:
+                    # Log validation errors but don't fail the export
+                    # The EPUB may still be usable, and we return the validation info
+                    for msg in self._last_validation_result.get_errors():
+                        logger.warning(
+                            f"EPUB validation error: [{msg.id}] {msg.message} at {msg.location}"
+                        )
+
             return self._success_result(content, manuscript)
         except Exception as e:
             return self._error_result(f"EPUB export failed: {str(e)}", manuscript)
+
+    def export_with_validation(
+        self, manuscript: Manuscript
+    ) -> tuple[ExportResult, Optional[EPUBValidationResult]]:
+        """Export the manuscript and return both export result and validation result.
+
+        This is a convenience method that ensures validation is run and returns
+        both results together.
+
+        Args:
+            manuscript: The manuscript to export.
+
+        Returns:
+            Tuple of (ExportResult, EPUBValidationResult or None if validation failed).
+        """
+        original_validate = self.validate
+        self.validate = True
+
+        try:
+            result = self.export(manuscript)
+            return result, self._last_validation_result
+        finally:
+            self.validate = original_validate
+
+    def validate_epub(self, epub_content: bytes) -> EPUBValidationResult:
+        """Validate raw EPUB content.
+
+        This can be used to validate an EPUB that was generated elsewhere.
+
+        Args:
+            epub_content: The raw bytes of the EPUB file.
+
+        Returns:
+            EPUBValidationResult with validation status and messages.
+        """
+        return EPUBValidator.validate(epub_content)
 
     def _create_book(self, manuscript: Manuscript) -> epub.EpubBook:
         """Create an EPUB book from the manuscript.

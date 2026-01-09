@@ -55,3 +55,4 @@ jiter>=0.4.1,<0.5.0  # instructor requires jiter<0.5.0
 ebooklib>=0.18  # EPUB generation
 python-docx>=1.1.0  # DOCX generation
 reportlab>=4.2.0  # PDF generation
+epubcheck>=5.1.0  # EPUB3 validation (requires Java JRE 8+)
