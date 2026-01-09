@@ -1,5 +1,11 @@
 """Tests for manuscript exporters."""
 
+import io
+
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+from app.services.export_docx import DOCXExportService
 from app.services.exporters import (
     ExportResult,
     MarkdownExporter,
@@ -626,3 +632,153 @@ class TestFileNameSanitization:
         exporter = TextExporter()
         file_name = exporter._create_file_name(manuscript)
         assert file_name == "manuscript.txt"
+
+
+class TestDOCXExporter:
+    """Tests for DOCXExportService."""
+
+    def test_export_basic_manuscript(self):
+        """DOCX exporter should export a basic manuscript."""
+        manuscript = Manuscript(
+            title="Test Book",
+            chapters=[
+                ChapterContent(
+                    number=1,
+                    title="First Chapter",
+                    content="This is the content.",
+                    word_count=4,
+                )
+            ],
+        )
+        exporter = DOCXExportService()
+        result = exporter.export(manuscript)
+
+        assert result.success is True
+        assert result.metadata.title == "Test Book"
+        assert result.metadata.format == ExportFormat.DOCX
+        assert result.size_bytes > 0
+
+    def test_export_with_front_matter(self):
+        """DOCX exporter should include front matter sections."""
+        manuscript = (
+            ManuscriptBuilder("My Novel")
+            .set_author("Jane Doe")
+            .add_title_page(subtitle="A Story")
+            .add_copyright_page(year=2024, publisher="Great Books", isbn="978-123456789")
+            .add_dedication("To my readers")
+            .add_chapter(1, "Chapter One", "Content here.")
+            .build()
+        )
+
+        exporter = DOCXExportService()
+        result = exporter.export(manuscript)
+
+        assert result.success is True
+
+        # Parse the generated DOCX to verify content
+        doc = Document(io.BytesIO(result.content))
+        paragraphs_text = [p.text for p in doc.paragraphs]
+        full_text = "\n".join(paragraphs_text)
+
+        # Verify title page elements
+        assert "My Novel" in full_text
+        assert "A Story" in full_text
+        assert "by Jane Doe" in full_text
+
+        # Verify copyright elements
+        assert "Copyright" in full_text and "2024" in full_text
+        assert "Great Books" in full_text
+        assert "978-123456789" in full_text
+
+        # Verify dedication
+        assert "To my readers" in full_text
+
+    def test_front_matter_formatting(self):
+        """DOCX front matter should have proper alignment."""
+        manuscript = (
+            ManuscriptBuilder("Test Book")
+            .set_author("Author Name")
+            .add_title_page()
+            .add_copyright_page(year=2024)
+            .add_dedication("Dedication text")
+            .add_chapter(1, "Chapter", "Content")
+            .build()
+        )
+
+        exporter = DOCXExportService()
+        result = exporter.export(manuscript)
+        doc = Document(io.BytesIO(result.content))
+
+        # Check that styles have correct alignment
+        # Title style should be centered
+        title_style = doc.styles["ManuscriptTitle"]
+        assert title_style.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.CENTER
+
+        # Copyright style should be left-aligned
+        copyright_style = doc.styles["Copyright"]
+        assert copyright_style.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.LEFT
+
+        # Dedication style should be centered
+        dedication_style = doc.styles["Dedication"]
+        assert dedication_style.paragraph_format.alignment == WD_ALIGN_PARAGRAPH.CENTER
+
+    def test_export_with_epigraph(self):
+        """DOCX exporter should include epigraph."""
+        manuscript = (
+            ManuscriptBuilder("Novel")
+            .set_author("Author")
+            .add_epigraph(
+                "To be or not to be",
+                attribution="Shakespeare",
+                source="Hamlet",
+            )
+            .add_chapter(1, "Ch 1", "Content")
+            .build()
+        )
+
+        exporter = DOCXExportService()
+        result = exporter.export(manuscript)
+
+        doc = Document(io.BytesIO(result.content))
+        full_text = "\n".join([p.text for p in doc.paragraphs])
+
+        assert "To be or not to be" in full_text
+        assert "Shakespeare" in full_text
+        assert "Hamlet" in full_text
+
+    def test_export_manuscript_formatting(self):
+        """DOCX should use manuscript formatting standards."""
+        manuscript = Manuscript(
+            title="Test",
+            chapters=[ChapterContent(number=1, title="Ch", content="Content")],
+        )
+
+        exporter = DOCXExportService()
+        result = exporter.export(manuscript)
+        doc = Document(io.BytesIO(result.content))
+
+        # Check Normal style settings
+        normal_style = doc.styles["Normal"]
+
+        # Font should be Times New Roman
+        assert normal_style.font.name == "Times New Roman"
+
+        # Font size should be 12pt (152400 EMUs = 12pt)
+        assert normal_style.font.size.pt == 12
+
+        # Line spacing should be 2.0 (double-spaced)
+        assert normal_style.paragraph_format.line_spacing == 2.0
+
+    def test_export_docx_file_extension(self):
+        """DOCX export should have correct file extension."""
+        manuscript = Manuscript(title="Book")
+        exporter = DOCXExportService()
+        result = exporter.export(manuscript)
+
+        assert result.file_name.endswith(".docx")
+
+    def test_export_docx_mime_type(self):
+        """DOCX export should have correct MIME type."""
+        exporter = DOCXExportService()
+        expected = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        assert exporter.mime_type == expected
