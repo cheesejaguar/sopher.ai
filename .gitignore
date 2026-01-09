@@ -339,3 +339,6 @@ oauth-secret-backup-*.yaml
 
 # Auto Claude data directory
 .auto-claude/
+
+# Git worktrees (used for parallel development)
+.worktrees/
