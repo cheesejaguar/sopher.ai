@@ -489,18 +489,48 @@ async def run_llm_review(
             # Find JSON in response (may be wrapped in markdown code blocks)
             json_match = re.search(r'\{[\s\S]*\}', content)
             if json_match:
-                return json.loads(json_match.group())
+                result = json.loads(json_match.group())
+                # Ensure summary is a string, not a nested object
+                if "summary" in result and not isinstance(result["summary"], str):
+                    result["summary"] = str(result.get("summary", ""))[:500]
+                return result
             else:
+                # No JSON found - extract meaningful text, avoiding raw JSON display
+                clean_content = content.strip()
+                # Remove any partial JSON that might be in the response
+                if clean_content.startswith("{"):
+                    summary = "Analysis completed but response format was unexpected."
+                else:
+                    summary = clean_content[:500] if clean_content else "Analysis completed."
                 return {
                     "score": 0.7,
-                    "summary": content[:500],
+                    "summary": summary,
                     "parse_error": "Could not extract JSON from response"
                 }
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            # JSON parsing failed - try to extract specific fields from partial JSON
+            score = 0.7
+            summary = "Analysis completed but full results could not be parsed."
+
+            # Try to extract score from partial JSON
+            score_match = re.search(r'"score"\s*:\s*([\d.]+)', content)
+            if score_match:
+                try:
+                    score = float(score_match.group(1))
+                except ValueError:
+                    pass
+
+            # Try to extract summary from partial JSON
+            summary_match = re.search(
+                r'"summary"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', content
+            )
+            if summary_match:
+                summary = summary_match.group(1).replace('\\"', '"')[:500]
+
             return {
-                "score": 0.7,
-                "summary": content[:500],
-                "parse_error": "Invalid JSON in response"
+                "score": score,
+                "summary": summary,
+                "parse_error": f"Partial JSON parsed: {str(e)[:100]}"
             }
 
     except Exception as e:
