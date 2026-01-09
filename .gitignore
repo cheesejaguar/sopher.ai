@@ -336,3 +336,6 @@ oauth-secret-backup-*.yaml
 
 # Root-level lockfiles (frontend has its own)
 /package-lock.json
+
+# Auto Claude data directory
+.auto-claude/

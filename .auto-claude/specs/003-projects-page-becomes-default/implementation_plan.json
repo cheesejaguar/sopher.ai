@@ -15,26 +15,55 @@
           "id": "subtask-1-1",
           "description": "Update OAuth success handler in middleware.ts to redirect to /projects instead of allowing through to /",
           "service": "frontend",
-          "status": "pending",
+          "status": "completed",
           "files_to_create": [],
-          "files_to_modify": ["frontend/middleware.ts"],
+          "files_to_modify": [
+            "frontend/middleware.ts"
+          ],
           "patterns_from": [],
           "verification": {
             "type": "manual",
             "run": "Login via OAuth and verify landing on /projects page"
-          }
+          },
+          "notes": "Updated OAuth success handler to redirect to /projects?oauth=success instead of allowing through to /?oauth=success. The oauth=success parameter is preserved for any client-side handling needs.",
+          "updated_at": "2026-01-09T00:04:19.725586+00:00"
         }
       ]
     }
   ],
   "qa_signoff": {
-    "status": "pending",
-    "issues": "",
-    "tests_passed": ""
+    "status": "approved",
+    "qa_session": 0,
+    "issues_found": [
+      {
+        "description": "Minor only - spec inconsistency (documentation issue, not code), optional test coverage improvement"
+      }
+    ],
+    "tests_passed": {},
+    "timestamp": "2026-01-09T00:07:56.788909+00:00",
+    "ready_for_qa_revalidation": false
   },
   "metadata": {
     "created_at": "2026-01-08T23:58:21.841Z",
     "complexity": "simple",
     "estimated_sessions": 1
+  },
+  "last_updated": "2026-01-09T00:07:56.788920+00:00",
+  "status": "human_review",
+  "planStatus": "review",
+  "qa_iteration_history": [
+    {
+      "iteration": 1,
+      "status": "approved",
+      "timestamp": "2026-01-09T00:08:26.903054+00:00",
+      "issues": [],
+      "duration_seconds": 215.37
+    }
+  ],
+  "qa_stats": {
+    "total_iterations": 1,
+    "last_iteration": 1,
+    "last_status": "approved",
+    "issues_by_type": {}
   }
 }
