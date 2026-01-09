@@ -333,6 +333,11 @@ oauth-secret-backup-*.yaml
 # Claude Code local files
 .claude/*.local.*
 .claude/*.local.md
+.auto-claude/
+.claude_settings.json
+
+# Git worktrees
+.worktrees/
 
 # Root-level lockfiles (frontend has its own)
 /package-lock.json
