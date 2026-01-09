@@ -59,10 +59,114 @@ _export_jobs: dict[str, dict] = {}
 # ============================================================================
 
 
+async def get_project_outline(db: AsyncSession, project_id: UUID) -> Optional[str]:
+    """Retrieve the latest outline artifact for a project.
+
+    Following the pattern from chapters.py for consistent artifact retrieval.
+
+    Args:
+        db: Database session
+        project_id: Project UUID
+
+    Returns:
+        Decoded outline content or None if not found
+    """
+    result = await db.execute(
+        select(Artifact)
+        .join(Session, Session.id == Artifact.session_id)
+        .where(Session.project_id == project_id)
+        .where(Artifact.kind == "outline")
+        .order_by(Artifact.created_at.desc())
+        .limit(1)
+    )
+    artifact = result.scalar_one_or_none()
+    if artifact and artifact.blob:
+        try:
+            return artifact.blob.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning(f"Failed to decode outline for project {project_id}")
+            return None
+    return None
+
+
+async def get_all_project_artifacts(
+    db: AsyncSession, project_id: UUID, kinds: Optional[list[str]] = None
+) -> dict[str, list[Artifact]]:
+    """Retrieve all artifacts for a project, grouped by kind.
+
+    Useful for comprehensive export that may include outline, style guide,
+    character bible, and other project content.
+
+    Args:
+        db: Database session
+        project_id: Project UUID
+        kinds: Optional list of artifact kinds to include (default: all)
+
+    Returns:
+        Dictionary mapping artifact kind to list of artifacts
+    """
+    query = (
+        select(Artifact)
+        .join(Session, Session.id == Artifact.session_id)
+        .where(Session.project_id == project_id)
+        .order_by(Artifact.created_at.desc())
+    )
+
+    if kinds:
+        query = query.where(Artifact.kind.in_(kinds))
+
+    result = await db.execute(query)
+    artifacts = result.scalars().all()
+
+    # Group by kind
+    artifacts_by_kind: dict[str, list[Artifact]] = {}
+    for artifact in artifacts:
+        kind = artifact.kind
+        if kind not in artifacts_by_kind:
+            artifacts_by_kind[kind] = []
+        artifacts_by_kind[kind].append(artifact)
+
+    logger.debug(
+        f"Retrieved {sum(len(v) for v in artifacts_by_kind.values())} artifacts "
+        f"for project {project_id}: {list(artifacts_by_kind.keys())}"
+    )
+
+    return artifacts_by_kind
+
+
+def decode_artifact_content(artifact: Artifact) -> str:
+    """Safely decode artifact blob content to string.
+
+    Args:
+        artifact: The artifact to decode
+
+    Returns:
+        Decoded content string, or empty string if decoding fails
+    """
+    if not artifact.blob:
+        return ""
+
+    try:
+        return artifact.blob.decode("utf-8")
+    except UnicodeDecodeError:
+        logger.warning(
+            f"Failed to decode artifact {artifact.id} (kind={artifact.kind}), "
+            "falling back to latin-1"
+        )
+        try:
+            return artifact.blob.decode("latin-1")
+        except Exception:
+            logger.error(f"Failed to decode artifact {artifact.id} with any encoding")
+            return ""
+
+
 async def get_chapter_artifacts(
     db: AsyncSession, project_id: UUID, chapter_numbers: Optional[list[int]] = None
 ) -> list[Artifact]:
     """Retrieve chapter artifacts for a project.
+
+    Queries the Artifact table where kind='chapter', orders by chapter_number,
+    and returns the latest version of each chapter (handling regenerations).
 
     Args:
         db: Database session
@@ -95,6 +199,12 @@ async def get_chapter_artifacts(
         if ch_num not in chapters_dict or artifact.created_at > chapters_dict[ch_num].created_at:
             chapters_dict[ch_num] = artifact
 
+    # Log aggregation results
+    logger.debug(
+        f"Aggregated {len(chapters_dict)} chapters for project {project_id} "
+        f"(from {len(artifacts)} total chapter artifacts)"
+    )
+
     return sorted(chapters_dict.values(), key=lambda a: a.meta.get("chapter_number", 0))
 
 
@@ -105,13 +215,16 @@ async def build_manuscript(
 ) -> Manuscript:
     """Build a Manuscript object from project data and chapter artifacts.
 
+    Aggregates all chapter content from artifacts, decodes blob content,
+    and assembles into a complete Manuscript with front/back matter.
+
     Args:
         project: The project
-        chapter_artifacts: List of chapter artifacts
+        chapter_artifacts: List of chapter artifacts (from get_chapter_artifacts)
         request: Export request with front/back matter options
 
     Returns:
-        Assembled Manuscript object
+        Assembled Manuscript object ready for export
     """
     # Determine author name
     author_name = request.author_name
@@ -121,21 +234,35 @@ async def build_manuscript(
     # Determine title
     title = request.custom_title or project.name
 
-    # Build chapter content
+    # Build chapter content from artifacts
+    # Each artifact contains: kind='chapter', meta with chapter_number and title, blob with content
     chapters: list[ChapterContent] = []
     for artifact in chapter_artifacts:
         ch_num = artifact.meta.get("chapter_number", 0)
         ch_title = artifact.meta.get("title", f"Chapter {ch_num}")
-        content = artifact.blob.decode("utf-8") if artifact.blob else ""
+
+        # Safely decode chapter content using helper function
+        content = decode_artifact_content(artifact)
+
+        # Log any empty chapters for debugging
+        if not content:
+            logger.warning(
+                f"Empty content for chapter {ch_num} in project {project.id}"
+            )
 
         chapters.append(
             ChapterContent(
                 number=ch_num,
                 title=ch_title,
                 content=content,
-                word_count=len(content.split()),
+                word_count=len(content.split()) if content else 0,
             )
         )
+
+    logger.info(
+        f"Built manuscript with {len(chapters)} chapters, "
+        f"{sum(ch.word_count for ch in chapters)} total words"
+    )
 
     # Build manuscript
     manuscript = Manuscript(
@@ -811,14 +938,15 @@ async def get_export_preview(
     # Get chapter artifacts to calculate actual stats
     chapter_artifacts = await get_chapter_artifacts(db, project_id)
 
-    # Calculate statistics
+    # Calculate statistics by aggregating chapter content
     total_chapters = len(chapter_artifacts)
     total_words = 0
     total_characters = 0
 
     for artifact in chapter_artifacts:
-        if artifact.blob:
-            content = artifact.blob.decode("utf-8")
+        # Use decode_artifact_content for safe decoding
+        content = decode_artifact_content(artifact)
+        if content:
             total_words += len(content.split())
             total_characters += len(content)
 
