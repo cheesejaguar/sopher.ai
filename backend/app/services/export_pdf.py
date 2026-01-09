@@ -148,6 +148,7 @@ class PDFExportService(BaseExporter):
         self._show_page_numbers = False
         self._is_first_pass = True  # True during first pass, False during second
         self._toc_entries: list[tuple[str, str, int]] = []  # (id, title, level)
+        self._first_content_page: Optional[int] = None  # Track first content page
 
     def _get_italic_font(self) -> str:
         """Get the italic variant of the current font.
@@ -208,14 +209,21 @@ class PDFExportService(BaseExporter):
         self._toc_entries = []
         self._current_page = 0
         self._is_first_pass = True
+        self._first_content_page = None  # Reset for each pass
 
         first_pass_buffer = io.BytesIO()
         first_doc = self._create_document(first_pass_buffer, manuscript)
         first_story = self._build_story(manuscript)
         first_doc.build(first_story)
 
+        # Save the first content page from the first pass for TOC calculation
+        first_content_page_from_first_pass = self._first_content_page
+
         # Second pass: Rebuild with accurate TOC using captured page numbers
         self._is_first_pass = False
+        self._first_content_page = None  # Reset for second pass rendering
+        # Store the first content page for TOC display page number calculation
+        self._first_content_page_for_toc = first_content_page_from_first_pass
         final_buffer = io.BytesIO()
         final_doc = self._create_document(final_buffer, manuscript)
         final_story = self._build_story(manuscript)
@@ -284,17 +292,29 @@ class PDFExportService(BaseExporter):
         canvas.restoreState()
 
     def _on_content_page(self, canvas, doc):
-        """Callback for content pages (with page numbers)."""
+        """Callback for content pages (with page numbers).
+
+        Page numbers restart from 1 for content pages (after front matter).
+        This follows standard book publishing conventions where front matter
+        (title page, copyright, dedication, etc.) is either unnumbered or
+        uses Roman numerals, and Arabic numerals begin with the first chapter.
+        """
         self._current_page = doc.page
         canvas.saveState()
 
+        # Track the first content page to calculate display page numbers
+        if self._first_content_page is None:
+            self._first_content_page = doc.page
+
+        # Calculate display page number (starts at 1 for first content page)
+        display_page_num = doc.page - self._first_content_page + 1
+
         # Draw page number at bottom center
-        page_num = doc.page
         canvas.setFont(self.font_name, 10)
         canvas.drawCentredString(
             self.PAGE_SIZE[0] / 2,
             0.5 * inch,
-            str(page_num),
+            str(display_page_num),
         )
 
         canvas.restoreState()
@@ -732,7 +752,8 @@ class PDFExportService(BaseExporter):
 
         On the first pass, page numbers are not yet known, so placeholder
         dots are used. On the second pass, actual page numbers from the
-        page tracker are included.
+        page tracker are included, converted to display page numbers
+        (starting from 1 for the first content page).
 
         Args:
             manuscript: The manuscript.
@@ -760,7 +781,15 @@ class PDFExportService(BaseExporter):
 
             # Get page number if available (second pass) or use placeholder
             if not self._is_first_pass and entry_id in self._page_tracker:
-                page_num = str(self._page_tracker[entry_id])
+                raw_page_num = self._page_tracker[entry_id]
+                # Convert raw page number to display page number (starting from 1)
+                # Use the first content page captured during the first pass
+                first_content = getattr(self, "_first_content_page_for_toc", None)
+                if first_content is not None:
+                    display_page_num = raw_page_num - first_content + 1
+                else:
+                    display_page_num = raw_page_num
+                page_num = str(display_page_num)
             else:
                 page_num = "..."
 
