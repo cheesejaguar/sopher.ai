@@ -406,6 +406,30 @@ export default function ProjectDetailPage() {
     }
   }, [projectId])
 
+  const fetchLiteraryReview = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/backend/v1/projects/${projectId}/continuity/literary-review`, {
+        credentials: 'include',
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        if (data.has_review) {
+          setReviewScore(data.overall_score || 0)
+          setReviewRecommendation(data.recommendation || '')
+          setReviewPhaseScores(data.phase_scores || {})
+          setReviewPhaseSummaries(data.phase_summaries || {})
+          setReviewIssues(data.issues || [])
+          setReviewChapterCount(data.chapter_count || 0)
+          setReviewWordCount(data.word_count || 0)
+          setReviewComplete(true)
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching literary review:', err)
+    }
+  }, [projectId])
+
   useEffect(() => {
     const fetchUserData = async () => {
       try {
@@ -433,8 +457,9 @@ export default function ProjectDetailPage() {
       fetchStats()
       fetchOutline()
       fetchChapters()
+      fetchLiteraryReview()
     }
-  }, [user, projectId, fetchProject, fetchStats, fetchOutline, fetchChapters])
+  }, [user, projectId, fetchProject, fetchStats, fetchOutline, fetchChapters, fetchLiteraryReview])
 
   const handleLogout = async () => {
     await fetch('/api/backend/auth/logout', {

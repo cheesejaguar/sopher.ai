@@ -543,8 +543,82 @@ async def run_llm_review(
 
 
 # ============================================================================
+# Helper Functions
+# ============================================================================
+
+
+async def save_literary_review_results(
+    project_id: UUID,
+    review_data: dict,
+) -> None:
+    """Save literary review results to project settings."""
+    from app.db import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(Project).where(Project.id == project_id))
+        project = result.scalar_one_or_none()
+        if project:
+            settings = project.settings or {}
+            settings["literary_review"] = {
+                "overall_score": review_data.get("overall_score"),
+                "recommendation": review_data.get("recommendation"),
+                "phase_scores": review_data.get("phase_scores"),
+                "phase_summaries": review_data.get("phase_summaries"),
+                "issues": review_data.get("all_issues", []),
+                "chapter_count": review_data.get("chapter_count"),
+                "word_count": review_data.get("total_words"),
+                "completed_at": datetime.utcnow().isoformat(),
+            }
+            project.settings = settings
+            await db.commit()
+            logger.info(f"Saved literary review results for project {project_id}")
+
+
+# ============================================================================
 # Endpoints
 # ============================================================================
+
+
+@router.get("/literary-review")
+async def get_literary_review(
+    project_id: UUID,
+    current_user: TokenData = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get saved literary review results for a project."""
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": ErrorCode.NOT_FOUND, "message": "Project not found"},
+        )
+
+    # Check ownership
+    if str(project.user_id) != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": ErrorCode.FORBIDDEN, "message": "Not authorized"},
+        )
+
+    settings = project.settings or {}
+    review = settings.get("literary_review")
+
+    if not review:
+        return {"has_review": False}
+
+    return {
+        "has_review": True,
+        "overall_score": review.get("overall_score", 0),
+        "recommendation": review.get("recommendation", ""),
+        "phase_scores": review.get("phase_scores", {}),
+        "phase_summaries": review.get("phase_summaries", {}),
+        "issues": review.get("issues", []),
+        "chapter_count": review.get("chapter_count", 0),
+        "word_count": review.get("word_count", 0),
+        "completed_at": review.get("completed_at"),
+    }
 
 
 @router.post("/check")
@@ -677,6 +751,12 @@ async def run_continuity_check(
                 "all_issues": all_issues[:20],  # Limit to top 20 issues
                 "full_report": phase_results,
             }
+
+            # Save review results to database for persistence
+            try:
+                await save_literary_review_results(project_id, complete_data)
+            except Exception as save_err:
+                logger.error(f"Failed to save review results: {save_err}")
 
             yield f"data: {json.dumps(complete_data)}\n\n"
 
