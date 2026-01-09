@@ -50,3 +50,8 @@ pypdf>=6.4.0  # Fix for RAM exhaustion vulnerabilities
 
 # Additional pins for dependency resolution
 jiter>=0.4.1,<0.5.0  # instructor requires jiter<0.5.0
+
+# Document export formats (EPUB, PDF, DOCX)
+ebooklib>=0.18  # EPUB generation
+python-docx>=1.1.0  # DOCX generation
+reportlab>=4.2.0  # PDF generation
