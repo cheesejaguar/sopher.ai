@@ -107,9 +107,11 @@ module = [
     "app.monitoring.*",
     "app.workers.*",
     "app.routers.*",
+    "app.workos_sso",
 ]
 # Allow flexibility in modules with complex data transformations and SQLAlchemy models
-disable_error_code = ["arg-type", "var-annotated", "index", "no-any-return", "return-value", "call-arg", "attr-defined", "assignment", "operator"]
+# valid-type: python-docx Document is a factory function, not a class type
+disable_error_code = ["arg-type", "var-annotated", "index", "no-any-return", "return-value", "call-arg", "attr-defined", "assignment", "operator", "valid-type"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
