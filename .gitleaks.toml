@@ -1,0 +1,73 @@
+# Gitleaks configuration for sopher.ai
+# https://github.com/gitleaks/gitleaks
+
+title = "sopher.ai secret detection rules"
+
+[extend]
+useDefault = true
+
+# Custom rules for additional patterns
+[[rules]]
+id = "fernet-key"
+description = "Fernet encryption key"
+regex = '''[A-Za-z0-9_-]{43}='''
+keywords = ["fernet", "fernet_key", "FERNET_KEY"]
+entropy = 3.5
+
+[[rules]]
+id = "jwt-secret-value"
+description = "JWT secret that looks like a real secret"
+regex = '''(?i)jwt[_-]?secret['":\s]*[=:]\s*['"]?[a-zA-Z0-9_/+=]{32,}['"]?'''
+keywords = ["jwt_secret", "jwt-secret", "JWT_SECRET"]
+
+[[rules]]
+id = "google-oauth-client-secret"
+description = "Google OAuth client secret"
+regex = '''GOCSPX-[a-zA-Z0-9_-]{28,}'''
+keywords = ["client_secret", "GOOGLE_CLIENT_SECRET"]
+
+[[rules]]
+id = "anthropic-api-key"
+description = "Anthropic API key"
+regex = '''sk-ant-[a-zA-Z0-9_-]{90,}'''
+keywords = ["anthropic", "ANTHROPIC_API_KEY"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API key"
+regex = '''sk-[a-zA-Z0-9]{48,}'''
+keywords = ["openai", "OPENAI_API_KEY"]
+
+# Allowlist for false positives
+[allowlist]
+description = "Allowlist for known safe patterns"
+
+# Allow example/placeholder values in documentation and templates
+paths = [
+    '''\.env\.example''',
+    '''\.env\..*\.template''',
+    '''docs/.*\.md''',
+    '''CLAUDE\.md''',
+    '''README\.md''',
+]
+
+# Allow specific patterns that are placeholders
+regexes = [
+    '''sk-ant-your-key-here''',
+    '''sk-your-key-here''',
+    '''sk-your-openai-key-here''',
+    '''your-google-key-here''',
+    '''your-google-ai-key-here''',
+    '''your-google-client-id''',
+    '''your-google-client-secret''',
+    '''CHANGE_ME_.*''',
+    '''dev-secret-key-change-in-production''',
+    '''gAAAAABhZ_generate_proper_key_for_production=''',
+    '''test-secret-that-is-at-least-32-characters-long-for-security''',
+]
+
+# Allow commits by bots
+commits = [
+    '''.*dependabot.*''',
+    '''.*renovate.*''',
+]
