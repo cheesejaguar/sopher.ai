@@ -6,8 +6,13 @@ These tests verify the complete authentication flow including:
 - Protected endpoint access
 """
 
+import os
+
 import pytest
 from httpx import AsyncClient
+
+# Check if WorkOS credentials are available
+WORKOS_CONFIGURED = bool(os.environ.get("WORKOS_CLIENT_ID") and os.environ.get("WORKOS_API_KEY"))
 
 
 @pytest.mark.asyncio
@@ -57,6 +62,10 @@ async def test_protected_endpoint_with_invalid_token(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    not WORKOS_CONFIGURED,
+    reason="WorkOS credentials (WORKOS_CLIENT_ID, WORKOS_API_KEY) not configured",
+)
 async def test_google_oauth_login_redirect(async_client: AsyncClient):
     """Test Google OAuth login initiates redirect."""
     response = await async_client.get("/auth/login/google", follow_redirects=False)

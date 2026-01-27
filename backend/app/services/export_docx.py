@@ -667,9 +667,7 @@ class DOCXExportService(BaseExporter):
         # Social media
         if bio.social_media:
             for platform, handle in bio.social_media.items():
-                doc.add_paragraph(
-                    f"{platform.capitalize()}: {handle}", style="FirstParagraph"
-                )
+                doc.add_paragraph(f"{platform.capitalize()}: {handle}", style="FirstParagraph")
 
     def _add_also_by_page(self, doc: Document, manuscript: Manuscript) -> None:
         """Add the "Also By" page.

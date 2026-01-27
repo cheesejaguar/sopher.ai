@@ -99,7 +99,7 @@ DEFAULT_PRICING = {
 def normalize_model_name(model: str) -> str:
     """Normalize model name by stripping openrouter/ prefix if present."""
     if model.startswith("openrouter/"):
-        return model[len("openrouter/"):]
+        return model[len("openrouter/") :]
     return model
 
 

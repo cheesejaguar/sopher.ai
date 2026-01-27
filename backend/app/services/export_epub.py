@@ -144,9 +144,7 @@ class EPUBValidator:
             from epubcheck import EpubCheck
 
             # Write EPUB to temporary file for validation
-            with tempfile.NamedTemporaryFile(
-                suffix=".epub", delete=False
-            ) as temp_file:
+            with tempfile.NamedTemporaryFile(suffix=".epub", delete=False) as temp_file:
                 temp_file.write(epub_content)
                 temp_path = temp_file.name
 

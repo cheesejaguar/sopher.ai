@@ -205,7 +205,7 @@ class PDFExportService(BaseExporter):
         self._init_styles()
 
         # First pass: Build document to capture page numbers
-        self._page_tracker: dict[str, int] = {}
+        self._page_tracker = {}
         self._toc_entries = []
         self._current_page = 0
         self._is_first_pass = True
@@ -231,9 +231,7 @@ class PDFExportService(BaseExporter):
 
         return final_buffer.getvalue()
 
-    def _create_document(
-        self, buffer: io.BytesIO, manuscript: Manuscript
-    ) -> BaseDocTemplate:
+    def _create_document(self, buffer: io.BytesIO, manuscript: Manuscript) -> BaseDocTemplate:
         """Create a PDF document with page templates.
 
         Args:
@@ -572,9 +570,7 @@ class PDFExportService(BaseExporter):
 
         # Subtitle
         if content.subtitle:
-            elements.append(
-                Paragraph(self._escape(content.subtitle), self._styles["Subtitle"])
-            )
+            elements.append(Paragraph(self._escape(content.subtitle), self._styles["Subtitle"]))
 
         # Author
         if content.author_name:
@@ -586,15 +582,11 @@ class PDFExportService(BaseExporter):
         # Publisher
         if content.publisher:
             elements.append(Spacer(1, 48))
-            elements.append(
-                Paragraph(self._escape(content.publisher), self._styles["Author"])
-            )
+            elements.append(Paragraph(self._escape(content.publisher), self._styles["Author"]))
 
         # Edition
         if content.edition:
-            elements.append(
-                Paragraph(self._escape(content.edition), self._styles["Author"])
-            )
+            elements.append(Paragraph(self._escape(content.edition), self._styles["Author"]))
 
         return elements
 
@@ -653,9 +645,7 @@ class PDFExportService(BaseExporter):
         if content.credits:
             elements.append(Spacer(1, 12))
             for credit in content.credits:
-                elements.append(
-                    Paragraph(self._escape(credit), self._styles["Copyright"])
-                )
+                elements.append(Paragraph(self._escape(credit), self._styles["Copyright"]))
 
         # Fiction disclaimer
         elements.append(Spacer(1, 24))
@@ -684,9 +674,7 @@ class PDFExportService(BaseExporter):
         elements.append(Spacer(1, 2.5 * inch))
 
         # Dedication text
-        elements.append(
-            Paragraph(self._escape(content.text), self._styles["Dedication"])
-        )
+        elements.append(Paragraph(self._escape(content.text), self._styles["Dedication"]))
 
         return elements
 
@@ -705,9 +693,7 @@ class PDFExportService(BaseExporter):
         elements.append(Spacer(1, 2.5 * inch))
 
         # Quote
-        elements.append(
-            Paragraph(f'"{self._escape(content.text)}"', self._styles["Epigraph"])
-        )
+        elements.append(Paragraph(f'"{self._escape(content.text)}"', self._styles["Epigraph"]))
 
         # Attribution
         if content.attribution or content.source:
@@ -717,9 +703,7 @@ class PDFExportService(BaseExporter):
             if content.source:
                 attr_parts.append(f"<i>{self._escape(content.source)}</i>")
             attribution = ", ".join(attr_parts)
-            elements.append(
-                Paragraph(f"— {attribution}", self._styles["Attribution"])
-            )
+            elements.append(Paragraph(f"— {attribution}", self._styles["Attribution"]))
 
         return elements
 
@@ -735,9 +719,7 @@ class PDFExportService(BaseExporter):
         elements = []
 
         # Heading
-        elements.append(
-            Paragraph("Acknowledgments", self._styles["Heading2"])
-        )
+        elements.append(Paragraph("Acknowledgments", self._styles["Heading2"]))
 
         # Content
         paragraphs = self._text_to_paragraphs(text)
@@ -799,9 +781,7 @@ class PDFExportService(BaseExporter):
 
         return elements
 
-    def _build_toc_entry(
-        self, title: str, page_num: str, available_width: float
-    ) -> Table:
+    def _build_toc_entry(self, title: str, page_num: str, available_width: float) -> Table:
         """Build a single TOC entry with dotted leader.
 
         Creates a table-based TOC entry with the chapter title on the left,
@@ -870,15 +850,11 @@ class PDFExportService(BaseExporter):
         elements.append(toc_marker)
 
         # Chapter heading
-        elements.append(
-            Paragraph(f"CHAPTER {chapter.number}", self._styles["ChapterHeading"])
-        )
+        elements.append(Paragraph(f"CHAPTER {chapter.number}", self._styles["ChapterHeading"]))
 
         # Chapter title
         if chapter.title:
-            elements.append(
-                Paragraph(self._escape(chapter.title), self._styles["ChapterTitle"])
-            )
+            elements.append(Paragraph(self._escape(chapter.title), self._styles["ChapterTitle"]))
 
         # Chapter content
         content_elements = self._content_to_elements(chapter.content)
@@ -943,9 +919,7 @@ class PDFExportService(BaseExporter):
 
         # Heading
         elements.append(
-            Paragraph(
-                f"Also by {self._escape(ab.author_name)}", self._styles["Heading2"]
-            )
+            Paragraph(f"Also by {self._escape(ab.author_name)}", self._styles["Heading2"])
         )
 
         # Series info
@@ -969,9 +943,7 @@ class PDFExportService(BaseExporter):
         # Standalone titles
         if ab.titles:
             elements.append(Spacer(1, 12))
-            elements.append(
-                Paragraph("<b>Standalone Novels</b>", self._styles["FirstParagraph"])
-            )
+            elements.append(Paragraph("<b>Standalone Novels</b>", self._styles["FirstParagraph"]))
             for title in ab.titles:
                 elements.append(
                     Paragraph(
@@ -1005,15 +977,11 @@ class PDFExportService(BaseExporter):
             elements.append(Spacer(1, 12))
 
         # Book title
-        elements.append(
-            Paragraph(self._escape(ex.book_title), self._styles["Heading2"])
-        )
+        elements.append(Paragraph(self._escape(ex.book_title), self._styles["Heading2"]))
 
         # Chapter title
         if ex.chapter_title:
-            elements.append(
-                Paragraph(self._escape(ex.chapter_title), self._styles["ChapterTitle"])
-            )
+            elements.append(Paragraph(self._escape(ex.chapter_title), self._styles["ChapterTitle"]))
 
         # Excerpt text
         paragraphs = self._text_to_paragraphs(ex.text)
