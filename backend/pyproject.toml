@@ -29,7 +29,7 @@ dependencies = [
     "pypdf>=6.4.0",  # Security fix for RAM exhaustion vulnerabilities
     "setuptools>=78.0.0",
     "workos>=5.0.0",  # WorkOS SSO integration
-    "python-docx>=1.1.0",  # DOCX export
+    "python-docx>=1.1.2",  # DOCX export
     "ebooklib>=0.18",  # EPUB generation
     "reportlab>=4.4.0",  # PDF generation
 ]

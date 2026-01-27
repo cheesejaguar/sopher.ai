@@ -523,7 +523,8 @@ async def run_llm_review(
                     pass
 
             # Try to extract summary from partial JSON
-            summary_match = re.search(r'"summary"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', content)
+            # Use alternation pattern to avoid ReDoS from nested quantifiers
+            summary_match = re.search(r'"summary"\s*:\s*"((?:[^"\\]|\\.)*)"', content)
             if summary_match:
                 summary = summary_match.group(1).replace('\\"', '"')[:500]
 
