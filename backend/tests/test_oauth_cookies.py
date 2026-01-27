@@ -119,7 +119,11 @@ class TestOAuthCallback:
                 "app.routers.auth.authenticate_with_workos_code",
                 new_callable=AsyncMock,
                 return_value={
-                    "profile": {"id": "google123", "email": "test@example.com", "name": "Test User"},
+                    "profile": {
+                        "id": "google123",
+                        "email": "test@example.com",
+                        "name": "Test User",
+                    },
                     "access_token": "google_token",
                 },
             ),

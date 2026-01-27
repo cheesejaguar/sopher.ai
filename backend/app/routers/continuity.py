@@ -30,6 +30,7 @@ from app.security import TokenData, get_current_user
 # Import LiteLLM for AI analysis
 try:
     from litellm import acompletion
+
     LITELLM_AVAILABLE = True
 except ImportError:
     LITELLM_AVAILABLE = False
@@ -263,7 +264,6 @@ Provide your analysis in JSON format:
     ],
     "summary": "2-3 sentence overall assessment"
 }""",
-
     "character_development": """You are a professional literary reviewer evaluating character development.
 
 Analyze this manuscript for:
@@ -285,7 +285,6 @@ Provide your analysis in JSON format:
     ],
     "summary": "2-3 sentence overall assessment"
 }""",
-
     "writing_quality": """You are a professional literary reviewer evaluating writing quality.
 
 Analyze this manuscript for:
@@ -307,7 +306,6 @@ Provide your analysis in JSON format:
     ],
     "summary": "2-3 sentence overall assessment"
 }""",
-
     "thematic_elements": """You are a professional literary reviewer evaluating thematic elements.
 
 Analyze this manuscript for:
@@ -328,7 +326,6 @@ Provide your analysis in JSON format:
     ],
     "summary": "2-3 sentence overall assessment"
 }""",
-
     "technical_consistency": """You are a professional literary reviewer evaluating technical consistency.
 
 Analyze this manuscript for:
@@ -353,7 +350,6 @@ Provide your analysis in JSON format:
     ],
     "summary": "2-3 sentence overall assessment"
 }""",
-
     "reader_experience": """You are a professional literary reviewer evaluating reader experience.
 
 Analyze this manuscript for:
@@ -376,7 +372,7 @@ Provide your analysis in JSON format:
     "target_audience": "description of ideal reader",
     "recommendation": "overall recommendation with reasoning",
     "summary": "2-3 sentence overall assessment"
-}"""
+}""",
 }
 
 
@@ -402,7 +398,10 @@ async def verify_project_ownership(
     if not project:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error_code": ErrorCode.PROJECT_NOT_FOUND, "message": "Project not found or you don't have access"},
+            detail={
+                "error_code": ErrorCode.PROJECT_NOT_FOUND,
+                "message": "Project not found or you don't have access",
+            },
         )
     return project
 
@@ -424,12 +423,14 @@ async def get_all_chapters(db: AsyncSession, project_id: UUID) -> list[dict]:
             chapter_num = artifact.meta.get("chapter_number", 0)
             title = artifact.meta.get("title", f"Chapter {chapter_num}")
             content = artifact.blob.decode("utf-8")
-            chapters.append({
-                "number": chapter_num,
-                "title": title,
-                "content": content,
-                "word_count": len(content.split())
-            })
+            chapters.append(
+                {
+                    "number": chapter_num,
+                    "title": title,
+                    "content": content,
+                    "word_count": len(content.split()),
+                }
+            )
 
     return chapters
 
@@ -465,6 +466,7 @@ async def run_llm_review(
         }
 
     from app.config import DEFAULT_MODEL
+
     model = model or DEFAULT_MODEL
     prompt = REVIEW_PROMPTS.get(phase_id, "")
 
@@ -487,7 +489,7 @@ async def run_llm_review(
         # Try to parse JSON from response
         try:
             # Find JSON in response (may be wrapped in markdown code blocks)
-            json_match = re.search(r'\{[\s\S]*\}', content)
+            json_match = re.search(r"\{[\s\S]*\}", content)
             if json_match:
                 result = json.loads(json_match.group())
                 # Ensure summary is a string, not a nested object
@@ -505,7 +507,7 @@ async def run_llm_review(
                 return {
                     "score": 0.7,
                     "summary": summary,
-                    "parse_error": "Could not extract JSON from response"
+                    "parse_error": "Could not extract JSON from response",
                 }
         except json.JSONDecodeError as e:
             # JSON parsing failed - try to extract specific fields from partial JSON
@@ -521,25 +523,19 @@ async def run_llm_review(
                     pass
 
             # Try to extract summary from partial JSON
-            summary_match = re.search(
-                r'"summary"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', content
-            )
+            summary_match = re.search(r'"summary"\s*:\s*"([^"]*(?:\\.[^"]*)*)"', content)
             if summary_match:
                 summary = summary_match.group(1).replace('\\"', '"')[:500]
 
             return {
                 "score": score,
                 "summary": summary,
-                "parse_error": f"Partial JSON parsed: {str(e)[:100]}"
+                "parse_error": f"Partial JSON parsed: {str(e)[:100]}",
             }
 
     except Exception as e:
         logger.error(f"LLM review failed for phase {phase_id}: {e}")
-        return {
-            "score": 0.0,
-            "error": str(e),
-            "summary": f"Review failed: {str(e)}"
-        }
+        return {"score": 0.0, "error": str(e), "summary": f"Review failed: {str(e)}"}
 
 
 # ============================================================================
@@ -658,10 +654,12 @@ async def run_continuity_check(
             # Compile full manuscript for review
             manuscript_parts = []
             for chapter in chapters:
-                manuscript_parts.append(f"## Chapter {chapter['number']}: {chapter['title']}\n\n{chapter['content']}")
+                manuscript_parts.append(
+                    f"## Chapter {chapter['number']}: {chapter['title']}\n\n{chapter['content']}"
+                )
 
             full_manuscript = "\n\n---\n\n".join(manuscript_parts)
-            total_words = sum(ch['word_count'] for ch in chapters)
+            total_words = sum(ch["word_count"] for ch in chapters)
 
             yield f"data: {json.dumps({'event': 'progress', 'phase': 'Preparing manuscript', 'progress': 0.05, 'detail': f'Compiled {len(chapters)} chapters ({total_words:,} words)'})}\n\n"
 
@@ -702,25 +700,13 @@ async def run_continuity_check(
                 # Collect specific issues from different result formats
                 if "specific_issues" in result:
                     for issue in result["specific_issues"]:
-                        all_issues.append({
-                            "phase": phase_id,
-                            "type": "specific",
-                            **issue
-                        })
+                        all_issues.append({"phase": phase_id, "type": "specific", **issue})
                 if "continuity_errors" in result:
                     for error in result["continuity_errors"]:
-                        all_issues.append({
-                            "phase": phase_id,
-                            "type": "continuity",
-                            **error
-                        })
+                        all_issues.append({"phase": phase_id, "type": "continuity", **error})
                 if "world_building_issues" in result:
                     for issue in result["world_building_issues"]:
-                        all_issues.append({
-                            "phase": phase_id,
-                            "type": "world_building",
-                            **issue
-                        })
+                        all_issues.append({"phase": phase_id, "type": "world_building", **issue})
 
             # Generate overall recommendation
             if overall_score >= 0.85:
@@ -730,7 +716,9 @@ async def run_continuity_check(
             elif overall_score >= 0.55:
                 recommendation = "This manuscript needs significant revision in several areas before publication."
             else:
-                recommendation = "This manuscript requires substantial rework across multiple dimensions."
+                recommendation = (
+                    "This manuscript requires substantial rework across multiple dimensions."
+                )
 
             # Complete event with full report
             complete_data = {

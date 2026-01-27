@@ -264,7 +264,9 @@ Begin writing the chapter now:"""
                                 ),
                             }
 
-            logger.info(f"[ChapterGen] Streaming complete. Chunks: {chunk_count}, Tokens emitted: {tokens_emitted}")
+            logger.info(
+                f"[ChapterGen] Streaming complete. Chunks: {chunk_count}, Tokens emitted: {tokens_emitted}"
+            )
 
             # Calculate and track costs
             prompt_tokens = len(prompt.split())

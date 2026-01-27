@@ -190,9 +190,7 @@ async def sso_callback(
     await check_oauth_rate_limit(request)
 
     # Log callback (sanitized)
-    sanitized_error = (
-        error.replace("\r", "").replace("\n", "").replace("\t", "") if error else None
-    )
+    sanitized_error = error.replace("\r", "").replace("\n", "").replace("\t", "") if error else None
     logger.info(
         f"SSO callback - code_present: {bool(code)}, "
         f"state_present: {bool(state)}, error: {sanitized_error}"

@@ -246,9 +246,7 @@ async def build_manuscript(
 
         # Log any empty chapters for debugging
         if not content:
-            logger.warning(
-                f"Empty content for chapter {ch_num} in project {project.id}"
-            )
+            logger.warning(f"Empty content for chapter {ch_num} in project {project.id}")
 
         chapters.append(
             ChapterContent(
@@ -545,9 +543,7 @@ async def create_export(
         )
 
     # Get chapter artifacts
-    chapter_artifacts = await get_chapter_artifacts(
-        db, project_id, request.chapters_to_include
-    )
+    chapter_artifacts = await get_chapter_artifacts(db, project_id, request.chapters_to_include)
 
     if not chapter_artifacts:
         raise HTTPException(
@@ -555,8 +551,7 @@ async def create_export(
             detail={
                 "error_code": "NO_CHAPTERS",
                 "message": (
-                    "No chapters found for this project. "
-                    "Generate chapters before exporting."
+                    "No chapters found for this project. " "Generate chapters before exporting."
                 ),
             },
         )
@@ -705,9 +700,11 @@ async def get_export_status(
         status=job["status"],
         progress=job["progress"],
         file_size_bytes=job.get("file_size_bytes"),
-        download_url=f"/api/v1/projects/{project_id}/export/{export_id}/download"
-        if job["status"] == ExportStatus.COMPLETED
-        else None,
+        download_url=(
+            f"/api/v1/projects/{project_id}/export/{export_id}/download"
+            if job["status"] == ExportStatus.COMPLETED
+            else None
+        ),
         error_message=job.get("error_message"),
         created_at=job["created_at"],
         completed_at=job.get("completed_at"),
@@ -878,10 +875,7 @@ async def get_export_history(
         )
 
     # Get exports for this project
-    project_exports = [
-        job for job in _export_jobs.values()
-        if job["project_id"] == str(project_id)
-    ]
+    project_exports = [job for job in _export_jobs.values() if job["project_id"] == str(project_id)]
 
     # Sort by created_at descending
     project_exports.sort(key=lambda x: x["created_at"], reverse=True)

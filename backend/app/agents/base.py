@@ -39,6 +39,7 @@ class AgentConfig:
         """Set default model from config if not provided."""
         if not self.model:
             import os
+
             self.model = os.getenv("PRIMARY_MODEL", "openrouter/openai/chatgpt-5.2")
 
 
