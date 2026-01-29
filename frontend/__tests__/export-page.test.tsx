@@ -26,6 +26,15 @@ vi.mock('@/lib/zustand', () => ({
   }),
 }));
 
+// Mock auth module
+vi.mock('@/lib/auth', () => ({
+  getCookie: vi.fn((name: string) => {
+    if (name === 'access_token') return 'test-token';
+    return null;
+  }),
+  hasValidAuthCookie: vi.fn(() => true),
+}));
+
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
   BookOpen: () => <span data-testid="book-icon">📖</span>,
@@ -82,6 +91,9 @@ describe('ExportPage Component', () => {
     vi.clearAllMocks();
     vi.resetModules();
     global.fetch = mockFetch;
+
+    // Set environment variable for API URL
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000';
 
     // Import component fresh for each test
     const module = await import('@/app/projects/[id]/export/page');

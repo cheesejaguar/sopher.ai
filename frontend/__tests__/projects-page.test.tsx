@@ -104,11 +104,10 @@ describe('ProjectsPage', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            items: mockProjects,
+            projects: mockProjects,
             total: 3,
             page: 1,
             page_size: 12,
-            total_pages: 1,
           }),
         });
       }
@@ -320,11 +319,10 @@ describe('ProjectsPage', () => {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({
-              items: [],
+              projects: [],
               total: 0,
               page: 1,
               page_size: 12,
-              total_pages: 0,
             }),
           });
         }
@@ -351,11 +349,10 @@ describe('ProjectsPage', () => {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({
-              items: mockProjects,
+              projects: mockProjects,
               total: 3,
               page: 1,
               page_size: 12,
-              total_pages: 1,
             }),
           });
         }
@@ -455,7 +452,7 @@ describe('ProjectsPage', () => {
 
       // Grid view should be active (checking button style)
       const gridButton = screen.getByTitle('Grid view');
-      expect(gridButton.className).toContain('bg-indigo');
+      expect(gridButton.className).toContain('bg-nebula-blue');
     });
 
     it('should switch to list view', async () => {
@@ -469,7 +466,7 @@ describe('ProjectsPage', () => {
 
       // List view should now be active
       const listButton = screen.getByTitle('List view');
-      expect(listButton.className).toContain('bg-indigo');
+      expect(listButton.className).toContain('bg-nebula-blue');
 
       // Table should be present
       expect(screen.getByRole('table')).toBeInTheDocument();
@@ -632,11 +629,10 @@ describe('Helper Functions', () => {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({
-              items: mockProjects,
+              projects: mockProjects,
               total: 3,
               page: 1,
               page_size: 12,
-              total_pages: 1,
             }),
           });
         }
@@ -654,7 +650,7 @@ describe('Helper Functions', () => {
         expect(inProgressBadge?.className).toContain('teal');
 
         const completedBadge = screen.getByText('completed').closest('span');
-        expect(completedBadge?.className).toContain('gold');
+        expect(completedBadge?.className).toContain('ember');
       });
     });
   });
@@ -672,11 +668,10 @@ describe('Helper Functions', () => {
           return Promise.resolve({
             ok: true,
             json: () => Promise.resolve({
-              items: mockProjects,
+              projects: mockProjects,
               total: 3,
               page: 1,
               page_size: 12,
-              total_pages: 1,
             }),
           });
         }

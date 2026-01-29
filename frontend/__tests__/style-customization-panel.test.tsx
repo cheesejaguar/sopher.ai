@@ -66,7 +66,7 @@ describe('StyleCustomizationPanel', () => {
     const shortButton = buttons.find((btn) => btn.textContent === 'short')
     if (shortButton) {
       fireEvent.click(shortButton)
-      expect(shortButton.className).toContain('border-teal')
+      expect(shortButton.className).toContain('border-aurora-teal')
     }
   })
 
@@ -157,7 +157,7 @@ describe('StyleCustomizationPanel', () => {
     // Default settings should be restored
     const buttons = screen.getAllByRole('button')
     const variedButton = buttons.find((btn) => btn.textContent === 'varied')
-    expect(variedButton?.className).toContain('border-teal')
+    expect(variedButton?.className).toContain('border-aurora-teal')
   })
 
   it('shows blend info when info button clicked', () => {

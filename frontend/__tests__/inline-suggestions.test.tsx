@@ -111,16 +111,16 @@ describe('InlineSuggestions', () => {
       render(<InlineSuggestions {...defaultProps} />)
       const contentArea = screen.getByTestId('content-with-suggestions')
 
-      // Info severity should have blue styling
-      const infoSpans = contentArea.querySelectorAll('.bg-blue-100')
+      // Info severity should have nebula-blue styling
+      const infoSpans = contentArea.querySelectorAll('[class*="nebula-blue"]')
       expect(infoSpans.length).toBeGreaterThanOrEqual(1)
 
-      // Warning severity should have yellow styling
-      const warningSpans = contentArea.querySelectorAll('.bg-yellow-100')
+      // Warning severity should have ember styling
+      const warningSpans = contentArea.querySelectorAll('[class*="ember"]')
       expect(warningSpans.length).toBeGreaterThanOrEqual(1)
 
       // Error severity should have red styling
-      const errorSpans = contentArea.querySelectorAll('.bg-red-100')
+      const errorSpans = contentArea.querySelectorAll('[class*="red-"]')
       expect(errorSpans.length).toBeGreaterThanOrEqual(1)
     })
   })

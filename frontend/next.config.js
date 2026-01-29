@@ -1,7 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
+  experimental: {
+    turbopackUseSystemTlsCerts: true,
+  },
   poweredByHeader: false,
   compress: true,
   compiler: {

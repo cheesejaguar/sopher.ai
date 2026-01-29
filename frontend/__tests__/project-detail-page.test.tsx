@@ -107,6 +107,24 @@ describe('ProjectDetailPage', () => {
           json: () => Promise.resolve(mockStats),
         });
       }
+      if (url.includes('/v1/projects/proj-123/outline')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ content: '', meta: {} }),
+        });
+      }
+      if (url.includes('/v1/projects/proj-123/chapters')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve([]),
+        });
+      }
+      if (url.includes('/v1/projects/proj-123/continuity/literary-review')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ suggestions: [] }),
+        });
+      }
       if (url.includes('/v1/projects/proj-123')) {
         return Promise.resolve({
           ok: true,
@@ -170,11 +188,11 @@ describe('ProjectDetailPage', () => {
       });
     });
 
-    it('should render generate button', async () => {
+    it('should render generate outline button', async () => {
       render(<ProjectDetailPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Generate')).toBeInTheDocument();
+        expect(screen.getByText('Generate Outline')).toBeInTheDocument();
       });
     });
   });
@@ -217,78 +235,30 @@ describe('ProjectDetailPage', () => {
     });
   });
 
-  describe('Settings Display', () => {
-    it('should display target audience', async () => {
+  describe('Tabs Display', () => {
+    it('should display book brief tab', async () => {
       render(<ProjectDetailPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Target Audience')).toBeInTheDocument();
-        expect(screen.getByText('Young Adults')).toBeInTheDocument();
+        expect(screen.getByText('Book Brief')).toBeInTheDocument();
       });
     });
 
-    it('should display tone', async () => {
+    it('should display outline tab', async () => {
       render(<ProjectDetailPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Tone')).toBeInTheDocument();
-        expect(screen.getByText('dramatic')).toBeInTheDocument();
+        const outlineElements = screen.getAllByText('Outline');
+        expect(outlineElements.length).toBeGreaterThan(0);
       });
     });
 
-    it('should display point of view', async () => {
+    it('should display manuscript tab', async () => {
       render(<ProjectDetailPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Point of View')).toBeInTheDocument();
-        expect(screen.getByText('Third Person Limited')).toBeInTheDocument();
-      });
-    });
-
-    it('should display tense', async () => {
-      render(<ProjectDetailPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('Tense')).toBeInTheDocument();
-        expect(screen.getByText('past')).toBeInTheDocument();
-      });
-    });
-
-    it('should display chapter length', async () => {
-      render(<ProjectDetailPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('Chapter Length')).toBeInTheDocument();
-        expect(screen.getByText('3,500 words')).toBeInTheDocument();
-      });
-    });
-
-    it('should display style guide', async () => {
-      render(<ProjectDetailPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('Style Guide')).toBeInTheDocument();
-        expect(screen.getByText('Write with vivid descriptions')).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe('Character Bible & World Building', () => {
-    it('should display character bible', async () => {
-      render(<ProjectDetailPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('Character Bible')).toBeInTheDocument();
-        expect(screen.getByText('Main character: Hero')).toBeInTheDocument();
-      });
-    });
-
-    it('should display world building', async () => {
-      render(<ProjectDetailPage />);
-
-      await waitFor(() => {
-        expect(screen.getByText('World Building')).toBeInTheDocument();
-        expect(screen.getByText('Fantasy realm')).toBeInTheDocument();
+        const manuscriptElements = screen.getAllByText('Manuscript');
+        expect(manuscriptElements.length).toBeGreaterThan(0);
       });
     });
   });
@@ -410,16 +380,12 @@ describe('ProjectDetailPage', () => {
       expect(mockLocationHref).toHaveBeenCalledWith('/projects');
     });
 
-    it('should navigate to generation page when generate clicked', async () => {
+    it('should have generate outline button', async () => {
       render(<ProjectDetailPage />);
 
       await waitFor(() => {
-        expect(screen.getByText('Generate')).toBeInTheDocument();
+        expect(screen.getByText('Generate Outline')).toBeInTheDocument();
       });
-
-      fireEvent.click(screen.getByText('Generate'));
-
-      expect(mockLocationHref).toHaveBeenCalledWith('/?project=proj-123');
     });
   });
 

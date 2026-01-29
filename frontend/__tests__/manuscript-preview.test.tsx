@@ -321,7 +321,7 @@ describe('ManuscriptPreview Component', () => {
       render(<ManuscriptPreview {...defaultProps} />);
 
       const titlePageNav = screen.getByTestId('nav-item-title_page-');
-      expect(titlePageNav).toHaveClass('bg-teal/10');
+      expect(titlePageNav).toHaveClass('bg-aurora-teal/10');
     });
   });
 

@@ -363,7 +363,7 @@ describe('Outline Editor Page', () => {
 
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalledWith(
-          '/api/v1/projects/test-project-id/outline',
+          '/api/backend/v1/projects/test-project-id/outline',
           expect.objectContaining({
             method: 'PUT',
           })
