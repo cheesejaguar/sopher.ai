@@ -11,40 +11,40 @@ from unittest.mock import patch
 
 
 class TestSupportedModels:
-    """Tests for OPENROUTER_MODELS configuration."""
+    """Tests for SUPPORTED_MODELS configuration."""
 
     def test_supported_models_not_empty(self):
         """Test that supported models list is not empty."""
-        from app.config import OPENROUTER_MODELS
+        from app.config import SUPPORTED_MODELS
 
-        assert len(OPENROUTER_MODELS) > 0
+        assert len(SUPPORTED_MODELS) > 0
 
-    def test_supported_models_contains_openai(self):
-        """Test that OpenAI models are included."""
-        from app.config import OPENROUTER_MODELS
+    def test_supported_models_contains_haiku(self):
+        """Test that Anthropic Haiku model is included."""
+        from app.config import SUPPORTED_MODELS
 
-        openai_models = [m for m in OPENROUTER_MODELS if "openai" in m]
-        assert len(openai_models) >= 1
+        haiku_models = [m for m in SUPPORTED_MODELS if "haiku" in m]
+        assert len(haiku_models) >= 1
 
-    def test_supported_models_contains_anthropic(self):
-        """Test that Anthropic models are included."""
-        from app.config import OPENROUTER_MODELS
+    def test_supported_models_contains_sonnet(self):
+        """Test that Anthropic Sonnet model is included."""
+        from app.config import SUPPORTED_MODELS
 
-        claude_models = [m for m in OPENROUTER_MODELS if "claude" in m]
-        assert len(claude_models) >= 1
+        sonnet_models = [m for m in SUPPORTED_MODELS if "sonnet" in m]
+        assert len(sonnet_models) >= 1
 
-    def test_supported_models_contains_google(self):
-        """Test that Google models are included."""
-        from app.config import OPENROUTER_MODELS
+    def test_supported_models_contains_opus(self):
+        """Test that Anthropic Opus model is included."""
+        from app.config import SUPPORTED_MODELS
 
-        gemini_models = [m for m in OPENROUTER_MODELS if "gemini" in m]
-        assert len(gemini_models) >= 1
+        opus_models = [m for m in SUPPORTED_MODELS if "opus" in m]
+        assert len(opus_models) >= 1
 
     def test_supported_models_set_matches_list(self):
         """Test that SUPPORTED_MODELS_SET contains same models as list."""
-        from app.config import OPENROUTER_MODELS, SUPPORTED_MODELS_SET
+        from app.config import SUPPORTED_MODELS, SUPPORTED_MODELS_SET
 
-        assert set(OPENROUTER_MODELS) == SUPPORTED_MODELS_SET
+        assert set(SUPPORTED_MODELS) == SUPPORTED_MODELS_SET
 
 
 class TestPrimaryModels:
@@ -63,33 +63,29 @@ class TestPrimaryModels:
         for model in PRIMARY_MODELS:
             assert model in SUPPORTED_MODELS_SET, f"{model} not in supported models"
 
-    def test_primary_models_include_each_provider(self):
-        """Test that primary models include one from each provider."""
+    def test_primary_models_are_anthropic(self):
+        """Test that primary models are all Anthropic models."""
         from app.config import PRIMARY_MODELS
 
-        has_openai = any("openai" in m for m in PRIMARY_MODELS)
-        has_anthropic = any("claude" in m for m in PRIMARY_MODELS)
-        has_google = any("gemini" in m for m in PRIMARY_MODELS)
+        has_anthropic = all("anthropic/" in m for m in PRIMARY_MODELS)
 
-        assert has_openai, "Primary models should include OpenAI"
-        assert has_anthropic, "Primary models should include Anthropic"
-        assert has_google, "Primary models should include Google"
+        assert has_anthropic, "Primary models should all be Anthropic models"
 
 
 class TestDefaultModel:
     """Tests for DEFAULT_MODEL configuration."""
 
     def test_default_model_is_valid(self):
-        """Test that default model is valid (starts with openrouter/)."""
+        """Test that default model is valid (starts with anthropic/)."""
         from app.config import DEFAULT_MODEL, is_valid_model
 
         # DEFAULT_MODEL is set from PRIMARY_MODEL env var or defaults
-        # In test environment it might be set to openrouter/openai/gpt-5.2
+        # In test environment it might be set to anthropic/claude-sonnet-4.5
         assert is_valid_model(DEFAULT_MODEL), f"DEFAULT_MODEL {DEFAULT_MODEL} is not valid"
 
     def test_default_model_from_env(self):
         """Test that DEFAULT_MODEL can be set via environment."""
-        with patch.dict(os.environ, {"PRIMARY_MODEL": "openrouter/anthropic/claude-sonnet-4.5"}):
+        with patch.dict(os.environ, {"PRIMARY_MODEL": "anthropic/claude-sonnet-4.5"}):
             # Need to reimport to pick up new env var
             import importlib
 
@@ -98,7 +94,7 @@ class TestDefaultModel:
             importlib.reload(app.config)
             from app.config import DEFAULT_MODEL
 
-            assert DEFAULT_MODEL == "openrouter/anthropic/claude-sonnet-4.5"
+            assert DEFAULT_MODEL == "anthropic/claude-sonnet-4.5"
 
             # Restore original
             importlib.reload(app.config)
@@ -109,9 +105,9 @@ class TestIsValidModel:
 
     def test_valid_model_returns_true(self):
         """Test that valid models return True."""
-        from app.config import OPENROUTER_MODELS, is_valid_model
+        from app.config import SUPPORTED_MODELS, is_valid_model
 
-        for model in OPENROUTER_MODELS:
+        for model in SUPPORTED_MODELS:
             assert is_valid_model(model) is True
 
     def test_invalid_model_returns_false(self):
@@ -122,13 +118,13 @@ class TestIsValidModel:
         assert is_valid_model("") is False
         assert is_valid_model("gpt-99") is False
 
-    def test_openrouter_prefix_always_valid(self):
-        """Test that any openrouter/ prefixed model is considered valid."""
+    def test_anthropic_prefix_always_valid(self):
+        """Test that any anthropic/ prefixed model is considered valid."""
         from app.config import is_valid_model
 
-        # Any openrouter model should be valid for flexibility
-        assert is_valid_model("openrouter/openai/gpt-5") is True
-        assert is_valid_model("openrouter/some-new-provider/new-model") is True
+        # Any anthropic model should be valid for flexibility
+        assert is_valid_model("anthropic/claude-sonnet-4.5") is True
+        assert is_valid_model("anthropic/some-new-model/new-model") is True
 
 
 class TestGetPrimaryModels:
@@ -164,17 +160,17 @@ class TestGetAllModels:
 
     def test_returns_all_supported(self):
         """Test that get_all_models returns all supported models."""
-        from app.config import OPENROUTER_MODELS, get_all_models
+        from app.config import SUPPORTED_MODELS, get_all_models
 
         result = get_all_models()
-        assert len(result) == len(OPENROUTER_MODELS)
+        assert len(result) == len(SUPPORTED_MODELS)
 
     def test_returns_copy(self):
         """Test that get_all_models returns a copy."""
-        from app.config import OPENROUTER_MODELS, get_all_models
+        from app.config import SUPPORTED_MODELS, get_all_models
 
         result = get_all_models()
         result.append("test-model")
 
         # Original should not be modified
-        assert "test-model" not in OPENROUTER_MODELS
+        assert "test-model" not in SUPPORTED_MODELS

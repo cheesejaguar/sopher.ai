@@ -163,7 +163,7 @@ class TestBookPipeline:
     @pytest.fixture
     def pipeline(self):
         """Create a test pipeline."""
-        return BookPipeline(model="gpt-4-test")
+        return BookPipeline(model="anthropic/claude-sonnet-4.5")
 
     @pytest.fixture
     def mock_concept_response(self):

@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..config import AGENT_MODEL_MAP
 from .base import Agent, AgentConfig
 from .prompts import (
     CONCEPT_SYSTEM_PROMPT,
@@ -157,14 +158,17 @@ class BookPipeline:
         Initialize the book pipeline.
 
         Args:
-            model: Primary model to use (default: from PRIMARY_MODEL env var or gpt-4)
+            model: Primary model to use (default: from PRIMARY_MODEL env var)
             fallback_models: Models to try if primary fails
             config_loader: Optional ConfigLoader for loading agent definitions
                 from .claude/agents/ and .claude/skills/ files.
                 When None, uses hardcoded prompts (legacy mode).
         """
-        self.model = model or os.getenv("PRIMARY_MODEL", "gpt-4")
-        self.fallbacks = fallback_models or ["claude-sonnet-4-20250514", "gemini-2.5-pro"]
+        self.model = model or os.getenv("PRIMARY_MODEL", "anthropic/claude-sonnet-4.5")
+        self.fallbacks = fallback_models or [
+            "anthropic/claude-haiku-4.5",
+            "anthropic/claude-opus-4.6",
+        ]
         self.config_loader = config_loader
 
         # Initialize agents
@@ -245,7 +249,7 @@ class BookPipeline:
             AgentConfig(
                 role="Concept Generator",
                 system_prompt=CONCEPT_SYSTEM_PROMPT,
-                model=self.model,
+                model=AGENT_MODEL_MAP.get("concept_generator", self.model),
                 temperature=0.7,
                 max_tokens=4000,
                 fallback_models=self.fallbacks,
@@ -257,7 +261,7 @@ class BookPipeline:
             AgentConfig(
                 role="Outline Creator",
                 system_prompt=OUTLINE_SYSTEM_PROMPT,
-                model=self.model,
+                model=AGENT_MODEL_MAP.get("outliner", self.model),
                 temperature=0.6,
                 max_tokens=8000,
                 fallback_models=self.fallbacks,
@@ -269,7 +273,7 @@ class BookPipeline:
             AgentConfig(
                 role="Chapter Writer",
                 system_prompt=WRITER_SYSTEM_PROMPT,
-                model=self.model,
+                model=AGENT_MODEL_MAP.get("writer", self.model),
                 temperature=0.8,  # More creative for writing
                 max_tokens=8000,
                 fallback_models=self.fallbacks,
@@ -281,7 +285,7 @@ class BookPipeline:
             AgentConfig(
                 role="Editor",
                 system_prompt=EDITOR_SYSTEM_PROMPT,
-                model=self.model,
+                model=AGENT_MODEL_MAP.get("editor", self.model),
                 temperature=0.3,  # More precise for editing
                 max_tokens=8000,
                 fallback_models=self.fallbacks,
@@ -293,7 +297,7 @@ class BookPipeline:
             AgentConfig(
                 role="Continuity Checker",
                 system_prompt=CONTINUITY_SYSTEM_PROMPT,
-                model=self.model,
+                model=AGENT_MODEL_MAP.get("continuity_checker", self.model),
                 temperature=0.2,  # Very precise for fact-checking
                 max_tokens=6000,
                 fallback_models=self.fallbacks,

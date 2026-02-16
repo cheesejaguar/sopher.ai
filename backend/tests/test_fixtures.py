@@ -198,7 +198,7 @@ async def test_cost_factory_creates_valid_cost(
     assert cost.id is not None
     assert cost.session_id == session.id
     assert cost.agent == "writer"
-    assert cost.model == "gpt-4o"
+    assert cost.model == "anthropic/claude-sonnet-4.5"
     assert cost.prompt_tokens == 100
     assert cost.completion_tokens == 50
 
@@ -214,14 +214,14 @@ async def test_cost_factory_custom_values(
     cost = await cost_factory(
         session=session,
         agent="editor",
-        model="claude-sonnet-4-20250514",
+        model="anthropic/claude-sonnet-4.5",
         prompt_tokens=2000,
         completion_tokens=1000,
         usd=Decimal("0.05"),
     )
 
     assert cost.agent == "editor"
-    assert cost.model == "claude-sonnet-4-20250514"
+    assert cost.model == "anthropic/claude-sonnet-4.5"
     assert cost.prompt_tokens == 2000
     assert cost.usd == Decimal("0.05")
 

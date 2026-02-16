@@ -7,7 +7,7 @@ tools:
   - get_timeline
   - search_chapters
   - send_message
-model: inherit
+model: anthropic/claude-opus-4.6
 skills:
   - continuity-checking
 ---

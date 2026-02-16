@@ -156,7 +156,7 @@ class TestBuildAgentConfig:
         config = loader.build_agent_config(
             agent_name="test-writer",
             role_name="writer",
-            model="gpt-5",
+            model="anthropic/claude-sonnet-4.5",
             temperature=0.8,
         )
         assert "You are a test writer." in config.system_prompt
@@ -169,9 +169,9 @@ class TestBuildAgentConfig:
         config = loader.build_agent_config(
             agent_name="test-writer",
             role_name="writer",
-            model="gpt-5",
+            model="anthropic/claude-sonnet-4.5",
         )
-        assert config.model == "gpt-5"
+        assert config.model == "anthropic/claude-sonnet-4.5"
 
     def test_build_config_inherit_model_uses_default(self, tmp_project):
         """Model 'inherit' should resolve to default."""
@@ -288,7 +288,7 @@ class TestRealProjectFiles:
         config = project_loader.build_agent_config(
             agent_name="chapter-writer",
             role_name="writer",
-            model="gpt-5",
+            model="anthropic/claude-sonnet-4.5",
             temperature=0.8,
             max_tokens=8000,
         )

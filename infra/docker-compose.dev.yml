@@ -49,15 +49,15 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/sopherai
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: dev-secret-key-change-in-production
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       WORKOS_CLIENT_ID: ${WORKOS_CLIENT_ID}
       WORKOS_API_KEY: ${WORKOS_API_KEY}
       WORKOS_REDIRECT_URI: ${WORKOS_REDIRECT_URI:-http://localhost:3000/api/backend/auth/callback}
       LOCAL_AUTH_BYPASS: ${LOCAL_AUTH_BYPASS:-false}
       FERNET_KEY: ${FERNET_KEY:-l0uQjBDS9SEum5gQtVuODNH74FY4zikKT-NIhX95VCo=}
-      PRIMARY_MODEL: openrouter/openai/gpt-5.2
-      SECONDARY_MODEL: openrouter/anthropic/claude-sonnet-4.5
-      OVERFLOW_MODEL: openrouter/google/gemini-3-pro-preview
+      PRIMARY_MODEL: anthropic/claude-sonnet-4.5
+      SECONDARY_MODEL: anthropic/claude-haiku-4.5
+      OVERFLOW_MODEL: anthropic/claude-opus-4.6
       CORS_ORIGINS: "http://localhost:3000,http://frontend:3000"
       FRONTEND_URL: "http://localhost:3000"
       LOG_LEVEL: INFO

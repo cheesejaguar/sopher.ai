@@ -119,7 +119,7 @@ class Cost(Base):
     id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     session_id = Column(PGUUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False)
     agent = Column(Text, nullable=False)  # writer, editor, etc.
-    model = Column(Text)  # gpt-5, claude-sonnet-4-20250514, gemini-2.5-pro, etc.
+    model = Column(Text)  # anthropic/claude-sonnet-4.5, anthropic/claude-opus-4.6, etc.
     prompt_tokens = Column(Integer, default=0)
     completion_tokens = Column(Integer, default=0)
     usd = Column(Numeric(10, 6), default=0)

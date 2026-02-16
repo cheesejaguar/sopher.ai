@@ -35,7 +35,7 @@ class TestUsageSchemas:
             monthly_budget_usd=50.0,
             remaining_budget_usd=25.0,
             by_agent={"writer": 10.0, "editor": 15.0},
-            by_model={"gpt-5": 20.0, "claude": 5.0},
+            by_model={"anthropic/claude-sonnet-4.5": 20.0, "anthropic/claude-haiku-4.5": 5.0},
         )
         assert response.total_usd == 100.0
         assert response.month_usd == 25.0
@@ -64,8 +64,8 @@ class TestUsageSchemas:
     def test_estimate_request_defaults(self):
         """Test EstimateRequest default values."""
         request = EstimateRequest()
-        # Default model is now openrouter/openai/chatgpt-5.2
-        assert request.model.startswith("openrouter/")
+        # Default model is now anthropic/claude-sonnet-4.5
+        assert request.model.startswith("anthropic/")
         assert request.target_chapters == 12
         assert request.avg_prompt_tokens == 2000
         assert request.avg_completion_tokens == 4000
@@ -73,12 +73,12 @@ class TestUsageSchemas:
     def test_estimate_request_custom_values(self):
         """Test EstimateRequest with custom values."""
         request = EstimateRequest(
-            model="openrouter/anthropic/claude-sonnet-4.5",
+            model="anthropic/claude-sonnet-4.5",
             target_chapters=20,
             avg_prompt_tokens=3000,
             avg_completion_tokens=5000,
         )
-        assert request.model == "openrouter/anthropic/claude-sonnet-4.5"
+        assert request.model == "anthropic/claude-sonnet-4.5"
         assert request.target_chapters == 20
 
     def test_estimate_response_model(self):
@@ -88,7 +88,7 @@ class TestUsageSchemas:
             total_prompt_tokens=24000,
             total_completion_tokens=48000,
             breakdown={"prompt": 2.40, "completion": 8.10},
-            model="gpt-5",
+            model="anthropic/claude-sonnet-4.5",
             chapters=12,
         )
         assert response.estimated_usd == 10.50
@@ -161,7 +161,9 @@ class TestGetUsage:
 
         # Mock model query
         mock_model_result = MagicMock()
-        mock_model_result.__iter__ = lambda self: iter([("gpt-5", 20.0), ("claude", 5.0)])
+        mock_model_result.__iter__ = lambda self: iter(
+            [("anthropic/claude-sonnet-4.5", 20.0), ("anthropic/claude-haiku-4.5", 5.0)]
+        )
 
         # Set up side effects for multiple execute calls
         mock_db.execute = AsyncMock(
@@ -256,7 +258,7 @@ class TestEstimateCost:
             "total_prompt_tokens": 24000,
             "total_completion_tokens": 48000,
             "breakdown": {"prompt": 2.40, "completion": 8.10},
-            "model": "gpt-5",
+            "model": "anthropic/claude-sonnet-4.5",
             "chapters": 12,
         }
 
@@ -264,7 +266,7 @@ class TestEstimateCost:
             result = await estimate_cost(request=request, current_user=token_data)
 
         assert result.estimated_usd == 10.50
-        assert result.model == "gpt-5"
+        assert result.model == "anthropic/claude-sonnet-4.5"
         assert result.chapters == 12
 
     @pytest.mark.asyncio
@@ -274,7 +276,7 @@ class TestEstimateCost:
 
         token_data = TokenData(user_id=str(uuid4()))
         request = EstimateRequest(
-            model="claude-sonnet-4-20250514",
+            model="anthropic/claude-sonnet-4.5",
             target_chapters=20,
             avg_prompt_tokens=3000,
             avg_completion_tokens=5000,
@@ -285,7 +287,7 @@ class TestEstimateCost:
             "total_prompt_tokens": 60000,
             "total_completion_tokens": 100000,
             "breakdown": {"prompt": 10.00, "completion": 15.00},
-            "model": "claude-sonnet-4-20250514",
+            "model": "anthropic/claude-sonnet-4.5",
             "chapters": 20,
         }
 
@@ -293,6 +295,6 @@ class TestEstimateCost:
             result = await estimate_cost(request=request, current_user=token_data)
 
         assert result.estimated_usd == 25.00
-        assert result.model == "claude-sonnet-4-20250514"
+        assert result.model == "anthropic/claude-sonnet-4.5"
         assert result.chapters == 20
         assert result.total_prompt_tokens == 60000

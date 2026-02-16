@@ -7,7 +7,7 @@ tools:
   - get_chapter_outline
   - get_writer_notes
   - send_message
-model: inherit
+model: anthropic/claude-sonnet-4.5
 skills:
   - editing
 ---

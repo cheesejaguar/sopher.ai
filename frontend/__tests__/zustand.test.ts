@@ -80,7 +80,7 @@ describe('Zustand Store', () => {
         monthly_budget_usd: 100.00,
         remaining_budget_usd: 75.00,
         by_agent: { writer: 15, editor: 10 },
-        by_model: { 'gpt-4': 20, 'claude-sonnet': 5 },
+        by_model: { 'anthropic/claude-sonnet-4.5': 20, 'anthropic/claude-haiku-4.5': 5 },
       };
 
       useStore.getState().setUsage(mockUsage);
@@ -96,7 +96,7 @@ describe('Zustand Store', () => {
         total_prompt_tokens: 100000,
         total_completion_tokens: 200000,
         breakdown: { outline: 0.5, chapters: 12.0, editing: 3.0 },
-        model: 'gpt-4o',
+        model: 'anthropic/claude-sonnet-4.5',
         chapters: 10,
       };
 
@@ -375,7 +375,7 @@ describe('Zustand Store', () => {
         total_prompt_tokens: 50000,
         total_completion_tokens: 100000,
         breakdown: { outline: 0.5, chapters: 8.0 },
-        model: 'gpt-4o',
+        model: 'anthropic/claude-sonnet-4.5',
         chapters: 10,
       });
 

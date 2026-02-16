@@ -1,43 +1,39 @@
 model_list:
-  - model_name: gpt-5
+  - model_name: claude-haiku-4.5
     litellm_params:
-      model: openai/gpt-5
-      api_key: ${OPENAI_API_KEY}
-      max_tokens: 8192
-      temperature: 0.7
-
-  - model_name: claude-sonnet-4-20250514
-    litellm_params:
-      model: anthropic/claude-sonnet-4-20250514
+      model: anthropic/claude-haiku-4.5
       api_key: ${ANTHROPIC_API_KEY}
       max_tokens: 8192
       temperature: 0.7
 
-  - model_name: gemini-2.5-pro
+  - model_name: claude-sonnet-4.5
     litellm_params:
-      model: google/gemini-2.5-pro
-      api_key: ${GOOGLE_API_KEY}
+      model: anthropic/claude-sonnet-4.5
+      api_key: ${ANTHROPIC_API_KEY}
+      max_tokens: 8192
+      temperature: 0.7
+
+  - model_name: claude-opus-4.6
+    litellm_params:
+      model: anthropic/claude-opus-4.6
+      api_key: ${ANTHROPIC_API_KEY}
       max_tokens: 8192
       temperature: 0.7
 
 routing:
   strategy: usage-based-routing
   fallbacks:
-    - primary: gpt-5
-      secondary: claude-sonnet-4-20250514
-    - primary: claude-sonnet-4-20250514
-      secondary: gpt-5
-  overflow:
-    trigger: context_window_exceeded
-    route_to: gemini-2.5-pro
+    - primary: claude-sonnet-4.5
+      secondary: claude-haiku-4.5
+    - primary: claude-opus-4.6
+      secondary: claude-sonnet-4.5
   cheap_fallback:
     models:
-      - claude-sonnet-4-20250514
-      - gemini-2.5-pro
+      - claude-haiku-4.5
 
 redis:
   url: ${REDIS_URL:-redis://localhost:6379/0}
-  
+
 cache:
   response_ttl_seconds: 3600
   conversation_ttl_seconds: 86400
@@ -46,26 +42,26 @@ cache:
 budgets:
   monthly_usd_limit: ${MONTHLY_BUDGET_USD:-500}
   agent_allocations:
-    writer: 0.60
-    editor: 0.25
-    continuity_checker: 0.10
-    concept_generator: 0.03
-    outliner: 0.02
+    writer: 0.55
+    editor: 0.15
+    continuity_checker: 0.15
+    concept_generator: 0.05
+    outliner: 0.10
 
 rate_limits:
   per_key:
     rpm: 60
     tpm: 1000000
-    
+
 backoff:
   initial_seconds: 4
   max_retries: 3
   jitter: true
-  
+
 cost_tracking:
   enabled: true
   track_per_request: true
-  
+
 logging:
   level: INFO
   json_logs: true

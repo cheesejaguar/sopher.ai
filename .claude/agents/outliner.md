@@ -6,7 +6,7 @@ tools:
   - get_brief
   - get_character_profiles
   - get_world_building
-model: inherit
+model: anthropic/claude-sonnet-4.5
 skills:
   - outlining
 ---

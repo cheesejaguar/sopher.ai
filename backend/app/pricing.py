@@ -1,7 +1,7 @@
 """Centralized pricing logic for LLM models
 
-OpenRouter pricing: Model cost + 5% platform fee
-https://openrouter.ai/docs#pricing
+Anthropic direct pricing via LiteLLM
+https://docs.anthropic.com/en/docs/about-claude/models
 """
 
 from typing import Any, Dict, TypedDict
@@ -27,65 +27,38 @@ class BookCostEstimate(TypedDict):
     chapters: int
 
 
-# Model pricing in USD per 1000 tokens (includes ~5% OpenRouter fee)
-# Pricing based on OpenRouter rates as of 2025
+# Model pricing in USD per 1000 tokens
+# Anthropic direct pricing as of 2025
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
-    # OpenAI via OpenRouter
-    "openai/chatgpt-5.2": {
-        "prompt_per_1k": 0.0105,  # $10/M input
-        "completion_per_1k": 0.0315,  # $30/M output
+    # Anthropic Claude family (active models)
+    "anthropic/claude-haiku-4.5": {
+        "prompt_per_1k": 0.0008,  # $0.80/M input
+        "completion_per_1k": 0.004,  # $4/M output
     },
-    "openai/gpt-4-turbo": {
-        "prompt_per_1k": 0.0105,
-        "completion_per_1k": 0.0315,
-    },
-    "openai/gpt-4": {
-        "prompt_per_1k": 0.0315,
-        "completion_per_1k": 0.063,
-    },
-    # Anthropic via OpenRouter
     "anthropic/claude-sonnet-4.5": {
-        "prompt_per_1k": 0.00315,  # $3/M input
-        "completion_per_1k": 0.01575,  # $15/M output
+        "prompt_per_1k": 0.003,  # $3/M input
+        "completion_per_1k": 0.015,  # $15/M output
     },
+    "anthropic/claude-opus-4.6": {
+        "prompt_per_1k": 0.015,  # $15/M input
+        "completion_per_1k": 0.075,  # $75/M output
+    },
+    # Legacy models (kept for backward compatibility with existing cost records)
     "anthropic/claude-3-sonnet": {
-        "prompt_per_1k": 0.00315,
-        "completion_per_1k": 0.01575,
+        "prompt_per_1k": 0.003,
+        "completion_per_1k": 0.015,
     },
     "anthropic/claude-3-opus": {
-        "prompt_per_1k": 0.01575,
-        "completion_per_1k": 0.07875,
+        "prompt_per_1k": 0.015,
+        "completion_per_1k": 0.075,
     },
-    # Google via OpenRouter
-    "google/gemini-3-pro-preview": {
-        "prompt_per_1k": 0.000525,  # Very competitive pricing
-        "completion_per_1k": 0.00157,
+    "openai/chatgpt-5.2": {
+        "prompt_per_1k": 0.01,
+        "completion_per_1k": 0.03,
     },
     "google/gemini-2.5-pro": {
-        "prompt_per_1k": 0.000525,
-        "completion_per_1k": 0.00157,
-    },
-    "google/gemini-2.5-flash": {
-        "prompt_per_1k": 0.000079,
-        "completion_per_1k": 0.000315,
-    },
-    # xAI Grok via OpenRouter
-    "x-ai/grok-4.1-fast": {
-        "prompt_per_1k": 0.00525,
-        "completion_per_1k": 0.0157,
-    },
-    "x-ai/grok-3": {
-        "prompt_per_1k": 0.0105,
-        "completion_per_1k": 0.0315,
-    },
-    # DeepSeek via OpenRouter (very cost-effective)
-    "deepseek/deepseek-v3.2": {
-        "prompt_per_1k": 0.00029,  # $0.27/M input
-        "completion_per_1k": 0.00115,  # $1.10/M output
-    },
-    "deepseek/deepseek-chat": {
-        "prompt_per_1k": 0.00029,
-        "completion_per_1k": 0.00115,
+        "prompt_per_1k": 0.0005,
+        "completion_per_1k": 0.0015,
     },
 }
 
@@ -97,7 +70,7 @@ DEFAULT_PRICING = {
 
 
 def normalize_model_name(model: str) -> str:
-    """Normalize model name by stripping openrouter/ prefix if present."""
+    """Normalize model name by stripping routing prefixes if present."""
     if model.startswith("openrouter/"):
         return model[len("openrouter/") :]
     return model

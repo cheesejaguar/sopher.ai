@@ -73,7 +73,7 @@ class ConfigLoader:
         config = loader.build_agent_config(
             agent_name="chapter-writer",
             role_name="writer",
-            model="gpt-5",
+            model="anthropic/claude-sonnet-4.5",
             temperature=0.8,
         )
     """
@@ -188,9 +188,11 @@ class ConfigLoader:
 
         system_prompt = "\n".join(prompt_parts)
 
-        # Resolve model -- "inherit" or None means use default
+        # Resolve model: agent def > pipeline param > default
         resolved_model = ""
-        if model and model not in ("inherit", "default"):
+        if agent_def.model and agent_def.model not in ("inherit", "default"):
+            resolved_model = agent_def.model
+        elif model and model not in ("inherit", "default"):
             resolved_model = model
 
         # Get tool schemas for this role

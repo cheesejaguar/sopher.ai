@@ -358,7 +358,7 @@ def cost_factory(db_session: AsyncSession) -> Callable:
     async def _create_cost(
         session: SessionModel,
         agent: str = "writer",
-        model: str = "gpt-4o",
+        model: str = "anthropic/claude-sonnet-4.5",
         prompt_tokens: int = 100,
         completion_tokens: int = 50,
         usd: Decimal = Decimal("0.001"),

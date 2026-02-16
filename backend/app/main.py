@@ -38,12 +38,10 @@ litellm.cache = litellm.Cache(
 litellm.success_callback = ["prometheus"]
 litellm.failure_callback = ["prometheus"]
 
-# Set OpenRouter API key for all openrouter/* model calls
-openrouter_key = os.getenv("OPENROUTER_API_KEY")
-if openrouter_key:
-    os.environ["OPENROUTER_API_KEY"] = openrouter_key
-    # Also set as generic key for litellm
-    litellm.openrouter_key = openrouter_key
+# Set Anthropic API key for all anthropic/* model calls
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+if anthropic_key:
+    os.environ["ANTHROPIC_API_KEY"] = anthropic_key
 
 
 @asynccontextmanager

@@ -118,10 +118,10 @@ class TestTeamRunRequest:
         with pytest.raises(Exception):
             TeamRunRequest(max_parallel=6)
 
-    def test_openrouter_model_accepted(self):
-        """OpenRouter prefixed models should be accepted."""
-        req = TeamRunRequest(model="openrouter/anthropic/claude-sonnet-4.5")
-        assert req.model == "openrouter/anthropic/claude-sonnet-4.5"
+    def test_anthropic_model_accepted(self):
+        """Anthropic prefixed models should be accepted."""
+        req = TeamRunRequest(model="anthropic/claude-sonnet-4.5")
+        assert req.model == "anthropic/claude-sonnet-4.5"
 
     def test_style_guide_length(self):
         """Style guide must be under 5000 chars."""

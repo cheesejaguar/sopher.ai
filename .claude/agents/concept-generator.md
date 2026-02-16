@@ -5,7 +5,7 @@ tools:
   - get_brief
   - get_settings
   - search_genre_conventions
-model: inherit
+model: anthropic/claude-haiku-4.5
 skills:
   - concept-generation
 ---

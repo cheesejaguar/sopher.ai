@@ -7,7 +7,7 @@ tools:
   - get_previous_chapters
   - get_character_bible
   - send_message
-model: inherit
+model: anthropic/claude-opus-4.6
 skills:
   - chapter-writing
 ---

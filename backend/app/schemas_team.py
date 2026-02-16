@@ -60,7 +60,7 @@ class TeamRunRequest(BaseModel):
     @classmethod
     def validate_model(cls, v: str) -> str:
         """Validate that the model is supported."""
-        if v.startswith("openrouter/"):
+        if v.startswith("anthropic/"):
             return v
         if v not in SUPPORTED_MODELS_SET:
             supported = sorted(SUPPORTED_MODELS_SET)

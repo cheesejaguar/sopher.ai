@@ -44,7 +44,7 @@ class AgentConfig:
         if not self.model:
             import os
 
-            self.model = os.getenv("PRIMARY_MODEL", "openrouter/openai/chatgpt-5.2")
+            self.model = os.getenv("PRIMARY_MODEL", "anthropic/claude-sonnet-4.5")
 
 
 class AgentError(Exception):
