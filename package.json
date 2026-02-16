@@ -1,0 +1,13 @@
+{
+  "name": "sopher-ai",
+  "private": true,
+  "scripts": {
+    "build": "cd frontend && npm run build",
+    "vercel-build": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/.next .next && cp frontend/next.config.js . && cp -r frontend/public ."
+  },
+  "dependencies": {
+    "next": "14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
