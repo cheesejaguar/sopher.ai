@@ -215,7 +215,7 @@ async def stream_team_progress(
                 skip_continuity=config.get("skip_continuity", False),
             ):
                 if await request.is_disconnected():
-                    logger.info(f"Client disconnected from team stream {run_id}")
+                    logger.info(f"Client disconnected from team stream {_sanitize_log(run_id)}")
                     break
 
                 yield {

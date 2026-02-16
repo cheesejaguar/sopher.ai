@@ -322,7 +322,9 @@ class TeamLead:
                 error="Could not claim task (already claimed)",
             )
 
-        logger.info(f"Task claimed: {task.title} by {task.assigned_agent}")
+        logger.info(
+            f"Task claimed: {_sanitize_log(task.title)} by {_sanitize_log(task.assigned_agent)}"
+        )
 
         # 2. Create TeamAgent wrapper
         agent_role = str(task.assigned_agent)
