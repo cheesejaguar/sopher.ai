@@ -7,6 +7,7 @@ team agent runs for book generation.
 import json
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import AsyncIterator, Optional
 from uuid import UUID, uuid4
 
@@ -16,6 +17,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+from ..agents.config_loader import ConfigLoader
 from ..agents.context_manager import ContextManager
 from ..agents.orchestrator import BookPipeline
 from ..agents.team_lead import TeamLead
@@ -170,7 +172,13 @@ async def stream_team_progress(
         message_bus = MessageBus(db, cache)
         context_manager = ContextManager(cache)
         quality_gate = QualityGateService()
-        pipeline = BookPipeline(model=team_run.config.get("model"))
+        # Load agent definitions and skills from .claude/ directories
+        project_root = str(Path(__file__).parent.parent.parent.parent)
+        config_loader = ConfigLoader(project_root=project_root)
+        pipeline = BookPipeline(
+            model=team_run.config.get("model"),
+            config_loader=config_loader,
+        )
 
         team_lead = TeamLead(
             pipeline=pipeline,

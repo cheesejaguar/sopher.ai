@@ -24,6 +24,7 @@ Example usage:
 """
 
 from .base import Agent, AgentAPIError, AgentConfig, AgentError, AgentResponseError, SimpleAgent
+from .config_loader import ConfigLoader
 from .context_manager import ContextManager
 from .orchestrator import (
     BookConcept,
@@ -38,6 +39,8 @@ from .orchestrator import (
 )
 from .team_agent import TeamAgent, TeamAgentConfig
 from .team_lead import TeamLead, TeamProgressEvent
+from .tool_definitions import ROLE_TOOLS
+from .tool_handlers import BookToolHandler
 
 __all__ = [
     # Core classes
@@ -57,6 +60,10 @@ __all__ = [
     "TeamAgentConfig",
     "TeamProgressEvent",
     "ContextManager",
+    # Tool calling
+    "ConfigLoader",
+    "BookToolHandler",
+    "ROLE_TOOLS",
     # Models
     "BookConcept",
     "BookOutline",

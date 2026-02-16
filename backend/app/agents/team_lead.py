@@ -6,6 +6,7 @@ optimization, and quality gates.
 """
 
 import asyncio
+import copy
 import json
 import logging
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from .orchestrator import (
     BookPipeline,
 )
 from .team_agent import TeamAgent, TeamAgentConfig
+from .tool_handlers import BookToolHandler
 
 logger = logging.getLogger(__name__)
 
@@ -320,10 +322,27 @@ class TeamLead:
                 error=f"Unknown agent role: {task.assigned_agent}",
             )
 
+        # Attach tool handler if agent has tools configured
+        if base_agent.config.tools:
+            task_config = copy.copy(base_agent.config)
+            task_config.tool_handler = BookToolHandler(
+                context_manager=self.context_manager,
+                message_bus=self.message_bus,
+                team_run_id=team_run_id,
+                role=task.assigned_agent,
+                chapter_number=task.chapter_number,
+            )
+            task_agent = Agent(
+                task_config,
+                response_model=base_agent.response_model,
+            )
+        else:
+            task_agent = base_agent
+
         team_agent = TeamAgent(
-            agent=base_agent,
+            agent=task_agent,
             config=TeamAgentConfig(
-                agent_config=base_agent.config,
+                agent_config=task_agent.config,
                 role_name=task.assigned_agent,
                 team_run_id=team_run_id,
                 task_id=task.id,

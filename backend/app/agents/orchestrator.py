@@ -151,6 +151,7 @@ class BookPipeline:
         self,
         model: str | None = None,
         fallback_models: list[str] | None = None,
+        config_loader: Any | None = None,
     ):
         """
         Initialize the book pipeline.
@@ -158,15 +159,88 @@ class BookPipeline:
         Args:
             model: Primary model to use (default: from PRIMARY_MODEL env var or gpt-4)
             fallback_models: Models to try if primary fails
+            config_loader: Optional ConfigLoader for loading agent definitions
+                from .claude/agents/ and .claude/skills/ files.
+                When None, uses hardcoded prompts (legacy mode).
         """
         self.model = model or os.getenv("PRIMARY_MODEL", "gpt-4")
         self.fallbacks = fallback_models or ["claude-sonnet-4-20250514", "gemini-2.5-pro"]
+        self.config_loader = config_loader
 
         # Initialize agents
-        self._init_agents()
+        if config_loader:
+            self._init_agents_from_definitions()
+        else:
+            self._init_agents_legacy()
 
-    def _init_agents(self) -> None:
-        """Initialize all pipeline agents."""
+    def _init_agents_from_definitions(self) -> None:
+        """Initialize agents from .claude/agents/ definition files + skills."""
+        agent_map = {
+            "concept-generator": ("concept_generator", BookConcept, 0.7, 4000),
+            "outliner": ("outliner", BookOutline, 0.6, 8000),
+            "chapter-writer": ("writer", Chapter, 0.8, 8000),
+            "editor": ("editor", EditedChapter, 0.3, 8000),
+            "continuity-checker": ("continuity_checker", ContinuityReport, 0.2, 6000),
+        }
+
+        for agent_name, (role, response_model, temp, max_tok) in agent_map.items():
+            try:
+                config = self.config_loader.build_agent_config(
+                    agent_name=agent_name,
+                    role_name=role,
+                    model=self.model,
+                    temperature=temp,
+                    max_tokens=max_tok,
+                    fallback_models=self.fallbacks,
+                )
+                agent = Agent(config, response_model=response_model)
+            except ValueError:
+                logger.warning(
+                    f"Agent definition not found for {agent_name}, "
+                    f"falling back to hardcoded prompt"
+                )
+                agent = self._create_legacy_agent(role, response_model, temp, max_tok)
+
+            # Set the agent on the pipeline
+            attr_map = {
+                "concept_generator": "concept_agent",
+                "outliner": "outline_agent",
+                "writer": "writer_agent",
+                "editor": "editor_agent",
+                "continuity_checker": "continuity_agent",
+            }
+            setattr(self, attr_map[role], agent)
+
+    def _create_legacy_agent(
+        self,
+        role: str,
+        response_model: type,
+        temperature: float,
+        max_tokens: int,
+    ) -> Agent:
+        """Create an agent with hardcoded prompts (fallback)."""
+        prompt_map = {
+            "concept_generator": ("Concept Generator", CONCEPT_SYSTEM_PROMPT),
+            "outliner": ("Outline Creator", OUTLINE_SYSTEM_PROMPT),
+            "writer": ("Chapter Writer", WRITER_SYSTEM_PROMPT),
+            "editor": ("Editor", EDITOR_SYSTEM_PROMPT),
+            "continuity_checker": ("Continuity Checker", CONTINUITY_SYSTEM_PROMPT),
+        }
+        role_label, prompt = prompt_map[role]
+        return Agent(
+            AgentConfig(
+                role=role_label,
+                system_prompt=prompt,
+                model=self.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                fallback_models=self.fallbacks,
+            ),
+            response_model=response_model,
+        )
+
+    def _init_agents_legacy(self) -> None:
+        """Initialize all pipeline agents with hardcoded prompts."""
         self.concept_agent: Agent[BookConcept] = Agent(
             AgentConfig(
                 role="Concept Generator",
