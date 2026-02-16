@@ -198,7 +198,7 @@ async def test_cost_factory_creates_valid_cost(
     assert cost.id is not None
     assert cost.session_id == session.id
     assert cost.agent == "writer"
-    assert cost.model == "gpt-4o"
+    assert cost.model == "anthropic/claude-sonnet-4.5"
     assert cost.prompt_tokens == 100
     assert cost.completion_tokens == 50
 
@@ -214,14 +214,14 @@ async def test_cost_factory_custom_values(
     cost = await cost_factory(
         session=session,
         agent="editor",
-        model="claude-sonnet-4-20250514",
+        model="anthropic/claude-sonnet-4.5",
         prompt_tokens=2000,
         completion_tokens=1000,
         usd=Decimal("0.05"),
     )
 
     assert cost.agent == "editor"
-    assert cost.model == "claude-sonnet-4-20250514"
+    assert cost.model == "anthropic/claude-sonnet-4.5"
     assert cost.prompt_tokens == 2000
     assert cost.usd == Decimal("0.05")
 
@@ -280,7 +280,7 @@ async def test_mock_llm_response_streaming(mock_llm_response):
 def test_mock_agents_fixture(mock_agents):
     """Test that mock_agents provides expected interface."""
     assert mock_agents is not None
-    assert hasattr(mock_agents, "generate_concepts")
+    assert hasattr(mock_agents, "generate_concept")
     assert hasattr(mock_agents, "generate_outline")
     assert hasattr(mock_agents, "write_chapter")
     assert hasattr(mock_agents, "edit_content")
@@ -288,9 +288,9 @@ def test_mock_agents_fixture(mock_agents):
 
 
 @pytest.mark.asyncio
-async def test_mock_agents_generate_concepts(mock_agents):
-    """Test mock_agents generate_concepts returns expected structure."""
-    result = await mock_agents.generate_concepts("Test brief")
+async def test_mock_agents_generate_concept(mock_agents):
+    """Test mock_agents generate_concept returns expected structure."""
+    result = await mock_agents.generate_concept("Test brief")
 
     assert "concepts" in result
     assert "themes" in result

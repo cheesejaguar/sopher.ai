@@ -34,13 +34,17 @@ class AgentConfig:
     max_tokens: int = 4000
     fallback_models: list[str] = field(default_factory=list)
     timeout: float = 120.0
+    # Tool calling support (OpenAI-format tool schemas)
+    tools: list[dict[str, Any]] | None = None
+    tool_handler: Any = None  # ToolHandler instance, set at runtime
+    max_tool_iterations: int = 10
 
     def __post_init__(self):
         """Set default model from config if not provided."""
         if not self.model:
             import os
 
-            self.model = os.getenv("PRIMARY_MODEL", "openrouter/openai/chatgpt-5.2")
+            self.model = os.getenv("PRIMARY_MODEL", "anthropic/claude-sonnet-4.5")
 
 
 class AgentError(Exception):
@@ -169,6 +173,62 @@ class Agent(Generic[T]):
         except Exception as e:
             raise AgentResponseError(f"Failed to validate response: {e}") from e
 
+    async def _run_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        completion_kwargs: dict[str, Any],
+    ) -> str:
+        """Execute a tool-calling loop until the model produces a final response.
+
+        Calls the LLM with tool definitions. When the model returns tool_calls,
+        executes each via the configured tool_handler and feeds results back.
+        Repeats until the model produces a content-only response.
+
+        Args:
+            messages: The conversation messages (mutated in-place).
+            completion_kwargs: kwargs for litellm.acompletion (messages updated each iteration).
+
+        Returns:
+            The final text content from the model.
+
+        Raises:
+            AgentError: If max_tool_iterations is exceeded.
+        """
+        for iteration in range(self.config.max_tool_iterations):
+            response = await litellm.acompletion(**completion_kwargs)
+            message = response.choices[0].message
+
+            # If no tool calls, we have the final response
+            tool_calls = getattr(message, "tool_calls", None)
+            if not tool_calls:
+                return message.content or ""
+
+            # Append the assistant message with tool_calls
+            messages.append(message.model_dump(exclude_none=True))
+
+            # Execute each tool call
+            for tool_call in tool_calls:
+                fn_name = tool_call.function.name
+                fn_args = json.loads(tool_call.function.arguments)
+                logger.debug(f"Agent '{self.config.role}' calling tool: " f"{fn_name}({fn_args})")
+                result = await self.config.tool_handler.execute(fn_name, fn_args)
+                result_str = json.dumps(result) if not isinstance(result, str) else result
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result_str,
+                    }
+                )
+
+            # Update messages in completion_kwargs for next iteration
+            completion_kwargs["messages"] = messages
+
+        raise AgentError(
+            f"Agent '{self.config.role}' exceeded max tool iterations "
+            f"({self.config.max_tool_iterations})"
+        )
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -211,13 +271,22 @@ class Agent(Generic[T]):
             if self.config.fallback_models:
                 completion_kwargs["fallbacks"] = self.config.fallback_models
 
+            # Add tools if configured
+            if self.config.tools:
+                completion_kwargs["tools"] = self.config.tools
+
             # Merge any additional kwargs
             completion_kwargs.update(kwargs)
 
             logger.debug(f"Agent '{self.config.role}' calling {self.config.model}")
-            response = await litellm.acompletion(**completion_kwargs)
 
-            content = response.choices[0].message.content or ""
+            # Use tool-calling loop if tools are configured
+            if self.config.tools and self.config.tool_handler:
+                content = await self._run_with_tools(messages, completion_kwargs)
+            else:
+                response = await litellm.acompletion(**completion_kwargs)
+                content = response.choices[0].message.content or ""
+
             logger.debug(f"Agent '{self.config.role}' received {len(content)} chars")
 
             if self.response_model:
@@ -227,6 +296,9 @@ class Agent(Generic[T]):
         except (litellm.APIError, litellm.Timeout) as e:
             # Let tenacity handle retries
             logger.warning(f"Agent '{self.config.role}' API error: {e}")
+            raise
+
+        except AgentError:
             raise
 
         except Exception as e:

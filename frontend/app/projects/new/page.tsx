@@ -46,38 +46,24 @@ const GENRES = [
 
 const MODELS = [
   {
-    id: 'openrouter/openai/chatgpt-5.2',
-    name: 'ChatGPT 5.2',
-    provider: 'OpenAI',
-    description: 'Most capable, best for complex narratives',
-    tier: 'premium',
-  },
-  {
-    id: 'openrouter/anthropic/claude-sonnet-4.5',
+    id: 'anthropic/claude-sonnet-4.5',
     name: 'Claude Sonnet 4.5',
     provider: 'Anthropic',
-    description: 'Excellent writing quality, nuanced prose',
+    description: 'Best balance of quality and speed for most writing tasks',
+    tier: 'standard',
+  },
+  {
+    id: 'anthropic/claude-opus-4.6',
+    name: 'Claude Opus 4.6',
+    provider: 'Anthropic',
+    description: 'Highest quality for complex narratives and creative prose',
     tier: 'premium',
   },
   {
-    id: 'openrouter/google/gemini-3-pro-preview',
-    name: 'Gemini 3 Pro',
-    provider: 'Google',
-    description: 'Fast and cost-effective',
-    tier: 'standard',
-  },
-  {
-    id: 'openrouter/x-ai/grok-4.1-fast',
-    name: 'Grok 4.1 Fast',
-    provider: 'xAI',
-    description: 'Quick generation, good quality',
-    tier: 'standard',
-  },
-  {
-    id: 'openrouter/deepseek/deepseek-v3.2',
-    name: 'DeepSeek V3.2',
-    provider: 'DeepSeek',
-    description: 'Most affordable option',
+    id: 'anthropic/claude-haiku-4.5',
+    name: 'Claude Haiku 4.5',
+    provider: 'Anthropic',
+    description: 'Fast and cost-effective for quick tasks',
     tier: 'economy',
   },
 ]
@@ -87,7 +73,7 @@ const initialFormData: FormData = {
   brief: '',
   genre: '',
   target_chapters: 12,
-  model: 'openrouter/openai/chatgpt-5.2',
+  model: 'anthropic/claude-sonnet-4.5',
 }
 
 export default function NewProjectPage() {

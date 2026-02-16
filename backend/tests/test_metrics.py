@@ -16,7 +16,7 @@ class TestMetricsTracker:
         """Test track_inference returns a context manager."""
         from app.metrics import MetricsTracker
 
-        timer = MetricsTracker.track_inference("gpt-4", "writer", "generate")
+        timer = MetricsTracker.track_inference("anthropic/claude-sonnet-4.5", "writer", "generate")
         assert hasattr(timer, "__enter__")
         assert hasattr(timer, "__exit__")
 
@@ -30,7 +30,7 @@ class TestMetricsTracker:
 
         # This should not raise
         MetricsTracker.track_tokens(
-            model="gpt-4",
+            model="anthropic/claude-sonnet-4.5",
             agent="writer",
             prompt_tokens=100,
             completion_tokens=500,
@@ -42,7 +42,7 @@ class TestMetricsTracker:
 
         # This should not raise
         MetricsTracker.track_cost(
-            model="gpt-4",
+            model="anthropic/claude-sonnet-4.5",
             agent="writer",
             cost_usd=0.05,
         )
@@ -74,7 +74,7 @@ class TestMetricsTracker:
         from app.metrics import MetricsTracker
 
         MetricsTracker.track_model_error(
-            model="gpt-4",
+            model="anthropic/claude-sonnet-4.5",
             error_type="rate_limit",
         )
 

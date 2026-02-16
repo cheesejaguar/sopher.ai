@@ -119,7 +119,7 @@ async def test_outline_stream_contract(async_client: AsyncClient, mock_token):
     project_id = str(uuid4())
 
     with (
-        patch("app.routers.outline.BookWritingAgents") as mock_agents,
+        patch("app.routers.outline.BookPipeline") as mock_agents,
         patch("app.routers.outline.get_db") as mock_get_db,
         patch("app.routers.outline.cache.get", return_value=None),
         patch("app.routers.outline.cache.set"),
@@ -141,7 +141,7 @@ async def test_outline_stream_contract(async_client: AsyncClient, mock_token):
 
         # Mock the agents
         mock_agent_instance = AsyncMock()
-        mock_agent_instance.generate_concepts = AsyncMock(return_value={"concepts": "test"})
+        mock_agent_instance.generate_concept = AsyncMock(return_value={"concepts": "test"})
         mock_agents.return_value = mock_agent_instance
 
         with patch("app.routers.outline.acompletion") as mock_completion:
@@ -195,7 +195,7 @@ async def test_cost_tracking(async_client: AsyncClient, mock_token):
         mock_session_instance.__class__.__name__ = "Session"
         mock_session_class.return_value = mock_session_instance
 
-        with patch("app.routers.outline.BookWritingAgents"):
+        with patch("app.routers.outline.BookPipeline"):
             with patch("app.routers.outline.acompletion") as mock_completion:
                 # Mock LLM with usage data
                 async def mock_stream():
@@ -300,7 +300,7 @@ def test_sse_error_event_parsing():
 @pytest.mark.asyncio
 async def test_outline_stream_error_handling_scenarios():
     """Test various SSE stream error scenarios."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     from app.models import Session
     from app.routers.outline import event_generator
@@ -323,7 +323,7 @@ async def test_outline_stream_error_handling_scenarios():
     outline_request = OutlineRequest(brief="Test brief for error scenarios", target_chapters=5)
 
     # Test 1: Agent creation failure
-    with patch("app.routers.outline.BookWritingAgents") as mock_agents:
+    with patch("app.routers.outline.BookPipeline") as mock_agents:
         mock_agents.side_effect = Exception("Agent initialization failed")
 
         error_events = []
@@ -345,11 +345,13 @@ async def test_outline_stream_error_handling_scenarios():
 
     # Test 2: LLM completion failure
     with (
-        patch("app.routers.outline.BookWritingAgents") as mock_agents,
+        patch("app.routers.outline.BookPipeline") as mock_agents,
         patch("app.routers.outline.acompletion") as mock_completion,
         patch("app.routers.outline.cache.get", return_value=None),
     ):
-        mock_agents.return_value.generate_concepts = AsyncMock(return_value={})
+        mock_concept = MagicMock()
+        mock_concept.model_dump.return_value = {"title": "Test", "themes": []}
+        mock_agents.return_value.generate_concept = AsyncMock(return_value=mock_concept)
         mock_completion.side_effect = Exception("LLM service unavailable")
 
         error_events = []
@@ -406,7 +408,7 @@ async def test_outline_validation_error_structure(async_client: AsyncClient, moc
 async def test_sse_connection_failure_simulation():
     """Test SSE connection failure scenarios that frontend should handle."""
     import asyncio
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     # Simulate connection dropping during stream
     mock_request = AsyncMock()
@@ -434,11 +436,14 @@ async def test_sse_connection_failure_simulation():
     mock_user = AsyncMock()
 
     with (
-        patch("app.routers.outline.BookWritingAgents") as mock_agents,
+        patch("app.routers.outline.BookPipeline") as mock_agents,
         patch("app.routers.outline.acompletion") as mock_completion,
         patch("app.routers.outline.cache.get", return_value=None),
+        patch("app.routers.outline.cache.set", new_callable=AsyncMock),
     ):
-        mock_agents.return_value.generate_concepts = AsyncMock(return_value={})
+        mock_concept = MagicMock()
+        mock_concept.model_dump.return_value = {"title": "Test", "themes": []}
+        mock_agents.return_value.generate_concept = AsyncMock(return_value=mock_concept)
 
         # Mock streaming response that would normally continue
         async def mock_stream():

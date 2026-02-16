@@ -358,7 +358,7 @@ def cost_factory(db_session: AsyncSession) -> Callable:
     async def _create_cost(
         session: SessionModel,
         agent: str = "writer",
-        model: str = "gpt-4o",
+        model: str = "anthropic/claude-sonnet-4.5",
         prompt_tokens: int = 100,
         completion_tokens: int = 50,
         usd: Decimal = Decimal("0.001"),
@@ -426,9 +426,9 @@ def mock_llm_response() -> Callable[..., AsyncMock]:
 
 @pytest.fixture
 def mock_agents() -> MagicMock:
-    """Mock BookWritingAgents for testing."""
+    """Mock BookPipeline for testing."""
     agents = MagicMock()
-    agents.generate_concepts = AsyncMock(
+    agents.generate_concept = AsyncMock(
         return_value={
             "concepts": "Test concepts for book generation",
             "themes": ["adventure", "growth"],

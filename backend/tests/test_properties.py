@@ -61,9 +61,9 @@ def valid_outline_request(draw):
         model=draw(
             st.sampled_from(
                 [
-                    "openrouter/openai/chatgpt-5.2",
-                    "openrouter/anthropic/claude-sonnet-4.5",
-                    "openrouter/google/gemini-2.5-pro",
+                    "anthropic/claude-sonnet-4.5",
+                    "anthropic/claude-haiku-4.5",
+                    "anthropic/claude-opus-4.6",
                 ]
             )
         ),

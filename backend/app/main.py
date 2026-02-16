@@ -20,7 +20,7 @@ from .db import check_db_health, close_db, init_db
 from .errors import ErrorCode, api_error
 from .logging import clear_request_context, parse_trace_context, set_request_context, setup_logging
 from .metrics import MetricsTracker, metrics_router
-from .routers import auth, chapters, continuity, editing, export, outline, projects, usage
+from .routers import auth, chapters, continuity, editing, export, outline, projects, team, usage
 from .security import create_access_token
 
 # Configure structured logging early
@@ -38,12 +38,10 @@ litellm.cache = litellm.Cache(
 litellm.success_callback = ["prometheus"]
 litellm.failure_callback = ["prometheus"]
 
-# Set OpenRouter API key for all openrouter/* model calls
-openrouter_key = os.getenv("OPENROUTER_API_KEY")
-if openrouter_key:
-    os.environ["OPENROUTER_API_KEY"] = openrouter_key
-    # Also set as generic key for litellm
-    litellm.openrouter_key = openrouter_key
+# Set Anthropic API key for all anthropic/* model calls
+anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+if anthropic_key:
+    os.environ["ANTHROPIC_API_KEY"] = anthropic_key
 
 
 @asynccontextmanager
@@ -440,6 +438,7 @@ app.include_router(projects.router, tags=["projects"])
 app.include_router(usage.router, prefix="/api/v1", tags=["usage"])
 app.include_router(continuity.router, prefix="/api/v1", tags=["continuity"])
 app.include_router(export.router, prefix="/api/v1", tags=["export"])
+app.include_router(team.router, prefix="/api/v1", tags=["team"])
 
 
 # Root endpoint

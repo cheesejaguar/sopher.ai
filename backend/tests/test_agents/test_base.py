@@ -48,8 +48,8 @@ class TestAgentConfig:
 
         assert config.role == "test"
         assert config.system_prompt == "You are a test agent"
-        # Default model is set from PRIMARY_MODEL env var or openrouter default
-        assert config.model.startswith("openrouter/") or config.model in ["gpt-4", "gpt-4-turbo"]
+        # Default model is set from PRIMARY_MODEL env var or anthropic default
+        assert config.model.startswith("anthropic/")
         assert config.temperature == 0.7
         assert config.max_tokens == 4000
         assert config.fallback_models == []
@@ -60,17 +60,20 @@ class TestAgentConfig:
         config = AgentConfig(
             role="writer",
             system_prompt="You are a writer",
-            model="claude-3-opus",
+            model="anthropic/claude-opus-4.6",
             temperature=0.9,
             max_tokens=8000,
-            fallback_models=["gpt-4", "gemini-pro"],
+            fallback_models=["anthropic/claude-sonnet-4.5", "anthropic/claude-haiku-4.5"],
             timeout=60.0,
         )
 
-        assert config.model == "claude-3-opus"
+        assert config.model == "anthropic/claude-opus-4.6"
         assert config.temperature == 0.9
         assert config.max_tokens == 8000
-        assert config.fallback_models == ["gpt-4", "gemini-pro"]
+        assert config.fallback_models == [
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-haiku-4.5",
+        ]
         assert config.timeout == 60.0
 
 
@@ -83,7 +86,7 @@ class TestAgent:
         return AgentConfig(
             role="test_agent",
             system_prompt="You are a helpful test agent.",
-            model="gpt-4",
+            model="anthropic/claude-sonnet-4.5",
         )
 
     @pytest.fixture
@@ -184,7 +187,7 @@ class TestAgent:
     @pytest.mark.asyncio
     async def test_run_includes_fallbacks(self, config):
         """Test run includes fallback models in API call."""
-        config.fallback_models = ["claude-3-opus", "gemini-pro"]
+        config.fallback_models = ["anthropic/claude-opus-4.6", "anthropic/claude-haiku-4.5"]
         agent = Agent(config)
         mock_response = MockResponse("test")
 
@@ -193,7 +196,10 @@ class TestAgent:
             await agent.run("test")
 
         call_kwargs = mock_completion.call_args.kwargs
-        assert call_kwargs["fallbacks"] == ["claude-3-opus", "gemini-pro"]
+        assert call_kwargs["fallbacks"] == [
+            "anthropic/claude-opus-4.6",
+            "anthropic/claude-haiku-4.5",
+        ]
 
     @pytest.mark.asyncio
     async def test_run_passes_extra_kwargs(self, agent):

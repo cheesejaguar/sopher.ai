@@ -123,8 +123,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      PRIMARY_MODEL: ${PRIMARY_MODEL:-claude-sonnet-4-20250514}
-      SECONDARY_MODEL: ${SECONDARY_MODEL:-gpt-4o}
+      PRIMARY_MODEL: ${PRIMARY_MODEL:-anthropic/claude-sonnet-4.5}
+      SECONDARY_MODEL: ${SECONDARY_MODEL:-anthropic/claude-haiku-4.5}
       MONTHLY_BUDGET_USD: ${MONTHLY_BUDGET_USD:-100}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://${DOMAIN:-localhost}}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}

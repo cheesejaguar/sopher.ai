@@ -136,12 +136,12 @@ class TestBookOutlineWithRevision:
             logline="An exciting AI-generated story",
             synopsis=synopsis,
             generated_at=datetime.utcnow(),
-            model_used="gpt-5",
+            model_used="anthropic/claude-sonnet-4.5",
             revision_number=1,
         )
 
         assert outline.generated_at is not None
-        assert outline.model_used == "gpt-5"
+        assert outline.model_used == "anthropic/claude-sonnet-4.5"
 
 
 class TestOutlineEndpointRoutes:

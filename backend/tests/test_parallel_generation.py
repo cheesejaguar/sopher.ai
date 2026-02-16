@@ -293,7 +293,9 @@ class TestCreateChapterGenerator:
         """Test that generator function is created correctly."""
         from app.routers.chapters import _create_chapter_generator
 
-        generator = _create_chapter_generator("gpt-4o", "## Content Guidelines\n...")
+        generator = _create_chapter_generator(
+            "anthropic/claude-sonnet-4.5", "## Content Guidelines\n..."
+        )
         assert callable(generator)
 
     def test_generator_is_async(self):
@@ -302,7 +304,7 @@ class TestCreateChapterGenerator:
 
         from app.routers.chapters import _create_chapter_generator
 
-        generator = _create_chapter_generator("gpt-4o", "")
+        generator = _create_chapter_generator("anthropic/claude-sonnet-4.5", "")
         assert asyncio.iscoroutinefunction(generator)
 
 

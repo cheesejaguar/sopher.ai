@@ -97,11 +97,9 @@ function getPhaseIndex(phaseId: PhaseId): number {
 }
 
 const MODELS = [
-  { id: 'openrouter/anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic', tier: 'premium' },
-  { id: 'openrouter/openai/gpt-5.2', name: 'GPT-5.2', provider: 'OpenAI', tier: 'premium' },
-  { id: 'openrouter/x-ai/grok-4.1-fast', name: 'Grok 4.1 Fast', provider: 'xAI', tier: 'standard' },
-  { id: 'openrouter/google/gemini-3-pro-preview', name: 'Gemini 3 Pro', provider: 'Google', tier: 'standard' },
-  { id: 'openrouter/deepseek/deepseek-v3.2', name: 'DeepSeek V3.2', provider: 'DeepSeek', tier: 'economy' },
+  { id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', provider: 'Anthropic', tier: 'standard' },
+  { id: 'anthropic/claude-opus-4.6', name: 'Claude Opus 4.6', provider: 'Anthropic', tier: 'premium' },
+  { id: 'anthropic/claude-haiku-4.5', name: 'Claude Haiku 4.5', provider: 'Anthropic', tier: 'economy' },
 ] as const
 
 function getModelInfo(modelId: string | undefined) {
@@ -528,7 +526,7 @@ export default function ProjectDetailPage() {
     try {
       // Get selected model from project settings
       const projectSettings = project.settings as ProjectSettings | undefined
-      const selectedModel = projectSettings?.model || 'openrouter/anthropic/claude-sonnet-4.5'
+      const selectedModel = projectSettings?.model || 'anthropic/claude-sonnet-4.5'
 
       const params = new URLSearchParams({
         brief: project.brief || project.description || '',
@@ -771,7 +769,7 @@ export default function ProjectDetailPage() {
     try {
       console.log('[ChapterGen] Starting generation for chapter', chapterNumber)
       const projectSettings = project.settings as ProjectSettings | undefined
-      const selectedModel = projectSettings?.model || 'openrouter/anthropic/claude-sonnet-4.5'
+      const selectedModel = projectSettings?.model || 'anthropic/claude-sonnet-4.5'
 
       // Get previous chapters for context
       const previousChapters = chapters
