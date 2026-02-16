@@ -233,7 +233,7 @@ async def stream_team_progress(
             await db.commit()
 
         except Exception as e:
-            logger.error(f"Team stream error for run {run_id}: {_sanitize_log(e)}")
+            logger.error(f"Team stream error for run {_sanitize_log(run_id)}: {_sanitize_log(e)}")
             yield {
                 "event": "error",
                 "data": json.dumps({"error": _sanitize_log(e)}),
@@ -252,7 +252,10 @@ async def stream_team_progress(
             try:
                 await team_lead.cleanup(run_id)
             except Exception as cleanup_err:
-                logger.warning(f"Cleanup error for run {run_id}: {_sanitize_log(cleanup_err)}")
+                logger.warning(
+                    f"Cleanup error for run {_sanitize_log(run_id)}: "
+                    f"{_sanitize_log(cleanup_err)}"
+                )
 
     return EventSourceResponse(
         event_generator(),
