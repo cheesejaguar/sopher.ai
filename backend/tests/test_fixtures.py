@@ -280,7 +280,7 @@ async def test_mock_llm_response_streaming(mock_llm_response):
 def test_mock_agents_fixture(mock_agents):
     """Test that mock_agents provides expected interface."""
     assert mock_agents is not None
-    assert hasattr(mock_agents, "generate_concepts")
+    assert hasattr(mock_agents, "generate_concept")
     assert hasattr(mock_agents, "generate_outline")
     assert hasattr(mock_agents, "write_chapter")
     assert hasattr(mock_agents, "edit_content")
@@ -288,9 +288,9 @@ def test_mock_agents_fixture(mock_agents):
 
 
 @pytest.mark.asyncio
-async def test_mock_agents_generate_concepts(mock_agents):
-    """Test mock_agents generate_concepts returns expected structure."""
-    result = await mock_agents.generate_concepts("Test brief")
+async def test_mock_agents_generate_concept(mock_agents):
+    """Test mock_agents generate_concept returns expected structure."""
+    result = await mock_agents.generate_concept("Test brief")
 
     assert "concepts" in result
     assert "themes" in result

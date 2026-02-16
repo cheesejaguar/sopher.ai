@@ -300,7 +300,7 @@ def test_sse_error_event_parsing():
 @pytest.mark.asyncio
 async def test_outline_stream_error_handling_scenarios():
     """Test various SSE stream error scenarios."""
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     from app.models import Session
     from app.routers.outline import event_generator
@@ -349,7 +349,9 @@ async def test_outline_stream_error_handling_scenarios():
         patch("app.routers.outline.acompletion") as mock_completion,
         patch("app.routers.outline.cache.get", return_value=None),
     ):
-        mock_agents.return_value.generate_concept = AsyncMock(return_value={})
+        mock_concept = MagicMock()
+        mock_concept.model_dump.return_value = {"title": "Test", "themes": []}
+        mock_agents.return_value.generate_concept = AsyncMock(return_value=mock_concept)
         mock_completion.side_effect = Exception("LLM service unavailable")
 
         error_events = []
@@ -406,7 +408,7 @@ async def test_outline_validation_error_structure(async_client: AsyncClient, moc
 async def test_sse_connection_failure_simulation():
     """Test SSE connection failure scenarios that frontend should handle."""
     import asyncio
-    from unittest.mock import AsyncMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     # Simulate connection dropping during stream
     mock_request = AsyncMock()
@@ -437,8 +439,11 @@ async def test_sse_connection_failure_simulation():
         patch("app.routers.outline.BookPipeline") as mock_agents,
         patch("app.routers.outline.acompletion") as mock_completion,
         patch("app.routers.outline.cache.get", return_value=None),
+        patch("app.routers.outline.cache.set", new_callable=AsyncMock),
     ):
-        mock_agents.return_value.generate_concept = AsyncMock(return_value={})
+        mock_concept = MagicMock()
+        mock_concept.model_dump.return_value = {"title": "Test", "themes": []}
+        mock_agents.return_value.generate_concept = AsyncMock(return_value=mock_concept)
 
         # Mock streaming response that would normally continue
         async def mock_stream():
