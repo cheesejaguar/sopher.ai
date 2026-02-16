@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
-from ..agents import BookWritingAgents
+from ..agents import BookPipeline
 from ..cache import cache
 from ..config import DEFAULT_MODEL
 from ..db import get_db
@@ -80,8 +80,8 @@ async def event_generator(
 
         MetricsTracker.track_cache(hit=False, cache_type="outline")
 
-        # Create outline generation prompt
-        agents = BookWritingAgents(model=model)
+        # Create pipeline for outline generation
+        pipeline = BookPipeline(model=model)
 
         # First, generate concepts
         yield {
@@ -89,7 +89,8 @@ async def event_generator(
             "data": json.dumps({"stage": "generating_concepts", "progress": 0.1}),
         }
 
-        concepts = await agents.generate_concepts(brief=outline_request.brief, plot_seeds=None)
+        concept = await pipeline.generate_concept(outline_request.brief)
+        concepts = {"concepts": concept.model_dump()}
 
         yield {
             "event": "checkpoint",

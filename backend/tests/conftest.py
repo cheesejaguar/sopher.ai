@@ -426,9 +426,9 @@ def mock_llm_response() -> Callable[..., AsyncMock]:
 
 @pytest.fixture
 def mock_agents() -> MagicMock:
-    """Mock BookWritingAgents for testing."""
+    """Mock BookPipeline for testing."""
     agents = MagicMock()
-    agents.generate_concepts = AsyncMock(
+    agents.generate_concept = AsyncMock(
         return_value={
             "concepts": "Test concepts for book generation",
             "themes": ["adventure", "growth"],

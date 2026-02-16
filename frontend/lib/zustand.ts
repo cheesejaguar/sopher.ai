@@ -70,6 +70,43 @@ export interface ChapterGenerationJob {
   error?: string
 }
 
+// Team Agents interfaces
+export interface TeamRun {
+  id: string
+  project_id: string
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  total_tasks: number
+  completed_tasks: number
+  failed_tasks: number
+  started_at?: string
+  completed_at?: string
+}
+
+export interface TeamTask {
+  id: string
+  task_type: string
+  title: string
+  description?: string
+  status: 'pending' | 'blocked' | 'ready' | 'claimed' | 'in_progress' | 'completed' | 'failed'
+  assigned_agent?: string
+  chapter_number?: number
+  dependencies: string[]
+  quality_score?: number
+  retry_count: number
+  started_at?: string
+  completed_at?: string
+}
+
+export interface TeamMessage {
+  id: string
+  from_agent: string
+  to_agent?: string
+  message_type: string
+  content: Record<string, unknown>
+  task_id?: string
+  created_at: string
+}
+
 export interface AppState {
   // User state
   user: User | null
@@ -114,6 +151,17 @@ export interface AppState {
   // Cost tracking
   totalCost: number
   incrementCost: (amount: number) => void
+
+  // Team Agents state
+  currentTeamRun: TeamRun | null
+  setCurrentTeamRun: (run: TeamRun | null) => void
+  teamTasks: TeamTask[]
+  setTeamTasks: (tasks: TeamTask[]) => void
+  updateTeamTask: (taskId: string, updates: Partial<TeamTask>) => void
+  teamMessages: TeamMessage[]
+  addTeamMessage: (message: TeamMessage) => void
+  setTeamMessages: (messages: TeamMessage[]) => void
+  clearTeamState: () => void
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -178,5 +226,26 @@ export const useStore = create<AppState>((set) => ({
   // Cost tracking
   totalCost: 0,
   incrementCost: (amount) => set((state) => ({ totalCost: state.totalCost + amount })),
+
+  // Team Agents state
+  currentTeamRun: null,
+  setCurrentTeamRun: (run) => set({ currentTeamRun: run }),
+  teamTasks: [],
+  setTeamTasks: (tasks) => set({ teamTasks: tasks }),
+  updateTeamTask: (taskId, updates) => set((state) => ({
+    teamTasks: state.teamTasks.map((t) =>
+      t.id === taskId ? { ...t, ...updates } : t
+    ),
+  })),
+  teamMessages: [],
+  addTeamMessage: (message) => set((state) => ({
+    teamMessages: [...state.teamMessages, message],
+  })),
+  setTeamMessages: (messages) => set({ teamMessages: messages }),
+  clearTeamState: () => set({
+    currentTeamRun: null,
+    teamTasks: [],
+    teamMessages: [],
+  }),
 }))
 

@@ -181,3 +181,112 @@ class EditHistory(Base):
     project = relationship("Project")
 
     __table_args__ = (Index("idx_edit_history_project_chapter", "project_id", "chapter_number"),)
+
+
+# ============================================================================
+# Team Agents Models
+# ============================================================================
+
+
+class TeamRun(Base):
+    """Represents a single team agent execution run for a project."""
+
+    __tablename__ = "team_runs"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(PGUUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    session_id = Column(PGUUID(as_uuid=True), ForeignKey("sessions.id"), nullable=False)
+    status = Column(Text, nullable=False, default="pending")
+    # pending, running, paused, completed, failed, cancelled
+    config = Column(JSONB, default={})
+    # Stores: max_parallel, skip_editing, skip_continuity, num_chapters, etc.
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    project = relationship("Project")
+    session = relationship("Session")
+    tasks = relationship("TeamTask", back_populates="team_run", cascade="all, delete-orphan")
+    messages = relationship(
+        "TeamMessage",
+        back_populates="team_run",
+        cascade="all, delete-orphan",
+        foreign_keys="TeamMessage.team_run_id",
+    )
+
+    __table_args__ = (
+        Index("idx_team_run_project", "project_id"),
+        Index("idx_team_run_status", "status"),
+    )
+
+
+class TeamTask(Base):
+    """A single task in a team run's shared task list."""
+
+    __tablename__ = "team_tasks"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    team_run_id = Column(PGUUID(as_uuid=True), ForeignKey("team_runs.id"), nullable=False)
+    task_type = Column(Text, nullable=False)
+    # concept, outline, write_chapter, edit_chapter, continuity_check
+    title = Column(Text, nullable=False)
+    description = Column(Text)
+    status = Column(Text, nullable=False, default="pending")
+    # pending, blocked, ready, claimed, in_progress, completed, failed
+    assigned_agent = Column(Text)
+    # concept_generator, outliner, writer, editor, continuity_checker
+    priority = Column(Integer, default=0)  # Higher = more urgent
+    chapter_number = Column(Integer)  # NULL for non-chapter tasks
+    dependencies = Column(JSONB, default=[])
+    # List of task UUIDs that must complete before this task is ready
+    input_context = Column(JSONB, default={})
+    # Context provided to the agent (compressed/summarized)
+    output_result = Column(JSONB, default={})
+    # Result after completion (artifact_id, summary, metadata)
+    quality_score = Column(Numeric(3, 2))
+    retry_count = Column(Integer, default=0)
+    max_retries = Column(Integer, default=2)
+    claimed_at = Column(DateTime(timezone=True))
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    team_run = relationship("TeamRun", back_populates="tasks")
+    task_messages = relationship("TeamMessage", back_populates="task", cascade="all, delete-orphan")
+
+    __table_args__ = (
+        Index("idx_team_task_run_status", "team_run_id", "status"),
+        Index("idx_team_task_type", "task_type"),
+        Index("idx_team_task_chapter", "team_run_id", "chapter_number"),
+    )
+
+
+class TeamMessage(Base):
+    """Message between agents in a team run."""
+
+    __tablename__ = "team_messages"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    team_run_id = Column(PGUUID(as_uuid=True), ForeignKey("team_runs.id"), nullable=False)
+    task_id = Column(PGUUID(as_uuid=True), ForeignKey("team_tasks.id"), nullable=True)
+    # NULL for broadcast messages not tied to a specific task
+    from_agent = Column(Text, nullable=False)
+    # team_lead, concept_generator, outliner, writer, editor, continuity_checker
+    to_agent = Column(Text)
+    # NULL = broadcast to all agents; otherwise target agent role
+    message_type = Column(Text, nullable=False)
+    # context_share, style_note, issue_report, correction_request,
+    # quality_feedback, dependency_resolved, status_update
+    content = Column(JSONB, nullable=False)
+    # Structured content: {"summary": "...", "details": {...}, "priority": "high"}
+    read_by = Column(JSONB, default=[])
+    # List of agent roles that have consumed this message
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    team_run = relationship("TeamRun", back_populates="messages")
+    task = relationship("TeamTask", back_populates="task_messages")
+
+    __table_args__ = (
+        Index("idx_team_message_run_agent", "team_run_id", "to_agent"),
+        Index("idx_team_message_run_created", "team_run_id", "created_at"),
+    )

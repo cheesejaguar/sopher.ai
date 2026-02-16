@@ -1,36 +1,43 @@
 """AI agents for book writing workflow.
 
 This module provides lightweight agents for book generation,
-replacing the heavy CrewAI/LangChain dependencies with direct
-LiteLLM calls and custom orchestration.
+using direct LiteLLM calls and team-based orchestration.
 
 Main classes:
-- BookPipeline: Complete book generation orchestrator
+- TeamLead: Team-based orchestrator with task tracking and inter-agent messaging
+- TeamAgent: Team-aware agent wrapper with context optimization
+- BookPipeline: Individual stage methods for book generation
 - Agent: Base agent class for LLM interactions
-- BookWritingAgents: Legacy compatibility wrapper
 
 Example usage:
-    from app.agents import BookPipeline
+    from app.agents import TeamLead, BookPipeline
 
+    # Team-based execution (recommended):
     pipeline = BookPipeline()
-    async for item in pipeline.generate_book("A mystery novel"):
-        print(item)
+    lead = TeamLead(pipeline, task_manager, message_bus, ...)
+    async for event in lead.run_team(run_id, brief):
+        print(event)
+
+    # Direct stage execution:
+    pipeline = BookPipeline()
+    concept = await pipeline.generate_concept("A mystery novel")
 """
 
 from .base import Agent, AgentAPIError, AgentConfig, AgentError, AgentResponseError, SimpleAgent
+from .context_manager import ContextManager
 from .orchestrator import (
     BookConcept,
     BookOutline,
     BookPipeline,
-    BookWritingAgents,
     Chapter,
     ChapterOutline,
     ContinuityIssue,
     ContinuityReport,
     EditedChapter,
     GenerationProgress,
-    ParallelChapterWriter,
 )
+from .team_agent import TeamAgent, TeamAgentConfig
+from .team_lead import TeamLead, TeamProgressEvent
 
 __all__ = [
     # Core classes
@@ -44,6 +51,12 @@ __all__ = [
     # Pipeline
     "BookPipeline",
     "GenerationProgress",
+    # Team agents
+    "TeamLead",
+    "TeamAgent",
+    "TeamAgentConfig",
+    "TeamProgressEvent",
+    "ContextManager",
     # Models
     "BookConcept",
     "BookOutline",
@@ -52,7 +65,4 @@ __all__ = [
     "EditedChapter",
     "ContinuityIssue",
     "ContinuityReport",
-    # Legacy compatibility
-    "BookWritingAgents",
-    "ParallelChapterWriter",
 ]
