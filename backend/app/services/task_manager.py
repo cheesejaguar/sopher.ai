@@ -20,6 +20,15 @@ from ..models import TeamTask
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_log(value: object, max_len: int = 200) -> str:
+    """Sanitize a value for safe logging (prevent log injection)."""
+    s = str(value).replace("\n", "\\n").replace("\r", "\\r")
+    if len(s) > max_len:
+        return s[:max_len] + "..."
+    return s
+
+
 # Redis key TTL for team resources (4 hours)
 TEAM_TTL = 14400
 
@@ -158,12 +167,12 @@ class TaskManager:
             if task.dependencies:
                 deps_key = f"team:{team_run_id}:deps:{task.id}"
                 for dep_id in task.dependencies:
-                    await self.redis.redis.sadd(deps_key, dep_id)
-                await self.redis.redis.expire(deps_key, TEAM_TTL)
+                    await self.redis.redis.sadd(deps_key, dep_id)  # type: ignore[misc]
+                await self.redis.redis.expire(deps_key, TEAM_TTL)  # type: ignore[misc]
 
         # Initialize run state in Redis
         state_key = f"team:{team_run_id}:state"
-        await self.redis.redis.hset(
+        await self.redis.redis.hset(  # type: ignore[misc]
             state_key,
             mapping={
                 "status": "running",
@@ -174,7 +183,7 @@ class TaskManager:
                 "started_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        await self.redis.redis.expire(state_key, TEAM_TTL)
+        await self.redis.redis.expire(state_key, TEAM_TTL)  # type: ignore[misc]
 
         logger.info(f"Created task graph with {len(tasks)} tasks for run {team_run_id}")
         return tasks
@@ -283,7 +292,7 @@ class TaskManager:
 
         # Increment completed counter in Redis
         state_key = f"team:{team_run_id}:state"
-        await self.redis.redis.hincrby(state_key, "completed_tasks", 1)
+        await self.redis.redis.hincrby(state_key, "completed_tasks", 1)  # type: ignore[misc]
 
         # Resolve dependencies and return newly unblocked tasks
         unblocked = await self._resolve_dependencies(team_run_id, task_id)
@@ -356,8 +365,8 @@ class TaskManager:
 
             # Increment failed counter
             state_key = f"team:{team_run_id}:state"
-            await self.redis.redis.hincrby(state_key, "failed_tasks", 1)
-            logger.error(f"Task {task_id} permanently failed: {error}")
+            await self.redis.redis.hincrby(state_key, "failed_tasks", 1)  # type: ignore[misc]
+            logger.error(f"Task {task_id} permanently failed: {_sanitize_log(error)}")
 
         await self.db.flush()
 
@@ -403,7 +412,7 @@ class TaskManager:
             Dict with total, completed, failed, in_progress, overall_progress.
         """
         state_key = f"team:{team_run_id}:state"
-        state = await self.redis.redis.hgetall(state_key)
+        state = await self.redis.redis.hgetall(state_key)  # type: ignore[misc]
 
         if not state:
             # Fallback to DB query
@@ -494,10 +503,10 @@ class TaskManager:
 
             # Remove from Redis dep set
             deps_key = f"team:{team_run_id}:deps:{task.id}"
-            await self.redis.redis.srem(deps_key, completed_id_str)
+            await self.redis.redis.srem(deps_key, completed_id_str)  # type: ignore[misc]
 
             # Check if all dependencies are now resolved
-            remaining = await self.redis.redis.scard(deps_key)
+            remaining = await self.redis.redis.scard(deps_key)  # type: ignore[misc]
             if remaining == 0:
                 # Unblock the task
                 stmt = update(TeamTask).where(TeamTask.id == task.id).values(status="ready")
@@ -524,7 +533,7 @@ class TaskManager:
             status: The new status.
         """
         stream_key = f"team:{team_run_id}:status"
-        await self.redis.redis.xadd(
+        await self.redis.redis.xadd(  # type: ignore[misc]
             stream_key,
             {
                 "task_id": str(task_id),
@@ -534,4 +543,4 @@ class TaskManager:
             },
         )
         # Ensure stream has a TTL
-        await self.redis.redis.expire(stream_key, TEAM_TTL)
+        await self.redis.redis.expire(stream_key, TEAM_TTL)  # type: ignore[misc]

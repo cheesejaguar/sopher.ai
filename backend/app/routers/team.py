@@ -42,6 +42,14 @@ router = APIRouter(prefix="/projects/{project_id}/team", tags=["team"])
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_log(value: object, max_len: int = 200) -> str:
+    """Sanitize a value for safe logging (prevent log injection)."""
+    s = str(value).replace("\n", "\\n").replace("\r", "\\r")
+    if len(s) > max_len:
+        return s[:max_len] + "..."
+    return s
+
+
 @router.post("/start", response_model=TeamRunResponse, status_code=status.HTTP_201_CREATED)
 async def start_team_run(
     project_id: UUID,
@@ -78,6 +86,11 @@ async def start_team_run(
             },
         )
 
+    # Sanitize style_guide input (strip control characters)
+    sanitized_style_guide = request_body.style_guide
+    if sanitized_style_guide:
+        sanitized_style_guide = sanitized_style_guide.strip()
+
     # Create a session for this run
     session = Session(
         id=uuid4(),
@@ -95,7 +108,7 @@ async def start_team_run(
         status="pending",
         config={
             "num_chapters": request_body.num_chapters,
-            "style_guide": request_body.style_guide,
+            "style_guide": sanitized_style_guide,
             "max_parallel": request_body.max_parallel,
             "skip_editing": request_body.skip_editing,
             "skip_continuity": request_body.skip_continuity,
@@ -220,10 +233,10 @@ async def stream_team_progress(
             await db.commit()
 
         except Exception as e:
-            logger.error(f"Team stream error for run {run_id}: {e}")
+            logger.error(f"Team stream error for run {run_id}: {_sanitize_log(e)}")
             yield {
                 "event": "error",
-                "data": json.dumps({"error": str(e)}),
+                "data": json.dumps({"error": _sanitize_log(e)}),
             }
             # Mark run as failed
             stmt = (
@@ -239,7 +252,7 @@ async def stream_team_progress(
             try:
                 await team_lead.cleanup(run_id)
             except Exception as cleanup_err:
-                logger.warning(f"Cleanup error for run {run_id}: {cleanup_err}")
+                logger.warning(f"Cleanup error for run {run_id}: {_sanitize_log(cleanup_err)}")
 
     return EventSourceResponse(
         event_generator(),
@@ -285,7 +298,7 @@ async def get_team_tasks(
             status=t.status,
             assigned_agent=t.assigned_agent,
             chapter_number=t.chapter_number,
-            dependencies=[str(d) for d in (t.dependencies or [])],
+            dependencies=[str(d) for d in (list(t.dependencies) if t.dependencies else [])],
             quality_score=float(t.quality_score) if t.quality_score else None,
             retry_count=t.retry_count or 0,
             claimed_at=t.claimed_at,
@@ -389,7 +402,7 @@ async def pause_team_run(
 
     team_run.status = "paused"
     state_key = f"team:{run_id}:state"
-    await cache.redis.hset(state_key, "status", "paused")
+    await cache.redis.hset(state_key, "status", "paused")  # type: ignore[misc]
     await db.commit()
 
     return {"status": "paused", "team_run_id": str(run_id)}
@@ -424,7 +437,7 @@ async def resume_team_run(
 
     team_run.status = "running"
     state_key = f"team:{run_id}:state"
-    await cache.redis.hset(state_key, "status", "running")
+    await cache.redis.hset(state_key, "status", "running")  # type: ignore[misc]
     await db.commit()
 
     return {"status": "running", "team_run_id": str(run_id)}
@@ -471,7 +484,7 @@ async def cancel_team_run(
     team_run.status = "cancelled"
     team_run.completed_at = datetime.now(timezone.utc)
     state_key = f"team:{run_id}:state"
-    await cache.redis.hset(state_key, "status", "cancelled")
+    await cache.redis.hset(state_key, "status", "cancelled")  # type: ignore[misc]
     await db.commit()
 
     return {"status": "cancelled", "team_run_id": str(run_id)}

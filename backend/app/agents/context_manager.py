@@ -251,8 +251,12 @@ class ContextManager:
                     await self.store_context(team_run_id, "character_bible", chars)
 
         elif task_type == "write_chapter" and chapter_number is not None:
-            # Store chapter summary for other agents
+            # Store full chapter content for the editor
             content = result if isinstance(result, str) else str(result)
+            content_key = f"chapter_content:{chapter_number}"
+            await self.store_context(team_run_id, content_key, content)
+
+            # Store summary for other agents (continuity, etc.)
             summary = self._summarize_chapter(content)
             ch_key = f"chapter_summary:{chapter_number}"
             await self.store_context(team_run_id, ch_key, summary)
@@ -261,8 +265,12 @@ class ContextManager:
             await self._update_all_chapter_summaries(team_run_id, chapter_number, summary)
 
         elif task_type == "edit_chapter" and chapter_number is not None:
-            # Update chapter summary with edited version
+            # Store full edited content
             content = result if isinstance(result, str) else str(result)
+            content_key = f"chapter_content:{chapter_number}"
+            await self.store_context(team_run_id, content_key, content)
+
+            # Update summary with edited version
             summary = self._summarize_chapter(content)
             ch_key = f"chapter_summary:{chapter_number}"
             await self.store_context(team_run_id, ch_key, summary)
@@ -284,7 +292,8 @@ class ContextManager:
             chapter_number: The chapter number.
             outline_data: The chapter outline data.
         """
-        await self.store_context(team_run_id, "chapter_outline", outline_data)
+        key = f"chapter_outline:{chapter_number}"
+        await self.store_context(team_run_id, key, outline_data)
 
     async def store_chapter_content(
         self,
@@ -299,7 +308,8 @@ class ContextManager:
             chapter_number: The chapter number.
             content: The chapter text content.
         """
-        await self.store_context(team_run_id, "chapter_content", content)
+        key = f"chapter_content:{chapter_number}"
+        await self.store_context(team_run_id, key, content)
 
     async def get_previous_chapter_summaries(
         self,

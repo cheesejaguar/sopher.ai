@@ -19,6 +19,15 @@ from ..schemas_team import AGENT_ROLES
 
 logger = logging.getLogger(__name__)
 
+
+def _sanitize_log(value: object, max_len: int = 200) -> str:
+    """Sanitize a value for safe logging (prevent log injection)."""
+    s = str(value).replace("\n", "\\n").replace("\r", "\\r")
+    if len(s) > max_len:
+        return s[:max_len] + "..."
+    return s
+
+
 # Redis key TTL for team resources (4 hours)
 TEAM_TTL = 14400
 
@@ -93,15 +102,15 @@ class MessageBus:
         if to_agent:
             # Direct message to specific agent
             inbox_key = f"team:{team_run_id}:inbox:{to_agent}"
-            await self.redis.redis.rpush(inbox_key, msg_data)
-            await self.redis.redis.expire(inbox_key, TEAM_TTL)
+            await self.redis.redis.rpush(inbox_key, msg_data)  # type: ignore[misc]
+            await self.redis.redis.expire(inbox_key, TEAM_TTL)  # type: ignore[misc]
         else:
             # Broadcast to all agent roles except sender
             for role in AGENT_ROLES:
                 if role != from_agent:
                     inbox_key = f"team:{team_run_id}:inbox:{role}"
-                    await self.redis.redis.rpush(inbox_key, msg_data)
-                    await self.redis.redis.expire(inbox_key, TEAM_TTL)
+                    await self.redis.redis.rpush(inbox_key, msg_data)  # type: ignore[misc]
+                    await self.redis.redis.expire(inbox_key, TEAM_TTL)  # type: ignore[misc]
 
         # 4. Pub/Sub notification for real-time listeners
         channel = f"team:{team_run_id}:messages"
@@ -135,13 +144,13 @@ class MessageBus:
         messages: list[dict[str, Any]] = []
 
         for _ in range(max_messages):
-            raw = await self.redis.redis.lpop(inbox_key)
+            raw = await self.redis.redis.lpop(inbox_key)  # type: ignore[misc]
             if raw is None:
                 break
             try:
                 messages.append(json.loads(raw))
             except json.JSONDecodeError:
-                logger.warning(f"Invalid message in inbox {inbox_key}: {raw}")
+                logger.warning(f"Invalid message in inbox {inbox_key}: {_sanitize_log(raw)}")
                 continue
 
         # Mark messages as read in database
@@ -182,7 +191,7 @@ class MessageBus:
             Number of pending messages.
         """
         inbox_key = f"team:{team_run_id}:inbox:{agent_role}"
-        return await self.redis.redis.llen(inbox_key)
+        return await self.redis.redis.llen(inbox_key)  # type: ignore[misc]
 
     async def get_messages(
         self,

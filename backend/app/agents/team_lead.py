@@ -31,6 +31,14 @@ from .tool_handlers import BookToolHandler
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_log(value: object, max_len: int = 200) -> str:
+    """Sanitize a value for safe logging (prevent log injection)."""
+    s = str(value).replace("\n", "\\n").replace("\r", "\\r")
+    if len(s) > max_len:
+        return s[:max_len] + "..."
+    return s
+
+
 @dataclass
 class TeamProgressEvent:
     """Progress event yielded by TeamLead for SSE streaming."""
@@ -94,6 +102,9 @@ class TeamLead:
         self.db = db
         self.redis = redis
 
+        # Timeout for individual agent task execution (seconds)
+        self._task_timeout = 600  # 10 minutes
+
         # Map agent roles to their Agent instances from the pipeline
         self._agent_map: dict[str, Agent] = {
             "concept_generator": pipeline.concept_agent,
@@ -132,17 +143,10 @@ class TeamLead:
         """
         run_id_str = str(team_run_id)
 
+        active_tasks: set[asyncio.Task] = set()
         try:
-            # 1. Create task graph
-            config = {
-                "brief": brief,
-                "num_chapters": num_chapters,
-                "style_guide": style_guide,
-                "skip_editing": skip_editing,
-                "skip_continuity": skip_continuity,
-                "max_parallel": max_parallel,
-            }
-            tasks = await self.task_manager.create_task_graph(team_run_id, config)
+            # 1. Fetch pre-created task graph (created by the API endpoint)
+            tasks = await self.task_manager.get_all_tasks(team_run_id)
 
             # 2. Store initial context
             await self.context_manager.store_context(team_run_id, "brief", brief)
@@ -158,7 +162,6 @@ class TeamLead:
 
             # 3. Main execution loop
             semaphore = asyncio.Semaphore(max_parallel)
-            active_tasks: set[asyncio.Task] = set()
 
             while True:
                 # Fetch ready tasks
@@ -188,7 +191,7 @@ class TeamLead:
                     try:
                         event = await completed_task
                     except Exception as e:
-                        logger.error(f"Task execution exception: {e}")
+                        logger.error(f"Task execution exception: {_sanitize_log(e)}")
                         yield TeamProgressEvent(
                             event_type="error",
                             team_run_id=run_id_str,
@@ -265,12 +268,21 @@ class TeamLead:
             )
 
         except Exception as e:
-            logger.error(f"Team run {team_run_id} failed: {e}")
+            logger.error(f"Team run {team_run_id} failed: {_sanitize_log(e)}")
             yield TeamProgressEvent(
                 event_type="team_failed",
                 team_run_id=run_id_str,
                 error=str(e),
             )
+
+        finally:
+            # Cancel any outstanding tasks to prevent memory leaks
+            for t in active_tasks:
+                if not t.done():
+                    t.cancel()
+            # Await cancellation to ensure proper cleanup
+            if active_tasks:
+                await asyncio.gather(*active_tasks, return_exceptions=True)
 
     async def _execute_with_semaphore(
         self,
@@ -313,7 +325,8 @@ class TeamLead:
         logger.info(f"Task claimed: {task.title} by {task.assigned_agent}")
 
         # 2. Create TeamAgent wrapper
-        base_agent = self._agent_map.get(task.assigned_agent)
+        agent_role = str(task.assigned_agent)
+        base_agent = self._agent_map.get(agent_role)
         if not base_agent:
             return TeamProgressEvent(
                 event_type="task_failed",
@@ -356,9 +369,12 @@ class TeamLead:
         # 3. Build task-specific prompt and context
         prompt, context = await self._build_task_prompt(team_run_id, task)
 
-        # 4. Execute
+        # 4. Execute with timeout
         try:
-            result = await team_agent.execute(prompt, context, task_type=task.task_type)
+            result = await asyncio.wait_for(
+                team_agent.execute(prompt, context, task_type=task.task_type),
+                timeout=self._task_timeout,
+            )
 
             # 5. Quality gate
             quality_score = self.quality_gate.assess(task.task_type, result)
@@ -373,7 +389,7 @@ class TeamLead:
                         "quality_feedback",
                         {
                             "score": quality_score,
-                            "instruction": "Quality below threshold. " "Please improve the output.",
+                            "instruction": "Quality below threshold. Please improve the output.",
                         },
                         task_id=task.id,
                     )
@@ -388,6 +404,24 @@ class TeamLead:
                         chapter_number=task.chapter_number,
                         quality_score=quality_score,
                         message=f"Retrying {task.title} (score: {quality_score:.2f})",
+                    )
+                else:
+                    # Retries exhausted but quality still below threshold
+                    await self.task_manager.fail_task(
+                        team_run_id,
+                        task.id,
+                        f"Quality below threshold after {task.max_retries} retries: "
+                        f"{quality_score:.2f}",
+                    )
+                    return TeamProgressEvent(
+                        event_type="task_failed",
+                        team_run_id=run_id_str,
+                        task_id=task_id_str,
+                        agent=task.assigned_agent,
+                        chapter_number=task.chapter_number,
+                        quality_score=quality_score,
+                        error=f"Quality below threshold after {task.max_retries} retries",
+                        message=f"Failed: {task.title} (score: {quality_score:.2f})",
                     )
 
             return TeamProgressEvent(
@@ -419,6 +453,19 @@ class TeamLead:
                 chapter_number=task.chapter_number,
                 error=str(e),
                 message=f"Failed: {task.title}",
+            )
+
+        except TimeoutError:
+            timeout_msg = f"Task timed out after {self._task_timeout}s"
+            await self.task_manager.fail_task(team_run_id, task.id, timeout_msg)
+            return TeamProgressEvent(
+                event_type="task_failed",
+                team_run_id=run_id_str,
+                task_id=task_id_str,
+                agent=task.assigned_agent,
+                chapter_number=task.chapter_number,
+                error=timeout_msg,
+                message=f"Timed out: {task.title}",
             )
 
         except Exception as e:
@@ -501,8 +548,8 @@ class TeamLead:
 
         elif task.task_type == "edit_chapter":
             ch_num = task.chapter_number or 1
-            ch_summary_key = f"chapter_summary:{ch_num}"
-            chapter_content = await self.context_manager.get_context(team_run_id, ch_summary_key)
+            ch_content_key = f"chapter_content:{ch_num}"
+            chapter_content = await self.context_manager.get_context(team_run_id, ch_content_key)
             style_guide = await self.context_manager.get_context(team_run_id, "style_guide")
 
             context.update(
@@ -577,4 +624,4 @@ class TeamLead:
             if cursor == 0:
                 break
 
-        logger.info(f"Cleaned up all resources for run {team_run_id}")
+        logger.info(f"Cleaned up all resources for run {_sanitize_log(team_run_id)}")
