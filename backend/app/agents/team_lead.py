@@ -268,7 +268,7 @@ class TeamLead:
             )
 
         except Exception as e:
-            logger.error(f"Team run {team_run_id} failed: {_sanitize_log(e)}")
+            logger.error(f"Team run {_sanitize_log(team_run_id)} failed: {_sanitize_log(e)}")
             yield TeamProgressEvent(
                 event_type="team_failed",
                 team_run_id=run_id_str,
