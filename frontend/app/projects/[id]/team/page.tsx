@@ -61,7 +61,7 @@ export default function TeamGenerationPage() {
   // Config state
   const [numChapters, setNumChapters] = useState(10)
   const [maxParallel, setMaxParallel] = useState(3)
-  const [selectedModel, setSelectedModel] = useState(MODELS[0].id)
+  const [selectedModel, setSelectedModel] = useState<string>(MODELS[0].id)
   const [styleGuide, setStyleGuide] = useState('')
   const [skipEditing, setSkipEditing] = useState(false)
   const [skipContinuity, setSkipContinuity] = useState(false)
