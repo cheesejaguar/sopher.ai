@@ -43,6 +43,7 @@ dev = [
     "black>=25.1.0",
     "ruff>=0.11.0",
     "mypy>=1.15.0",
+    "types-PyYAML>=6.0.12",
     "httpx>=0.28.0",
     "aiosqlite>=0.21.0",
 ]
@@ -99,6 +100,10 @@ disallow_incomplete_defs = false
 check_untyped_defs = false
 no_implicit_optional = false
 strict_optional = false
+
+[[tool.mypy.overrides]]
+module = ["yaml"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = [
