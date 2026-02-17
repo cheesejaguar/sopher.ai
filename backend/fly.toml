@@ -1,6 +1,35 @@
 # fly.toml - Fly.io configuration for sopher.ai backend
-# Deploy with: fly deploy --config backend/fly.toml
 # Docs: https://fly.io/docs/reference/configuration/
+#
+# === Setup Instructions ===
+#
+# 1. Create the app (if not already created):
+#      fly apps create sopherai-backend
+#
+# 2. Provision Fly Postgres (managed, in same region):
+#      fly postgres create --name sopherai-db --region sjc
+#      fly postgres attach sopherai-db --app sopherai-backend
+#    This auto-sets DATABASE_URL as a secret on the app.
+#    NOTE: Fly sets DATABASE_URL with a "postgres://" scheme. The app expects
+#    "postgresql+asyncpg://", so set the correct URL as a secret:
+#      fly secrets set DATABASE_URL="postgresql+asyncpg://<user>:<pass>@<host>:5432/sopherai_backend"
+#    (Use the credentials from `fly postgres attach` output, just swap the scheme.)
+#
+# 3. Provision Upstash Redis (managed):
+#      fly redis create --name sopherai-redis --region sjc
+#    This auto-sets REDIS_URL as a secret on the app.
+#
+# 4. Set remaining secrets:
+#      fly secrets set \
+#        JWT_SECRET="$(openssl rand -hex 32)" \
+#        FERNET_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" \
+#        ANTHROPIC_API_KEY="sk-ant-..." \
+#        OPENAI_API_KEY="sk-..." \
+#        GOOGLE_API_KEY="..." \
+#        CORS_ORIGINS="https://your-frontend-domain.com"
+#
+# 5. Deploy:
+#      fly deploy --config backend/fly.toml
 
 app = "sopherai-backend"
 primary_region = "sjc"
@@ -26,6 +55,8 @@ primary_region = "sjc"
   SSE_RETRY_INTERVAL = "5000"
   MAX_REQUEST_SIZE_MB = "10"
   PORT = "8000"
+  # DATABASE_URL and REDIS_URL are injected automatically by
+  # `fly postgres attach` and `fly redis create` as secrets.
 
 [http_service]
   internal_port = 8000
