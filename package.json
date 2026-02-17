@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "cd frontend && npm run build",
-    "vercel-build": "cd frontend && npm install && npm run build && cd .. && cp -r frontend/.next .next && cp frontend/next.config.js . && cp -r frontend/public ."
+    "vercel-build": "cd frontend && npm ci && npm run build && cd .. && cp -r frontend/.next .next && cp frontend/next.config.js . && if [ -d frontend/public ]; then cp -r frontend/public .; fi"
   },
   "dependencies": {
     "next": "14.2.35",
