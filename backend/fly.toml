@@ -1,0 +1,82 @@
+# fly.toml - Fly.io configuration for sopher.ai backend
+# Deploy with: fly deploy --config backend/fly.toml
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "sopherai-backend"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  strategy = "rolling"
+  release_command = "python -m alembic upgrade head"
+
+[env]
+  ENVIRONMENT = "production"
+  LOG_LEVEL = "INFO"
+  PYTHONUNBUFFERED = "1"
+  PRIMARY_MODEL = "anthropic/claude-sonnet-4.5"
+  SECONDARY_MODEL = "anthropic/claude-haiku-4.5"
+  OVERFLOW_MODEL = "anthropic/claude-opus-4.6"
+  METRICS_ENABLED = "true"
+  RATE_LIMIT_PER_MINUTE = "60"
+  RATE_LIMIT_BURST = "120"
+  SSE_KEEPALIVE_INTERVAL = "30"
+  SSE_RETRY_INTERVAL = "5000"
+  MAX_REQUEST_SIZE_MB = "10"
+  PORT = "8000"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+  [http_service.http_options]
+    # Long idle timeout for SSE streaming connections
+    idle_timeout = 300
+
+  # Proxy headers so the app sees real client IPs
+  [http_service.headers]
+    X-Forwarded-Proto = "https"
+
+[[http_service.checks]]
+  grace_period = "30s"
+  interval = "15s"
+  method = "GET"
+  timeout = "5s"
+  path = "/healthz"
+
+[[http_service.checks]]
+  grace_period = "60s"
+  interval = "30s"
+  method = "GET"
+  timeout = "10s"
+  path = "/readyz"
+
+# Prometheus metrics port
+[[services]]
+  internal_port = 9000
+  protocol = "tcp"
+
+  [[services.ports]]
+    port = 9000
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 2
+
+# Statics are not applicable since this is an API server
+
+[metrics]
+  port = 9000
+  path = "/api/metrics"
