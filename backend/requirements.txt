@@ -14,7 +14,7 @@ redis==5.3.1
 
 # Security and authentication
 PyJWT>=2.10.1  # Replaced python-jose to avoid ecdsa vulnerability
-cryptography==45.0.7
+cryptography==46.0.5
 passlib[bcrypt]==1.7.4
 workos>=5.0.0  # WorkOS SSO integration
 
