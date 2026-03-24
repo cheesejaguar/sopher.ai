@@ -204,7 +204,7 @@ jobs:
         sbom: false
     
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@0.24.0
+      uses: aquasecurity/trivy-action@0.35.0
       with:
         image-ref: ${{ env.REGISTRY }}/${{ github.repository_owner }}/sopher-${{ matrix.component }}:${{ steps.meta.outputs.version }}
         format: 'sarif'
