@@ -6,7 +6,7 @@
     "vercel-build": "cd frontend && npm ci && npm run build && cd .. && cp -r frontend/.next .next && cp frontend/next.config.js . && if [ -d frontend/public ]; then cp -r frontend/public .; fi"
   },
   "dependencies": {
-    "next": "14.2.35",
+    "next": "16.2.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   }
