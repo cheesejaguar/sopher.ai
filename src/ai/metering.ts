@@ -1,5 +1,4 @@
-import type { LanguageModelUsage } from "ai";
-import type { GatewayProviderOptions } from "@ai-sdk/gateway";
+import type { JSONValue, LanguageModelUsage } from "ai";
 import { checkBudget, recordLlmCall } from "@/lib/billing/meter";
 import { PROSE_FALLBACK_MODELS } from "./models";
 
@@ -18,7 +17,7 @@ export function gatewayOptions(
   ctx: MeterCtx,
   role: string,
   opts?: { withFallbacks?: boolean },
-): { gateway: GatewayProviderOptions } {
+): { gateway: Record<string, JSONValue> } {
   return {
     gateway: {
       user: ctx.userId,
