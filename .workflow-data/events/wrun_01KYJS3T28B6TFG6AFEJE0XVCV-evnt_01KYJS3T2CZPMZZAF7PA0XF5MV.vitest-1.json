@@ -1,0 +1,22 @@
+{
+  "eventType": "run_created",
+  "specVersion": 3,
+  "eventData": {
+    "deploymentId": "dpl_local@4.2.2",
+    "workflowName": "workflow//./src/workflows/spike//spikeWorkflow",
+    "input": {
+      "__type": "Uint8Array",
+      "data": "ZGV2bFtbMV0sImFhcm9uIl0="
+    },
+    "executionContext": {
+      "traceCarrier": {},
+      "workflowCoreVersion": "4.6.2",
+      "features": {
+        "encryption": false
+      }
+    }
+  },
+  "runId": "wrun_01KYJS3T28B6TFG6AFEJE0XVCV",
+  "eventId": "evnt_01KYJS3T2CZPMZZAF7PA0XF5MV",
+  "createdAt": "2026-07-27T21:53:50.668Z"
+}

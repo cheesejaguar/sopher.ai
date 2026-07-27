@@ -1,0 +1,10 @@
+{
+  "stepFiles": [
+    "/Users/aaron/Documents/sopher.ai/node_modules/.pnpm/workflow@4.6.2_@nestjs+common@11.1.28_reflect-metadata@0.2.2_rxjs@7.8.2__@nestjs+core@1_0dcacc738c77f853407a0561699a3c15/node_modules/workflow/dist/stdlib.js",
+    "/Users/aaron/Documents/sopher.ai/src/workflows/spike.ts"
+  ],
+  "workflowFiles": ["/Users/aaron/Documents/sopher.ai/src/workflows/spike.ts"],
+  "serdeOnlyFiles": [
+    "/Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+builders@4.1.3/node_modules/@workflow/builders/dist/serde-checker.js"
+  ]
+}

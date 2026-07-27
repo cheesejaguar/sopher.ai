@@ -4,13 +4,375 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/*
+  sopher.ai design system — "the chrome is the desk; the page is paper."
+
+  Chrome (app UI) is cool ink-and-indigo in both themes. Every surface that
+  holds manuscript prose uses the warm `paper` tokens with book typography.
+
+  Color roles:
+  - primary (indigo)  → user actions, brand
+  - ai (teal)         → AI presence only: suggestions, agent activity, live caret
+  - ember (orange)    → cost + warnings only
+  - paper             → manuscript surfaces
+*/
+
+:root {
+  /* Reading Room (light) */
+  --background: oklch(0.97 0.005 260);
+  --foreground: oklch(0.24 0.02 265);
+  --card: oklch(0.995 0.002 260);
+  --card-foreground: oklch(0.24 0.02 265);
+  --popover: oklch(0.995 0.002 260);
+  --popover-foreground: oklch(0.24 0.02 265);
+  --primary: oklch(0.5 0.19 268);
+  --primary-foreground: oklch(0.98 0.005 260);
+  --secondary: oklch(0.93 0.01 262);
+  --secondary-foreground: oklch(0.3 0.02 265);
+  --muted: oklch(0.93 0.008 260);
+  --muted-foreground: oklch(0.47 0.02 262);
+  --accent: oklch(0.94 0.012 262);
+  --accent-foreground: oklch(0.28 0.02 265);
+  --destructive: oklch(0.55 0.19 25);
+  --destructive-foreground: oklch(0.98 0.005 260);
+  --border: oklch(0.88 0.01 262);
+  --input: oklch(0.88 0.01 262);
+  --ring: oklch(0.5 0.19 268);
+
+  --ai: oklch(0.5 0.1 183);
+  --ai-foreground: oklch(0.99 0.002 260);
+  --ai-soft: oklch(0.93 0.035 183);
+  --ember: oklch(0.6 0.16 45);
+  --ember-foreground: oklch(0.99 0.002 260);
+  --success: oklch(0.55 0.14 155);
+
+  --paper: oklch(0.985 0.006 90);
+  --paper-foreground: oklch(0.23 0.015 75);
+  --paper-muted: oklch(0.5 0.02 80);
+  --paper-edge: oklch(0.9 0.012 85);
+
+  --chart-1: oklch(0.5 0.19 268);
+  --chart-2: oklch(0.52 0.1 183);
+  --chart-3: oklch(0.6 0.16 45);
+  --chart-4: oklch(0.55 0.15 300);
+  --chart-5: oklch(0.55 0.03 262);
+
+  --sidebar: oklch(0.95 0.007 260);
+  --sidebar-foreground: oklch(0.24 0.02 265);
+  --sidebar-primary: oklch(0.5 0.19 268);
+  --sidebar-primary-foreground: oklch(0.98 0.005 260);
+  --sidebar-accent: oklch(0.91 0.012 262);
+  --sidebar-accent-foreground: oklch(0.28 0.02 265);
+  --sidebar-border: oklch(0.88 0.01 262);
+  --sidebar-ring: oklch(0.5 0.19 268);
+
+  --radius: 0.625rem;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
+.dark {
+  /* Midnight Study (dark) — evolved from the original cosmic palette */
+  --background: oklch(0.19 0.02 265);
+  --foreground: oklch(0.96 0.005 260);
+  --card: oklch(0.23 0.02 265);
+  --card-foreground: oklch(0.96 0.005 260);
+  --popover: oklch(0.25 0.02 265);
+  --popover-foreground: oklch(0.96 0.005 260);
+  --primary: oklch(0.62 0.17 268);
+  --primary-foreground: oklch(0.98 0.005 260);
+  --secondary: oklch(0.28 0.02 265);
+  --secondary-foreground: oklch(0.8 0.02 260);
+  --muted: oklch(0.28 0.018 264);
+  --muted-foreground: oklch(0.72 0.02 260);
+  --accent: oklch(0.29 0.025 266);
+  --accent-foreground: oklch(0.96 0.005 260);
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(0.98 0.005 260);
+  --border: oklch(0.31 0.02 265);
+  --input: oklch(0.31 0.02 265);
+  --ring: oklch(0.62 0.17 268);
+
+  --ai: oklch(0.72 0.12 183);
+  --ai-foreground: oklch(0.17 0.02 265);
+  --ai-soft: oklch(0.32 0.05 183);
+  --ember: oklch(0.7 0.15 45);
+  --ember-foreground: oklch(0.17 0.02 265);
+  --success: oklch(0.68 0.13 155);
+
+  --paper: oklch(0.26 0.015 80);
+  --paper-foreground: oklch(0.92 0.01 90);
+  --paper-muted: oklch(0.7 0.02 85);
+  --paper-edge: oklch(0.33 0.018 80);
+
+  --chart-1: oklch(0.62 0.17 268);
+  --chart-2: oklch(0.72 0.12 183);
+  --chart-3: oklch(0.7 0.15 45);
+  --chart-4: oklch(0.65 0.15 300);
+  --chart-5: oklch(0.65 0.03 262);
+
+  --sidebar: oklch(0.21 0.02 265);
+  --sidebar-foreground: oklch(0.96 0.005 260);
+  --sidebar-primary: oklch(0.62 0.17 268);
+  --sidebar-primary-foreground: oklch(0.98 0.005 260);
+  --sidebar-accent: oklch(0.27 0.022 266);
+  --sidebar-accent-foreground: oklch(0.96 0.005 260);
+  --sidebar-border: oklch(0.31 0.02 265);
+  --sidebar-ring: oklch(0.62 0.17 268);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-ai: var(--ai);
+  --color-ai-foreground: var(--ai-foreground);
+  --color-ai-soft: var(--ai-soft);
+  --color-ember: var(--ember);
+  --color-ember-foreground: var(--ember-foreground);
+  --color-success: var(--success);
+  --color-paper: var(--paper);
+  --color-paper-foreground: var(--paper-foreground);
+  --color-paper-muted: var(--paper-muted);
+  --color-paper-edge: var(--paper-edge);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-instrument-sans);
+  --font-serif: var(--font-literata);
+  --font-display: var(--font-fraunces);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  @keyframes caret-blink {
+    0%,
+    45% {
+      opacity: 1;
+    }
+    55%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes ink-fill {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 25%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+/* Manuscript typography — shared by streaming preview, editor canvas, and reading view */
+.prose-manuscript {
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.75;
+  max-width: 68ch;
+  color: var(--paper-foreground);
+}
+
+@media (min-width: 1024px) {
+  .prose-manuscript {
+    font-size: 1.125rem;
+  }
+}
+
+.prose-manuscript p {
+  margin-block: 0.9em;
+}
+
+.prose-manuscript h1,
+.prose-manuscript h2,
+.prose-manuscript h3 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-block: 1.4em 0.6em;
+  text-wrap: balance;
+}
+
+.prose-manuscript h1 {
+  font-size: 1.75em;
+}
+
+.prose-manuscript h2 {
+  font-size: 1.35em;
+}
+
+.prose-manuscript h3 {
+  font-size: 1.15em;
+}
+
+.prose-manuscript em {
+  font-style: italic;
+}
+
+.prose-manuscript blockquote {
+  border-left: 2px solid var(--paper-edge);
+  padding-left: 1.25em;
+  font-style: italic;
+  color: var(--paper-muted);
+  margin-block: 1.2em;
+}
+
+.prose-manuscript hr {
+  border: none;
+  text-align: center;
+  margin-block: 2em;
+}
+
+.prose-manuscript hr::after {
+  content: "⁂";
+  color: var(--paper-muted);
+  font-size: 1.1em;
+  letter-spacing: 0.5em;
+}
+
+.prose-manuscript figure {
+  margin-block: 1.5em;
+}
+
+.prose-manuscript figcaption {
   font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.8rem;
+  color: var(--paper-muted);
+  text-align: center;
+  margin-top: 0.6em;
+}
+
+/* Book-style paragraph indents for the reading view */
+.prose-manuscript--book p {
+  margin-block: 0;
+  text-indent: 1.5em;
+}
+
+.prose-manuscript--book p:first-of-type,
+.prose-manuscript--book h1 + p,
+.prose-manuscript--book h2 + p,
+.prose-manuscript--book h3 + p,
+.prose-manuscript--book hr + p {
+  text-indent: 0;
+}
+
+/* Live streaming caret — AI presence */
+.stream-caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 0.1em;
+  vertical-align: text-bottom;
+  background: var(--ai);
+  animation: caret-blink 1.1s steps(1) infinite;
+}
+
+/* Paper surface — every manuscript container */
+.paper-surface {
+  background: var(--paper);
+  color: var(--paper-foreground);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 1px 3px oklch(0.2 0.02 265 / 8%);
+}
+
+/* Rationed glow — marketing hero and generation screen only */
+.glow-primary {
+  box-shadow: 0 0 48px color-mix(in oklch, var(--primary) 28%, transparent);
+}
+
+.marketing-aurora {
+  background:
+    radial-gradient(
+      ellipse 70% 55% at 50% -10%,
+      color-mix(in oklch, var(--primary) 22%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 45% 40% at 82% 18%,
+      color-mix(in oklch, var(--ai) 12%, transparent),
+      transparent 70%
+    );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .stream-caret::after {
+    animation: none;
+    opacity: 1;
+  }
 }

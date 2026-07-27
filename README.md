@@ -31,13 +31,13 @@ The system uses a thin orchestration layer built on [LiteLLM](https://github.com
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| **Backend** | FastAPI, SQLAlchemy (async), PostgreSQL, Redis |
-| **AI Orchestration** | LiteLLM, Pydantic, custom Agent framework |
-| **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS, Zustand |
-| **Infrastructure** | Docker, Kubernetes (GKE), Prometheus, Grafana |
-| **CI/CD** | GitHub Actions, CodeQL, Semgrep |
+| Layer                | Technology                                                 |
+| -------------------- | ---------------------------------------------------------- |
+| **Backend**          | FastAPI, SQLAlchemy (async), PostgreSQL, Redis             |
+| **AI Orchestration** | LiteLLM, Pydantic, custom Agent framework                  |
+| **Frontend**         | Next.js 14 (App Router), TypeScript, Tailwind CSS, Zustand |
+| **Infrastructure**   | Docker, Kubernetes (GKE), Prometheus, Grafana              |
+| **CI/CD**            | GitHub Actions, CodeQL, Semgrep                            |
 
 ## Quick Start
 
@@ -72,6 +72,7 @@ docker-compose -f docker-compose.dev.yml up
 ```
 
 Access the application:
+
 - **Frontend**: http://localhost:3000
 - **API Docs**: http://localhost:8000/docs
 - **Prometheus**: http://localhost:9090
@@ -133,14 +134,14 @@ npm run dev
 
 ### Core Endpoints
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/projects` | POST | Create a new book project |
-| `/api/v1/projects/{id}/outline/stream` | GET | Stream outline generation |
-| `/api/v1/projects/{id}/chapters/{n}/generate/stream` | POST | Stream chapter generation |
-| `/api/v1/projects/{id}/chapters/{n}/edit/stream` | POST | Stream editorial pass |
-| `/api/v1/projects/{id}/continuity/check` | POST | Run continuity validation |
-| `/api/v1/projects/{id}/export` | GET | Export manuscript |
+| Endpoint                                             | Method | Description               |
+| ---------------------------------------------------- | ------ | ------------------------- |
+| `/api/v1/projects`                                   | POST   | Create a new book project |
+| `/api/v1/projects/{id}/outline/stream`               | GET    | Stream outline generation |
+| `/api/v1/projects/{id}/chapters/{n}/generate/stream` | POST   | Stream chapter generation |
+| `/api/v1/projects/{id}/chapters/{n}/edit/stream`     | POST   | Stream editorial pass     |
+| `/api/v1/projects/{id}/continuity/check`             | POST   | Run continuity validation |
+| `/api/v1/projects/{id}/export`                       | GET    | Export manuscript         |
 
 ### SSE Event Format
 
@@ -252,17 +253,17 @@ npm run test         # Run tests
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | - |
-| `ANTHROPIC_API_KEY` | Anthropic API key | - |
-| `GOOGLE_API_KEY` | Google AI API key | - |
-| `DATABASE_URL` | PostgreSQL connection | `postgresql+asyncpg://postgres:postgres@localhost:5432/sopherai` |
-| `REDIS_URL` | Redis connection | `redis://localhost:6379/0` |
-| `JWT_SECRET` | JWT signing secret (min 32 chars) | - |
-| `MONTHLY_BUDGET_USD` | Cost limit per user | `100` |
-| `PRIMARY_MODEL` | Default LLM model | `gpt-4` |
-| `LOG_LEVEL` | Logging verbosity | `INFO` |
+| Variable             | Description                       | Default                                                          |
+| -------------------- | --------------------------------- | ---------------------------------------------------------------- |
+| `OPENAI_API_KEY`     | OpenAI API key                    | -                                                                |
+| `ANTHROPIC_API_KEY`  | Anthropic API key                 | -                                                                |
+| `GOOGLE_API_KEY`     | Google AI API key                 | -                                                                |
+| `DATABASE_URL`       | PostgreSQL connection             | `postgresql+asyncpg://postgres:postgres@localhost:5432/sopherai` |
+| `REDIS_URL`          | Redis connection                  | `redis://localhost:6379/0`                                       |
+| `JWT_SECRET`         | JWT signing secret (min 32 chars) | -                                                                |
+| `MONTHLY_BUDGET_USD` | Cost limit per user               | `100`                                                            |
+| `PRIMARY_MODEL`      | Default LLM model                 | `gpt-4`                                                          |
+| `LOG_LEVEL`          | Logging verbosity                 | `INFO`                                                           |
 
 ### Model Configuration
 
@@ -301,11 +302,11 @@ kubectl create secret generic sopher-secrets \
 
 ### Health Checks
 
-| Endpoint | Purpose |
-|----------|---------|
-| `/healthz` | Basic health check |
-| `/readyz` | Readiness probe (DB + Redis) |
-| `/livez` | Liveness probe |
+| Endpoint   | Purpose                      |
+| ---------- | ---------------------------- |
+| `/healthz` | Basic health check           |
+| `/readyz`  | Readiness probe (DB + Redis) |
+| `/livez`   | Liveness probe               |
 
 ## Monitoring
 

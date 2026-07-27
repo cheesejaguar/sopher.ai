@@ -33,7 +33,7 @@ uvicorn app.main:app --reload            # Run development server (port 8000)
 pytest tests/ -v --cov=app              # Run tests with coverage
 pytest tests/test_api_contract.py::test_health_endpoint  # Run single test
 black app tests                          # Format code
-ruff check app tests                     # Lint code  
+ruff check app tests                     # Lint code
 mypy app                                 # Type check
 ```
 
@@ -55,7 +55,7 @@ npm run test                             # Run color contrast tests
 # Backend: Run all quality checks
 cd backend && black app tests && ruff check app tests && mypy app && pytest tests/ -v
 
-# Frontend: Run all quality checks  
+# Frontend: Run all quality checks
 cd frontend && npm run lint && npm run type-check && npm run build
 
 # Full stack verification
@@ -77,7 +77,7 @@ docker-compose -f docker-compose.dev.yml down      # Stop all services
 The system uses 5 main tables (defined in `backend/app/models.py`) with UUID primary keys:
 
 - **projects**: Book projects with JSONB settings
-- **sessions**: Writing sessions linked to projects  
+- **sessions**: Writing sessions linked to projects
 - **events**: Action logs with JSONB payloads
 - **artifacts**: Generated content (outlines, chapters) with optional blob storage
 - **costs**: Token usage and cost tracking per agent/session
@@ -89,7 +89,7 @@ Database migrations are handled through SQLAlchemy with async support. All opera
 The CrewAI agents (in `backend/app/agents/agents.py`) work in a coordinated pipeline:
 
 1. **ConceptGenerator**: Expands brief into rich concepts
-2. **Outliner**: Creates detailed chapter-by-chapter structure  
+2. **Outliner**: Creates detailed chapter-by-chapter structure
 3. **Writer**: Generates chapter content following style guides
 4. **Editor**: Performs structural editing and improvements
 5. **ContinuityChecker**: Validates consistency across characters/timeline
@@ -99,6 +99,7 @@ Agents can work in parallel for chapter generation and use shared context throug
 ## API Design Patterns
 
 ### Main Endpoints
+
 - `/api/v1/projects/{id}/outline/stream` - Generate book outline with SSE streaming
 - `/api/v1/projects/{id}/chapter/{n}/draft/stream` - Stream chapter draft generation
 - `/api/v1/projects/{id}/chapter/{n}/edit/stream` - Stream editorial pass
@@ -107,7 +108,9 @@ Agents can work in parallel for chapter generation and use shared context throug
 - `/ws/agents/{id}` - WebSocket for real-time agent status updates
 
 ### SSE Streaming Pattern
+
 All streaming endpoints follow this pattern:
+
 - Token events: `{"event": "token", "data": "content"}`
 - Checkpoints: `{"event": "checkpoint", "data": "{\"progress\": 0.5}"}`
 - Completion: `{"event": "complete", "data": "{\"tokens\": 1000}"}`
@@ -117,6 +120,7 @@ Authentication uses JWT with 1-hour expiry. Rate limiting is per-key (60 RPM). A
 ## Environment Configuration
 
 Required environment variables:
+
 - `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`: LLM provider keys
 - `DATABASE_URL`: PostgreSQL connection string (default: `postgresql+asyncpg://postgres:postgres@localhost:5432/sopherai`)
 - `REDIS_URL`: Redis connection string (default: `redis://localhost:6379/0`)
@@ -146,16 +150,19 @@ See `.env.example` for complete configuration with descriptions.
 ### Development Workflow Options
 
 #### Docker Compose (Recommended)
+
 ```bash
 cd infra
 docker-compose -f docker-compose.dev.yml up
 ```
+
 - Automatically sets up PostgreSQL, Redis, and all services
 - Hot reload enabled for both frontend and backend
 - Access at http://localhost:3000 (frontend), http://localhost:8000 (backend API)
 - API docs at http://localhost:8000/docs
 
 #### Local Development
+
 ```bash
 # Backend
 cd backend
@@ -167,6 +174,7 @@ cd frontend
 npm install
 npm run dev
 ```
+
 - Requires local PostgreSQL and Redis installation
 - More control over individual services
 - Better for debugging specific components
@@ -180,12 +188,14 @@ See `.github/SETUP_SECRETS.md` for setting up your own deployment pipeline.
 ## Key File Locations
 
 ### Frontend
+
 - `frontend/lib/zustand.ts`: Global state store with TypeScript interfaces (Message, Chapter, Project, AppState)
 - `frontend/app/`: Next.js App Router pages and components
 - `frontend/components/ui/`: Reusable UI components (Radix UI based)
 - Uses `@/*` path alias for imports (configured in tsconfig.json)
 
 ### Backend
+
 - `backend/app/agents/agents.py`: BookWritingAgents class with 5 specialized CrewAI agents
 - `backend/app/models.py`: SQLAlchemy database models
 - `backend/app/schemas.py`: Pydantic validation schemas
@@ -193,6 +203,7 @@ See `.github/SETUP_SECRETS.md` for setting up your own deployment pipeline.
 - `backend/app/main.py`: FastAPI application entry point
 
 ### Configuration
+
 - `router/litellm.config.yaml`: LiteLLM router configuration with model fallbacks and budget allocation
 - `.env.example`: Environment variable template
 - `infra/docker-compose.dev.yml`: Docker Compose configuration for local development
@@ -201,24 +212,28 @@ See `.github/SETUP_SECRETS.md` for setting up your own deployment pipeline.
 ## Testing Strategy
 
 ### Backend Testing
+
 - Test files: `backend/tests/test_api_contract.py`, `backend/tests/test_properties.py`
 - Run with: `pytest tests/ -v --cov=app`
 - Currently 13/15 tests passing (2 skipped due to complex SQLAlchemy mocking)
 - Property-based testing with Hypothesis for schema validation
 
 ### Frontend Testing
+
 - Color contrast test: `frontend/tests/color-contrast.test.js`
 - Run with: `npm run test`
 - TypeScript strict mode and ESLint for quality assurance
 - No comprehensive test suite yet
 
 ### Code Quality Tools
+
 - **Backend**: Black (100 char line length), Ruff (E,F,I,N,W rules), MyPy (strict)
 - **Frontend**: ESLint (Next.js core-web-vitals), TypeScript strict mode
 
 ## Deployment Notes
 
 The system is containerized and Kubernetes-ready:
+
 - HPA scales 2-10 pods based on CPU/memory/active_sessions
 - Health checks on `/healthz`, `/readyz`, `/livez`
 - Prometheus metrics at `/api/metrics`
@@ -229,6 +244,7 @@ When modifying streaming endpoints, ensure proper cleanup of SSE connections and
 ## CI/CD Pipeline
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) includes:
+
 - **Security Scanning**: CodeQL analysis for Python and JavaScript-TypeScript
 - **Quality Gates**: Backend linting (ruff, black, mypy), frontend linting (ESLint, TypeScript)
 - **Testing**: Automated test execution with PostgreSQL and Redis services

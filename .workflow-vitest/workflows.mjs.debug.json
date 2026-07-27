@@ -1,0 +1,6 @@
+{
+  "workflowFiles": ["/Users/aaron/Documents/sopher.ai/src/workflows/spike.ts"],
+  "serdeOnlyFiles": [
+    "/Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+builders@4.1.3/node_modules/@workflow/builders/dist/serde-checker.js"
+  ]
+}
