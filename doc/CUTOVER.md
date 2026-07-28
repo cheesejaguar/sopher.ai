@@ -15,82 +15,115 @@ Sign-in currently runs on a Clerk **development** instance — fully functional,
 but Clerk-branded URLs, dev-mode session limits, and a "development" watermark
 on the widget.
 
-### Read this first: the domain field is not editable
+### Current topology (verified 2026-07-28)
 
-A development instance's domain is a Clerk-assigned name like
-`actual.eagle-8.lcl.dev` (its Frontend API is the matching
-`actual-eagle-8.clerk.accounts.dev`). Per Clerk's docs, you can change the
-primary domain of a **production** instance but **not** a development one — the
-field is read-only and will never read `sopher.ai`. There is no settings page
-where you rename it. The domain is entered *once*, as an input inside the
-create-production-instance flow. Do not go looking for it anywhere else.
+Both instances already exist. `*.lcl.dev` is the placeholder name Clerk assigns
+an instance that has no real domain attached — it does **not** imply
+"development".
 
-### Confirm you are in the right application first
+| Clerk environment | Instance domain | Frontend API | Status |
+|---|---|---|---|
+| Development | `actual.eagle-8.lcl.dev` | `actual-eagle-8.clerk.accounts.dev` | **what sopher.ai currently runs on** (`pk_test_`/`sk_test_`, instance `ins_3H6bP8akul1e7ulGjE737i7Pm6e`) |
+| Production | `measured.rabbit-48.lcl.dev` | not yet serving TLS | created, **domain not yet set to `sopher.ai`** |
 
-The deployed app authenticates against instance
-`ins_3H6bP8akul1e7ulGjE737i7Pm6e`, whose development domain is
-`actual.eagle-8.lcl.dev`. There is at least one other Clerk application on this
-account (`measured.rabbit-48.lcl.dev`) — work done there produces keys that
-match nothing. Verify which app you are in before touching anything:
+So the remaining task is not "create a production instance" — it is **change the
+existing production instance's domain to `sopher.ai`**.
+
+### Step 1 — point the production instance at sopher.ai
+
+Per Clerk's docs you can change the primary domain of a production instance
+(but never a development one — that field is permanently read-only, which is
+why it cannot be edited on the Development tab).
+
+- **Dashboard**: switch the environment selector to **Production**, then go to
+  the [Domains page](https://dashboard.clerk.com/~/domains) and change the
+  primary domain to `sopher.ai`.
+- **Or Backend API**, using the production (`sk_live_`) secret key:
+
+  ```bash
+  curl -XPOST -H 'Authorization: <sk_live_...>' -H 'Content-type: application/json' \
+    -d '{"home_url":"https://sopher.ai"}' \
+    'https://api.clerk.com/v1/instance/change_domain'
+  ```
+
+> **Changing the domain regenerates the Publishable Key.** Clerk will fail to
+> load if the app keeps using the old one, so always re-copy `pk_live_` from the
+> dashboard *after* this step — not before.
+
+This causes no downtime on the live site, because the live site is still
+authenticating against the development instance until step 3.
+
+### Step 2 — DNS
+
+sopher.ai is on Cloudflare nameservers. Every Clerk record must be
+**DNS-only / grey cloud**; proxying them breaks Clerk.
+
+Already in place and correct:
+
+- `clerk.sopher.ai` CNAME → `frontend-api.clerk.services`
+- `accounts.sopher.ai` CNAME → `accounts.clerk.services`
+
+Still missing (email/DKIM — take the exact targets from the Domains page):
+`clkmail`, `clk._domainkey`, `clk2._domainkey`.
+
+Wait for the Domains page to show the domain and SSL certificates as verified.
+DNS propagation can take up to 48h, though Cloudflare is usually minutes.
+
+### Step 3 — swap the keys and redeploy
+
+Production environment only:
 
 ```bash
-# decode the publishable key currently deployed -> shows the instance domain
-vercel env pull /tmp/ck.txt --environment=production --yes
-grep NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY /tmp/ck.txt | cut -d= -f2 | tr -d '"' \
-  | sed 's/^pk_test_//;s/^pk_live_//' | base64 -d; echo
-# authoritative: ask the instance about itself
-curl -s -H "Authorization: Bearer $(grep '^CLERK_SECRET_KEY' /tmp/ck.txt | cut -d= -f2- | tr -d '"')" \
-  https://api.clerk.com/v1/instance
-rm -f /tmp/ck.txt
+vercel env rm NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY production --yes
+vercel env add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY production   # new pk_live_...
+vercel env rm CLERK_SECRET_KEY production --yes
+vercel env add CLERK_SECRET_KEY production                    # sk_live_...
 ```
 
-### Steps
+Then redeploy (any push to `main`, or `vercel redeploy`).
 
-1. Clerk dashboard → select the application whose development instance is
-   `actual.eagle-8.lcl.dev`.
-2. Click the environment dropdown at the top that reads **Development** →
-   **Create production instance**. Choose "clone settings from development".
-   SSO connections, Integrations, and Paths do *not* clone — reconfigure them.
-3. Enter `sopher.ai` as the domain **in that creation flow**. Clerk then lists
-   the DNS records to add.
-4. Add the records in Cloudflare (sopher.ai runs on Cloudflare nameservers).
-   All Clerk records must be **DNS-only / grey cloud**, never proxied.
-   Already in place and correct:
-   - `clerk.sopher.ai` CNAME → `frontend-api.clerk.services`
-   - `accounts.sopher.ai` CNAME → `accounts.clerk.services`
+Also reconfigure on the production instance — these do **not** copy from
+development: SSO/social connections, Integrations, and Paths. Any social
+connection redirect URLs must be updated to the new domain.
 
-   Still missing (email/DKIM — Clerk gives the exact targets):
-   `clkmail`, `clk._domainkey`, `clk2._domainkey`.
-5. Copy the production keys into Vercel (production environment only):
-   `vercel env rm ... production` then `vercel env add ... production`, for
-   `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` (pk_live/sk_live).
-6. Optional but recommended: Clerk dashboard → webhook endpoint
-   `https://sopher.ai/api/webhooks/clerk`, subscribe to `user.created` +
-   `user.updated`, set `CLERK_WEBHOOK_SIGNING_SECRET` in Vercel.
-7. Redeploy (or push any commit); verify `/studio` redirects through
-   `clerk.sopher.ai` rather than `*.accounts.dev`.
+Recommended: Clerk dashboard → webhook endpoint
+`https://sopher.ai/api/webhooks/clerk`, subscribe to `user.created` +
+`user.updated`, set `CLERK_WEBHOOK_SIGNING_SECRET` in Vercel.
 
-### Verifying, and one expected red herring
-
-Until the production instance exists, `https://clerk.sopher.ai` returns
-Cloudflare **Error 1000 "DNS points to prohibited IP"**. This does *not* mean
-the DNS is wrong. Clerk sits behind Cloudflare, so Cloudflare only routes
-`clerk.sopher.ai` once Clerk has registered it as a custom hostname on their
-side — which happens when the production instance is created. The error clears
-on its own at that point. Green means:
+### Step 4 — verify
 
 ```bash
-curl -s "https://clerk.sopher.ai/v1/environment?__clerk_api_version=2021-02-05" | head -c 200
+curl -s "https://clerk.sopher.ai/v1/environment?__clerk_api_version=2021-02-05" | head -c 300
 # expect JSON with display_config.instance_environment_type == "production"
 ```
 
-To change the domain *later* (production instances only):
+Until the domain change lands, `clerk.sopher.ai` returns Cloudflare
+**Error 1000 "DNS points to prohibited IP"**. That is expected and is *not* a
+DNS mistake: Clerk sits behind Cloudflare, so Cloudflare only routes the
+hostname once Clerk registers it as a custom hostname on their side. It clears
+itself once step 1 completes.
 
-```bash
-curl -XPOST -H 'Authorization: <sk_live_...>' -H 'Content-type: application/json' \
-  -d '{"home_url":"https://sopher.ai"}' \
-  'https://api.clerk.com/v1/instance/change_domain'
+### Known consequence: existing data is keyed to the development instance
+
+Clerk does not share user records between environments, so signing in to the
+production instance mints a **new** user id. `users.id` is the Clerk id, and
+`projects.user_id` references it, so today's data would orphan:
+
+| Clerk user id | Email | Owns |
+|---|---|---|
+| `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` | cheesejaguar@gmail.com | 1 project, 12 chapters |
+| `dev-user` | dev@sopher.ai | — (local fallback) |
+
+After the first production sign-in, re-point the row to the new id:
+
+```sql
+-- new_id = the user_... shown in the production instance's Users page
+insert into users (id, email, name) values ('<new_id>', 'cheesejaguar@gmail.com', null)
+  on conflict (id) do nothing;
+update projects set user_id = '<new_id>' where user_id = 'user_3H6zLw7xAgKc7NqVOROUMGgZWkJ';
 ```
+
+Or accept the loss — the existing project is the end-to-end test novel.
 
 ## 2. Decommission the old GKE stack (after soak — no earlier than 2026-08-03)
 
