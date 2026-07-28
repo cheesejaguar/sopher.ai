@@ -69,18 +69,47 @@ Still missing (email/DKIM — take the exact targets from the Domains page):
 Wait for the Domains page to show the domain and SSL certificates as verified.
 DNS propagation can take up to 48h, though Cloudflare is usually minutes.
 
-### Step 3 — swap the keys and redeploy
+### Step 3 — the keys sync themselves; do not swap them by hand
 
-Production environment only:
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are **owned by the
+Clerk marketplace resource**, not by us. Both carry
+`contentHint.type = "integration-store-secret"` bound to resource
+`clerk-camel-basket` (store `ir_hwgYOYUxHAiFtFmf`, integration
+`oac_7uYNbc9CdDAZmNqbt3LEkO3a`) — the same ownership shape Neon's `DATABASE_URL`
+has. They cannot be edited from the Vercel dashboard or CLI, and there is no
+CLI command that remaps them: `vercel integration-resource` offers only
+`connect`, `disconnect`, `remove`, `claim`, `create-threshold`.
+
+Per Clerk's docs the mapping is automatic — *"Clerk's development instance maps
+to Vercel's development and preview environments, and the production instance
+maps to Vercel's production environment."*
+
+Today both variables are a **single row targeting all three environments**
+(`['production','preview','development']`) holding the development key, which is
+why production serves `pk_test_`. That is the symptom of the production instance
+not being fully provisioned. Completing step 1 (attaching `sopher.ai`) is what
+lets Clerk publish `pk_live_`/`sk_live_` into the Production target on its own.
+
+Verify the split appeared, then redeploy:
 
 ```bash
-vercel env rm NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY production --yes
-vercel env add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY production   # new pk_live_...
-vercel env rm CLERK_SECRET_KEY production --yes
-vercel env add CLERK_SECRET_KEY production                    # sk_live_...
+vercel env ls production        # CLERK_* rows should no longer span all 3 targets
+vercel env pull /tmp/ck.txt --environment=production --yes
+grep NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY /tmp/ck.txt | cut -d= -f2 | tr -d '"' \
+  | sed 's/^pk_test_//;s/^pk_live_//' | base64 -d; echo   # expect sopher.ai
+rm -f /tmp/ck.txt
 ```
 
-Then redeploy (any push to `main`, or `vercel redeploy`).
+**Fallback, only if Clerk never syncs production keys:** disconnect the resource
+and take ownership of the variables manually. This breaks auth until the new
+values are set, and gives up automatic key rotation — so treat it as a last
+resort, not a shortcut.
+
+```bash
+vercel integration-resource disconnect clerk-camel-basket sopher-ai
+vercel env add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY production
+vercel env add CLERK_SECRET_KEY production
+```
 
 Also reconfigure on the production instance — these do **not** copy from
 development: SSO/social connections, Integrations, and Paths. Any social
