@@ -7,200 +7,105 @@ AI Gateway credits (haiku tier active), production merge (#103), auth-gate fix
 (#111), domain attachment, and a full end-to-end book generated and exported
 on the shipped pipeline.
 
-Two operator steps remain.
+One operator step remains (GKE teardown); Clerk production auth is done.
 
-## 1. Clerk production instance (when you want branded auth)
+## 1. Clerk production auth — DONE 2026-07-28
 
-Sign-in currently runs on a Clerk **development** instance — fully functional,
-but Clerk-branded URLs, dev-mode session limits, and a "development" watermark
-on the widget.
-
-### Current topology (verified 2026-07-28)
-
-Both instances already exist. `*.lcl.dev` is the placeholder name Clerk assigns
-an instance that has no real domain attached — it does **not** imply
-"development".
-
-| Clerk environment | Instance domain | Frontend API | Status |
-|---|---|---|---|
-| Development | `actual.eagle-8.lcl.dev` | `actual-eagle-8.clerk.accounts.dev` | **what sopher.ai currently runs on** (`pk_test_`/`sk_test_`, instance `ins_3H6bP8akul1e7ulGjE737i7Pm6e`) |
-| Production | `measured.rabbit-48.lcl.dev` | not yet serving TLS | created, **domain not yet set to `sopher.ai`** |
-
-So the remaining task is not "create a production instance" — it is **change the
-existing production instance's domain to `sopher.ai`**.
-
-### Root cause — the domain is a create-only field that was never set
-
-This Clerk account came from the **Vercel Marketplace**, so its domain is
-Vercel-managed. The resource was provisioned with `metadata: {}` — no domain —
-and Vercel's product schema declares:
-
-```json
-"domain": {
-  "ui:label": "Production domain (optional)",
-  "ui:readonly": "update",
-  "ui:control": "domain"
-}
-```
-
-`ui:readonly: "update"` means the field is settable **only at resource
-creation**. Verified consequences:
-
-- Clerk's dashboard shows the domain as *"managed by Vercel"* and will not edit
-  it; `POST /v1/instance/change_domain` does not apply to managed resources.
-- Vercel's *"Production domain required"* notice is a tooltip, not a control.
-- The REST API refuses it too. `PATCH /v1/storage/stores/integration/{id}`
-  accepts an empty body but rejects both `{"domain":…}` and
-  `{"metadata":{"domain":…}}` with *"should NOT have additional property"*.
-- No CLI reaches it: `vercel integration` = add, accept-terms, balance,
-  categories, discover, guide, installations, list, open, resource, update;
-  `vercel integration resource` = connect, disconnect, remove, claim,
-  create-threshold.
-
-Everything downstream — the production instance stuck on a `.lcl.dev`
-placeholder, production serving `pk_test_` — follows from that one empty field.
-The only fix inside the Marketplace is to **recreate the resource with the
-domain set during install**.
-
-### Step 1 — recreate the Clerk resource with a domain
-
-State being replaced (for reference/rollback):
+`https://sopher.ai` now authenticates against a Clerk **production** instance
+on its own domain. Verified: the live page loads
+`https://clerk.sopher.ai/npm/@clerk/clerk-js@6/...`, the production
+publishable key is `pk_live_` decoding to `clerk.sopher.ai`, and
+`/v1/instance` reports `environment_type: production`.
 
 | | |
 |---|---|
-| Resource | `clerk-camel-basket` (`ir_hwgYOYUxHAiFtFmf`) |
-| Clerk app | `app_3H6bP5BDzHMZLyN2XrbLPV5TIxd` |
-| Integration | `oac_7uYNbc9CdDAZmNqbt3LEkO3a`, config `icfg_2xSONU7uZ1l3PUqwrcUkiQd0` |
-| Owns env vars | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (all 3 targets) |
+| Resource | `sopher-ai` (`ir_w3QjAAUbAONgHuO9`), metadata `{"domain":"sopher.ai"}` |
+| Clerk app | `app_3H9AzE6yUQ0gCgm14RIgl7nUyG6` |
+| Prod instance | `ins_3H9AzC8FBbLeKBPFW9JFOa7aiIA` — domain `sopher.ai` |
+| Dev instance | `fluent.snake-62.lcl.dev` → Preview + Development |
+| Deleted | old resource `clerk-camel-basket` / app `app_3H6bP5BDzHMZLyN2XrbLPV5TIxd` |
 
-Order matters — removing the resource deletes those env vars, so the site is
-down until the new one is connected. Do it in one sitting.
+Env vars are integration-owned and correctly split: Production carries the
+`pk_live_`/`sk_live_` pair, Preview+Development the `pk_test_` pair.
 
-1. Vercel dashboard → the `clerk-camel-basket` resource → **Remove**. (CLI
-   equivalent: `vercel integration resource remove clerk-camel-basket`.)
-2. Install Clerk again — `vercel integration add clerk`, or the dashboard's
-   Marketplace flow. Both are interactive and need human confirmation.
-3. **In the install form, fill "Production domain (optional)" with `sopher.ai`.**
-   This is the entire point of the exercise and the one field that cannot be
-   fixed later. Not `www.sopher.ai` — see the canonical-domain note in step 2.
-4. Connect the resource to project `sopher-ai` for all three environments.
+### What actually blocked this, and the traps
 
-Clerk then provisions a production instance on `sopher.ai` and the integration
-syncs `pk_live_`/`sk_live_` into the Production target itself. Never hand-copy
-those keys; the integration owns them and would overwrite or reject the edit.
+**The domain is a create-only field.** The original resource was provisioned
+with `metadata: {}`, and Vercel's product schema marks `domain` as
+`"ui:readonly": "update"` — settable *only* at creation. Neither dashboard, CLI,
+nor REST API can add it afterwards (`PATCH
+/v1/storage/stores/integration/{id}` rejects both `{"domain":…}` and
+`{"metadata":{"domain":…}}`). The fix was to recreate the resource. Everything
+else — Clerk showing "managed by Vercel", the production instance sitting on a
+`.lcl.dev` placeholder, production serving `pk_test_` — followed from that one
+empty field.
 
-### Step 2 — DNS
-
-The project is **apex-canonical** (set 2026-07-28): `sopher.ai` serves and
-`www.sopher.ai` 308-redirects to it. It was previously the other way round,
-which would have made Clerk provision under `www.` and stranded the records
-already in place. If this is ever flipped back, the Clerk DNS records must move
-with it.
+**Remove the old resource first.** Installing the new one while
+`clerk-camel-basket` still held `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` /
+`CLERK_SECRET_KEY` made Vercel fall back to a `PROD_` prefix
+(`NEXT_PUBLIC_PROD_CLERK_PUBLISHABLE_KEY`), which the app does not read. Fix:
 
 ```bash
-# current state
-curl -sI https://www.sopher.ai | head -1     # 308 -> https://sopher.ai/
-curl -so /dev/null -w '%{http_code}\n' https://sopher.ai   # 200
+vercel integration-resource remove clerk-camel-basket -y -a
+vercel integration-resource disconnect <new-resource> -y -a
+vercel integration-resource connect <new-resource> sopher-ai -y \
+  -e production -e preview -e development     # no --prefix
 ```
 
-sopher.ai is on Cloudflare nameservers. Every Clerk record must be
-**DNS-only / grey cloud**; proxying them breaks Clerk.
+**`vercel redeploy` will not pick up new `NEXT_PUBLIC_*` values.** Those are
+inlined at build time and the build cache restores the old ones. Use
+`vercel --prod --force`.
 
-Already in place and correct:
+**The `Clerk DNS Configuration` deploy check lags reality.** It kept failing
+after all five CNAMEs resolved and `clerk.sopher.ai` returned 200. Bypass with
+`vercel promote <deployment-url>`; reversible via `vercel rollback`.
 
-- `clerk.sopher.ai` CNAME → `frontend-api.clerk.services`
-- `accounts.sopher.ai` CNAME → `accounts.clerk.services`
+### Two false alarms — do not chase these
 
-Still missing (email/DKIM — take the exact targets from the Domains page):
-`clkmail`, `clk._domainkey`, `clk2._domainkey`.
+- `curl https://accounts.sopher.ai` returns **403 with `cf-mitigated:
+  challenge`** ("Just a moment..."). That is a Cloudflare bot challenge, not a
+  provisioning failure. Browsers pass it.
+- `curl https://sopher.ai/studio` returns **404**. Clerk's `auth.protect()`
+  answers non-document requests that way. A real navigation
+  (`Accept: text/html`) gets `307 → /sign-in?redirect_url=…`, which is correct.
 
-Wait for the Domains page to show the domain and SSL certificates as verified.
-DNS propagation can take up to 48h, though Cloudflare is usually minutes.
+### DNS (all five present and verified, DNS-only / grey cloud)
 
-### Step 3 — the keys sync themselves; do not swap them by hand
+| Host | Target |
+|---|---|
+| `clerk.sopher.ai` | `frontend-api.clerk.services` |
+| `accounts.sopher.ai` | `accounts.clerk.services` |
+| `clkmail.sopher.ai` | `mail.y3qj9ha93smv.clerk.services` |
+| `clk._domainkey.sopher.ai` | `dkim1.y3qj9ha93smv.clerk.services` |
+| `clk2._domainkey.sopher.ai` | `dkim2.y3qj9ha93smv.clerk.services` |
 
-`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` are **owned by the
-Clerk marketplace resource**, not by us. Both carry
-`contentHint.type = "integration-store-secret"` bound to resource
-`clerk-camel-basket` (store `ir_hwgYOYUxHAiFtFmf`, integration
-`oac_7uYNbc9CdDAZmNqbt3LEkO3a`) — the same ownership shape Neon's `DATABASE_URL`
-has. They cannot be edited from the Vercel dashboard or CLI, and there is no
-CLI command that remaps them: `vercel integration-resource` offers only
-`connect`, `disconnect`, `remove`, `claim`, `create-threshold`.
+The project is **apex-canonical** (changed 2026-07-28): `sopher.ai` serves,
+`www.sopher.ai` 308-redirects to it. It was previously reversed, which would
+have made Clerk provision under `www.` and stranded these records. If it is ever
+flipped back, these move with it.
 
-Per Clerk's docs the mapping is automatic — *"Clerk's development instance maps
-to Vercel's development and preview environments, and the production instance
-maps to Vercel's production environment."*
+### Remaining: reparent the sample project after first sign-in
 
-Today both variables are a **single row targeting all three environments**
-(`['production','preview','development']`) holding the development key, which is
-why production serves `pk_test_`. That is the symptom of the production instance
-not being fully provisioned. Completing step 1 (attaching `sopher.ai`) is what
-lets Clerk publish `pk_live_`/`sk_live_` into the Production target on its own.
+Clerk does not share users across instances, and the new production instance
+currently has **0 users**. The existing 12-chapter book is owned by `dev-user`
+(the dev fallback identity), not by any Clerk account:
 
-Verify the split appeared, then redeploy:
-
-```bash
-vercel env ls production        # CLERK_* rows should no longer span all 3 targets
-vercel env pull /tmp/ck.txt --environment=production --yes
-grep NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY /tmp/ck.txt | cut -d= -f2 | tr -d '"' \
-  | sed 's/^pk_test_//;s/^pk_live_//' | base64 -d; echo   # expect sopher.ai
-rm -f /tmp/ck.txt
-```
-
-**Fallback, only if Clerk never syncs production keys:** disconnect the resource
-and take ownership of the variables manually. This breaks auth until the new
-values are set, and gives up automatic key rotation — so treat it as a last
-resort, not a shortcut.
-
-```bash
-vercel integration-resource disconnect clerk-camel-basket sopher-ai
-vercel env add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY production
-vercel env add CLERK_SECRET_KEY production
-```
-
-Also reconfigure on the production instance — these do **not** copy from
-development: SSO/social connections, Integrations, and Paths. Any social
-connection redirect URLs must be updated to the new domain.
-
-Recommended: Clerk dashboard → webhook endpoint
-`https://sopher.ai/api/webhooks/clerk`, subscribe to `user.created` +
-`user.updated`, set `CLERK_WEBHOOK_SIGNING_SECRET` in Vercel.
-
-### Step 4 — verify
-
-```bash
-curl -s "https://clerk.sopher.ai/v1/environment?__clerk_api_version=2021-02-05" | head -c 300
-# expect JSON with display_config.instance_environment_type == "production"
-```
-
-Until the domain change lands, `clerk.sopher.ai` returns Cloudflare
-**Error 1000 "DNS points to prohibited IP"**. That is expected and is *not* a
-DNS mistake: Clerk sits behind Cloudflare, so Cloudflare only routes the
-hostname once Clerk registers it as a custom hostname on their side. It clears
-itself once step 1 completes.
-
-### Known consequence: existing data is keyed to the development instance
-
-Clerk does not share user records between environments, so signing in to the
-production instance mints a **new** user id. `users.id` is the Clerk id, and
-`projects.user_id` references it, so today's data would orphan:
-
-| Clerk user id | Email | Owns |
+| Owner | Email | Projects |
 |---|---|---|
-| `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` | cheesejaguar@gmail.com | 1 project, 12 chapters |
-| `dev-user` | dev@sopher.ai | — (local fallback) |
+| `dev-user` | dev@sopher.ai | 1 (12 chapters) |
+| `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` | cheesejaguar@gmail.com | 0 (stale, old instance) |
 
-After the first production sign-in, re-point the row to the new id:
+After signing up on `https://sopher.ai`, move it across:
 
 ```sql
--- new_id = the user_... shown in the production instance's Users page
-insert into users (id, email, name) values ('<new_id>', 'cheesejaguar@gmail.com', null)
-  on conflict (id) do nothing;
-update projects set user_id = '<new_id>' where user_id = 'user_3H6zLw7xAgKc7NqVOROUMGgZWkJ';
+-- new_id = the user_... from the production instance's Users page
+update projects set user_id = '<new_id>' where user_id = 'dev-user';
+delete from users where id = 'user_3H6zLw7xAgKc7NqVOROUMGgZWkJ';  -- optional cleanup
 ```
 
-Or accept the loss — the existing project is the end-to-end test novel.
+Optional hardening: Clerk dashboard → webhook `https://sopher.ai/api/webhooks/clerk`,
+events `user.created` + `user.updated`, then set `CLERK_WEBHOOK_SIGNING_SECRET`
+(the current value belongs to the deleted app and is stale).
 
 ## 2. Decommission the old GKE stack (after soak — no earlier than 2026-08-03)
 
