@@ -29,31 +29,49 @@ an instance that has no real domain attached — it does **not** imply
 So the remaining task is not "create a production instance" — it is **change the
 existing production instance's domain to `sopher.ai`**.
 
-### Step 1 — point the production instance at sopher.ai
+### Step 1 — configure the domain on the Vercel side
 
-Per Clerk's docs you can change the primary domain of a production instance
-(but never a development one — that field is permanently read-only, which is
-why it cannot be edited on the Development tab).
+This Clerk account was provisioned through the **Vercel Marketplace**, so the
+domain is Vercel-managed. Consequences:
 
-- **Dashboard**: switch the environment selector to **Production**, then go to
-  the [Domains page](https://dashboard.clerk.com/~/domains) and change the
-  primary domain to `sopher.ai`.
-- **Or Backend API**, using the production (`sk_live_`) secret key:
+- The Clerk dashboard shows the domain as *"managed by Vercel"* and will not let
+  you edit it. `POST /v1/instance/change_domain` is likewise not the path here.
+- Vercel shows *"Production domain required — your production deployment is
+  currently using development keys. Configure a domain to start using Clerk's
+  production environment."*
+- **No CLI can do this.** `vercel integration` offers only add, accept-terms,
+  balance, categories, discover, guide, installations, list, open, resource,
+  update; `vercel integration resource` only connect, disconnect, remove,
+  claim, create-threshold. None configure a resource's domain.
 
-  ```bash
-  curl -XPOST -H 'Authorization: <sk_live_...>' -H 'Content-type: application/json' \
-    -d '{"home_url":"https://sopher.ai"}' \
-    'https://api.clerk.com/v1/instance/change_domain'
-  ```
+Configure it on the Clerk resource card in the Vercel dashboard (the card in
+Installed Products showing "Production domain required"). `vercel integration
+open clerk clerk-camel-basket` opens the resource dashboard via SSO.
 
-> **Changing the domain regenerates the Publishable Key.** Clerk will fail to
-> load if the app keeps using the old one, so always re-copy `pk_live_` from the
-> dashboard *after* this step — not before.
+> **Match the canonical domain.** Clerk provisions its subdomains under whatever
+> production domain it is given, so `sopher.ai` yields `clerk.sopher.ai` while
+> `www.sopher.ai` would yield `clerk.www.sopher.ai`. The project is configured
+> apex-canonical (below) precisely so the existing DNS records apply.
 
-This causes no downtime on the live site, because the live site is still
-authenticating against the development instance until step 3.
+Changing a Clerk domain regenerates the Publishable Key. Since the integration
+owns that variable it re-syncs on its own — never copy a `pk_live_` by hand.
+
+No downtime results: the live site keeps using the development instance until
+the integration publishes production keys.
 
 ### Step 2 — DNS
+
+The project is **apex-canonical** (set 2026-07-28): `sopher.ai` serves and
+`www.sopher.ai` 308-redirects to it. It was previously the other way round,
+which would have made Clerk provision under `www.` and stranded the records
+already in place. If this is ever flipped back, the Clerk DNS records must move
+with it.
+
+```bash
+# current state
+curl -sI https://www.sopher.ai | head -1     # 308 -> https://sopher.ai/
+curl -so /dev/null -w '%{http_code}\n' https://sopher.ai   # 200
+```
 
 sopher.ai is on Cloudflare nameservers. Every Clerk record must be
 **DNS-only / grey cloud**; proxying them breaks Clerk.
