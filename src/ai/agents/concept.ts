@@ -1,6 +1,7 @@
 import { generateText, isStepCount, Output } from "ai";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { seedEntities } from "@/db/queries/entities";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
@@ -79,10 +80,9 @@ export async function generateConcept(input: ConceptCtx): Promise<BookConcept> {
 }
 
 /**
- * Persists the concept onto the book row and seeds the character bible from
- * the concept's cast. Existing bible entries win (onConflictDoNothing on the
- * uq_character_name (bookId, name) index) so re-running never clobbers facts
- * later chapters added.
+ * Persists the concept onto the book row and seeds the story bible from the
+ * concept's cast. Existing entities win (onConflictDoNothing on
+ * uq_entity_name) so re-running never clobbers canon later chapters added.
  */
 export async function persistConcept(bookId: string, concept: BookConcept): Promise<void> {
   const db = getDb();
@@ -96,21 +96,12 @@ export async function persistConcept(bookId: string, concept: BookConcept): Prom
     })
     .where(eq(schema.books.id, bookId));
 
-  if (concept.characters.length > 0) {
-    await db
-      .insert(schema.characterBible)
-      .values(
-        concept.characters.map((c) => ({
-          bookId,
-          name: c.name,
-          facts: {
-            role: c.role,
-            facts: [c.description, `Arc: ${c.arc}`],
-          },
-        })),
-      )
-      .onConflictDoNothing({
-        target: [schema.characterBible.bookId, schema.characterBible.name],
-      });
-  }
+  await seedEntities(
+    bookId,
+    concept.characters.map((c) => ({
+      kind: "character" as const,
+      name: c.name,
+      attrs: { role: c.role, facts: [c.description, `Arc: ${c.arc}`] },
+    })),
+  );
 }

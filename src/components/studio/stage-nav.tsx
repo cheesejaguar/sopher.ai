@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 const stages = [
   { slug: "brief", label: "Brief" },
   { slug: "outline", label: "Outline" },
+  { slug: "bible", label: "Bible" },
   { slug: "write", label: "Write" },
   { slug: "editor", label: "Editor" },
   { slug: "manuscript", label: "Manuscript" },

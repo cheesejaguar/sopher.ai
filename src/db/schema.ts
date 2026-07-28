@@ -141,28 +141,63 @@ export const chapterRevisions = pgTable(
   (t) => [index("idx_revisions_chapter").on(t.chapterId, t.createdAt)],
 );
 
-export type CharacterFacts = {
-  role?: string;
-  appearance?: Record<string, string>;
-  personality?: string[];
-  relationships?: Record<string, string>;
-  facts?: string[];
-  firstAppearance?: number;
-};
-
-export const characterBible = pgTable(
-  "character_bible",
+/**
+ * The story bible. Supersedes the character-only `character_bible`: characters
+ * drift, but so do objects (a sword that grows a jewel) and places (a house
+ * that grows a room), and `continuity_issues` already reasoned about setting
+ * and plot categories this model could not represent.
+ *
+ * `attrs` is validated per kind by `src/ai/schemas/entities.ts`. Its `facts`
+ * array is append-only, which is what lets a wave of concurrently drafting
+ * chapters merge into one row without lost updates.
+ */
+export const entities = pgTable(
+  "entities",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     bookId: uuid("book_id")
       .notNull()
       .references(() => books.id, { onDelete: "cascade" }),
+    kind: text("kind", {
+      enum: ["character", "location", "object", "organization", "event"],
+    }).notNull(),
     name: text("name").notNull(),
-    facts: jsonb("facts").$type<CharacterFacts>().default({}).notNull(),
-    updatedByChapter: integer("updated_by_chapter"),
+    aliases: jsonb("aliases").$type<string[]>().default([]).notNull(),
+    attrs: jsonb("attrs").$type<Record<string, unknown>>().default({}).notNull(),
+    portraitAssetId: uuid("portrait_asset_id"),
+    firstAppearanceChapter: integer("first_appearance_chapter"),
+    lastUpdatedChapter: integer("last_updated_chapter"),
     ...timestamps,
   },
-  (t) => [uniqueIndex("uq_character_name").on(t.bookId, t.name)],
+  (t) => [
+    uniqueIndex("uq_entity_name").on(t.bookId, t.kind, t.name),
+    index("idx_entities_book").on(t.bookId, t.kind),
+  ],
+);
+
+/** The entity-relationship graph — siblings, owners, members, locations. */
+export const entityRelationships = pgTable(
+  "entity_relationships",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    bookId: uuid("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    fromEntityId: uuid("from_entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    toEntityId: uuid("to_entity_id")
+      .notNull()
+      .references(() => entities.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    description: text("description"),
+    establishedChapter: integer("established_chapter"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_entity_relationship").on(t.fromEntityId, t.toEntityId, t.type),
+    index("idx_relationships_book").on(t.bookId),
+  ],
 );
 
 export const generationRuns = pgTable(
@@ -347,6 +382,7 @@ export const assets = pgTable(
         "cover",
         "illustration",
         "diagram",
+        "portrait",
         "export_epub",
         "export_pdf",
         "export_docx",

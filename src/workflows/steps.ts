@@ -6,6 +6,7 @@ import { generateConcept, persistConcept } from "@/ai/agents/concept";
 import { generateOutline, persistOutline } from "@/ai/agents/outline";
 import { writeChapter, persistChapter } from "@/ai/agents/chapter-writer";
 import { summarizeChapter } from "@/ai/agents/summarizer";
+import { buildEntityBible } from "@/ai/agents/entity-bible";
 import { editChapter } from "@/ai/agents/editor";
 import {
   aggregateContinuityOutcomes,
@@ -18,6 +19,7 @@ import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
 import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
 import { estimateBookCost } from "@/ai/estimate";
 import { getOrCreateBook } from "@/db/queries/projects";
+import { listEntities } from "@/db/queries/entities";
 import { chapterNs, PROGRESS_NS, type GenerationConfig, type RunEvent } from "@/lib/run-events";
 import { isChapterComplete } from "./resume";
 import type { BookConcept, BookOutline, ChapterOutlinePlan } from "@/ai/schemas";
@@ -209,6 +211,35 @@ export async function outlineStep(
     });
     await persistOutline(book.id, outline);
     return outline;
+  } catch (error) {
+    toWorkflowError(error);
+  }
+}
+
+/**
+ * Builds the story bible from the concept + outline before any chapter drafts.
+ * Idempotent: seeding uses onConflictDoNothing, so a retry re-derives without
+ * clobbering canon that chapters have already added.
+ */
+export async function entityBibleStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  concept: BookConcept,
+  outline: BookOutline,
+): Promise<{ entityCount: number; relationshipCount: number }> {
+  "use step";
+  const { project, book, meter } = await loadRunContext(ref);
+  try {
+    const existing = await listEntities(book.id);
+    return await buildEntityBible({
+      meter,
+      bookId: book.id,
+      tier: config.tier,
+      concept,
+      outline,
+      genre: project.genre ?? undefined,
+      existingNames: existing.map((e) => e.name),
+    });
   } catch (error) {
     toWorkflowError(error);
   }

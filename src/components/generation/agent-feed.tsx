@@ -6,6 +6,7 @@ import type { AgentFeedItem, AgentName, RunConnection } from "@/hooks/use-run-st
 const AGENT_LABELS: Record<AgentName, string> = {
   concept: "Concept",
   outliner: "Outliner",
+  "entity-bible": "Story bible",
   writer: "Writer",
   editor: "Editor",
   continuity: "Continuity",
