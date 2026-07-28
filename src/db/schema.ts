@@ -193,6 +193,11 @@ export const generationRuns = pgTable(
   (t) => [
     index("idx_runs_project").on(t.projectId, t.createdAt),
     index("idx_runs_status").on(t.status),
+    // Race-proof backstop for the "one active generation per project" rule.
+    // Export runs are excluded so exports stay independent of generation.
+    uniqueIndex("uq_runs_active_per_project")
+      .on(t.projectId)
+      .where(sql`status in ('queued','running','awaiting_input') and kind <> 'export'`),
   ],
 );
 
@@ -255,6 +260,8 @@ export type SuggestionAnchor = {
   start: number;
   end: number;
   originalText: string;
+  /** Ordinal among identical matches of originalText (0 = first). Absent on legacy/review rows. */
+  occurrence?: number;
 };
 
 export const suggestions = pgTable(

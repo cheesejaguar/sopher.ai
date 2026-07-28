@@ -6,12 +6,26 @@
 
 export type AnchorRange = { start: number; end: number };
 
-/** First-occurrence resolution of an anchor quote inside chapter content. */
-export function resolveAnchor(content: string, anchorText: string): AnchorRange | null {
+/**
+ * Resolve an anchor quote inside chapter content. With `hintStart`, the
+ * occurrence whose start is closest to the hint wins (so duplicate passages
+ * resolve to the intended one); without it, the first occurrence.
+ */
+export function resolveAnchor(
+  content: string,
+  anchorText: string,
+  hintStart?: number,
+): AnchorRange | null {
   if (!anchorText) return null;
-  const start = content.indexOf(anchorText);
-  if (start === -1) return null;
-  return { start, end: start + anchorText.length };
+  const first = content.indexOf(anchorText);
+  if (first === -1) return null;
+  let best = first;
+  if (hintStart !== undefined) {
+    for (let idx = first; idx !== -1; idx = content.indexOf(anchorText, idx + 1)) {
+      if (Math.abs(idx - hintStart) < Math.abs(best - hintStart)) best = idx;
+    }
+  }
+  return { start: best, end: best + anchorText.length };
 }
 
 /** Word count matching the drafting pipeline's convention. */

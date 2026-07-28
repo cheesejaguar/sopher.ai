@@ -77,22 +77,39 @@ const MAX_FUZZY_ANCHOR = 600;
 /**
  * Find `needle` in `haystack`, exact first, then tolerating differing
  * whitespace runs (markdown "\n\n" vs doc-text separators, wrapped lines).
+ * `occurrence` selects the nth match (0-based, enumerated at every start
+ * position); falls back to the first match when absent or out of range.
  */
 export function findTextRange(
   haystack: string,
   needle: string,
+  occurrence = 0,
 ): { start: number; end: number } | null {
   if (!needle) return null;
-  const exact = haystack.indexOf(needle);
-  if (exact !== -1) return { start: exact, end: exact + needle.length };
+  const exact: number[] = [];
+  for (let idx = haystack.indexOf(needle); idx !== -1; idx = haystack.indexOf(needle, idx + 1)) {
+    exact.push(idx);
+    if (exact.length > occurrence) break;
+  }
+  if (exact.length > 0) {
+    const start = exact[occurrence] ?? exact[0];
+    return { start, end: start + needle.length };
+  }
 
   if (needle.length > MAX_FUZZY_ANCHOR) return null;
   const tokens = needle.split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return null;
   const pattern = tokens.map(escapeRegExp).join("\\s+");
-  const match = new RegExp(pattern).exec(haystack);
-  if (!match) return null;
-  return { start: match.index, end: match.index + match[0].length };
+  const re = new RegExp(pattern, "g");
+  const fuzzy: RegExpExecArray[] = [];
+  for (let match = re.exec(haystack); match; match = re.exec(haystack)) {
+    fuzzy.push(match);
+    if (fuzzy.length > occurrence) break;
+    re.lastIndex = match.index + 1;
+  }
+  const chosen = fuzzy[occurrence] ?? fuzzy[0];
+  if (!chosen) return null;
+  return { start: chosen.index, end: chosen.index + chosen[0].length };
 }
 
 /**
@@ -103,9 +120,10 @@ export function findTextRange(
 export function findAnchorRangeInDoc(
   doc: PMNode,
   originalText: string,
+  occurrence = 0,
 ): { from: number; to: number } | null {
   const index = indexDocText(doc);
-  const range = findTextRange(index.text, originalText);
+  const range = findTextRange(index.text, originalText, occurrence);
   if (!range) return null;
   return index.toPmRange(range.start, range.end);
 }

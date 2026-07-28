@@ -17,6 +17,8 @@ export type EditChapterInput = {
   content: string;
   styleGuide?: string;
   chapterOutline?: unknown;
+  /** Continuity issues the edit must address; kept out of the chapter body. */
+  revisionNotes?: string;
 };
 
 export type EditChapterResult = {
@@ -85,6 +87,9 @@ function editPrompt(input: EditChapterInput, metricsNote: string): string {
       styleGuide: input.styleGuide,
       chapterOutline: outlineToText(input.chapterOutline),
     }),
+    input.revisionNotes
+      ? `## Continuity issues to address (fix via replacements)\n${input.revisionNotes}`
+      : "",
     `## Measured heuristics (free analysis)\n${metricsNote}`,
     [
       `## Output format (this overrides the response format in your instructions)`,
@@ -93,7 +98,9 @@ function editPrompt(input: EditChapterInput, metricsNote: string): string {
       `Respect the author's voice: light touch — refinement, not rewriting. Leave everything you do not flag untouched.`,
       `Put overall observations in "notes" as short strings.`,
     ].join("\n"),
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 // Same contract as chapter-writer's applyReplacements: exact-match spans only,

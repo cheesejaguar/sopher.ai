@@ -14,6 +14,14 @@ const bodySchema = z.object({
   requireOutlineApproval: z.boolean().default(false),
 });
 
+/** Postgres unique violation on uq_runs_active_per_project, possibly wrapped by the driver. */
+function isActiveRunConflict(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const { code, message, cause } = error as { code?: string; message?: string; cause?: unknown };
+  if (code === "23505" || message?.includes("uq_runs_active_per_project")) return true;
+  return cause !== undefined && isActiveRunConflict(cause);
+}
+
 export async function POST(req: Request, ctx: { params: Promise<{ projectId: string }> }) {
   let userId: string;
   try {
@@ -25,6 +33,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     throw error;
   }
   const { projectId } = await ctx.params;
+  if (!z.uuid().safeParse(projectId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -63,16 +74,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     waveSize: 4,
   };
 
-  const [run] = await db
-    .insert(schema.generationRuns)
-    .values({
-      projectId,
-      userId,
-      kind: "full_book",
-      status: "queued",
-      config,
-    })
-    .returning({ id: schema.generationRuns.id });
+  let run: { id: string };
+  try {
+    [run] = await db
+      .insert(schema.generationRuns)
+      .values({
+        projectId,
+        userId,
+        kind: "full_book",
+        status: "queued",
+        config,
+      })
+      .returning({ id: schema.generationRuns.id });
+  } catch (error) {
+    // The partial unique index is the race-proof backstop behind the pre-check above.
+    if (!isActiveRunConflict(error)) throw error;
+    const [raced] = await db
+      .select({ id: schema.generationRuns.id })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.projectId, projectId),
+          inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+        ),
+      )
+      .limit(1);
+    return Response.json(
+      { error: "A generation run is already in progress", runId: raced?.id },
+      { status: 409 },
+    );
+  }
 
   const workflowRun = await start(generateBook, [run.id, projectId, userId, config]);
   await db
@@ -94,6 +125,9 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ projectId: 
     throw error;
   }
   const { projectId } = await ctx.params;
+  if (!z.uuid().safeParse(projectId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const db = getDb();
   const [run] = await db
     .select()

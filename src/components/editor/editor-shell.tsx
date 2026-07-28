@@ -403,6 +403,9 @@ export function EditorShell({
       const ed = editorRef.current;
       if (!ed || ed.isDestroyed) return;
       setBusy("apply");
+      // Freeze typing for the round-trip: a keystroke landing between the
+      // flush-serialize and applyServerChapter's setContent would be discarded.
+      ed.setEditable(false);
       try {
         if (!(await autosaveRef.current.flush())) {
           toast.error("Couldn't save the chapter first — resolve the conflict.");
@@ -439,6 +442,7 @@ export function EditorShell({
           toast.error("Couldn't apply the suggestion — try again.");
         }
       } finally {
+        if (!ed.isDestroyed) ed.setEditable(true);
         setBusy(null);
       }
     },
@@ -448,7 +452,10 @@ export function EditorShell({
   const acceptAll = useCallback(async () => {
     const ids = suggestions.map((s) => s.id);
     if (ids.length === 0) return;
+    const ed = editorRef.current;
     setBusy("apply");
+    // Freeze typing for the round-trips (see acceptSuggestion).
+    ed?.setEditable(false);
     try {
       if (!(await autosaveRef.current.flush())) {
         toast.error("Couldn't save the chapter first — resolve the conflict.");
@@ -478,6 +485,7 @@ export function EditorShell({
         toast.success(`Applied ${applied} suggestion${applied === 1 ? "" : "s"}.`);
       }
     } finally {
+      if (ed && !ed.isDestroyed) ed.setEditable(true);
       setBusy(null);
     }
   }, [applyServerChapter, chapterId, suggestions]);

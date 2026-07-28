@@ -47,6 +47,11 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   await checkBudget(ctx.userId);
   const startedAt = Date.now();
   const result = await fn();
+  // Image models bill per generated image, not per token — count returned image files.
+  const imageCount =
+    (result as { files?: Array<{ mediaType?: string }> }).files?.filter((f) =>
+      f.mediaType?.startsWith("image/"),
+    ).length ?? 0;
   await recordLlmCall({
     userId: ctx.userId,
     projectId: ctx.projectId,
@@ -60,6 +65,7 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
       cachedInputTokens: result.usage.inputTokenDetails?.cacheReadTokens ?? 0,
       cacheWriteTokens: result.usage.inputTokenDetails?.cacheWriteTokens ?? 0,
       reasoningTokens: result.usage.outputTokenDetails?.reasoningTokens ?? 0,
+      imageCount,
     },
     latencyMs: Date.now() - startedAt,
   });

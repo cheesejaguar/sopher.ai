@@ -22,6 +22,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     throw error;
   }
   const { runId } = await ctx.params;
+  if (!z.uuid().safeParse(runId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });

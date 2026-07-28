@@ -24,6 +24,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     throw error;
   }
   const { projectId } = await ctx.params;
+  if (!z.uuid().safeParse(projectId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
@@ -90,6 +93,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ projectId: stri
     throw error;
   }
   const { projectId } = await ctx.params;
+  if (!z.uuid().safeParse(projectId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const url = new URL(req.url);
   const parsed = querySchema.safeParse({ runId: url.searchParams.get("runId") });
   if (!parsed.success) {

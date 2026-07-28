@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "uq_runs_active_per_project" ON "generation_runs" USING btree ("project_id") WHERE status in ('queued','running','awaiting_input') and kind <> 'export';

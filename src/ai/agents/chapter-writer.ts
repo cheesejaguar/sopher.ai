@@ -217,10 +217,12 @@ export async function writeChapter(ctx: ChapterWriterCtx): Promise<ChapterResult
   );
 
   const revised = applyReplacements(draft, revision.output.replacements);
+  // Only credit the revision bump when at least one replacement actually landed.
+  const qualityScore = revised === draft ? verdict.score : Math.min(1, verdict.score + 0.1);
   return {
     content: revised,
     wordCount: countWords(revised),
-    qualityScore: Math.min(1, verdict.score + 0.1),
+    qualityScore,
     critique: verdict,
   };
 }

@@ -76,15 +76,24 @@ export async function POST(
   const { anchor } = suggestion;
   let start: number;
   let end: number;
-  if (
-    chapter.version === suggestion.chapterVersion &&
-    chapter.content.slice(anchor.start, anchor.end) === anchor.originalText
-  ) {
+  if (chapter.content.slice(anchor.start, anchor.end) === anchor.originalText) {
+    // The quoted passage still sits at its recorded offsets — use them even
+    // when the version moved (typing elsewhere doesn't shift this passage).
     start = anchor.start;
     end = anchor.end;
   } else {
-    const found = resolveAnchor(chapter.content, anchor.originalText);
+    // Re-anchor near the recorded position so duplicate passages resolve to
+    // the intended occurrence, not the first.
+    const found = resolveAnchor(chapter.content, anchor.originalText, anchor.start);
     if (!found) {
+      // The quote is gone for good — retire the suggestion so it doesn't
+      // reappear as pending on reload.
+      await db
+        .update(schema.suggestions)
+        .set({ status: "rejected" })
+        .where(
+          and(eq(schema.suggestions.id, suggestionId), eq(schema.suggestions.status, "pending")),
+        );
       return Response.json(
         {
           error: "The chapter has changed and this suggestion no longer matches",

@@ -1,5 +1,5 @@
 import { generateText, Output } from "ai";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
@@ -49,34 +49,25 @@ export async function summarizeChapter(input: {
       ),
     );
 
+  // Atomic upsert: concurrent chapter steps in a wave append facts without
+  // lost updates or racing the uq_character_name unique index.
   for (const entry of summary.newFacts) {
-    const [existing] = await db
-      .select()
-      .from(schema.characterBible)
-      .where(
-        and(
-          eq(schema.characterBible.bookId, input.bookId),
-          eq(schema.characterBible.name, entry.character),
-        ),
-      )
-      .limit(1);
-    if (existing) {
-      await db
-        .update(schema.characterBible)
-        .set({
-          facts: { ...existing.facts, facts: [...(existing.facts.facts ?? []), ...entry.facts] },
-          updatedByChapter: input.chapterNumber,
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.characterBible.id, existing.id));
-    } else {
-      await db.insert(schema.characterBible).values({
+    await db
+      .insert(schema.characterBible)
+      .values({
         bookId: input.bookId,
         name: entry.character,
         facts: { facts: entry.facts, firstAppearance: input.chapterNumber },
         updatedByChapter: input.chapterNumber,
+      })
+      .onConflictDoUpdate({
+        target: [schema.characterBible.bookId, schema.characterBible.name],
+        set: {
+          facts: sql`jsonb_set(${schema.characterBible.facts}, '{facts}', coalesce(${schema.characterBible.facts}->'facts', '[]'::jsonb) || (excluded.facts->'facts'))`,
+          updatedByChapter: input.chapterNumber,
+          updatedAt: new Date(),
+        },
       });
-    }
   }
 
   return summary;

@@ -51,7 +51,7 @@ export const bookOutlineSchema = z.object({
   synopsis: z.string(),
   themes: z.array(z.string()).max(6),
   plotStructure: z.string(),
-  chapters: z.array(chapterOutlineSchema).min(3),
+  chapters: z.array(chapterOutlineSchema).min(3).max(60),
 });
 export type BookOutline = z.infer<typeof bookOutlineSchema>;
 

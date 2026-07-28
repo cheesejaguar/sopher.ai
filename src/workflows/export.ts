@@ -59,6 +59,15 @@ async function emitExportProgress(ref: RunRef, event: RunEvent) {
 }
 
 /**
+ * Minted in its own step so retries of the upload step reuse the same token
+ * (and thus the same blob pathname) instead of re-rolling it.
+ */
+async function mintExportToken(): Promise<string> {
+  "use step";
+  return crypto.randomUUID();
+}
+
+/**
  * Assemble + render + upload in a single step: the rendered buffer must never
  * cross a step boundary as an argument, so the whole byte-producing path lives
  * here and only small identifiers leave.
@@ -66,6 +75,7 @@ async function emitExportProgress(ref: RunRef, event: RunEvent) {
 async function assembleAndUploadStep(
   ref: RunRef,
   format: ExportFormat,
+  token: string,
 ): Promise<{ assetId: string; filename: string }> {
   "use step";
   const manuscript = await loadManuscript(ref.userId, ref.projectId);
@@ -78,7 +88,7 @@ async function assembleAndUploadStep(
   const meta = FORMAT_META[format];
 
   const blob = await put(
-    `exports/${ref.projectId}/${ref.dbRunId}.${meta.extension}`,
+    `exports/${ref.projectId}/${token}.${meta.extension}`,
     Buffer.from(result.buffer),
     {
       access: "public",
@@ -122,7 +132,8 @@ export async function exportBook(
       detail: `Assembling the ${FORMAT_META[format].label} edition`,
     });
 
-    const { assetId, filename } = await assembleAndUploadStep(ref, format);
+    const token = await mintExportToken();
+    const { assetId, filename } = await assembleAndUploadStep(ref, format, token);
 
     await markExportStatus(ref, "completed");
     await emitExportProgress(ref, { type: "stage", stage: "done", pct: 100, detail: filename });

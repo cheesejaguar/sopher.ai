@@ -126,6 +126,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
+  // Ordinal of this passage among identical matches (0 = first), so the
+  // client can highlight/apply the right duplicate. Counts match starts
+  // before the selection in the full content, mirroring findTextRange's
+  // every-start enumeration.
+  let occurrence = 0;
+  for (
+    let idx = chapter.content.indexOf(selection.text);
+    idx !== -1 && idx < selection.start;
+    idx = chapter.content.indexOf(selection.text, idx + 1)
+  ) {
+    occurrence += 1;
+  }
+
   const [row] = await db
     .insert(schema.suggestions)
     .values({
@@ -134,7 +147,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       passType: "selection",
       suggestionType: "selection",
       severity: "info",
-      anchor: { start: selection.start, end: selection.end, originalText: selection.text },
+      anchor: {
+        start: selection.start,
+        end: selection.end,
+        originalText: selection.text,
+        occurrence,
+      },
       suggestedText: output.replacement,
       explanation: output.rationale,
       status: "pending",

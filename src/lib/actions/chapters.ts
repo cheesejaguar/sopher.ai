@@ -1,6 +1,7 @@
 "use server";
 
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
@@ -33,6 +34,7 @@ export async function saveChapter(
   opts?: { force?: boolean },
 ): Promise<SaveChapterResult> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(chapterId).success) return { ok: false, error: "not_found" };
   if (
     typeof content !== "string" ||
     content.length > MAX_CONTENT_CHARS ||

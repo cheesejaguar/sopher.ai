@@ -1,24 +1,25 @@
+import { cache } from "react";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 
-/** Project + its book row (book may be null before first generation). */
-export async function getProjectWithBook(userId: string, projectId: string) {
+/**
+ * Project + its book row (book may be null before first generation).
+ * Single LEFT JOIN (uq_books_project guarantees at most one book) and
+ * per-request deduped so layout/metadata/page share one execution.
+ */
+export const getProjectWithBook = cache(async (userId: string, projectId: string) => {
   const db = getDb();
-  const [project] = await db
-    .select()
+  const [row] = await db
+    .select({ project: schema.projects, book: schema.books })
     .from(schema.projects)
+    .leftJoin(schema.books, eq(schema.books.projectId, schema.projects.id))
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
     .limit(1);
-  if (!project) return null;
-  const [book] = await db
-    .select()
-    .from(schema.books)
-    .where(eq(schema.books.projectId, projectId))
-    .limit(1);
-  return { project, book: book ?? null };
-}
+  if (!row) return null;
+  return { project: row.project, book: row.book ?? null };
+});
 
-export async function getChapterList(bookId: string) {
+export const getChapterList = cache(async (bookId: string) => {
   const db = getDb();
   return db
     .select({
@@ -35,9 +36,9 @@ export async function getChapterList(bookId: string) {
     .from(schema.chapters)
     .where(eq(schema.chapters.bookId, bookId))
     .orderBy(schema.chapters.chapterNumber);
-}
+});
 
-export async function getChapterWithContent(bookId: string, chapterNumber: number) {
+export const getChapterWithContent = cache(async (bookId: string, chapterNumber: number) => {
   const db = getDb();
   const [chapter] = await db
     .select()
@@ -47,7 +48,7 @@ export async function getChapterWithContent(bookId: string, chapterNumber: numbe
     )
     .limit(1);
   return chapter ?? null;
-}
+});
 
 export async function getChapterById(chapterId: string) {
   const db = getDb();

@@ -6,6 +6,8 @@ export type ModelPricing = {
   outputPerMTok: number;
   cachedInputPerMTok: number;
   cacheWritePerMTok: number;
+  /** Flat USD per generated image (image models bill per image, not per token). */
+  perImageUsd?: number;
 };
 
 export const MODEL_PRICING: Record<string, ModelPricing> = {
@@ -38,6 +40,7 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     outputPerMTok: 3,
     cachedInputPerMTok: 0.05,
     cacheWritePerMTok: 0.5,
+    perImageUsd: 0.067,
   },
 };
 
@@ -46,6 +49,7 @@ const FALLBACK_PRICING: ModelPricing = {
   outputPerMTok: 25,
   cachedInputPerMTok: 0.5,
   cacheWritePerMTok: 6.25,
+  perImageUsd: 0.15,
 };
 
 export type UsageTokens = {
@@ -53,6 +57,7 @@ export type UsageTokens = {
   outputTokens: number;
   cachedInputTokens?: number;
   cacheWriteTokens?: number;
+  imageCount?: number;
 };
 
 export function calculateUsd(model: string, usage: UsageTokens): number {
@@ -65,6 +70,7 @@ export function calculateUsd(model: string, usage: UsageTokens): number {
       cachedRead * pricing.cachedInputPerMTok +
       cacheWrite * pricing.cacheWritePerMTok +
       usage.outputTokens * pricing.outputPerMTok) /
-    1_000_000;
+      1_000_000 +
+    (usage.imageCount ?? 0) * (pricing.perImageUsd ?? 0);
   return Math.round(usd * 1_000_000) / 1_000_000;
 }

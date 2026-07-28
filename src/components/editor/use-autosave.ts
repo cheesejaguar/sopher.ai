@@ -42,8 +42,13 @@ export function useAutosave(options: {
   });
 
   const save = useCallback(
-    (force = false): Promise<boolean> => {
-      if (inflightRef.current) return inflightRef.current;
+    function save(force = false): Promise<boolean> {
+      // A stale in-flight save may not contain the latest keystrokes; once it
+      // settles (its .finally has nulled inflightRef), chain a fresh save if
+      // the editor is still dirty so callers see the *latest* content's fate.
+      if (inflightRef.current) {
+        return inflightRef.current.then((ok) => (ok && dirtyRef.current ? save(force) : ok));
+      }
       if (!dirtyRef.current && !force) return Promise.resolve(true);
       // After a conflict, only an explicit resolution ("keep mine") may write.
       if (conflictRef.current && !force) return Promise.resolve(false);
@@ -146,8 +151,14 @@ export function useAutosave(options: {
   useEffect(
     () => () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      // Unmount (e.g. client-side navigation) with a pending debounce: fire
+      // and forget a final save so those keystrokes aren't silently lost.
+      if (dirtyRef.current && !conflictRef.current && !inflightRef.current) {
+        const content = optionsRef.current.getContent();
+        if (content != null) void saveChapter(chapterId, content, versionRef.current);
+      }
     },
-    [],
+    [chapterId],
   );
 
   return {
