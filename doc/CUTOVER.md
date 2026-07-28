@@ -84,28 +84,34 @@ The project is **apex-canonical** (changed 2026-07-28): `sopher.ai` serves,
 have made Clerk provision under `www.` and stranded these records. If it is ever
 flipped back, these move with it.
 
-### Remaining: reparent the sample project after first sign-in
+### Reparenting — DONE 2026-07-28
 
-Clerk does not share users across instances, and the new production instance
-currently has **0 users**. The existing 12-chapter book is owned by `dev-user`
-(the dev fallback identity), not by any Clerk account:
+Signed up on the production instance via Google OAuth as
+`user_3H9G4eFVRvEnP0Vt784TGrXyzET` (cheesejaguar@gmail.com); `requireUser()`
+lazily upserted the `users` row on first request, as designed.
 
-| Owner | Email | Projects |
-|---|---|---|
-| `dev-user` | dev@sopher.ai | 1 (12 chapters) |
-| `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` | cheesejaguar@gmail.com | 0 (stale, old instance) |
+All work previously owned by the `dev-user` fallback identity was moved to it,
+so cost history stays attached to the book (the usage UI aggregates `llm_calls`
+by user):
 
-After signing up on `https://sopher.ai`, move it across:
+| Table | Rows moved |
+|---|---|
+| `projects` | 1 — *Untitled Fantasy*, 12 chapters, 36,587 words |
+| `generation_runs` | 4 |
+| `llm_calls` | 109 — $6.39 metered |
+| `content_tool_runs` | 1 |
 
-```sql
--- new_id = the user_... from the production instance's Users page
-update projects set user_id = '<new_id>' where user_id = 'dev-user';
-delete from users where id = 'user_3H6zLw7xAgKc7NqVOROUMGgZWkJ';  -- optional cleanup
-```
+`budgets` had no rows for either identity. Nothing remains under `dev-user`.
 
-Optional hardening: Clerk dashboard → webhook `https://sopher.ai/api/webhooks/clerk`,
-events `user.created` + `user.updated`, then set `CLERK_WEBHOOK_SIGNING_SECRET`
-(the current value belongs to the deleted app and is stale).
+Two harmless leftovers:
+
+- `users` still holds `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` from the deleted Clerk
+  app — 0 projects, orphaned. Safe to delete; left in place to avoid an
+  unnecessary cascade.
+- `CLERK_WEBHOOK_SIGNING_SECRET` belongs to the deleted app and is stale. It is
+  inert (the webhook simply never verifies), but to enable user reconciliation:
+  Clerk dashboard → webhook `https://sopher.ai/api/webhooks/clerk`, events
+  `user.created` + `user.updated`, then update the variable.
 
 ## 2. Decommission the old GKE stack (after soak — no earlier than 2026-08-03)
 
