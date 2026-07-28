@@ -28,16 +28,18 @@ export function estimateBookCost(
 ): BookEstimate {
   const m = MODELS[tier];
   const chapterOutputTokens = wordsPerChapter * TOKENS_PER_WORD;
-  // Context discipline: cached system prefix + outline slice + rolling summaries + tool results.
-  const chapterInputTokens = 6_500;
-  const cachedShare = 0.65;
+  // Calibrated 2026-07-27 against llm_calls from a real 12x3,000-word run:
+  // draft inputs ~9.5k with ~50% served from cache (system prefix + outline
+  // slice + summaries + tool results).
+  const chapterInputTokens = 9_500;
+  const cachedShare = 0.5;
 
   const stages: StageEstimate[] = [];
 
-  const conceptOutline = calculateUsd(m.concept, { inputTokens: 3_000, outputTokens: 1_500 });
+  const conceptOutline = calculateUsd(m.concept, { inputTokens: 12_000, outputTokens: 6_000 });
   const outlineUsd = calculateUsd(m.outline, {
-    inputTokens: 5_000,
-    outputTokens: 350 * chapters,
+    inputTokens: 8_000,
+    outputTokens: 700 * chapters,
   });
   stages.push({ stage: "Concept + outline", usd: conceptOutline + outlineUsd });
 
@@ -73,21 +75,24 @@ export function estimateBookCost(
   }
 
   const summaryUsd = calculateUsd(m.summarizer, {
-    inputTokens: chapterOutputTokens,
-    outputTokens: 400,
+    inputTokens: chapterOutputTokens + 1_500,
+    outputTokens: 1_200,
   });
   stages.push({ stage: "Summaries + character bible", usd: summaryUsd * chapters });
 
   const continuityCalls = tier === "draft" ? 1 : 6;
+  // Each phase re-reads the summary corpus and spot-checks prose via tools.
+  const continuityInput = 20_000 + 350 * chapters;
   const continuityUsd = calculateUsd(m.continuity, {
-    inputTokens: 350 * chapters + 2_500,
-    outputTokens: 1_200,
+    inputTokens: continuityInput,
+    outputTokens: 2_000,
+    cachedInputTokens: continuityInput * cachedShare,
   });
   stages.push({ stage: "Continuity review", usd: continuityUsd * continuityCalls });
 
   const totalUsd = stages.reduce((acc, s) => acc + s.usd, 0);
   const parallelWaves = Math.ceil(chapters / 4);
-  const estimatedMinutes = Math.round(4 + parallelWaves * (tier === "premium" ? 5 : 3));
+  const estimatedMinutes = Math.round(10 + parallelWaves * (tier === "premium" ? 10 : 8));
 
   return {
     tier,
