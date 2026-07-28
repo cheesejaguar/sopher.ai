@@ -105,6 +105,15 @@ export function ExportDialog({ projectId }: { projectId: string }) {
   }
 
   const busy = phase.name === "working";
+  const formatName = (id: ExportFormat) => FORMATS.find((f) => f.id === id)?.name ?? id;
+  // One short sentence, polled state summarised. The failure branch carries its
+  // own role="alert" so it is not repeated here.
+  const status =
+    phase.name === "working"
+      ? `Binding the ${formatName(phase.format)} edition. This takes a few seconds.`
+      : phase.name === "done"
+        ? `${formatName(phase.format)} export ready to download: ${phase.asset.filename}.`
+        : "";
 
   return (
     <Dialog>
@@ -130,21 +139,27 @@ export function ExportDialog({ projectId }: { projectId: string }) {
               <button
                 key={format.id}
                 type="button"
-                disabled={busy}
-                onClick={() => beginExport(format.id)}
+                // aria-disabled rather than disabled: a `disabled` button drops
+                // keyboard focus to the body the moment the export starts.
+                aria-disabled={busy || undefined}
+                onClick={() => {
+                  if (busy) return;
+                  void beginExport(format.id);
+                }}
                 className={cn(
                   "flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors",
                   "hover:border-primary/50 hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring",
-                  "disabled:pointer-events-none disabled:opacity-50",
+                  "aria-disabled:pointer-events-none aria-disabled:opacity-50",
                   isActive && "border-primary bg-accent",
                 )}
               >
                 <span className="flex items-center gap-2 text-sm font-medium">
                   {isActive && phase.name === "working" ? (
-                    <Spinner className="size-4" />
+                    <Spinner aria-hidden="true" className="size-4" />
                   ) : (
                     <Icon className="size-4 text-muted-foreground" />
                   )}
+                  <span className="sr-only">Export as </span>
                   {format.name}
                 </span>
                 <span className="text-xs text-muted-foreground">{format.blurb}</span>
@@ -153,10 +168,17 @@ export function ExportDialog({ projectId }: { projectId: string }) {
           })}
         </div>
 
-        <div aria-live="polite">
+        {/* The announcement lives in its own text-only region: putting the
+            result card (with its Download button) inside a live region makes
+            screen readers read interactive content on every poll tick. */}
+        <p role="status" className="sr-only">
+          {status}
+        </p>
+
+        <div>
           {phase.name === "working" ? (
             <p className="text-xs text-muted-foreground">
-              Binding the {FORMATS.find((f) => f.id === phase.format)?.name} edition…
+              Binding the {formatName(phase.format)} edition…
             </p>
           ) : null}
 
@@ -166,16 +188,23 @@ export function ExportDialog({ projectId }: { projectId: string }) {
               <Button size="sm" render={<a href={`/api/exports/${phase.asset.id}`} />}>
                 <Download data-icon="inline-start" />
                 Download
+                <span className="sr-only">
+                  {" "}
+                  the {formatName(phase.format)} export, {phase.asset.filename}
+                </span>
               </Button>
             </div>
           ) : null}
 
           {phase.name === "failed" ? (
             <div className="space-y-2 rounded-lg bg-destructive/10 p-3">
-              <p className="text-xs text-destructive">{phase.message}</p>
+              <p role="alert" className="text-xs text-destructive">
+                {phase.message}
+              </p>
               <Button variant="outline" size="xs" onClick={() => beginExport(phase.format)}>
                 <RefreshCw data-icon="inline-start" />
                 Try again
+                <span className="sr-only"> — export as {formatName(phase.format)}</span>
               </Button>
             </div>
           ) : null}

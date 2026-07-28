@@ -32,9 +32,14 @@ test.describe("studio usage", () => {
     await expect(page.getByRole("progressbar", { name: "Monthly budget used" })).toBeVisible();
     await expect(page.getByText(/% used ·/)).toBeVisible();
 
-    // Spend breakdowns.
-    await expect(page.getByText("Spend by book")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Spend by role")).toBeVisible({ timeout: 20_000 });
+    // Spend breakdowns. Queried by role: each card title is a heading, and the
+    // tables carry sr-only captions that would also match a bare text query.
+    await expect(page.getByRole("heading", { name: "Spend by book" })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByRole("heading", { name: "Spend by role" })).toBeVisible({
+      timeout: 20_000,
+    });
 
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, "studio-usage");

@@ -51,7 +51,12 @@ export function FolioRail({
   const vertical = orientation === "vertical";
   const activeIndex = chapters.findIndex((c) => c.number === activeChapter);
   const [focusIndex, setFocusIndex] = React.useState<number | null>(null);
-  const tabbableIndex = focusIndex ?? (activeIndex >= 0 ? activeIndex : 0);
+  // Clamped: if the chapter list shrinks below a remembered focus index, no
+  // option would carry tabIndex 0 and the rail would drop out of the tab order.
+  const tabbableIndex = Math.min(
+    focusIndex ?? (activeIndex >= 0 ? activeIndex : 0),
+    chapters.length - 1,
+  );
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     const forward = vertical ? "ArrowDown" : "ArrowRight";
@@ -98,7 +103,9 @@ export function FolioRail({
                 onKeyDown={handleKeyDown}
                 onFocus={() => setFocusIndex(index)}
                 className={cn(
-                  "relative overflow-hidden rounded-[3px] border outline-none transition-colors motion-safe:duration-200",
+                  // Keyboard focus must stay visible: the `ring` below marks the
+                  // selected chapter, not the focused one, so the outline is kept.
+                  "relative overflow-hidden rounded-[3px] border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-safe:duration-200",
                   vertical ? "h-6 w-10" : "h-10 w-6",
                   statusClasses[chapter.status],
                   isActive && "ring-2 ring-ring ring-offset-2 ring-offset-background",

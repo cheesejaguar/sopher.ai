@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 export default function MarketingLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-dvh flex-col">
+      {/* The skip link lives once, in the root layout; this layout supplies its
+          target below so it resolves without JavaScript. */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur">
         <nav
           aria-label="Main"
@@ -41,7 +43,9 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
         </nav>
       </header>
 
-      <main className="flex-1">{children}</main>
+      <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
+        {children}
+      </main>
 
       <footer className="border-t border-border/60">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-10 px-6 py-12 sm:flex-row sm:items-start sm:justify-between">

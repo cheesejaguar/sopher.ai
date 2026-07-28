@@ -9,6 +9,13 @@ import type { QualityTier } from "@/ai/models";
 
 type StepState = "done" | "active" | "pending";
 
+/** Step state is drawn with colour + a glyph; screen readers get this word. */
+const STEP_STATE_TEXT: Record<StepState, string> = {
+  done: "complete",
+  active: "in progress",
+  pending: "not started",
+};
+
 type Step = {
   key: string;
   label: string;
@@ -86,6 +93,7 @@ function StageMark({ label, state, note }: { label: string; state: StepState; no
           )}
         >
           {label}
+          <span className="sr-only"> — {STEP_STATE_TEXT[state]}</span>
         </span>
         {note ? (
           <span className="text-[10px] whitespace-nowrap text-muted-foreground">{note}</span>
@@ -115,10 +123,21 @@ export function StageTimeline({
     draftingCount > 0 && plannedTotal > 0
       ? `${draftingCount} of ${plannedTotal} drafting`
       : undefined;
+  const activeStep = steps.find((step) => stepState(step, stage) === "active");
+  // The bar is the only place the number lives visually, so spell it out for
+  // screen readers together with the step it belongs to.
+  const progressValueText = activeStep
+    ? `${Math.round(pct)}% complete — ${activeStep.label}`
+    : `${Math.round(pct)}% complete`;
 
   return (
     <section aria-label="Generation progress" className="space-y-3">
-      <ol className="flex items-center gap-3 overflow-x-auto rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10">
+      {/* Scrolls sideways on narrow viewports, so it needs to be reachable by
+          keyboard — it holds no focusable children of its own. */}
+      <ol
+        tabIndex={0}
+        className="flex items-center gap-3 overflow-x-auto rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10"
+      >
         {steps.map((step, index) => {
           const state = stepState(step, stage);
           return (
@@ -146,6 +165,7 @@ export function StageTimeline({
         <Progress
           value={Math.round(pct)}
           aria-label="Overall progress"
+          aria-valuetext={progressValueText}
           className="min-w-0 flex-1"
         />
         <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">

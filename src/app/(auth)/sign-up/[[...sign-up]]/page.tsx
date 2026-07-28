@@ -8,7 +8,11 @@ export const metadata = { title: "Create account" };
 
 export default function SignUpPage() {
   return (
-    <main className="flex min-h-dvh items-center justify-center p-6">
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className="flex min-h-dvh items-center justify-center p-6 outline-none"
+    >
       {clerkEnabled ? (
         <Suspense fallback={<Skeleton className="h-96 w-96 max-w-full rounded-xl" />}>
           <SignUp />

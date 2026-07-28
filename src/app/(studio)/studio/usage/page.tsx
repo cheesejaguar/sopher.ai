@@ -29,7 +29,9 @@ async function BudgetCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{monthName} budget</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          {monthName} budget
+        </CardTitle>
         <CardDescription>
           Resets on the 1st.{" "}
           {budget.hardLimit ? "Generation pauses at the cap." : "Soft cap — generation continues."}
@@ -58,7 +60,9 @@ async function ProjectSpendCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Spend by book</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          Spend by book
+        </CardTitle>
         <CardDescription>Month to date, across generation and editing runs.</CardDescription>
       </CardHeader>
       <CardContent>
@@ -74,7 +78,9 @@ async function RoleSpendCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Spend by role</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          Spend by role
+        </CardTitle>
         <CardDescription>
           Which agents and models the money went to. Cached input tokens are billed at a tenth of
           the input rate.

@@ -32,11 +32,16 @@ export function SpendTable({ rows }: { rows: ProjectSpendRow[] }) {
 
   return (
     <Table>
+      <caption className="sr-only">Spend by book, month to date</caption>
       <TableHeader>
         <TableRow>
-          <TableHead>Book</TableHead>
-          <TableHead className="text-right">Model calls</TableHead>
-          <TableHead className="text-right">Spend</TableHead>
+          <TableHead scope="col">Book</TableHead>
+          <TableHead scope="col" className="text-right">
+            Model calls
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Spend
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

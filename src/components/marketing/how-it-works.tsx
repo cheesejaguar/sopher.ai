@@ -2,12 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { cn } from "@/lib/utils";
-
 type Step = {
   num: string;
   name: string;
-  spineLabel: string;
+  note?: string;
   description: string;
 };
 
@@ -15,34 +13,30 @@ const STEPS: Step[] = [
   {
     num: "01",
     name: "Concept",
-    spineLabel: "Concept",
     description:
       "Reads your brief and develops the premise, world, and cast into a concept worth writing.",
   },
   {
     num: "02",
     name: "Outline",
-    spineLabel: "Outline",
     description:
       "Structures the story into a chapter-by-chapter plan with arcs, beats, and payoffs.",
   },
   {
     num: "03",
     name: "Chapters",
-    spineLabel: "Chapters ∥",
+    note: "four at a time",
     description:
       "A team of writers drafts every chapter in parallel, each following the outline and your style guide.",
   },
   {
     num: "04",
     name: "Editor",
-    spineLabel: "Editor",
     description: "Critiques and rewrites each chapter for pacing, voice, and prose quality.",
   },
   {
     num: "05",
     name: "Continuity",
-    spineLabel: "Continuity",
     description:
       "Checks names, timelines, and details across the whole manuscript before it ships.",
   },
@@ -98,10 +92,12 @@ export function HowItWorks() {
 
         <ol className="mt-14 grid gap-8 md:grid-cols-5 md:gap-4 lg:gap-6">
           {STEPS.map((step, index) => (
-            <li key={step.name} className="flex gap-4 md:flex-col md:gap-4">
+            <li key={step.name} className="flex gap-4 md:flex-col md:gap-5">
+              {/* Decorative spine: fills with ink as the pipeline is described.
+                  The two bands are the raised ridges of a hardcover spine. */}
               <div
                 aria-hidden="true"
-                className="relative w-2 shrink-0 self-stretch overflow-hidden rounded-full border border-border bg-card md:h-52 md:w-full md:self-auto md:rounded-lg"
+                className="relative w-2 shrink-0 self-stretch overflow-hidden rounded-full border border-border bg-card md:h-20 md:w-full md:self-auto md:rounded-lg"
               >
                 <div
                   className="absolute inset-0 origin-bottom bg-primary motion-safe:transition-transform motion-safe:duration-500 motion-safe:ease-out"
@@ -110,24 +106,20 @@ export function HowItWorks() {
                     transitionDelay: reducedMotion ? "0ms" : `${index * STAGGER_MS}ms`,
                   }}
                 />
-                <span
-                  className={cn(
-                    "absolute bottom-4 left-1/2 hidden -translate-x-1/2 rotate-180 font-display text-lg font-medium tracking-wide transition-colors duration-300 md:block [writing-mode:vertical-rl]",
-                    inked ? "text-primary-foreground" : "text-muted-foreground",
-                  )}
-                  style={{
-                    transitionDelay: reducedMotion ? "0ms" : `${index * STAGGER_MS + 200}ms`,
-                  }}
-                >
-                  {step.spineLabel}
-                </span>
+                <span className="absolute inset-x-0 top-[22%] hidden h-px bg-primary-foreground/30 md:block" />
+                <span className="absolute inset-x-0 bottom-[22%] hidden h-px bg-primary-foreground/30 md:block" />
               </div>
               <div className="min-w-0">
-                <h3 className="font-sans text-sm font-semibold">
-                  <span className="mr-1.5 font-mono text-xs font-normal text-muted-foreground">
+                <h3 className="flex flex-wrap items-baseline gap-x-2 font-sans text-base font-semibold">
+                  <span className="font-mono text-xs font-normal text-muted-foreground">
                     {step.num}
                   </span>
                   {step.name}
+                  {step.note ? (
+                    <span className="rounded-full bg-ai-soft px-2 py-0.5 font-sans text-[0.68rem] font-medium text-ai">
+                      {step.note}
+                    </span>
+                  ) : null}
                 </h3>
                 <p className="mt-1.5 text-sm text-pretty text-muted-foreground">
                   {step.description}

@@ -62,6 +62,7 @@ export function OutlineApprovalBar({ runId, projectId }: { runId: string; projec
             onClick={() => setNotesOpen((open) => !open)}
             disabled={pending !== null}
             aria-expanded={notesOpen}
+            aria-controls="outline-notes-panel"
           >
             <MessageSquareText aria-hidden="true" data-icon="inline-start" />
             Request changes
@@ -78,7 +79,7 @@ export function OutlineApprovalBar({ runId, projectId }: { runId: string; projec
       </div>
 
       {notesOpen ? (
-        <div className="mt-3 space-y-2">
+        <div id="outline-notes-panel" className="mt-3 space-y-2">
           <Label htmlFor="outline-notes">What should the Outliner change?</Label>
           <Textarea
             id="outline-notes"
@@ -101,7 +102,11 @@ export function OutlineApprovalBar({ runId, projectId }: { runId: string; projec
         </div>
       ) : null}
 
-      {error ? <p className="mt-2 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

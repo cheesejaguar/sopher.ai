@@ -46,11 +46,14 @@ function useHydrated() {
 function SettingRow({
   label,
   description,
+  descriptionId,
   htmlFor,
   children,
 }: {
   label: string;
   description: string;
+  /** Lets the row's control reference the description via aria-describedby. */
+  descriptionId?: string;
   htmlFor?: string;
   children: React.ReactNode;
 }) {
@@ -58,7 +61,9 @@ function SettingRow({
     <div className="flex flex-wrap items-center justify-between gap-4">
       <div className="min-w-48 space-y-1">
         <Label htmlFor={htmlFor}>{label}</Label>
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <p id={descriptionId} className="text-xs text-muted-foreground">
+          {description}
+        </p>
       </div>
       {children}
     </div>
@@ -72,7 +77,9 @@ export function AppearanceCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Appearance</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          Appearance
+        </CardTitle>
         <CardDescription>
           The studio chrome. Manuscript pages always read like paper.
         </CardDescription>
@@ -81,6 +88,7 @@ export function AppearanceCard() {
         <SettingRow
           label="Theme"
           description="Midnight study by default. Follows your system if you let it."
+          descriptionId="theme-hint"
         >
           {mounted ? (
             <Select
@@ -90,7 +98,7 @@ export function AppearanceCard() {
                 if (typeof value === "string") setTheme(value);
               }}
             >
-              <SelectTrigger className="w-36" aria-label="Theme">
+              <SelectTrigger className="w-36" aria-label="Theme" aria-describedby="theme-hint">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -141,7 +149,9 @@ export function DefaultsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Generation defaults</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          Generation defaults
+        </CardTitle>
         <CardDescription>
           The tier new briefs start on. Stored in this browser for now — account-level defaults
           arrive with sign-in.
@@ -151,6 +161,7 @@ export function DefaultsCard() {
         <SettingRow
           label="Quality tier"
           description="Draft for speed, Standard for most books, Premium for final prose."
+          descriptionId="default-tier-hint"
         >
           {mounted ? (
             <Select
@@ -162,7 +173,11 @@ export function DefaultsCard() {
                 }
               }}
             >
-              <SelectTrigger className="w-64" aria-label="Default quality tier">
+              <SelectTrigger
+                className="w-64"
+                aria-label="Default quality tier"
+                aria-describedby="default-tier-hint"
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -217,7 +232,9 @@ export function BudgetCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Monthly budget</CardTitle>
+        <CardTitle role="heading" aria-level={2}>
+          Monthly budget
+        </CardTitle>
         <CardDescription>
           Generation pauses before a run would cross it. Never a surprise invoice.
         </CardDescription>
@@ -237,6 +254,8 @@ export function BudgetCard({
             aria-valuemin={0}
             aria-valuemax={monthlyLimitUsd}
             aria-valuenow={Math.min(spentUsd, monthlyLimitUsd)}
+            // Without this the meter announces a bare number, not an amount.
+            aria-valuetext={`$${spentUsd.toFixed(2)} of $${monthlyLimitUsd.toFixed(2)}`}
             className="h-1.5 overflow-hidden rounded-full bg-muted"
           >
             <div
@@ -250,6 +269,7 @@ export function BudgetCard({
           htmlFor="monthly-budget"
           label="Monthly limit"
           description="Between $5 and $500. Applies from the next generation call."
+          descriptionId="monthly-budget-hint"
         >
           <div className="flex items-center gap-2">
             <span aria-hidden="true" className="font-mono text-sm text-muted-foreground">
@@ -261,8 +281,13 @@ export function BudgetCard({
               min={5}
               max={500}
               step={1}
+              required
               inputMode="numeric"
               value={limit}
+              aria-invalid={message?.kind === "error" || undefined}
+              aria-describedby={
+                message ? "monthly-budget-hint monthly-budget-message" : "monthly-budget-hint"
+              }
               onChange={(event) => setLimit(event.target.value)}
               className="w-24 font-mono tabular-nums"
             />
@@ -275,7 +300,8 @@ export function BudgetCard({
 
         {message ? (
           <p
-            role="status"
+            id="monthly-budget-message"
+            role={message.kind === "error" ? "alert" : "status"}
             className={
               message.kind === "error" ? "text-xs text-destructive" : "text-xs text-success"
             }

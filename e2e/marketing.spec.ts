@@ -11,7 +11,10 @@ test.describe("landing page", () => {
 
     // Hero headline.
     await expect(
-      page.getByRole("heading", { level: 1, name: "Your brief. A finished book." }),
+      page.getByRole("heading", {
+        level: 1,
+        name: "Any book you can imagine. Made for the people you love.",
+      }),
     ).toBeVisible();
 
     // Main navigation landmarks.
@@ -32,6 +35,53 @@ test.describe("landing page", () => {
 
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, "landing");
+  });
+
+  test("the brief demo is switchable by keyboard", async ({ page }) => {
+    await page.goto("/");
+
+    const examples = page.getByRole("group", {
+      name: "Example books, each written from a one-sentence brief",
+    });
+    const mystery = examples.getByRole("button", { name: "Mystery" });
+    await expect(mystery).toHaveAttribute("aria-pressed", "false");
+
+    await mystery.click();
+    await expect(mystery).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      page.getByText("A locked-room mystery set in my hometown", { exact: false }),
+    ).toBeVisible();
+  });
+
+  test.describe("with motion allowed", () => {
+    // The suite runs reduced-motion by default, where the demo never advances on
+    // its own — so the pause affordance only needs to exist when motion is on.
+    test.use({ contextOptions: { reducedMotion: "no-preference" } });
+
+    test("auto-advancing examples can be paused (WCAG 2.2.2)", async ({ page }) => {
+      await page.goto("/");
+
+      const pause = page.getByRole("button", { name: "Pause cycling through examples" });
+      await expect(pause).toBeVisible();
+      await pause.click();
+      await expect(
+        page.getByRole("button", { name: "Resume cycling through examples" }),
+      ).toBeVisible();
+
+      // Choosing an example hands control to the reader, so auto-advance stops for good.
+      await page.getByRole("button", { name: "Family memoir" }).click();
+      await expect(page.getByRole("button", { name: /cycling through examples/ })).toHaveCount(0);
+    });
+  });
+
+  test("a skip link is the first tab stop and targets the main region", async ({ page }) => {
+    await page.goto("/");
+    await page.keyboard.press("Tab");
+
+    const skip = page.getByRole("link", { name: "Skip to main content" });
+    await expect(skip).toBeFocused();
+    await skip.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
   });
 });
 

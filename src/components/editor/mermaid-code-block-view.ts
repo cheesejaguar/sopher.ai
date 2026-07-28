@@ -49,10 +49,13 @@ export class MermaidCodeBlockView implements NodeView {
       figure.className = "my-6";
       figure.setAttribute("data-mermaid-figure", "true");
 
+      // The rendered SVG is an unlabelled blob of shapes and stray text runs.
+      // Hide it from assistive tech and let the Mermaid source below act as
+      // the text alternative — it is right there in the figure, and editable.
       this.preview = document.createElement("div");
       this.preview.className = PREVIEW_CLASS;
       this.preview.contentEditable = "false";
-      this.preview.setAttribute("aria-label", "Rendered diagram");
+      this.preview.setAttribute("aria-hidden", "true");
 
       this.errorEl = document.createElement("div");
       this.errorEl.className = `${ERROR_CLASS} hidden`;
@@ -62,7 +65,12 @@ export class MermaidCodeBlockView implements NodeView {
       pre.className = SOURCE_CLASS;
       code.className = "language-mermaid";
 
-      figure.append(this.preview, this.errorEl, pre);
+      const caption = document.createElement("figcaption");
+      caption.className = "sr-only";
+      caption.contentEditable = "false";
+      caption.textContent = "Diagram, described by the Mermaid source below.";
+
+      figure.append(this.preview, this.errorEl, pre, caption);
       this.dom = figure;
       this.scheduleRender(0);
     } else {
@@ -132,7 +140,10 @@ export class MermaidCodeBlockView implements NodeView {
       this.renderedSource = null;
       const message =
         error instanceof Error ? error.message.split("\n")[0] : "Invalid Mermaid syntax";
-      this.errorEl.textContent = `Diagram won't render: ${message} — fix the source below.`;
+      const text = `Diagram won't render: ${message} — fix the source below.`;
+      // Rewriting identical text re-fires the alert; only touch it on a change
+      // so typing through a broken diagram doesn't interrupt over and over.
+      if (this.errorEl.textContent !== text) this.errorEl.textContent = text;
       this.errorEl.classList.remove("hidden");
       if (!this.preview.innerHTML) this.preview.classList.add("hidden");
     }

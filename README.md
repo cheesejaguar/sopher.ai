@@ -3,7 +3,7 @@
 [![CI](https://github.com/cheesejaguar/sopher.ai/actions/workflows/ci.yml/badge.svg)](https://github.com/cheesejaguar/sopher.ai/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Your brief. A finished book.** sopher.ai turns an author's brief into a
+**Any book you can imagine, made for the people you love.** sopher.ai turns a sentence or two into a
 complete, edited manuscript — drafted, critiqued, and continuity-checked by a
 team of AI agents while you watch it happen, then refined in a suggestion-based
 web editor.

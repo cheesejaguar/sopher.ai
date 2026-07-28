@@ -116,6 +116,15 @@ export function StepEstimate({
   const remaining = budget ? budget.monthlyLimitUsd - budget.monthToDateUsd : null;
   const overBudget = selected !== undefined && remaining !== null && selected.totalUsd > remaining;
 
+  // Announced once the quote has settled — never while it is still being fetched,
+  // and never per keystroke (the quote itself is debounced).
+  const announcement =
+    selected && !loading
+      ? `${TIER_LABELS[state.tier].name} estimate: ${formatUsd(selected.totalUsd)}, about ${
+          selected.estimatedMinutes
+        } minutes.`
+      : "";
+
   return (
     <div className="space-y-5">
       <RadioGroup
@@ -131,6 +140,14 @@ export function StepEstimate({
         {TIERS.map((tier) => {
           const estimate = estimates[tier];
           const active = state.tier === tier;
+          // The price and duration are part of the choice, so they belong in the
+          // option's name rather than only in adjacent text.
+          const optionLabel =
+            estimate && !loading
+              ? `${TIER_LABELS[tier].name} — ${formatUsd(estimate.totalUsd)}, about ${
+                  estimate.estimatedMinutes
+                } minutes`
+              : `${TIER_LABELS[tier].name} — estimate still loading`;
           return (
             <label
               key={tier}
@@ -143,7 +160,7 @@ export function StepEstimate({
                 <span className="font-display text-sm font-semibold tracking-tight">
                   {TIER_LABELS[tier].name}
                 </span>
-                <RadioGroupItem value={tier} aria-label={TIER_LABELS[tier].name} />
+                <RadioGroupItem value={tier} aria-label={optionLabel} />
               </span>
               <span className="text-xs text-muted-foreground">{TIER_LABELS[tier].blurb}</span>
               <span className="text-xs text-ai">{modelMix(tier)}</span>
@@ -170,7 +187,7 @@ export function StepEstimate({
         <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
           Estimate — {TIER_LABELS[state.tier].name}
         </p>
-        <div className="mt-4 font-mono text-sm text-paper-foreground">
+        <div className="mt-4 font-mono text-sm text-paper-foreground" aria-busy={loading}>
           {selected && !loading ? (
             <>
               <ul className="space-y-1.5">
@@ -220,18 +237,23 @@ export function StepEstimate({
       <div className="flex items-center justify-between gap-4 rounded-xl border bg-card p-4">
         <div className="space-y-0.5">
           <Label htmlFor="wizard-approval">Pause for my outline approval</Label>
-          <p className="text-xs text-muted-foreground">
+          <p id="wizard-approval-hint" className="text-xs text-muted-foreground">
             The run stops after the outline and waits for you before any chapters are drafted.
           </p>
         </div>
         <Switch
           id="wizard-approval"
+          aria-describedby="wizard-approval-hint"
           checked={state.requireOutlineApproval}
           onCheckedChange={(checked) =>
             dispatch({ type: "patch", patch: { requireOutlineApproval: checked === true } })
           }
         />
       </div>
+
+      <p aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
     </div>
   );
 }

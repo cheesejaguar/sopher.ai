@@ -34,14 +34,20 @@ function ProjectCardSkeleton() {
 
 export function ProjectGridSkeleton() {
   return (
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      <ProjectCardSkeleton />
-      <ProjectCardSkeleton />
-      <ProjectCardSkeleton />
-      <div className="flex min-h-44 items-center justify-center rounded-xl border border-dashed border-border">
-        <Skeleton className="size-9 rounded-full" />
+    <>
+      {/* Skeletons are silent to assistive tech — announce the wait instead. */}
+      <p role="status" className="sr-only">
+        Loading your books…
+      </p>
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-hidden="true">
+        <ProjectCardSkeleton />
+        <ProjectCardSkeleton />
+        <ProjectCardSkeleton />
+        <div className="flex min-h-44 items-center justify-center rounded-xl border border-dashed border-border">
+          <Skeleton className="size-9 rounded-full" />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

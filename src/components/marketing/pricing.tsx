@@ -74,11 +74,25 @@ export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
           </p>
         </div>
 
-        <div className="mt-12 grid items-stretch gap-6 md:grid-cols-3">
+        <div
+          role="list"
+          aria-label="Quality tiers"
+          className="mt-12 grid items-stretch gap-6 md:grid-cols-3"
+        >
           {TIERS.map((tier) => (
-            <Card key={tier.name} className={cn(tier.recommended && "ring-2 ring-primary")}>
+            <Card
+              key={tier.name}
+              role="listitem"
+              className={cn(tier.recommended && "ring-2 ring-primary")}
+            >
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+                {/* The ring around the Standard tier is decoration; the badge is
+                    what actually says "Recommended" to everyone. */}
+                <CardTitle
+                  role="heading"
+                  aria-level={headingLevel + 1}
+                  className="flex items-center gap-2"
+                >
                   {tier.name}
                   {tier.recommended ? (
                     <span className={cn(badgeVariants())}>Recommended</span>

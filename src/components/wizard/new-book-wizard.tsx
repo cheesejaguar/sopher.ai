@@ -53,14 +53,21 @@ function FolioProgress({ state, onGoto }: { state: WizardState; onGoto: (step: n
     <ol aria-label="Wizard steps" className="flex items-center gap-4">
       {WIZARD_STEPS.map((step, index) => {
         const status = index === state.step ? "current" : index <= reachable ? "open" : "locked";
+        const locked = status === "locked";
         return (
           <li key={step.id}>
             <button
               type="button"
-              onClick={() => onGoto(index)}
-              disabled={status === "locked"}
+              onClick={() => {
+                if (!locked) onGoto(index);
+              }}
+              // aria-disabled rather than `disabled`: a locked step stays reachable
+              // by keyboard so its name can explain why it cannot be opened yet.
+              aria-disabled={locked || undefined}
               aria-current={status === "current" ? "step" : undefined}
-              className="group flex items-center gap-1.5 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+              // `after` widens the pointer target to >=24px without changing layout,
+              // matching how the UI primitives here handle small controls.
+              className="group relative flex items-center gap-1.5 rounded-md outline-none after:absolute after:-inset-x-1 after:-inset-y-1.5 focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-default"
             >
               <span
                 aria-hidden="true"
@@ -77,10 +84,14 @@ function FolioProgress({ state, onGoto }: { state: WizardState; onGoto: (step: n
                 className={cn(
                   "text-xs font-medium",
                   status === "current" ? "text-foreground" : "text-muted-foreground",
-                  status === "locked" && "opacity-60",
+                  locked && "opacity-60",
                 )}
               >
                 {step.label}
+              </span>
+              <span className="sr-only">
+                {` Step ${index + 1} of ${WIZARD_STEPS.length}`}
+                {locked ? ", not available until the earlier steps are complete" : ""}
               </span>
             </button>
           </li>
@@ -123,6 +134,23 @@ export function NewBookWizard() {
   const [error, setError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
   const hydrated = React.useRef(false);
+  // Set only by the step controls, so the heading is never focused on mount
+  // or when a saved draft is restored.
+  const stepChanged = React.useRef(false);
+  const headingRef = React.useRef<HTMLHeadingElement>(null);
+
+  function goToStep(action: WizardActionEvent) {
+    stepChanged.current = true;
+    dispatch(action);
+  }
+
+  // A wizard step is a view change: move focus to the new step's heading so
+  // screen reader and keyboard users land in the content that just replaced.
+  React.useEffect(() => {
+    if (!stepChanged.current) return;
+    stepChanged.current = false;
+    headingRef.current?.focus();
+  }, [state.step]);
 
   // Resume a saved draft (or apply the device's default tier) once, on mount.
   React.useEffect(() => {
@@ -188,11 +216,16 @@ export function NewBookWizard() {
   const heading = STEP_HEADINGS[stepId];
   const lastStep = state.step === WIZARD_STEPS.length - 1;
   const canAdvance = stepComplete(state, state.step);
+  // Why "Next" is unavailable — the button alone does not make this obvious.
+  const blockedReason =
+    stepId === "genre"
+      ? "Choose a genre to continue."
+      : "Describe the story in a few sentences to continue.";
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <FolioProgress state={state} onGoto={(step) => dispatch({ type: "goto", step })} />
+        <FolioProgress state={state} onGoto={(step) => goToStep({ type: "goto", step })} />
         {ui.resumed ? (
           <p className="text-xs text-muted-foreground">
             Resumed your saved draft.{" "}
@@ -208,7 +241,14 @@ export function NewBookWizard() {
       </div>
 
       <header className="space-y-1">
-        <h2 className="font-display text-xl font-semibold tracking-tight">{heading.title}</h2>
+        <h2
+          ref={headingRef}
+          tabIndex={-1}
+          className="font-display text-xl font-semibold tracking-tight outline-none"
+        >
+          {heading.title}
+          <span className="sr-only">{` — step ${state.step + 1} of ${WIZARD_STEPS.length}`}</span>
+        </h2>
         <p className="text-sm text-muted-foreground">{heading.hint}</p>
       </header>
 
@@ -226,14 +266,20 @@ export function NewBookWizard() {
       <footer className="flex items-center justify-between gap-3 border-t pt-4">
         <Button
           variant="ghost"
-          onClick={() => dispatch({ type: "back" })}
+          onClick={() => goToStep({ type: "back" })}
           disabled={state.step === 0 || pending}
         >
           <ArrowLeft aria-hidden="true" data-icon="inline-start" />
           Back
         </Button>
         {lastStep ? (
-          <Button onClick={handleSubmit} disabled={pending}>
+          <Button
+            onClick={handleSubmit}
+            disabled={pending}
+            // Stays focused while the book starts, so the label change is heard.
+            focusableWhenDisabled
+            className="aria-disabled:opacity-50"
+          >
             {pending ? (
               <Spinner data-icon="inline-start" />
             ) : (
@@ -242,10 +288,21 @@ export function NewBookWizard() {
             {pending ? "Starting the book…" : "Start the book"}
           </Button>
         ) : (
-          <Button onClick={() => dispatch({ type: "next" })} disabled={!canAdvance}>
-            Next
-            <ArrowRight aria-hidden="true" data-icon="inline-end" />
-          </Button>
+          <>
+            <p id="wizard-next-hint" className="sr-only">
+              {canAdvance ? "" : blockedReason}
+            </p>
+            <Button
+              onClick={() => goToStep({ type: "next" })}
+              disabled={!canAdvance}
+              focusableWhenDisabled
+              aria-describedby={canAdvance ? undefined : "wizard-next-hint"}
+              className="aria-disabled:opacity-50"
+            >
+              Next
+              <ArrowRight aria-hidden="true" data-icon="inline-end" />
+            </Button>
+          </>
         )}
       </footer>
     </div>
