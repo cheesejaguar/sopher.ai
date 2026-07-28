@@ -230,11 +230,17 @@ function selfCheckPrompt(
     .join("\n\n");
 }
 
-function normalizeOutline(outline: BookOutline, structureId: string): BookOutline {
+function normalizeOutline(
+  outline: BookOutline,
+  structureId: string,
+  chapterCount: number,
+): BookOutline {
+  // Clamp to the configured chapter count so an over-long outline cannot
+  // draft (and bill) more chapters than the author budgeted for.
   return {
     ...outline,
     plotStructure: getPlotTemplate(structureId) ? structureId : outline.plotStructure,
-    chapters: outline.chapters.map((c, i) => ({ ...c, number: i + 1 })),
+    chapters: outline.chapters.slice(0, chapterCount).map((c, i) => ({ ...c, number: i + 1 })),
   };
 }
 
@@ -276,9 +282,9 @@ export async function generateOutline(input: OutlineInput): Promise<BookOutline>
 
   if (input.tier !== "draft") {
     const issues = codeCheckIssues(outline, input.chapterCount, plan.acts, template);
-    // Cheap code checks first; the LLM pass only runs for premium and only
-    // when the checks found something it needs to fix.
-    if (issues.length > 0 && input.tier === "premium") {
+    // Cheap code checks first; the LLM pass only runs when the checks found
+    // something it needs to fix.
+    if (issues.length > 0) {
       const checked = await metered(
         input.meter,
         { role: "outliner", operation: "outliner.selfCheck", model },
@@ -295,7 +301,7 @@ export async function generateOutline(input: OutlineInput): Promise<BookOutline>
     }
   }
 
-  return normalizeOutline(outline, structureId);
+  return normalizeOutline(outline, structureId, input.chapterCount);
 }
 
 /**

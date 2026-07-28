@@ -1,8 +1,5 @@
 .next
 node_modules
 pnpm-lock.yaml
+_port
 drizzle
-.agents
-.claude
-doc
-src/app/.well-known

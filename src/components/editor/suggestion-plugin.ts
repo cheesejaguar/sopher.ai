@@ -91,7 +91,11 @@ function createSuggestionPlugin(onActivate?: (id: string | null) => void): Plugi
         if (meta?.type === "set") {
           items = meta.suggestions.map((suggestion) => ({
             suggestion,
-            range: findAnchorRangeInDoc(newState.doc, suggestion.anchor.originalText),
+            range: findAnchorRangeInDoc(
+              newState.doc,
+              suggestion.anchor.originalText,
+              suggestion.anchor.occurrence ?? 0,
+            ),
           }));
           if (activeId && !items.some((i) => i.suggestion.id === activeId)) activeId = null;
           if (hoverId && !items.some((i) => i.suggestion.id === hoverId)) hoverId = null;

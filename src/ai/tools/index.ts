@@ -52,34 +52,24 @@ function characterBibleUpdate(ctx: ToolCtx) {
     }),
     execute: async ({ name, facts }) => {
       const db = getDb();
-      const [existing] = await db
-        .select()
-        .from(schema.characterBible)
-        .where(
-          and(eq(schema.characterBible.bookId, ctx.bookId), eq(schema.characterBible.name, name)),
-        )
-        .limit(1);
-      if (existing) {
-        const merged = {
-          ...existing.facts,
-          facts: [...(existing.facts.facts ?? []), ...facts],
-        };
-        await db
-          .update(schema.characterBible)
-          .set({
-            facts: merged,
-            updatedByChapter: ctx.chapterNumber,
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.characterBible.id, existing.id));
-      } else {
-        await db.insert(schema.characterBible).values({
+      // Atomic upsert: concurrent chapter steps in a wave append facts without
+      // lost updates or racing the uq_character_name unique index.
+      await db
+        .insert(schema.characterBible)
+        .values({
           bookId: ctx.bookId,
           name,
           facts: { facts, firstAppearance: ctx.chapterNumber },
           updatedByChapter: ctx.chapterNumber,
+        })
+        .onConflictDoUpdate({
+          target: [schema.characterBible.bookId, schema.characterBible.name],
+          set: {
+            facts: sql`jsonb_set(${schema.characterBible.facts}, '{facts}', coalesce(${schema.characterBible.facts}->'facts', '[]'::jsonb) || (excluded.facts->'facts'))`,
+            updatedByChapter: ctx.chapterNumber,
+            updatedAt: new Date(),
+          },
         });
-      }
       return { recorded: true, name, factCount: facts.length };
     },
   });

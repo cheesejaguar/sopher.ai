@@ -1,0 +1,318 @@
+<title>sopher.ai — Code Review</title>
+<style>
+  :root {
+    --bg: #f5f6f9;
+    --panel: #ffffff;
+    --ink: #1b2230;
+    --ink-soft: #55607a;
+    --ink-faint: #8892a8;
+    --line: #e2e5ee;
+    --line-soft: #eef0f6;
+    --indigo: #4a5fd0;
+    --indigo-soft: #eef0fc;
+    --high: #c14a2b;
+    --high-soft: #fbe9e2;
+    --medium: #a9791f;
+    --medium-soft: #f8efd8;
+    --low: #5b6b86;
+    --low-soft: #eceff4;
+    --fixed: #227a5a;
+    --fixed-soft: #dcf0e7;
+    --defer: #74809a;
+    --defer-soft: #eceef4;
+    --teal: #1f8a86;
+    --shadow: 0 1px 2px rgba(20, 28, 48, 0.05), 0 6px 22px rgba(20, 28, 48, 0.05);
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f141d;
+      --panel: #171e2a;
+      --ink: #e7ebf3;
+      --ink-soft: #a3adc2;
+      --ink-faint: #6f7b93;
+      --line: #262f3f;
+      --line-soft: #1e2634;
+      --indigo: #8296f4;
+      --indigo-soft: #232c47;
+      --high: #e2795a;
+      --high-soft: #3a2620;
+      --medium: #d6ac5a;
+      --medium-soft: #352c1c;
+      --low: #94a2be;
+      --low-soft: #232b3a;
+      --fixed: #5cc196;
+      --fixed-soft: #1a3229;
+      --defer: #8a97b1;
+      --defer-soft: #232a38;
+      --teal: #55c2ba;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 30px rgba(0, 0, 0, 0.28);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f141d; --panel: #171e2a; --ink: #e7ebf3; --ink-soft: #a3adc2; --ink-faint: #6f7b93;
+    --line: #262f3f; --line-soft: #1e2634; --indigo: #8296f4; --indigo-soft: #232c47;
+    --high: #e2795a; --high-soft: #3a2620; --medium: #d6ac5a; --medium-soft: #352c1c;
+    --low: #94a2be; --low-soft: #232b3a; --fixed: #5cc196; --fixed-soft: #1a3229;
+    --defer: #8a97b1; --defer-soft: #232a38; --teal: #55c2ba;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 30px rgba(0,0,0,.28);
+  }
+  :root[data-theme="light"] {
+    --bg: #f5f6f9; --panel: #fff; --ink: #1b2230; --ink-soft: #55607a; --ink-faint: #8892a8;
+    --line: #e2e5ee; --line-soft: #eef0f6; --indigo: #4a5fd0; --indigo-soft: #eef0fc;
+    --high: #c14a2b; --high-soft: #fbe9e2; --medium: #a9791f; --medium-soft: #f8efd8;
+    --low: #5b6b86; --low-soft: #eceff4; --fixed: #227a5a; --fixed-soft: #dcf0e7;
+    --defer: #74809a; --defer-soft: #eceef4; --teal: #1f8a86;
+    --shadow: 0 1px 2px rgba(20,28,48,.05), 0 6px 22px rgba(20,28,48,.05);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 2rem) 5rem; }
+
+  header.masthead { border-bottom: 1px solid var(--line); padding-bottom: 1.75rem; margin-bottom: 2rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--indigo);
+    margin: 0 0 0.75rem;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: clamp(1.9rem, 4.5vw, 2.9rem);
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin: 0 0 0.6rem;
+  }
+  .lede { color: var(--ink-soft); max-width: 60ch; margin: 0; font-size: 1.02rem; }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem;
+    margin-top: 1.25rem; font-size: 0.82rem; color: var(--ink-faint);
+    font-family: var(--mono);
+  }
+  .meta b { color: var(--ink-soft); font-weight: 500; }
+
+  .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+  @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1rem 1.1rem; box-shadow: var(--shadow);
+  }
+  .tile .n { font-family: var(--mono); font-size: 2rem; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1; }
+  .tile .l { font-size: 0.78rem; color: var(--ink-faint); margin-top: 0.4rem; }
+  .tile.accent .n { color: var(--indigo); }
+  .tile.fixed .n { color: var(--fixed); }
+
+  .methodology {
+    background: var(--indigo-soft); border: 1px solid color-mix(in srgb, var(--indigo) 22%, transparent);
+    border-radius: 12px; padding: 0.9rem 1.1rem; margin: 1.5rem 0 2rem;
+    font-size: 0.9rem; color: var(--ink-soft); display: flex; gap: 0.7rem; align-items: baseline;
+  }
+  .methodology .tag {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--teal); white-space: nowrap; padding-top: 0.05rem;
+  }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 2.25rem 0 1rem; }
+  .controls .grp { display: flex; gap: 0.3rem; }
+  .controls .spacer { flex: 1; }
+  button.filter {
+    font-family: var(--sans); font-size: 0.8rem; color: var(--ink-soft);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+    padding: 0.32rem 0.8rem; cursor: pointer; transition: all 0.15s ease;
+  }
+  button.filter:hover { border-color: var(--ink-faint); }
+  button.filter[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  button.filter:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+
+  h2.sec {
+    font-family: var(--serif); font-weight: 600; font-size: 1.35rem; letter-spacing: -0.01em;
+    margin: 2.5rem 0 0.4rem; display: flex; align-items: baseline; gap: 0.6rem;
+  }
+  h2.sec .count { font-family: var(--mono); font-size: 0.85rem; color: var(--ink-faint); font-weight: 400; }
+  .sec-note { color: var(--ink-faint); font-size: 0.85rem; margin: 0 0 1rem; }
+
+  .list { display: flex; flex-direction: column; gap: 0.5rem; }
+  .finding {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    box-shadow: var(--shadow); overflow: hidden; transition: border-color 0.15s ease;
+  }
+  .finding[hidden] { display: none; }
+  .finding summary {
+    list-style: none; cursor: pointer; display: grid;
+    grid-template-columns: 4px auto 1fr auto; align-items: center; gap: 0.85rem;
+    padding: 0.8rem 1rem 0.8rem 0; position: relative;
+  }
+  .finding summary::-webkit-details-marker { display: none; }
+  .finding summary:focus-visible { outline: 2px solid var(--indigo); outline-offset: -2px; border-radius: 12px; }
+  .stripe { align-self: stretch; border-radius: 4px 0 0 4px; }
+  .sev-high .stripe { background: var(--high); }
+  .sev-medium .stripe { background: var(--medium); }
+  .sev-low .stripe { background: var(--low); }
+
+  .badges { display: flex; flex-direction: column; gap: 0.3rem; align-items: flex-start; }
+  .chip {
+    font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 0.14rem 0.44rem; border-radius: 5px; white-space: nowrap; font-weight: 500;
+  }
+  .chip.sev-high { background: var(--high-soft); color: var(--high); }
+  .chip.sev-medium { background: var(--medium-soft); color: var(--medium); }
+  .chip.sev-low { background: var(--low-soft); color: var(--low); }
+  .chip.dim { background: var(--line-soft); color: var(--ink-faint); }
+
+  .fmain { min-width: 0; }
+  .ftitle { font-size: 0.94rem; font-weight: 500; color: var(--ink); line-height: 1.35; }
+  .floc { font-family: var(--mono); font-size: 0.74rem; color: var(--ink-faint); margin-top: 0.2rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .status {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.05em; text-transform: uppercase;
+    padding: 0.28rem 0.6rem; border-radius: 999px; white-space: nowrap; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 0.35rem; margin-right: 1rem;
+  }
+  .status.fixed { background: var(--fixed-soft); color: var(--fixed); }
+  .status.deferred { background: var(--defer-soft); color: var(--defer); }
+  .status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .detail { padding: 0.2rem 1rem 1.1rem calc(1rem + 4px + 0.85rem); border-top: 1px solid var(--line-soft); margin-top: -0.2rem; }
+  .detail .row { margin-top: 0.85rem; }
+  .detail .k { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 0.3rem; }
+  .detail .v { font-size: 0.9rem; color: var(--ink-soft); line-height: 1.6; }
+  .detail code { font-family: var(--mono); font-size: 0.82em; background: var(--line-soft); padding: 0.08em 0.35em; border-radius: 4px; word-break: break-word; }
+
+  footer { margin-top: 3.5rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 0.8rem; }
+  footer b { color: var(--ink-soft); font-weight: 500; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Code review · sopher.ai</p>
+    <h1>Full review: bugs, security, and performance</h1>
+    <p class="lede">An adversarially-verified sweep of the production codebase across security, correctness, and performance. Every finding below was traced by an independent verifier before it was reported; two candidate findings were refuted and dropped.</p>
+    <div class="meta">
+      <span><b>Scope</b> ~23.7k lines, src/</span>
+      <span><b>Method</b> 6 area reviewers → 38 verify passes</span>
+      <span><b>Confirmed</b> 36 · refuted 2</span>
+    </div>
+  </header>
+
+  <div class="tiles">
+    <div class="tile"><div class="n">33</div><div class="l">distinct defects<br>(36 confirmed, deduped)</div></div>
+    <div class="tile fixed"><div class="n">21</div><div class="l">fixed &amp; shipped<br>in this review</div></div>
+    <div class="tile accent"><div class="n">8</div><div class="l">high-severity<br>all fixed</div></div>
+    <div class="tile"><div class="n">12</div><div class="l">deferred<br>(tracked follow-ups)</div></div>
+  </div>
+
+  <div class="methodology">
+    <span class="tag">Verified</span>
+    <span>Each finding was independently checked against the real control flow before reporting. During the fixes, live testing against the database caught an operator-precedence bug in the atomic character-bible upsert (a <code>||</code> / <code>-&gt;</code> mistake that returned NULL on conflict) — fixed and re-verified with 4 concurrent writers before shipping.</span>
+  </div>
+
+  <div class="controls" role="group" aria-label="Filter findings">
+    <div class="grp" data-dim="sev">
+      <button class="filter" aria-pressed="true" data-f="all">All</button>
+      <button class="filter" aria-pressed="false" data-f="high">High</button>
+      <button class="filter" aria-pressed="false" data-f="medium">Medium</button>
+      <button class="filter" aria-pressed="false" data-f="low">Low</button>
+    </div>
+    <div class="spacer"></div>
+    <div class="grp" data-dim="dim">
+      <button class="filter" aria-pressed="false" data-d="security">Security</button>
+      <button class="filter" aria-pressed="false" data-d="correctness">Correctness</button>
+      <button class="filter" aria-pressed="false" data-d="performance">Performance</button>
+    </div>
+  </div>
+
+  <section>
+    <h2 class="sec">Fixed &amp; shipped <span class="count" id="fixed-count"></span></h2>
+    <p class="sec-note">Applied in this review, verified green (272 unit tests + 12 E2E), migration applied.</p>
+    <div class="list" id="fixed-list"></div>
+  </section>
+
+  <section>
+    <h2 class="sec">Deferred <span class="count" id="defer-count"></span></h2>
+    <p class="sec-note">Real defects that need a migration, a redesign, or careful staging — tracked for a follow-up rather than rushed into this batch.</p>
+    <div class="list" id="defer-list"></div>
+  </section>
+
+  <footer>
+    <p><b>Refuted (not defects):</b> a claimed budget-cache race — blocked by the pre-flight full-book budget check; and a claimed metering double-count — the audit row never enters spend.</p>
+    <p style="margin-top:.6rem">Dependency audit: the 5 high advisories GitHub flags are transitive through Next.js (<code>sharp</code>, <code>postcss</code> — fix on a Next bump) or dev-only tooling (<code>esbuild</code> via drizzle-kit, <code>brace-expansion</code> via eslint — never shipped). Dependabot PRs are open.</p>
+  </footer>
+</div>
+
+<script>
+  const DATA = [{"sev": "high", "dim": "correctness", "file": "workflows/steps.ts", "line": 357, "title": "Continuity revision pass writes internal continuity notes into the final manuscript", "status": "fixed", "detail": "editChapterStep appends issue notes to the chapter body before passing it to the editor: content = `${chapter.content}\\n\\n<!-- CONTINUITY NOTES TO ADDRESS -->\\n${issueNotes}`", "fix": "Preferred fix: keep the chapter body pure"}, {"sev": "high", "dim": "correctness", "file": "ai/agents/summarizer.ts", "line": 73, "title": "character_bible writes race under wave parallelism: lost updates and a unique-violation that fails the whole run", "status": "fixed", "detail": "With waveSize=4, up to 4 writeChapterSteps run concurrently, each executing summarizeChapter and the writer's characterBibleUpdate tool (src/ai/tools/index.ts:53-86)", "fix": "Replace the select/if/else read-modify-write in BOTH writers (src/ai/agents/summarizer.ts:52-80 and characterBibleUpdate in src/ai/tools/index.ts:53-86) with a "}, {"sev": "high", "dim": "correctness", "file": "ai/agents/outline.ts", "line": 336, "title": "Retry runs regenerate concept/outline and clobber completed chapters' real summaries with new plan summaries", "status": "fixed", "detail": "Resume semantics only cover chapters: conceptStep and outlineStep (src/workflows/steps.ts:152-197) have no 'already done' check, so a retry POST /generate after a failed run re-bil", "fix": "Three coordinated changes (the reviewer's persistOutline-only guard is insufficient because remaining chapters would still be drafted from a different outline t"}, {"sev": "high", "dim": "correctness", "file": "app/api/chapters/[chapterId]/edits/[suggestionId]/route.ts", "line": 86, "title": "Accept re-anchors by first occurrence, splicing the wrong duplicate passage", "status": "fixed", "detail": "When the chapter version has moved since the suggestion was created (any autosave keystroke or a prior accept in the accept-all loop does this), the accept path falls back to resol", "fix": "Two-part fix, slightly stronger than proposed"}, {"sev": "high", "dim": "correctness", "file": "lib/editor/doc-text.ts", "line": 87, "title": "Client highlight anchors to first occurrence; edit-then-accept writes the author's text into the wrong passage", "status": "fixed", "detail": "findTextRange uses haystack.indexOf(needle) (and a first-match fuzzy regex), so findAnchorRangeInDoc \u2014 used by the suggestion plugin (suggestion-plugin.ts:94) \u2014 always highlights t", "fix": "The reviewer's direction is right; refine it as follows"}, {"sev": "high", "dim": "correctness", "file": "components/editor/use-autosave.ts", "line": 147, "title": "Unmount cancels the debounced save without flushing \u2014 client-side navigation loses the last edits", "status": "fixed", "detail": "The unmount cleanup (lines 146-151) only does clearTimeout(timerRef.current)", "fix": "Flush on unmount in useAutosave: change the unmount cleanup (use-autosave.ts:146-151) to, after clearing the timer, check `dirtyRef.current && !conflictRef.curr"}, {"sev": "high", "dim": "correctness", "file": "components/editor/editor-shell.tsx", "line": 268, "title": "applyServerChapter overwrites the doc and clears dirty state, discarding keystrokes typed during accept round-trips", "status": "fixed", "detail": "The editor stays fully editable while busy === 'apply' (only buttons are disabled)", "fix": "The reviewer's first option is the right minimal fix; it just needs correct placement"}, {"sev": "high", "dim": "security", "file": "lib/billing/pricing.ts", "line": 36, "title": "Image generation billed at token rates instead of per-image: budget guard bypass", "status": "fixed", "detail": "The AI Gateway prices google/gemini-3.1-flash-image per generated image (verified live: image_dimension_quality_pricing = $0.045 at 512px, $0.067 default/1K, $0.151 at 4K), but MOD", "fix": "Meter images per-file at recording time; do not fold contentToolRuns.usd into spend (that would double-count the token portion and keep audit and metering entan"}, {"sev": "medium", "dim": "correctness", "file": "workflows/steps.ts", "line": 88, "title": "toWorkflowError maps transient DB/network errors to FatalError, killing runs and re-billing in-flight chapters", "status": "fixed", "detail": "toWorkflowError's catch-all (`throw new FatalError(...)` at line 88) converts every error that is not an APICallError and lacks an isRetryable property \u2014 including transient Neon c", "fix": "Two parts"}, {"sev": "medium", "dim": "correctness", "file": "ai/agents/chapter-writer.ts", "line": 219, "title": "Revision that applies zero replacements still bumps qualityScore by +0.1, letting a failed chapter dodge the edit gate", "status": "fixed", "detail": "applyReplacements (chapter-writer.ts:107-115) silently drops any replacement whose 'original' span is not a verbatim match (unlike the editor's version, it doesn't even count skips", "fix": "Minimal correct fix in chapter-writer.ts: gate the bonus on actual change"}, {"sev": "medium", "dim": "correctness", "file": "ai/agents/outline.ts", "line": 278, "title": "Standard-tier outline validation is computed and then discarded \u2014 chapter-count mismatch passes through silently", "status": "fixed", "detail": "generateOutline runs codeCheckIssues for every non-draft tier (line 278) but only acts on the result when tier === 'premium' (line 281)", "fix": "Two independent fixes, both worth applying"}, {"sev": "medium", "dim": "correctness", "file": "app/api/projects/[projectId]/generate/route.ts", "line": 41, "title": "TOCTOU on the active-run check allows two concurrent workflows writing the same book", "status": "fixed", "detail": "POST /generate does select-for-active-run (lines 41-56) then insert + start(), with no DB constraint preventing two active runs per project (generation_runs has only non-unique ind", "fix": "Enforce uniqueness in Postgres, but scope it by kind so the export flow keeps working: (1) add two partial unique indexes to generation_runs in src/db/schema.ts"}, {"sev": "medium", "dim": "correctness", "file": "components/editor/use-autosave.ts", "line": 46, "title": "flush() returns a stale in-flight save's success, falsely reporting the server matches the editor", "status": "fixed", "detail": "save() begins with `if (inflightRef.current) return inflightRef.current;`", "fix": "The reviewer's fix is correct and sufficient for this finding"}, {"sev": "medium", "dim": "performance", "file": "app/(studio)/projects/[projectId]/layout.tsx", "line": 30, "title": "Project/chapter queries run 2-3x per request \u2014 no React.cache dedup anywhere", "status": "fixed", "detail": "generateMetadata (line 23) and the layout body (line 30) each call requireUser() + getProjectWithBook(), and every stage page repeats the same pair a third time (editor/[chapterNum", "fix": "The reviewer's fix is correct; refine it as follows"}, {"sev": "medium", "dim": "performance", "file": "db/queries/books.ts", "line": 13, "title": "getProjectWithBook makes two dependent round trips instead of one LEFT JOIN", "status": "fixed", "detail": "The function SELECTs the project, awaits it, then SELECTs the book by projectId (lines 7-18)", "fix": "The reviewer's join is correct but only halves the waste (6 round trips \u2192 3)"}, {"sev": "medium", "dim": "security", "file": "lib/clerk.ts", "line": 3, "title": "Authentication fails open when Clerk publishable key env var is absent", "status": "fixed", "detail": "clerkEnabled is derived solely from Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)", "fix": "The reviewer's proposed NODE_ENV guard is the wrong signal: Vercel preview deployments also run with NODE_ENV='production', so it would both break the explicitl"}, {"sev": "medium", "dim": "security", "file": "workflows/export.ts", "line": 80, "title": "Manuscript exports are public blobs at deterministic paths and are never deleted", "status": "fixed", "detail": "assembleAndUploadStep uploads the full rendered manuscript with put(`exports/${projectId}/${dbRunId}.${ext}`, ..., { access: 'public', allowOverwrite: true })", "fix": "Three changes, refining the reviewer's proposal: (1) Make the export pathname unguessable: in assembleAndUploadStep, upload to `exports/${ref.projectId}/${ref.d"}, {"sev": "low", "dim": "correctness", "file": "app/api/runs/[runId]/route.ts", "line": 21, "title": "Malformed UUID path params reach Postgres and cause unhandled 500s", "status": "fixed", "detail": "The runs routes (GET /api/runs/[runId], /stream, /input) and the project routes (/api/projects/[projectId]/generate and /export) pass the raw path segment straight into eq() agains", "fix": "The proposed fix is correct; make it complete by covering both handlers in each file"}, {"sev": "low", "dim": "correctness", "file": "lib/editor/markdown-offsets.ts", "line": 47, "title": "Selection containing U+E001 silently truncates at the sentinel \u2014 the verification passes on the truncated span", "status": "fixed", "detail": "markdownSelection locates sentinels with indexOf", "fix": "The reviewer's first option is the right minimal fix; the lastIndexOf alternative is subtly wrong on its own (a user U+E001 located after the selection would th"}, {"sev": "low", "dim": "correctness", "file": "components/editor/editor-shell.tsx", "line": 436, "title": "Accept-409 removes the suggestion client-side but it stays 'pending' in the DB \u2014 zombie suggestions reappear on reload", "status": "fixed", "detail": "When accept returns 409 because the anchor no longer resolves (edits/[suggestionId]/route.ts:87-94), the server leaves the suggestion row status='pending' \u2014 it is neither applied n", "fix": "In the accept handler's anchor-unresolvable branch (edits/[suggestionId]/route.ts:87-95), mark the suggestion resolved before returning 409, e.g.: `await db.upd"}, {"sev": "low", "dim": "security", "file": "ai/schemas/index.ts", "line": 54, "title": "Outline chapter count has no upper bound \u2014 drafting loop writes outline.chapters, bypassing the pre-flight budget estimate", "status": "fixed", "detail": "bookOutlineSchema.chapters is z.array(chapterOutlineSchema).min(3) with no .max(), and the 'exactly N chapters' constraint is prompt-level only (src/ai/agents/outline.ts:137)", "fix": "Two layers, both cheap: (1) In src/ai/schemas/index.ts add `.max(60)` to `bookOutlineSchema.chapters` (matches the product cap in createProjectSchema, src/lib/v"}, {"sev": "medium", "dim": "correctness", "file": "workflows/steps.ts", "line": 221, "title": "Step retry after summarizer failure permanently skips the chapter summary and character-bible facts", "status": "deferred", "detail": "In writeChapterStep, persistChapter sets status='drafted' with content (line 298) before summarizeChapter runs (line 305)", "fix": "Backfill on the resume path (the reviewer's first option), with one correction: the early-return query doesn't currently select the fields needed"}, {"sev": "medium", "dim": "correctness", "file": "workflows/steps.ts", "line": 305, "title": "Step retry after persistChapter permanently skips summarizeChapter \u2014 story memory and bible facts lost", "status": "deferred", "detail": "writeChapterStep persists the chapter (status='drafted', steps.ts:298-304) BEFORE summarizeChapter runs (line 305)", "fix": "Make summarization its own retryable unit instead of piggybacking on the write step, and make the resume check aware of it"}, {"sev": "medium", "dim": "correctness", "file": "workflows/steps.ts", "line": 293, "title": "Retried writeChapterStep appends the full chapter's prose after the aborted attempt's deltas, garbling the live draft pane", "status": "deferred", "detail": "writeChapterStep streams every prose delta into the durable `chapter:N` namespace (line 293)", "fix": "The reviewer's in-band reset sentinel is the right approach; two refinements make it concrete and replay-safe"}, {"sev": "medium", "dim": "correctness", "file": "hooks/use-run-stream.ts", "line": 430, "title": "Chapter prose loop treats any clean stream end as final, freezing the live draft with no recovery", "status": "deferred", "detail": "When readNdjson returns without throwing, subscribeChapterProse assumes 'the run finished, so the prose replay is complete' and returns permanently (lines 429-430) \u2014 it never recon", "fix": "In subscribeChapterProse (src/hooks/use-run-stream.ts), replace the unconditional `return` at lines 429-430 with a guard mirroring the progress loop"}, {"sev": "low", "dim": "correctness", "file": "workflows/steps.ts", "line": 46, "title": "generation_events seq via coalesce(max(seq))+1 is non-atomic and non-idempotent under at-least-once step execution", "status": "deferred", "detail": "persistEvent allocates seq with a correlated max-subquery inside the insert (same pattern in src/workflows/export.ts:33) against the unique index uq_event_seq (runId, seq)", "fix": "Make the (runId, seq) pair deterministic across step re-execution instead of derived from table state: maintain an event counter in the workflow functions (work"}, {"sev": "low", "dim": "correctness", "file": "workflows/generate-book.ts", "line": 135, "title": "Failure-path steps in the catch block can mask the original error and leave the run stuck in 'running'", "status": "deferred", "detail": "The catch block awaits markRunStatus(ref,'failed') and emitProgress before rethrowing", "fix": "Two parts, applied to both generateBook (src/workflows/generate-book.ts:133-138) and exportBook (src/workflows/export.ts:130-135)"}, {"sev": "low", "dim": "correctness", "file": "components/editor/mermaid-code-block-view.ts", "line": 118, "title": "Out-of-order mermaid renders let a stale diagram overwrite the current one permanently", "status": "deferred", "detail": "render() sets this.lastRenderId before awaiting `mermaid.render` (lines 116-118) but never verifies after the await that it is still the latest render before writing `this.preview.", "fix": "In render(), generate the id before any await using a monotonic per-instance counter instead of Date.now() (which can collide within one millisecond): add `priv"}, {"sev": "low", "dim": "performance", "file": "lib/billing/meter.ts", "line": 103, "title": "Budget spend cache is 100% miss in the generation hot path", "status": "deferred", "detail": "metered() calls checkBudget() before every LLM call (src/ai/metering.ts:47), and recordLlmCall() deletes the runtime-cache spend key after every insert (meter.ts:103)", "fix": "Two safe changes: (1) Cache getBudget per user (short TTL, tag `budget:{userId}`) and invalidate that tag in the budget-settings mutation \u2014 budgets change rarel"}, {"sev": "low", "dim": "performance", "file": "ai/tools/index.ts", "line": 223, "title": "chaptersGetText fetches full chapter content, then slices in JS", "status": "deferred", "detail": "The continuity agent's chaptersGetText tool SELECTs the entire chapters.content column (line 215) and applies startChar/endChar slicing in JavaScript (line 223), defaulting to a 6,", "fix": "In chaptersGetText's execute (src/ai/tools/index.ts:213), compute the window in JS, clamp the length to non-negative, and push it into SQL:  execute: async ({ n"}, {"sev": "low", "dim": "performance", "file": "ai/tools/index.ts", "line": 28, "title": "characterBibleGet loads the whole character bible on every lookup", "status": "deferred", "detail": "The tool SELECTs every character_bible row for the book \u2014 including full jsonb facts \u2014 and filters case-insensitively in JS (lines 28-33), even though the input is capped at 8 name", "fix": "In `characterBibleGet` (src/ai/tools/index.ts), push the name filter into SQL and keep the miss computation in JS:  ```ts execute: async ({ names }) => {   cons"}, {"sev": "low", "dim": "performance", "file": "app/(studio)/projects/[projectId]/write/page.tsx", "line": 20, "title": "Write page runs sequential run lookups plus serial chapter fetch", "status": "deferred", "detail": "`(await getActiveRun(projectId)) ?? (await getLatestRun(projectId))` issues two sequential queries against generation_runs whenever there is no active run \u2014 which is the common idl", "fix": "In src/db/queries/books.ts add a combined helper, e.g.:  export async function getActiveOrLatestRun(projectId: string) {   const db = getDb();   const [run] = a"}, {"sev": "low", "dim": "performance", "file": "components/generation/live-draft-pane.tsx", "line": 154, "title": "ChapterProseView re-splits and re-reconciles the entire chapter, and forces synchronous layout, on every streamed delta batch", "status": "deferred", "detail": "`const paragraphs = text.length > 0 ? text.split(/\\n{2,}/) : []` (line 154) runs inline on every render with no memoization, re-scanning the full accumulated chapter text and re-al", "fix": "Three targeted changes in src/components/generation/live-draft-pane.tsx (plus optionally use-run-stream.ts): (1) Throttle updates to animation frames \u2014 either i"}];
+  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const code = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  function render(list, el) {
+    el.innerHTML = list.map((f, i) => `
+      <details class="finding sev-${f.sev}" data-sev="${f.sev}" data-dim="${f.dim}">
+        <summary>
+          <span class="stripe" aria-hidden="true"></span>
+          <span class="badges">
+            <span class="chip sev-${f.sev}">${f.sev}</span>
+            <span class="chip dim">${f.dim}</span>
+          </span>
+          <span class="fmain">
+            <span class="ftitle">${esc(f.title)}</span>
+            <span class="floc">${esc(f.file)}${f.line ? ":" + f.line : ""}</span>
+          </span>
+          <span class="status ${f.status}"><span class="dot"></span>${f.status}</span>
+        </summary>
+        <div class="detail">
+          <div class="row"><div class="k">What's wrong</div><div class="v">${code(f.detail)}…</div></div>
+          <div class="row"><div class="k">${f.status === "fixed" ? "Fix applied" : "Recommended fix"}</div><div class="v">${code(f.fix)}…</div></div>
+        </div>
+      </details>`).join("");
+  }
+
+  const fixed = DATA.filter((f) => f.status === "fixed");
+  const defer = DATA.filter((f) => f.status === "deferred");
+  render(fixed, document.getElementById("fixed-list"));
+  render(defer, document.getElementById("defer-list"));
+  document.getElementById("fixed-count").textContent = fixed.length;
+  document.getElementById("defer-count").textContent = defer.length;
+
+  let sevFilter = "all";
+  let dimFilter = null;
+  function apply() {
+    document.querySelectorAll(".finding").forEach((el) => {
+      const okSev = sevFilter === "all" || el.dataset.sev === sevFilter;
+      const okDim = !dimFilter || el.dataset.dim === dimFilter;
+      el.hidden = !(okSev && okDim);
+    });
+  }
+  document.querySelectorAll('[data-dim="sev"] .filter').forEach((b) => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll('[data-dim="sev"] .filter').forEach((x) => x.setAttribute("aria-pressed", "false"));
+      b.setAttribute("aria-pressed", "true");
+      sevFilter = b.dataset.f;
+      apply();
+    });
+  });
+  document.querySelectorAll('[data-dim="dim"] .filter').forEach((b) => {
+    b.addEventListener("click", () => {
+      const was = b.getAttribute("aria-pressed") === "true";
+      document.querySelectorAll('[data-dim="dim"] .filter').forEach((x) => x.setAttribute("aria-pressed", "false"));
+      b.setAttribute("aria-pressed", was ? "false" : "true");
+      dimFilter = was ? null : b.dataset.d;
+      apply();
+    });
+  });
+</script>

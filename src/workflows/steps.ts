@@ -85,7 +85,9 @@ function toWorkflowError(error: unknown): never {
     }
     throw new FatalError(message);
   }
-  throw new FatalError(error instanceof Error ? error.message : String(error));
+  throw new RetryableError(error instanceof Error ? error.message : String(error), {
+    retryAfter: "30s",
+  });
 }
 
 async function loadRunContext(ref: RunRef) {
@@ -152,6 +154,10 @@ export async function checkBudgetStep(ref: RunRef, config: GenerationConfig) {
 export async function conceptStep(ref: RunRef, config: GenerationConfig): Promise<BookConcept> {
   "use step";
   const { project, book, meter } = await loadRunContext(ref);
+  // Resume: a retry run reuses the concept a prior run already persisted.
+  if (book.concept && typeof book.concept === "object" && Object.keys(book.concept).length > 0) {
+    return book.concept as BookConcept;
+  }
   const tools: ToolCtx = { userId: ref.userId, projectId: ref.projectId, bookId: book.id };
   try {
     const concept = await generateConcept({
@@ -176,6 +182,18 @@ export async function outlineStep(
 ): Promise<BookOutline> {
   "use step";
   const { project, book, meter } = await loadRunContext(ref);
+  // Resume: without in-run revision notes, a retry reuses the persisted
+  // outline instead of regenerating it and clobbering chapter summaries.
+  if (revisionNotes === undefined) {
+    const db = getDb();
+    const [existing] = await db
+      .select({ content: schema.outlines.content })
+      .from(schema.outlines)
+      .where(eq(schema.outlines.bookId, book.id))
+      .orderBy(sql`${schema.outlines.version} desc`)
+      .limit(1);
+    if (existing) return existing.content as BookOutline;
+  }
   const tools: ToolCtx = { userId: ref.userId, projectId: ref.projectId, bookId: book.id };
   try {
     const outline = await generateOutline({
@@ -209,7 +227,9 @@ export async function writeChapterStep(
   const [existing] = await db
     .select({
       status: schema.chapters.status,
+      title: schema.chapters.title,
       content: schema.chapters.content,
+      summary: schema.chapters.summary,
       wordCount: schema.chapters.wordCount,
       qualityScore: schema.chapters.qualityScore,
     })
@@ -219,6 +239,22 @@ export async function writeChapterStep(
     )
     .limit(1);
   if (isChapterComplete(existing)) {
+    // Backfill: a retry after persistChapter succeeded but summarizeChapter
+    // failed must still write the summary and character-bible facts.
+    if (existing.summary == null) {
+      try {
+        await summarizeChapter({
+          meter,
+          bookId: book.id,
+          chapterNumber,
+          chapterTitle: existing.title,
+          content: existing.content,
+          tier: config.tier,
+        });
+      } catch (error) {
+        toWorkflowError(error);
+      }
+    }
     await writeEvent(PROGRESS_NS, {
       type: "chapter",
       chapterNumber,
@@ -354,9 +390,8 @@ export async function editChapterStep(
       tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id, chapterNumber },
       tier: config.tier,
       chapterNumber,
-      content: issueNotes
-        ? `${chapter.content}\n\n<!-- CONTINUITY NOTES TO ADDRESS -->\n${issueNotes}`
-        : chapter.content,
+      content: chapter.content,
+      revisionNotes: issueNotes,
       styleGuide: project.styleGuide ?? undefined,
     });
     if (edited.changed) {

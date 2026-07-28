@@ -6,8 +6,8 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 const paramsSchema = z.object({ assetId: z.uuid() });
 
 /**
- * Ownership-checked download: 302 to the blob URL (with ?download=1 so the
- * browser saves the file), keeping raw blob URLs out of the UI.
+ * Ownership-checked download: proxies the blob bytes instead of redirecting,
+ * so the raw blob URL never reaches the browser (history, referrers, UI).
  */
 export async function GET(_req: Request, ctx: { params: Promise<{ assetId: string }> }) {
   let userId: string;
@@ -26,12 +26,27 @@ export async function GET(_req: Request, ctx: { params: Promise<{ assetId: strin
 
   const db = getDb();
   const [asset] = await db
-    .select({ blobUrl: schema.assets.blobUrl })
+    .select({
+      blobUrl: schema.assets.blobUrl,
+      contentType: schema.assets.contentType,
+      meta: schema.assets.meta,
+    })
     .from(schema.assets)
     .innerJoin(schema.projects, eq(schema.assets.projectId, schema.projects.id))
     .where(and(eq(schema.assets.id, parsed.data.assetId), eq(schema.projects.userId, userId)))
     .limit(1);
   if (!asset) return Response.json({ error: "Asset not found" }, { status: 404 });
 
-  return Response.redirect(`${asset.blobUrl}?download=1`, 302);
+  const meta = asset.meta as { filename?: string };
+  const res = await fetch(asset.blobUrl);
+  if (!res.ok || !res.body) {
+    return Response.json({ error: "Asset not found" }, { status: 404 });
+  }
+  return new Response(res.body, {
+    headers: {
+      "Content-Type": asset.contentType,
+      "Content-Disposition": `attachment; filename="${meta.filename ?? "book"}"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
 }

@@ -43,6 +43,11 @@ export function markdownSelection(
     return null;
   }
 
+  // A document that already contains a sentinel character makes the offsets
+  // ambiguous (we'd find its sentinel, not ours) — bail so the caller shows
+  // the reselect hint instead of silently truncating.
+  if (clean.includes(SENTINEL_START) || clean.includes(SENTINEL_END)) return null;
+
   const startIdx = withSentinels.indexOf(SENTINEL_START);
   const endIdx = withSentinels.indexOf(SENTINEL_END);
   if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) return null;

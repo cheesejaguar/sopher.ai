@@ -33,7 +33,7 @@ export const imageTool: ContentTool = {
   description: "Generate an illustration for the selected passage",
   icon: "image",
   appliesTo: "selection",
-  estUsd: 0.05,
+  estUsd: 0.08,
   async run(ctx, input) {
     const promptModel = MODELS[ctx.tier].lineEdit;
     const promptResult = await metered(

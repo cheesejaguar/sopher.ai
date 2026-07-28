@@ -1,5 +1,6 @@
 import { getRun } from "workflow/api";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { PROGRESS_NS } from "@/lib/run-events";
@@ -21,6 +22,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ runId: string }
     throw error;
   }
   const { runId } = await ctx.params;
+  if (!z.uuid().safeParse(runId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const url = new URL(req.url);
   const namespace = url.searchParams.get("ns") ?? PROGRESS_NS;
   const startIndex = Number(url.searchParams.get("startIndex") ?? "0");

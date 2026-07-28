@@ -1,7 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { clerkEnabled } from "@/lib/clerk";
+import { clerkEnabled, devAuthAllowed } from "@/lib/clerk";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -23,12 +23,20 @@ async function devFallbackUser(): Promise<{ userId: string }> {
 
 /**
  * Resolves the signed-in Clerk user and lazily upserts the users row so the
- * Clerk webhook is reconciliation, not a critical path. Until the Clerk
- * integration is provisioned, every visitor shares a single dev identity so
- * previews stay fully usable; this path is dead code once keys exist.
+ * Clerk webhook is reconciliation, not a critical path. Without Clerk keys the
+ * shared dev identity is used only when explicitly allowed (development or
+ * ALLOW_DEV_AUTH=1); otherwise missing keys fail closed with a loud error.
  */
 export async function requireUser(): Promise<{ userId: string }> {
-  if (!clerkEnabled) return devFallbackUser();
+  if (!clerkEnabled) {
+    if (devAuthAllowed) {
+      console.warn(
+        "[auth] Clerk keys absent — serving shared dev fallback identity (dev/ALLOW_DEV_AUTH opt-in)",
+      );
+      return devFallbackUser();
+    }
+    throw new Error("Auth misconfigured: Clerk keys absent in a non-dev environment");
+  }
 
   const { userId } = await auth();
   if (!userId) throw new UnauthorizedError();

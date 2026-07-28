@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 
@@ -14,6 +15,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ runId: string 
     throw error;
   }
   const { runId } = await ctx.params;
+  if (!z.uuid().safeParse(runId).success) {
+    return Response.json({ error: "Not found" }, { status: 404 });
+  }
   const db = getDb();
   const [run] = await db
     .select()
