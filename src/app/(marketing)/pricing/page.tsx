@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export default function PricingPage() {
   return (
     <>
-      <Pricing />
+      <Pricing headingLevel={1} />
       <Faq />
     </>
   );

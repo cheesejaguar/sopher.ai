@@ -7,6 +7,7 @@ import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { CONTINUITY_SYSTEM_PROMPT } from "@/ai/prompts/continuity";
 import {
   REVIEW_PHASES,
+  REVIEW_PHASES_BY_KEY,
   buildReviewPhasePrompt,
   scoreToRecommendation,
   type ReviewPhaseKey,
@@ -22,6 +23,12 @@ export type ContinuityReport = {
   worstChapters: number[];
 };
 
+export type ContinuityOutcome = {
+  key: ReviewPhaseKey;
+  weight: number;
+  result: ReviewPhaseResult;
+};
+
 type ContinuityIssue = ReviewPhaseResult["issues"][number];
 
 const SEVERITY_RANK: Record<ContinuityIssue["severity"], number> = {
@@ -29,6 +36,11 @@ const SEVERITY_RANK: Record<ContinuityIssue["severity"], number> = {
   major: 2,
   minor: 1,
 };
+
+/** The rubric phases a tier runs: draft gets the cheap sanity phase only. */
+export function continuityPhaseKeys(tier: QualityTier): ReviewPhaseKey[] {
+  return tier === "draft" ? ["technical_consistency"] : REVIEW_PHASES.map((phase) => phase.key);
+}
 
 /** Chapter summaries corpus, rendered once and reused verbatim by every phase call. */
 function summariesCorpus(
@@ -123,18 +135,13 @@ function worstChapters(issues: ContinuityIssue[]): number[] {
 }
 
 /**
- * Runs the continuity review over the book's chapter summaries: one metered LLM
- * call per rubric phase (draft tier runs technical_consistency only), executed
- * sequentially so the cached system prompt stays warm and rate limits stay calm.
- * Deduped issues are persisted to continuity_issues; the report itself is
- * returned to the caller, which owns any further persistence.
+ * One rubric phase as a single metered LLM call — the unit of workflow
+ * checkpointing, so a retry never re-bills phases that already finished.
  */
-export async function runContinuityReview(input: {
-  meter: MeterCtx;
-  tools: ToolCtx;
-  tier: QualityTier;
-  runId?: string | null;
-}): Promise<ContinuityReport> {
+export async function runContinuityPhase(
+  input: { meter: MeterCtx; tools: ToolCtx; tier: QualityTier },
+  phaseKey: ReviewPhaseKey,
+): Promise<ContinuityOutcome> {
   const db = getDb();
   const rows = await db
     .select({
@@ -148,57 +155,42 @@ export async function runContinuityReview(input: {
 
   const corpus = summariesCorpus(rows);
   const model = MODELS[input.tier].continuity;
-  const toolset = buildToolset("continuity", input.tools);
-  const phasesToRun =
-    input.tier === "draft"
-      ? REVIEW_PHASES.filter((p) => p.key === "technical_consistency")
-      : REVIEW_PHASES;
+  const result = await metered(
+    input.meter,
+    { role: "continuity", operation: `continuity.${phaseKey}`, model },
+    () =>
+      generateText({
+        model,
+        instructions: anthropicCachedSystem(CONTINUITY_SYSTEM_PROMPT),
+        prompt: phaseUserPrompt(phaseKey, corpus),
+        tools: buildToolset("continuity", input.tools),
+        stopWhen: isStepCount(5),
+        // Force the final step to produce the structured result — without
+        // this, a phase that spends every step on tool spot-checks ends with
+        // no output and the whole review fails.
+        prepareStep: ({ stepNumber }) => (stepNumber >= 3 ? { activeTools: [] } : {}),
+        output: Output.object({ schema: reviewPhaseResultSchema }),
+        providerOptions: gatewayOptions(input.meter, "continuity"),
+      }),
+  );
+  return {
+    key: phaseKey,
+    weight: REVIEW_PHASES_BY_KEY[phaseKey].weight,
+    result: result.output,
+  };
+}
 
-  const outcomes: { key: ReviewPhaseKey; weight: number; result: ReviewPhaseResult }[] = [];
-  for (const phase of phasesToRun) {
-    const result = await metered(
-      input.meter,
-      { role: "continuity", operation: `continuity.${phase.key}`, model },
-      () =>
-        generateText({
-          model,
-          instructions: anthropicCachedSystem(CONTINUITY_SYSTEM_PROMPT),
-          prompt: phaseUserPrompt(phase.key, corpus),
-          tools: toolset,
-          stopWhen: isStepCount(5),
-          // Force the final step to produce the structured result — without
-          // this, a phase that spends every step on tool spot-checks ends with
-          // no output and the whole review fails.
-          prepareStep: ({ stepNumber }) => (stepNumber >= 3 ? { activeTools: [] } : {}),
-          output: Output.object({ schema: reviewPhaseResultSchema }),
-          providerOptions: gatewayOptions(input.meter, "continuity"),
-        }),
-    );
-    outcomes.push({ key: phase.key, weight: phase.weight, result: result.output });
-  }
-
+/**
+ * Pure aggregation of phase outcomes: weighted score (renormalized over the
+ * phases actually run), recommendation ladder, deduped issues, worst chapters.
+ */
+export function aggregateContinuityOutcomes(outcomes: ContinuityOutcome[]): ContinuityReport {
   const totalWeight = outcomes.reduce((sum, o) => sum + o.weight, 0);
   const score =
     totalWeight > 0
       ? outcomes.reduce((sum, o) => sum + o.result.score * o.weight, 0) / totalWeight
       : 0;
-
   const issues = dedupeIssues(outcomes.flatMap((o) => o.result.issues));
-
-  if (issues.length > 0) {
-    await db.insert(schema.continuityIssues).values(
-      issues.map((issue) => ({
-        bookId: input.tools.bookId,
-        runId: input.runId ?? null,
-        chapters: issue.chapters,
-        category: issue.category,
-        severity: issue.severity,
-        description: issue.description,
-        suggestedFix: issue.suggestedFix,
-      })),
-    );
-  }
-
   return {
     score,
     recommendation: scoreToRecommendation(score),
@@ -206,4 +198,43 @@ export async function runContinuityReview(input: {
     issues,
     worstChapters: worstChapters(issues),
   };
+}
+
+export async function persistContinuityIssues(
+  bookId: string,
+  runId: string | null | undefined,
+  issues: ContinuityIssue[],
+): Promise<void> {
+  if (issues.length === 0) return;
+  const db = getDb();
+  await db.insert(schema.continuityIssues).values(
+    issues.map((issue) => ({
+      bookId,
+      runId: runId ?? null,
+      chapters: issue.chapters,
+      category: issue.category,
+      severity: issue.severity,
+      description: issue.description,
+      suggestedFix: issue.suggestedFix,
+    })),
+  );
+}
+
+/**
+ * Full review as one call — used by ops scripts. The workflow runs the same
+ * pieces as separate checkpointed steps instead.
+ */
+export async function runContinuityReview(input: {
+  meter: MeterCtx;
+  tools: ToolCtx;
+  tier: QualityTier;
+  runId?: string | null;
+}): Promise<ContinuityReport> {
+  const outcomes: ContinuityOutcome[] = [];
+  for (const key of continuityPhaseKeys(input.tier)) {
+    outcomes.push(await runContinuityPhase(input, key));
+  }
+  const report = aggregateContinuityOutcomes(outcomes);
+  await persistContinuityIssues(input.tools.bookId, input.runId, report.issues);
+  return report;
 }

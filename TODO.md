@@ -51,9 +51,19 @@ in-document Mermaid figure → valid EPUB + 115-page PDF exports → $6.39 acros
 - [ ] After a soak week: tear down the GKE cluster and revoke legacy GCP secrets
       (steps in doc/CUTOVER.md).
 
-## Nice-to-have (post-launch)
+## Nice-to-have (post-launch) — complete
 
-- [ ] Playwright E2E suite in CI (dual-theme screenshots of the five key
-      surfaces; axe-core checks) — manual pass done during the rebuild
-- [ ] Per-phase checkpointing inside the continuity step (cheaper retries)
-- [ ] Resume failed full-book runs from completed chapters instead of restarting
+- [x] Playwright E2E suite in CI: dual-theme projects over marketing, auth,
+      wizard, and (DB-gated) studio surfaces with strict axe-core checks and
+      screenshot artifacts — 12/12 locally with `E2E_DB=1`, 8/8 in the no-DB
+      CI mode. Surfaced and fixed real WCAG AA contrast failures (dark primary
+      buttons now indigo-with-ink, light muted text darkened, tab triggers
+      raised to 70% ink) — zero serious/critical axe findings across five
+      surfaces in both themes; `/pricing` gained its `h1`.
+- [x] Per-phase checkpointing inside the continuity review: one workflow step
+      per rubric phase + a pure aggregate step (`aggregateContinuityOutcomes`
+      unit-tested for weighting, dedupe, worst-chapter ranking) — a retry
+      replays finished phases from checkpoints instead of re-billing them.
+- [x] Resume failed full-book runs from completed chapters:
+      `writeChapterStep` reuses chapters with real prose (`isChapterComplete`
+      unit-tested); crashed mid-draft chapters regenerate.

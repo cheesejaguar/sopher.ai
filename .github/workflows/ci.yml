@@ -28,3 +28,32 @@ jobs:
         run: pnpm db:check
         env:
           DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install chromium --with-deps
+      # E2E_DB is intentionally NOT set: the app's neon-http driver cannot
+      # reach a plain postgres container, so CI runs the DB-free subset
+      # (marketing, guest sign-in, wizard). See playwright.config.ts.
+      - run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e/screenshots
+          retention-days: 14

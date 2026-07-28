@@ -55,18 +55,19 @@ const TIERS: Tier[] = [
   },
 ];
 
-export function Pricing() {
+export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
+  const Heading = headingLevel === 1 ? "h1" : "h2";
   return (
     <section id="pricing" aria-labelledby="pricing-heading">
       <div className="mx-auto w-full max-w-6xl px-6 py-24 sm:py-32">
         <div className="max-w-2xl">
           <p className="font-mono text-xs tracking-[0.2em] text-primary uppercase">Pricing</p>
-          <h2
+          <Heading
             id="pricing-heading"
             className="mt-3 font-display text-3xl font-semibold tracking-tight text-balance sm:text-4xl"
           >
             Pay per book, not per month
-          </h2>
+          </Heading>
           <p className="mt-4 text-muted-foreground">
             Three quality tiers, one price each. Every book comes with a full cost report, so you
             can see what each agent spent.

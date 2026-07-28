@@ -1,10 +1,12 @@
 import { createHook, FatalError } from "workflow";
 import type { GenerationConfig } from "@/lib/run-events";
 import type { BookOutline } from "@/ai/schemas";
+import { continuityPhaseKeys, type ContinuityOutcome } from "@/ai/agents/continuity";
 import {
   checkBudgetStep,
   conceptStep,
-  continuityStep,
+  continuityFinalizeStep,
+  continuityPhaseStep,
   editChapterStep,
   emitCost,
   emitProgress,
@@ -98,7 +100,11 @@ export async function generateBook(
       agent: "continuity",
       message: "Reading the manuscript for consistency",
     });
-    const report = await continuityStep(ref, config);
+    const outcomes: ContinuityOutcome[] = [];
+    for (const phaseKey of continuityPhaseKeys(config.tier)) {
+      outcomes.push(await continuityPhaseStep(ref, config, phaseKey));
+    }
+    const report = await continuityFinalizeStep(ref, outcomes);
     await emitCost(ref);
 
     if (config.tier !== "draft" && report.score < 0.7 && report.worstChapters.length > 0) {
