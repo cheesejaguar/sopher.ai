@@ -2,6 +2,7 @@ import { tool, type ToolSet } from "ai";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
+import { entityGet, entityRelate, entitySearch, entityUpsert } from "@/ai/tools/entities";
 import { analyzeQuality, getQualityRecommendations } from "@/ai/analysis/quality-metrics";
 import { analyzePacing } from "@/ai/analysis/pacing";
 import { getGenreTemplate, chapterPromptForGenre, genreAvoidList } from "@/ai/knowledge/genres";
@@ -15,65 +16,6 @@ export type ToolCtx = {
 };
 
 export type AgentRole = "writer" | "outliner" | "editor" | "continuity" | "concept";
-
-function characterBibleGet(ctx: ToolCtx) {
-  return tool({
-    description:
-      "Look up canonical facts about characters (appearance, personality, relationships, established facts). Always consult before writing a scene involving a character.",
-    inputSchema: z.object({
-      names: z.array(z.string()).min(1).max(8).describe("Character names to look up"),
-    }),
-    execute: async ({ names }) => {
-      const db = getDb();
-      const rows = await db
-        .select()
-        .from(schema.characterBible)
-        .where(eq(schema.characterBible.bookId, ctx.bookId));
-      const wanted = new Set(names.map((n) => n.toLowerCase()));
-      const found = rows.filter((r) => wanted.has(r.name.toLowerCase()));
-      const missing = names.filter(
-        (n) => !found.some((r) => r.name.toLowerCase() === n.toLowerCase()),
-      );
-      return {
-        characters: found.map((r) => ({ name: r.name, facts: r.facts })),
-        missing,
-      };
-    },
-  });
-}
-
-function characterBibleUpdate(ctx: ToolCtx) {
-  return tool({
-    description:
-      "Record new canonical facts you introduced for a character (names, injuries, promises, object locations, relationship changes). Call after drafting when you established something future chapters must honor.",
-    inputSchema: z.object({
-      name: z.string(),
-      facts: z.array(z.string()).min(1).max(8).describe("New canonical facts, one per entry"),
-    }),
-    execute: async ({ name, facts }) => {
-      const db = getDb();
-      // Atomic upsert: concurrent chapter steps in a wave append facts without
-      // lost updates or racing the uq_character_name unique index.
-      await db
-        .insert(schema.characterBible)
-        .values({
-          bookId: ctx.bookId,
-          name,
-          facts: { facts, firstAppearance: ctx.chapterNumber },
-          updatedByChapter: ctx.chapterNumber,
-        })
-        .onConflictDoUpdate({
-          target: [schema.characterBible.bookId, schema.characterBible.name],
-          set: {
-            facts: sql`jsonb_set(${schema.characterBible.facts}, '{facts}', coalesce(${schema.characterBible.facts}->'facts', '[]'::jsonb) || (excluded.facts->'facts'))`,
-            updatedByChapter: ctx.chapterNumber,
-            updatedAt: new Date(),
-          },
-        });
-      return { recorded: true, name, factCount: facts.length };
-    },
-  });
-}
 
 function storySoFarSearch(ctx: ToolCtx) {
   return tool({
@@ -306,8 +248,10 @@ export function buildToolset(role: AgentRole, ctx: ToolCtx): ToolSet {
   switch (role) {
     case "writer":
       return {
-        characterBibleGet: characterBibleGet(ctx),
-        characterBibleUpdate: characterBibleUpdate(ctx),
+        entityGet: entityGet(ctx),
+        entitySearch: entitySearch(ctx),
+        entityUpsert: entityUpsert(ctx),
+        entityRelate: entityRelate(ctx),
         storySoFarSearch: storySoFarSearch(ctx),
         storySoFarRecent: storySoFarRecent(ctx),
         outlineGetChapter: outlineGetChapter(ctx),
@@ -317,19 +261,21 @@ export function buildToolset(role: AgentRole, ctx: ToolCtx): ToolSet {
       return {
         knowledgePlotStructure,
         knowledgeGenre,
-        characterBibleGet: characterBibleGet(ctx),
+        entityGet: entityGet(ctx),
+        entitySearch: entitySearch(ctx),
       };
     case "editor":
       return {
         qualityAnalyze,
         outlineGetChapter: outlineGetChapter(ctx),
-        characterBibleGet: characterBibleGet(ctx),
+        entityGet: entityGet(ctx),
       };
     case "continuity":
       return {
         chaptersGetText: chaptersGetText(ctx),
         storySoFarSearch: storySoFarSearch(ctx),
-        characterBibleGet: characterBibleGet(ctx),
+        entityGet: entityGet(ctx),
+        entitySearch: entitySearch(ctx),
         outlineGetStructure: outlineGetStructure(ctx),
         continuityRecordIssue: continuityRecordIssue(ctx),
       };

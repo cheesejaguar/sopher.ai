@@ -15,6 +15,20 @@
       "when": 1785209284778,
       "tag": "0001_shocking_green_goblin",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785275441890,
+      "tag": "0002_loose_mephisto",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785275458792,
+      "tag": "0003_lyrical_shiver_man",
+      "breakpoints": true
     }
   ]
 }

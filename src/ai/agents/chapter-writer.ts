@@ -80,7 +80,8 @@ function draftPrompt(ctx: ChapterWriterCtx, plan: ScenePlan): string {
     `Target length: about ${ctx.targetWords} words. Output plain markdown prose only — no JSON, no notes, no headings other than scene breaks if the style calls for them.`,
     `## Scene plan\n${JSON.stringify(plan, null, 2)}`,
     `## Working method`,
-    `Before writing a scene involving a character, call characterBibleGet for them. When you need an earlier event's details, call storySoFarSearch instead of inventing them. After you finish the draft, call characterBibleUpdate for any character you established new canonical facts about, then stop.`,
+    `Before writing anything involving a person, place, object, organization or event, call entityGet for it — the story bible is canon and you must not contradict it. If you are unsure whether something already exists, call entitySearch before inventing it, so you do not create a near-duplicate under a slightly different name. When you need an earlier event's details, call storySoFarSearch instead of inventing them.`,
+    `If you must introduce something new, derive its name from the entities it relates to: family members share surnames, and heritage governs naming. After you finish the draft, call entityUpsert for anything you established that later chapters must honor, entityRelate for any new relationship, then stop.`,
     `Open with: ${ctx.chapterOutline.openingHook}`,
     `Close with: ${ctx.chapterOutline.closingHook}`,
   ].join("\n\n");

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ENTITY_KINDS } from "./entities";
 
 export const conceptSchema = z.object({
   title: z.string(),
@@ -103,14 +104,30 @@ export type Revision = z.infer<typeof revisionSchema>;
 
 export const chapterSummarySchema = z.object({
   summary: z.string().max(2_000),
+  /**
+   * Entity deltas ride along on the summarizer call that already runs after
+   * every chapter, so per-chapter bible upkeep costs a few hundred output
+   * tokens rather than a second request per chapter.
+   */
   newFacts: z
     .array(
       z.object({
-        character: z.string(),
+        kind: z.enum(ENTITY_KINDS).default("character"),
+        name: z.string(),
         facts: z.array(z.string()).max(8),
       }),
     )
-    .max(10),
+    .max(16),
+  relationships: z
+    .array(
+      z.object({
+        from: z.string(),
+        to: z.string(),
+        type: z.string(),
+      }),
+    )
+    .max(10)
+    .default([]),
   timelineNote: z.string().optional(),
 });
 export type ChapterSummary = z.infer<typeof chapterSummarySchema>;

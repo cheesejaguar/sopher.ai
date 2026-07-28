@@ -9,6 +9,7 @@ import {
   continuityPhaseStep,
   editChapterStep,
   emitCost,
+  entityBibleStep,
   emitProgress,
   finalizeStep,
   markRunStatus,
@@ -67,6 +68,21 @@ export async function generateBook(
         outline = await outlineStep(ref, config, concept, approval.notes);
       }
     }
+
+    // Canon before prose: chapters draft four at a time, so the bible has to
+    // exist before any of them can consult it.
+    await emitProgress(ref, {
+      type: "agent",
+      agent: "entity-bible",
+      message: "Building the story bible",
+    });
+    const bible = await entityBibleStep(ref, config, concept, outline);
+    await emitProgress(ref, {
+      type: "agent",
+      agent: "entity-bible",
+      message: `${bible.entityCount} entities, ${bible.relationshipCount} relationships`,
+    });
+    await emitCost(ref);
 
     const chapterNumbers = outline.chapters.map((c) => c.number);
     const total = chapterNumbers.length;

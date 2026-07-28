@@ -36,7 +36,15 @@ export const runEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("agent"),
-    agent: z.enum(["concept", "outliner", "writer", "editor", "continuity", "summarizer"]),
+    agent: z.enum([
+      "concept",
+      "outliner",
+      "entity-bible",
+      "writer",
+      "editor",
+      "continuity",
+      "summarizer",
+    ]),
     message: z.string(),
     chapterNumber: z.number().int().optional(),
   }),
