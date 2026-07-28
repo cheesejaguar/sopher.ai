@@ -103,15 +103,19 @@ by user):
 
 `budgets` had no rows for either identity. Nothing remains under `dev-user`.
 
-Two harmless leftovers:
+Webhook reconciliation is configured and verified (2026-07-28):
+`https://sopher.ai/api/webhooks/clerk` with `CLERK_WEBHOOK_SIGNING_SECRET`
+regenerated against the new app. Forged and unsigned payloads are rejected with
+`400 Invalid signature` — a `503 Webhook not configured` would mean the secret
+is missing from the running deployment.
 
-- `users` still holds `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` from the deleted Clerk
-  app — 0 projects, orphaned. Safe to delete; left in place to avoid an
-  unnecessary cascade.
-- `CLERK_WEBHOOK_SIGNING_SECRET` belongs to the deleted app and is stale. It is
-  inert (the webhook simply never verifies), but to enable user reconciliation:
-  Clerk dashboard → webhook `https://sopher.ai/api/webhooks/clerk`, events
-  `user.created` + `user.updated`, then update the variable.
+> Env vars are injected at deploy time. After changing
+> `CLERK_WEBHOOK_SIGNING_SECRET`, redeploy — the running functions keep the old
+> value until you do.
+
+One harmless leftover: `users` still holds
+`user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` from the deleted Clerk app — 0 projects,
+orphaned. Safe to delete; left in place to avoid an unnecessary cascade.
 
 ## 2. Decommission the old GKE stack (after soak — no earlier than 2026-08-03)
 
