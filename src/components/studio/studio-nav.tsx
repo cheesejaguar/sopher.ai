@@ -14,27 +14,33 @@ const links = [
   { href: "/studio/usage", label: "Usage" },
 ] as const;
 
-function isActive(pathname: string, href: string): boolean {
+/**
+ * `"page"` only when the link *is* the current page; `"true"` when it merely
+ * owns the current section (e.g. "Projects" while inside a project workspace).
+ * Claiming `aria-current="page"` for a page you are not on misreports location
+ * to screen readers.
+ */
+function currentState(pathname: string, href: string): "page" | "true" | undefined {
+  if (pathname === href) return "page";
   if (href === "/studio") {
-    return (
-      pathname === "/studio" ||
-      pathname.startsWith("/studio/new") ||
-      pathname.startsWith("/projects")
-    );
+    return pathname.startsWith("/studio/new") || pathname.startsWith("/projects")
+      ? "true"
+      : undefined;
   }
-  return pathname === href || pathname.startsWith(`${href}/`);
+  return pathname.startsWith(`${href}/`) ? "true" : undefined;
 }
 
 function NavLinks({ pathname }: { pathname?: string }) {
   return (
     <nav aria-label="Studio" className="flex items-center gap-1">
       {links.map((link) => {
-        const active = pathname !== undefined && isActive(pathname, link.href);
+        const current = pathname !== undefined ? currentState(pathname, link.href) : undefined;
+        const active = current !== undefined;
         return (
           <Link
             key={link.href}
             href={link.href}
-            aria-current={active ? "page" : undefined}
+            aria-current={current}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               active

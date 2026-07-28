@@ -6,7 +6,10 @@ import { cn } from "@/lib/utils";
 
 function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
-    <div data-slot="table-container" className="relative w-full overflow-x-auto">
+    // The container scrolls horizontally at narrow widths and tables rarely
+    // contain focusable cells, so it needs to be reachable by keyboard for the
+    // hidden columns to be readable at all (WCAG 2.1.1).
+    <div data-slot="table-container" tabIndex={0} className="relative w-full overflow-x-auto">
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}

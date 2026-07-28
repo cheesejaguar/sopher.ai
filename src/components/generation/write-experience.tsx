@@ -45,6 +45,19 @@ export function WriteExperience({
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Starting (or restarting) a run unmounts the button that was just pressed,
+  // which would drop keyboard focus to <body>. Move it into the live view
+  // instead so the tab order continues from where the user was. — WCAG 2.4.3
+  const runRef = React.useRef<HTMLDivElement | null>(null);
+  const moveFocusToRun = React.useRef(false);
+
+  React.useEffect(() => {
+    if (snapshot && moveFocusToRun.current) {
+      moveFocusToRun.current = false;
+      runRef.current?.focus();
+    }
+  }, [snapshot]);
+
   async function startRun() {
     setPending(true);
     setError(null);
@@ -58,6 +71,7 @@ export function WriteExperience({
       const runId = (json as { runId?: string } | null)?.runId;
       if ((res.status === 202 || res.status === 409) && runId) {
         // 409 means a run is already active — attach to it instead of erroring.
+        moveFocusToRun.current = true;
         setSnapshot({
           run: { id: runId, status: res.status === 202 ? "queued" : "running", error: null },
           events: [],
@@ -96,20 +110,22 @@ export function WriteExperience({
   }
 
   return (
-    <RunViewer
-      key={snapshot.run.id}
-      runId={snapshot.run.id}
-      projectId={projectId}
-      projectTitle={projectTitle}
-      snapshot={snapshot}
-      titles={titles}
-      tier={tier}
-      estimateUsd={estimateUsd}
-      plannedChapters={targetChapters}
-      onRestart={startRun}
-      restartPending={pending}
-      restartError={error}
-    />
+    <div ref={runRef} tabIndex={-1}>
+      <RunViewer
+        key={snapshot.run.id}
+        runId={snapshot.run.id}
+        projectId={projectId}
+        projectTitle={projectTitle}
+        snapshot={snapshot}
+        titles={titles}
+        tier={tier}
+        estimateUsd={estimateUsd}
+        plannedChapters={targetChapters}
+        onRestart={startRun}
+        restartPending={pending}
+        restartError={error}
+      />
+    </div>
   );
 }
 
@@ -172,7 +188,11 @@ function PreFlight({
             {pending ? <Spinner /> : <PenLine aria-hidden="true" data-icon="inline-start" />}
             Start writing this book
           </Button>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
         </div>
       </section>
 

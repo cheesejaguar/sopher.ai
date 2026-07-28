@@ -61,12 +61,16 @@ export function RunControls({
 
   return (
     <div className="flex items-center justify-between gap-3">
+      {/* The dot is decorative; the word carries the state, and role="status"
+          means a drop to "reconnecting" is announced once, politely. */}
       <span
+        role="status"
         className={cn(
           "flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs",
           connection === "live" ? "text-foreground" : "text-muted-foreground",
         )}
       >
+        <span className="sr-only">Connection: </span>
         <span
           aria-hidden="true"
           className={cn(
@@ -95,7 +99,11 @@ export function RunControls({
               fresh run any time — but this one can&apos;t be resumed.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pending}>Keep writing</AlertDialogCancel>
             <AlertDialogAction variant="destructive" disabled={pending} onClick={cancelRun}>

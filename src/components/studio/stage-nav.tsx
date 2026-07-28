@@ -20,13 +20,23 @@ function StageTabs({ projectId, pathname }: { projectId: string; pathname?: stri
     <div className="flex w-fit items-center gap-1 rounded-lg bg-muted p-1">
       {stages.map((stage) => {
         const href = `/projects/${projectId}/${stage.slug}` as const;
-        const active =
-          pathname !== undefined && (pathname === href || pathname.startsWith(`${href}/`));
+        // `"page"` only for the exact route. A nested route such as
+        // /editor/3 is inside the stage but is not the tab's own page, so it
+        // gets the generic `"true"` rather than mislabelling the location.
+        const current =
+          pathname === undefined
+            ? undefined
+            : pathname === href
+              ? "page"
+              : pathname.startsWith(`${href}/`)
+                ? "true"
+                : undefined;
+        const active = current !== undefined;
         return (
           <Link
             key={stage.slug}
             href={href}
-            aria-current={active ? "page" : undefined}
+            aria-current={current}
             className={cn(
               "inline-flex h-7 items-center rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors",
               active

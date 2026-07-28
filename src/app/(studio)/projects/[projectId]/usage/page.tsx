@@ -64,6 +64,9 @@ async function ProjectUsage({ projectId }: { projectId: string }) {
 function UsageSkeleton() {
   return (
     <>
+      <p role="status" className="sr-only">
+        Loading usage…
+      </p>
       <div className="flex items-baseline justify-between">
         <Skeleton className="h-7 w-24" />
         <Skeleton className="h-5 w-40" />

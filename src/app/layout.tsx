@@ -3,6 +3,7 @@ import { Fraunces, Geist_Mono, Instrument_Sans, Literata } from "next/font/googl
 import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
+import { SkipLink } from "@/components/ui/skip-link";
 import { clerkEnabled } from "@/lib/clerk";
 import "./globals.css";
 
@@ -31,11 +32,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://sopher.ai"),
   title: {
-    default: "sopher.ai — Your brief. A finished book.",
+    default: "sopher.ai — Any book you can imagine, made for the people you love",
     template: "%s · sopher.ai",
   },
   description:
-    "sopher.ai turns an author's brief into a complete, edited manuscript. A team of AI agents plans, drafts, critiques, and checks continuity — while you watch, guide, and refine.",
+    "Describe any book in a sentence — a bedtime story where your dog is the superhero, a mystery set on your street, a family memoir — and a team of AI agents plans it, writes every chapter, and edits the whole manuscript while you watch.",
   openGraph: {
     siteName: "sopher.ai",
     type: "website",
@@ -55,6 +56,7 @@ export default function RootLayout({
       className={`${fraunces.variable} ${literata.variable} ${instrumentSans.variable} ${geistMono.variable}`}
     >
       <body className="min-h-dvh antialiased">
+        <SkipLink />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           {clerkEnabled ? <ClerkProvider>{children}</ClerkProvider> : children}
         </ThemeProvider>

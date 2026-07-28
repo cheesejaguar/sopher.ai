@@ -64,9 +64,12 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
 
 function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
+    // The panel is focusable (Base UI gives the open panel tabIndex=0), so it
+    // must keep the global :focus-visible ring — `outline-none` here left
+    // keyboard focus on the panel completely invisible. — WCAG 2.4.7
     <TabsPrimitive.Panel
       data-slot="tabs-content"
-      className={cn("flex-1 text-sm outline-none", className)}
+      className={cn("flex-1 text-sm", className)}
       {...props}
     />
   );

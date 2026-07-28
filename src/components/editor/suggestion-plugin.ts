@@ -35,8 +35,11 @@ type PluginMeta =
 
 export const suggestionPluginKey = new PluginKey<PluginState>("suggestionHighlights");
 
+// Rendered as <mark> so the dashed underline is not the only signal that a
+// passage carries a suggestion (1.3.1) — `text-inherit` keeps the browser's
+// default mark colour off the manuscript.
 const BASE_CLASS =
-  "cursor-pointer border-b-2 border-dashed border-ai/70 bg-ai-soft/30 transition-colors";
+  "cursor-pointer border-b-2 border-dashed border-ai/70 bg-ai-soft/30 text-inherit transition-colors";
 const HOVER_CLASS = "bg-ai-soft/60";
 const ACTIVE_CLASS = "border-solid border-ai bg-ai-soft/70";
 
@@ -55,6 +58,7 @@ function buildDecorations(
       .join(" ");
     decorations.push(
       Decoration.inline(item.range.from, item.range.to, {
+        nodeName: "mark",
         class: cls,
         "data-suggestion-id": id,
       }),

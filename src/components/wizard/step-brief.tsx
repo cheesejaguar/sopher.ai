@@ -59,9 +59,13 @@ export function StepBrief({
           onChange={(event) => dispatch({ type: "patch", patch: { brief: event.target.value } })}
           placeholder={placeholder}
           rows={10}
+          required
+          aria-describedby="wizard-brief-hint"
           className="prose-manuscript mx-auto mt-6 block w-full resize-none bg-transparent outline-none placeholder:text-paper-muted/70"
         />
+        {/* Deliberately not a live region: it changes on every keystroke. */}
         <p
+          id="wizard-brief-hint"
           className={cn(
             "mt-4 text-center font-mono text-xs tabular-nums",
             briefLength >= MIN_BRIEF_LENGTH ? "text-paper-muted" : "text-paper-muted/70",
@@ -70,6 +74,11 @@ export function StepBrief({
           {briefLength >= MIN_BRIEF_LENGTH
             ? `${briefLength.toLocaleString("en-US")} characters`
             : "A few sentences is enough to start"}
+          <span className="sr-only">
+            {briefLength >= MIN_BRIEF_LENGTH
+              ? ""
+              : ` — at least ${MIN_BRIEF_LENGTH} characters are needed before you can continue`}
+          </span>
         </p>
       </div>
 

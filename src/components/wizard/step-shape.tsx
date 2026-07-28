@@ -127,12 +127,14 @@ export function StepShape({
         <div className="space-y-6">
           <div className="space-y-2.5">
             <div className="flex items-baseline justify-between gap-3">
-              <Label htmlFor="wizard-chapters">Chapters</Label>
+              {/* Base UI renders the real control as an <input type="range"> nested
+                  inside the thumb, so `htmlFor` cannot reach it. `aria-labelledby`
+                  on the root is forwarded to that input and names it correctly. */}
+              <Label id="wizard-chapters-label">Chapters</Label>
               <span className="font-mono text-sm tabular-nums">{state.chapters}</span>
             </div>
             <Slider
-              id="wizard-chapters"
-              aria-label="Chapters"
+              aria-labelledby="wizard-chapters-label"
               min={MIN_CHAPTERS}
               max={MAX_CHAPTERS}
               step={1}
@@ -145,14 +147,13 @@ export function StepShape({
 
           <div className="space-y-2.5">
             <div className="flex items-baseline justify-between gap-3">
-              <Label htmlFor="wizard-words">Words per chapter</Label>
+              <Label id="wizard-words-label">Words per chapter</Label>
               <span className="font-mono text-sm tabular-nums">
                 {state.wordsPerChapter.toLocaleString("en-US")}
               </span>
             </div>
             <Slider
-              id="wizard-words"
-              aria-label="Words per chapter"
+              aria-labelledby="wizard-words-label"
               min={MIN_WORDS_PER_CHAPTER}
               max={MAX_WORDS_PER_CHAPTER}
               step={250}

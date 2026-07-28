@@ -39,7 +39,9 @@ export function AgentFeed({
           Agents at work
         </h3>
       </header>
-      <ol className="max-h-72 space-y-2.5 overflow-y-auto px-4 py-3">
+      {/* Scrollable, so it must be reachable by keyboard. Not a live region:
+          the agents post far too often to announce. */}
+      <ol tabIndex={0} className="max-h-72 space-y-2.5 overflow-y-auto px-4 py-3">
         {newestFirst.length === 0 ? (
           <li className="text-xs text-muted-foreground">Nothing yet — the room is quiet.</li>
         ) : (

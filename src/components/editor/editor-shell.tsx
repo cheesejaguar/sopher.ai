@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useReducer,
   useRef,
@@ -108,6 +109,37 @@ function computeCardPosition(
   }
 }
 
+/** Elements that must stay reachable even while zen mode covers the app. */
+const KEEP_REACHABLE = '[aria-live],[role="dialog"],[role="alertdialog"]';
+
+/**
+ * Zen mode paints a full-screen overlay over the studio chrome, but that chrome
+ * stays in the tab order underneath it — keyboard focus would land on controls
+ * the user cannot see (WCAG 2.4.11). Mark the covered siblings inert while zen
+ * is on. Body-level portals (dialogs, menus) sit outside this walk, and live
+ * regions such as the toaster are skipped explicitly.
+ */
+function hideBehindOverlay(overlay: HTMLElement): () => void {
+  const hidden: HTMLElement[] = [];
+  let node: HTMLElement | null = overlay;
+  while (node?.parentElement && node.parentElement !== document.body) {
+    for (const sibling of Array.from(node.parentElement.children)) {
+      if (sibling === node || !(sibling instanceof HTMLElement) || sibling.inert) continue;
+      if (sibling.matches(KEEP_REACHABLE) || sibling.querySelector(KEEP_REACHABLE)) continue;
+      sibling.inert = true;
+      hidden.push(sibling);
+    }
+    node = node.parentElement;
+  }
+  return () => {
+    for (const el of hidden) el.inert = false;
+  };
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
 async function postJson<T>(url: string, body: unknown): Promise<{ status: number; data: T }> {
   const res = await fetch(url, {
     method: "POST",
@@ -166,6 +198,26 @@ export function EditorShell({
   const [paperEl, setPaperEl] = useState<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const suppressDirtyRef = useRef(false);
+  const zenRef = useRef<HTMLDivElement | null>(null);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  /** Set to a suggestion id when an async result should take focus once it renders. */
+  const focusCardRef = useRef<string | null>(null);
+  const shortcutsId = useId();
+
+  // Polite announcements for async work and its results. Editor content and
+  // streaming text deliberately stay out of here — only outcomes are announced.
+  const [announcement, setAnnouncement] = useState("");
+
+  /** Put focus back on the manuscript when a control unmounted out from under it. */
+  const returnFocusToEditor = useCallback(() => {
+    requestAnimationFrame(() => {
+      const ed = editorRef.current;
+      if (!ed || ed.isDestroyed) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && document.body.contains(active)) return;
+      ed.view.dom.focus();
+    });
+  }, []);
 
   const getMarkdown = useCallback((): string | null => {
     const ed = editorRef.current;
@@ -198,6 +250,7 @@ export function EditorShell({
       attributes: {
         class: "prose-manuscript mx-auto min-h-[50vh] outline-none",
         "aria-label": `Chapter ${chapterNumber} manuscript`,
+        "aria-describedby": shortcutsId,
       },
       nodeViews: { codeBlock: mermaidCodeBlockView },
     },
@@ -283,6 +336,7 @@ export function EditorShell({
       const { from, to, empty } = ed.state.selection;
       if (empty) return;
       setBusy("edit");
+      setAnnouncement("Asking the editor to revise the selection…");
       try {
         if (!(await autosaveRef.current.flush())) {
           toast.error("Couldn't save the chapter before editing — resolve the conflict first.");
@@ -300,6 +354,10 @@ export function EditorShell({
         if (status === 201 && data.suggestion) {
           setSuggestions((prev) => [...prev, data.suggestion]);
           setActiveId(data.suggestion.id);
+          // The toolbar the user was standing on unmounts while busy; hand
+          // focus to the result instead of dropping it on the body.
+          focusCardRef.current = data.suggestion.id;
+          setAnnouncement("A suggestion is ready below the passage.");
         } else if (status === 402) {
           toast.error(String(data.error ?? "Monthly budget reached."));
         } else if (status === 409) {
@@ -321,6 +379,11 @@ export function EditorShell({
       const { from, to, empty } = ed.state.selection;
       if (empty) return;
       setBusy("tool");
+      setAnnouncement(
+        toolId === "mermaid"
+          ? "Generating a diagram from the selection…"
+          : "Generating an illustration from the selection…",
+      );
       try {
         if (!(await autosaveRef.current.flush())) {
           toast.error("Couldn't save the chapter first — resolve the conflict.");
@@ -379,6 +442,7 @@ export function EditorShell({
 
   const rejectSuggestion = useCallback(
     async (id: string) => {
+      const fromCard = !!cardRef.current?.contains(document.activeElement);
       setBusy("apply");
       try {
         const { status } = await postJson<SuggestionActionResponse>(
@@ -388,20 +452,23 @@ export function EditorShell({
         if (status === 200 || status === 409) {
           setSuggestions((prev) => prev.filter((s) => s.id !== id));
           setActiveId((cur) => (cur === id ? null : cur));
+          setAnnouncement("Suggestion dismissed.");
         } else {
           toast.error("Couldn't reject the suggestion — try again.");
         }
       } finally {
         setBusy(null);
+        if (fromCard) returnFocusToEditor();
       }
     },
-    [chapterId],
+    [chapterId, returnFocusToEditor],
   );
 
   const acceptSuggestion = useCallback(
     async (id: string, editedText?: string) => {
       const ed = editorRef.current;
       if (!ed || ed.isDestroyed) return;
+      const fromCard = !!cardRef.current?.contains(document.activeElement);
       setBusy("apply");
       // Freeze typing for the round-trip: a keystroke landing between the
       // flush-serialize and applyServerChapter's setContent would be discarded.
@@ -426,6 +493,7 @@ export function EditorShell({
           void postJson(`/api/chapters/${chapterId}/edits/${id}`, { action: "reject" });
           setSuggestions((prev) => prev.filter((s) => s.id !== id));
           setActiveId((cur) => (cur === id ? null : cur));
+          setAnnouncement("Your edit was applied to the passage.");
           return;
         }
         const { status, data } = await postJson<SuggestionActionResponse & { error?: unknown }>(
@@ -434,6 +502,7 @@ export function EditorShell({
         );
         if (status === 200 && data.chapter) {
           applyServerChapter(data.chapter, data.pending ?? []);
+          setAnnouncement("Suggestion applied to the chapter.");
         } else if (status === 409) {
           toast.error("The passage changed — this suggestion no longer applies.");
           setSuggestions((prev) => prev.filter((s) => s.id !== id));
@@ -444,9 +513,10 @@ export function EditorShell({
       } finally {
         if (!ed.isDestroyed) ed.setEditable(true);
         setBusy(null);
+        if (fromCard) returnFocusToEditor();
       }
     },
-    [applyServerChapter, chapterId],
+    [applyServerChapter, chapterId, returnFocusToEditor],
   );
 
   const acceptAll = useCallback(async () => {
@@ -500,6 +570,7 @@ export function EditorShell({
       );
       setSuggestions([]);
       setActiveId(null);
+      setAnnouncement(`Dismissed ${ids.length} suggestion${ids.length === 1 ? "" : "s"}.`);
     } finally {
       setBusy(null);
     }
@@ -508,6 +579,7 @@ export function EditorShell({
   const runReview = useCallback(
     async (instruction?: string) => {
       setBusy("review");
+      setAnnouncement(`The editor is reading chapter ${chapterNumber}…`);
       try {
         if (!(await autosaveRef.current.flush())) {
           toast.error("Couldn't save the chapter first — resolve the conflict.");
@@ -529,6 +601,13 @@ export function EditorShell({
           const seen = new Set(prev.map((s) => s.id));
           return [...prev, ...data.suggestions.filter((s) => !seen.has(s.id))];
         });
+        setAnnouncement(
+          data.suggestions.length === 0
+            ? "Review complete. Nothing flagged."
+            : `Review complete. ${data.suggestions.length} suggestion${
+                data.suggestions.length === 1 ? "" : "s"
+              } in the suggestions panel.`,
+        );
         if (data.skipped > 0) {
           toast.info(
             `${data.skipped} suggestion${data.skipped === 1 ? "" : "s"} couldn't be anchored and were skipped.`,
@@ -541,7 +620,7 @@ export function EditorShell({
         setBusy(null);
       }
     },
-    [chapterId],
+    [chapterId, chapterNumber],
   );
 
   const selectSuggestion = useCallback((id: string) => {
@@ -554,24 +633,53 @@ export function EditorShell({
       try {
         const dom = ed.view.domAtPos(item.range.from);
         const el = dom.node instanceof HTMLElement ? dom.node : dom.node.parentElement;
-        el?.scrollIntoView({ block: "center", behavior: "smooth" });
+        el?.scrollIntoView({
+          block: "center",
+          // scrollIntoView's explicit behaviour overrides the global
+          // reduced-motion CSS, so opt out here too.
+          behavior: prefersReducedMotion() ? "auto" : "smooth",
+        });
       } catch {
         // Position no longer resolvable; the panel still shows the card.
       }
     }
   }, []);
 
+  /** Close the inline card and keep focus on the manuscript rather than losing it. */
+  const dismissCard = useCallback(() => {
+    const fromCard = !!cardRef.current?.contains(document.activeElement);
+    setActiveId(null);
+    if (fromCard) returnFocusToEditor();
+  }, [returnFocusToEditor]);
+
   const toggleZen = useCallback(() => {
     router.replace((zen ? pathname : `${pathname}?zen=1`) as Route, { scroll: false });
   }, [pathname, router, zen]);
 
   // Keyboard: ⌘S save, ⌘⏎ accept active, ⌘⌫ reject active, Esc exits zen/card.
-  const keysRef = useRef({ zen, activeId, toggleZen, acceptSuggestion, rejectSuggestion });
+  const keysRef = useRef({
+    zen,
+    activeId,
+    toggleZen,
+    acceptSuggestion,
+    rejectSuggestion,
+    dismissCard,
+  });
   useEffect(() => {
-    keysRef.current = { zen, activeId, toggleZen, acceptSuggestion, rejectSuggestion };
+    keysRef.current = {
+      zen,
+      activeId,
+      toggleZen,
+      acceptSuggestion,
+      rejectSuggestion,
+      dismissCard,
+    };
   });
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // A popover, menu or dialog that already handled the key (typically
+      // Escape) owns it — don't also close the card or drop out of zen.
+      if (event.defaultPrevented) return;
       const k = keysRef.current;
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.key.toLowerCase() === "s") {
@@ -594,13 +702,44 @@ export function EditorShell({
           event.preventDefault();
           k.toggleZen();
         } else if (k.activeId) {
-          setActiveId(null);
+          event.preventDefault();
+          k.dismissCard();
         }
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // Entering or leaving zen re-parents the editor's DOM, which drops focus on
+  // the floor. Put it back on the manuscript when nothing else claimed it.
+  const zenMountedRef = useRef(false);
+  useEffect(() => {
+    if (!zenMountedRef.current) {
+      zenMountedRef.current = true;
+      return;
+    }
+    returnFocusToEditor();
+  }, [zen, returnFocusToEditor]);
+
+  useEffect(() => {
+    if (!zen || !zenRef.current) return;
+    return hideBehindOverlay(zenRef.current);
+  }, [zen]);
+
+  // Move focus onto a suggestion card that arrived from an async request.
+  useEffect(() => {
+    const wanted = focusCardRef.current;
+    if (!wanted) return;
+    if (wanted !== activeId) {
+      focusCardRef.current = null;
+      return;
+    }
+    const el = cardRef.current;
+    if (!el) return;
+    focusCardRef.current = null;
+    el.focus();
+  });
 
   if (!isDesktop) {
     return <MobileInterstitial projectId={projectId} />;
@@ -618,10 +757,19 @@ export function EditorShell({
             <p className="font-mono text-[10px] tracking-widest text-paper-muted uppercase">
               Chapter {chapterNumber}
             </p>
-            <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-balance">
+            <h2 className="mt-1 font-display text-2xl font-semibold tracking-tight text-balance">
               {chapterTitle ?? `Chapter ${chapterNumber}`}
-            </h1>
+            </h2>
           </header>
+
+          {/* Keyboard help, announced when focus enters the manuscript. */}
+          <p id={shortcutsId} className="sr-only">
+            Rich text editor. Select a passage and press Tab to reach the AI editing tools. Press
+            Control or Command S to save. When a suggestion is selected, press Control or Command
+            Enter to accept it and Control or Command Backspace to reject it. Press Escape to close
+            a suggestion or leave zen mode. Every suggestion is also listed in the suggestions
+            panel.
+          </p>
 
           <EditorContent editor={editor} />
 
@@ -636,6 +784,10 @@ export function EditorShell({
 
           {activeSuggestion && cardPos ? (
             <div
+              ref={cardRef}
+              role="group"
+              aria-label="Editor suggestion"
+              tabIndex={-1}
               className="absolute z-20 w-96 max-w-[calc(100%-2rem)]"
               style={{ top: cardPos.top, left: cardPos.left }}
             >
@@ -646,7 +798,7 @@ export function EditorShell({
                 onAccept={() => void acceptSuggestion(activeSuggestion.id)}
                 onAcceptEdited={(text) => void acceptSuggestion(activeSuggestion.id, text)}
                 onReject={() => void rejectSuggestion(activeSuggestion.id)}
-                onDismiss={() => setActiveId(null)}
+                onDismiss={dismissCard}
               />
             </div>
           ) : null}
@@ -688,7 +840,7 @@ export function EditorShell({
   return (
     <>
       {zen ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background">
+        <div ref={zenRef} className="fixed inset-0 z-50 flex flex-col bg-background">
           <div className="min-h-0 flex-1 overflow-hidden">{canvas}</div>
           {statusBar}
         </div>
@@ -756,6 +908,11 @@ export function EditorShell({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Outcomes only — never the manuscript or streaming text. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
 
       <Toaster position="bottom-center" />
     </>

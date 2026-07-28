@@ -74,7 +74,10 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
               {new Intl.NumberFormat("en-US").format(project.wordCount)} words
             </span>
           </div>
-          <Progress value={progress} aria-label="Chapters completed" />
+          <Progress
+            value={progress}
+            aria-label={`Chapters completed: ${project.chaptersDone} of ${project.chaptersTotal}`}
+          />
         </CardContent>
         <CardFooter className="justify-between text-xs">
           <span className="font-mono tabular-nums">

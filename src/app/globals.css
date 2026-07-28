@@ -376,3 +376,68 @@
     opacity: 1;
   }
 }
+
+/*
+  Windows High Contrast / forced-colors mode.
+
+  These rules are intentionally unlayered so they win over Tailwind's `utilities`
+  layer. Only states that would otherwise become *invisible* are restored — the
+  rest of the design system degrades to system colors as intended.
+*/
+@media (forced-colors: active) {
+  /*
+    Focus indicators across the design system are box-shadow rings (`ring-*`),
+    which forced-colors strips, and most primitives clear the native ring with
+    Tailwind's `outline-none` (which, unlike `outline-hidden`, has no
+    forced-colors fallback). Without this, keyboard focus is invisible on every
+    button, input, textarea, select, switch, toggle and radio. — WCAG 2.4.7
+  */
+  :focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /*
+    Current/selected states are painted with background colors only, which
+    forced-colors flattens to Canvas — the active nav item, stage tab and menu
+    highlight would be indistinguishable from their siblings. — WCAG 1.4.1
+  */
+  [aria-current]:not([aria-current="false"]),
+  [data-slot="tabs-trigger"][data-active],
+  [data-slot="select-item"][data-selected],
+  [data-slot="dropdown-menu-item"]:focus {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  /* Switch: track, thumb and checked state are all background colors. */
+  [data-slot="switch"] {
+    border-color: CanvasText;
+  }
+  [data-slot="switch"][data-checked] {
+    background-color: Highlight;
+  }
+  [data-slot="switch-thumb"] {
+    background-color: CanvasText;
+  }
+  [data-slot="switch"][data-checked] [data-slot="switch-thumb"] {
+    background-color: HighlightText;
+  }
+
+  /* Radio: checked fill and inner dot are background colors. */
+  [data-slot="radio-group-item"][data-checked] {
+    background-color: Highlight;
+    border-color: Highlight;
+  }
+  [data-slot="radio-group-indicator"] > span {
+    background-color: HighlightText;
+  }
+
+  /* Progress: the filled portion is otherwise the same colour as the track. */
+  [data-slot="progress-track"] {
+    outline: 1px solid CanvasText;
+  }
+  [data-slot="progress-indicator"] {
+    background-color: Highlight;
+  }
+}

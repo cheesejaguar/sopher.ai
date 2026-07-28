@@ -84,6 +84,7 @@ export function LiveDraftPane({
                 />
               ) : null}
               Chapter {n}
+              {live ? <span className="sr-only"> (drafting now)</span> : null}
             </TabsTrigger>
           );
         })}
@@ -158,6 +159,11 @@ function ChapterProseView({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        // A scrollable box must be reachable by keyboard, and a bare <div>
+        // cannot carry an accessible name — hence role="region" + tabIndex.
+        // Deliberately NOT a live region: prose arrives token by token.
+        role="region"
+        tabIndex={0}
         aria-label={`Chapter ${chapterNumber} draft`}
         className="paper-surface max-h-[32rem] min-h-72 overflow-y-auto px-6 py-8 sm:px-10"
       >

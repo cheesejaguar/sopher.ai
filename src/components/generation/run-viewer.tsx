@@ -14,7 +14,43 @@ import { CostTicker } from "@/components/generation/cost-ticker";
 import { RunControls } from "@/components/generation/run-controls";
 import { ApprovalBanner } from "@/components/generation/approval-banner";
 import { CompletionMoment } from "@/components/generation/completion-moment";
+import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
+
+/**
+ * One short sentence per stage. Deliberately excludes the percentage, the cost
+ * ticker and the prose stream: those change many times a second and would turn
+ * the live region into noise. Only stage changes (and the drafted-chapter
+ * count) alter this string, so assistive tech hears each milestone once.
+ */
+function announcementFor(stage: Stage, draftedCount: number, plannedTotal: number): string {
+  switch (stage) {
+    case "queued":
+      return "Run queued. Waiting for the agents to start.";
+    case "concept":
+      return "Developing the concept.";
+    case "outline":
+      return "Writing the outline.";
+    case "awaiting_approval":
+      return "Paused. The outline is ready for your approval.";
+    case "chapters":
+      return `Drafting chapters: ${draftedCount} of ${plannedTotal} done.`;
+    case "editing":
+      return "Editing the chapters.";
+    case "continuity":
+      return "Checking continuity across the book.";
+    case "revising":
+      return "Revising against the continuity notes.";
+    case "finalizing":
+      return "Finishing the manuscript.";
+    case "done":
+      return "The book is written.";
+    case "failed":
+      return "The run failed.";
+    case "cancelled":
+      return "The run was stopped.";
+  }
+}
 
 /**
  * The live run experience. Every visual state derives from actual run events
@@ -56,10 +92,16 @@ export function RunViewer({
     [state.chapters],
   );
   const draftingCount = railChapters.filter((c) => c.status === "drafting").length;
+  const draftedCount = railChapters.filter(
+    (c) => c.status !== "planned" && c.status !== "drafting",
+  ).length;
   const plannedTotal = Math.max(railChapters.length, plannedChapters);
+  const announcement = announcementFor(state.stage, draftedCount, plannedTotal);
+
+  let content: React.ReactNode;
 
   if (state.stage === "done") {
-    return (
+    content = (
       <CompletionMoment
         projectId={projectId}
         projectTitle={projectTitle}
@@ -72,10 +114,8 @@ export function RunViewer({
         }
       />
     );
-  }
-
-  if (state.stage === "failed") {
-    return (
+  } else if (state.stage === "failed") {
+    content = (
       <EndCard
         icon={<CircleAlert aria-hidden="true" className="size-5 text-destructive" />}
         title="The run hit a wall."
@@ -89,10 +129,8 @@ export function RunViewer({
         error={restartError}
       />
     );
-  }
-
-  if (state.stage === "cancelled") {
-    return (
+  } else if (state.stage === "cancelled") {
+    content = (
       <EndCard
         icon={<OctagonX aria-hidden="true" className="size-5 text-muted-foreground" />}
         title="You stopped this run."
@@ -103,52 +141,66 @@ export function RunViewer({
         error={restartError}
       />
     );
-  }
+  } else {
+    content = (
+      <div className="space-y-4">
+        <StageTimeline
+          stage={state.stage}
+          pct={state.pct}
+          detail={state.detail}
+          tier={tier}
+          draftingCount={draftingCount}
+          plannedTotal={plannedTotal}
+        />
 
-  return (
-    <div className="space-y-4">
-      <StageTimeline
-        stage={state.stage}
-        pct={state.pct}
-        detail={state.detail}
-        tier={tier}
-        draftingCount={draftingCount}
-        plannedTotal={plannedTotal}
-      />
+        {state.stage === "awaiting_approval" ? <ApprovalBanner projectId={projectId} /> : null}
 
-      {state.stage === "awaiting_approval" ? <ApprovalBanner projectId={projectId} /> : null}
+        {state.error && !state.error.fatal ? (
+          <p
+            role="alert"
+            className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          >
+            <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+            {state.error.message}
+          </p>
+        ) : null}
 
-      {state.error && !state.error.fatal ? (
-        <p className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
-          {state.error.message}
-        </p>
-      ) : null}
+        <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
+          <div className="min-w-0 space-y-4">
+            {railChapters.length > 0 ? (
+              <FolioRail chapters={railChapters} orientation="horizontal" className="flex-wrap" />
+            ) : null}
+            <LiveDraftPane
+              chapters={state.chapters}
+              titles={titles}
+              stage={state.stage}
+              subscribeChapterProse={subscribeChapterProse}
+            />
+          </div>
 
-      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="min-w-0 space-y-4">
-          {railChapters.length > 0 ? (
-            <FolioRail chapters={railChapters} orientation="horizontal" className="flex-wrap" />
-          ) : null}
-          <LiveDraftPane
-            chapters={state.chapters}
-            titles={titles}
-            stage={state.stage}
-            subscribeChapterProse={subscribeChapterProse}
-          />
-        </div>
-
-        <div className="space-y-4">
-          <CostTicker totalUsd={state.totalUsd} estimateUsd={estimateUsd} />
-          <AgentFeed items={state.agentFeed} connection={state.connection} />
-          <RunControls
-            projectId={projectId}
-            connection={state.connection}
-            onCancelled={markCancelled}
-          />
+          <div className="space-y-4">
+            <CostTicker totalUsd={state.totalUsd} estimateUsd={estimateUsd} />
+            <AgentFeed items={state.agentFeed} connection={state.connection} />
+            <RunControls
+              projectId={projectId}
+              connection={state.connection}
+              onCancelled={markCancelled}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    );
+  }
+
+  // The live region is mounted in every branch, so it exists before its text
+  // ever changes: silent on first paint, one polite sentence per milestone.
+  return (
+    <>
+      <p role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </p>
+      {content}
+    </>
   );
 }
 
@@ -180,7 +232,11 @@ function EndCard({
         {pending ? <Spinner /> : null}
         {actionLabel}
       </Button>
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
     </section>
   );
 }

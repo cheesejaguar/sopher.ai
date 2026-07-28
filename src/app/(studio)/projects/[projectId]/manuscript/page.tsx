@@ -103,9 +103,11 @@ export default async function ManuscriptPage({
                 {project.genre}
               </p>
             ) : null}
-            <h3 className="mt-5 font-display text-4xl font-semibold text-balance text-paper-foreground sm:text-5xl">
+            {/* h2, not h3: the chapter heading further down is an h2, and a
+                title page that reads as its subordinate inverts the outline. */}
+            <h2 className="mt-5 font-display text-4xl font-semibold text-balance text-paper-foreground sm:text-5xl">
               {book.title}
-            </h3>
+            </h2>
             {book.synopsis ? (
               <p className="mx-auto mt-6 max-w-prose font-serif text-paper-muted">
                 {book.synopsis}

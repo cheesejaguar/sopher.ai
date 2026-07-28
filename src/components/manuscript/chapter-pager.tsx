@@ -25,7 +25,8 @@ export function ChapterPager({
           href={`/projects/${projectId}/manuscript?chapter=${previous.number}` as Route}
           className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "max-w-[45%]")}
         >
-          <ChevronLeft data-icon="inline-start" />
+          <ChevronLeft aria-hidden="true" data-icon="inline-start" />
+          <span className="sr-only">Previous chapter: </span>
           <span className="truncate">{previous.title}</span>
         </Link>
       ) : (
@@ -36,8 +37,9 @@ export function ChapterPager({
           href={`/projects/${projectId}/manuscript?chapter=${next.number}` as Route}
           className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "max-w-[45%]")}
         >
+          <span className="sr-only">Next chapter: </span>
           <span className="truncate">{next.title}</span>
-          <ChevronRight data-icon="inline-end" />
+          <ChevronRight aria-hidden="true" data-icon="inline-end" />
         </Link>
       ) : (
         <span aria-hidden="true" />

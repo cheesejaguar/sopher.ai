@@ -56,6 +56,10 @@ const PRESETS: { key: string; label: string; icon: typeof Sparkles; instruction:
 /**
  * The bubble menu over a text selection: preset AI edits, a custom
  * instruction, and content tools (diagram / illustration) in the overflow.
+ *
+ * The menu element is appended right after the ProseMirror editable, so Tab
+ * from the manuscript lands on it — `role="group"` and a name make that stop
+ * meaningful, and the plugin keeps the menu open while focus is inside it.
  */
 export function SelectionToolbar({
   editor,
@@ -86,11 +90,13 @@ export function SelectionToolbar({
       updateDelay={150}
       shouldShow={({ editor: ed, state }) => ed.isEditable && !state.selection.empty}
       options={{ placement: "top", offset: 8 }}
+      role="group"
+      aria-label="AI tools for the selected passage"
       className="z-30 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md"
     >
       {busy ? (
-        <span className="flex items-center gap-2 px-2 py-1 text-xs text-ai">
-          <Spinner className="size-3.5" />
+        <span role="status" className="flex items-center gap-2 px-2 py-1 text-xs text-ai">
+          <Spinner aria-hidden="true" className="size-3.5" />
           Working on it…
         </span>
       ) : (

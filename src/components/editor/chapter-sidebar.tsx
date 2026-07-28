@@ -57,12 +57,17 @@ export function ChapterSidebar({
               const inner = (
                 <>
                   <span
-                    aria-hidden="true"
                     className={cn(
                       "size-1.5 shrink-0 rounded-full",
                       chapterStatusDotClasses[chapter.status],
                     )}
-                  />
+                  >
+                    {/* Drafted rows show a word count, so the dot's colour is
+                        the only carrier of the status — name it for AT. */}
+                    {drafted ? (
+                      <span className="sr-only">{chapterStatusLabels[chapter.status]}.</span>
+                    ) : null}
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-xs font-medium">
                       {chapter.chapterNumber}. {chapter.title ?? "Untitled"}

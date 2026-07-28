@@ -32,22 +32,36 @@ export function RoleTable({ rows }: { rows: RoleSpendRow[] }) {
   }
 
   return (
-    <Table>
+    <Table aria-label="Spend by agent role and model">
       <TableHeader>
         <TableRow>
-          <TableHead>Role</TableHead>
-          <TableHead className="hidden lg:table-cell">Model</TableHead>
-          <TableHead className="text-right">Calls</TableHead>
-          <TableHead className="hidden text-right sm:table-cell">Input</TableHead>
-          <TableHead className="hidden text-right sm:table-cell">Output</TableHead>
-          <TableHead className="hidden text-right md:table-cell">Cached (90% off)</TableHead>
-          <TableHead className="text-right">Cost</TableHead>
+          <TableHead scope="col">Role</TableHead>
+          <TableHead scope="col" className="hidden lg:table-cell">
+            Model
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Calls
+          </TableHead>
+          <TableHead scope="col" className="hidden text-right sm:table-cell">
+            Input
+          </TableHead>
+          <TableHead scope="col" className="hidden text-right sm:table-cell">
+            Output
+          </TableHead>
+          <TableHead scope="col" className="hidden text-right md:table-cell">
+            Cached (90% off)
+          </TableHead>
+          <TableHead scope="col" className="text-right">
+            Cost
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
           <TableRow key={`${row.agentRole}-${row.model}`}>
-            <TableCell className="font-medium capitalize">{row.agentRole}</TableCell>
+            <TableHead scope="row" className="h-auto p-2 font-medium capitalize">
+              {row.agentRole}
+            </TableHead>
             <TableCell className="hidden font-mono text-xs text-muted-foreground lg:table-cell">
               {row.model}
             </TableCell>
@@ -71,7 +85,9 @@ export function RoleTable({ rows }: { rows: RoleSpendRow[] }) {
       </TableBody>
       <TableFooter>
         <TableRow>
-          <TableCell>Total</TableCell>
+          <TableHead scope="row" className="h-auto p-2">
+            Total
+          </TableHead>
           <TableCell className="hidden lg:table-cell" />
           <TableCell />
           <TableCell className="hidden sm:table-cell" />

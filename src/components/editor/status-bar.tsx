@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { useEditorState, type Editor } from "@tiptap/react";
 import { AlertTriangle, Check, Maximize2, MessageSquareText, Minimize2 } from "lucide-react";
 
@@ -13,11 +14,39 @@ import type { SaveState } from "./use-autosave";
 
 const READING_WPM = 230;
 
+/**
+ * Announcements for the save state. "Unsaved changes" and "Saving…" are
+ * transient and would chatter on every keystroke pause, so only the settled
+ * outcomes are announced.
+ */
+const settledSaveMessages: Partial<Record<SaveState, string>> = {
+  saved: "Chapter saved.",
+  conflict: "Save conflict — this chapter changed somewhere else.",
+  error: "Save failed. Retrying on your next edit.",
+};
+
+function SaveAnnouncer({ state }: { state: SaveState }) {
+  const [message, setMessage] = useState("");
+  const previous = useRef<SaveState>(state);
+
+  useEffect(() => {
+    if (previous.current === state) return;
+    previous.current = state;
+    setMessage(settledSaveMessages[state] ?? "");
+  }, [state]);
+
+  return (
+    <span role="status" aria-live="polite" className="sr-only">
+      {message}
+    </span>
+  );
+}
+
 function SaveIndicator({ state }: { state: SaveState }) {
   if (state === "saving") {
     return (
       <span className="flex items-center gap-1.5 text-muted-foreground">
-        <Spinner className="size-3" /> Saving…
+        <Spinner aria-hidden="true" className="size-3" /> Saving…
       </span>
     );
   }
@@ -75,6 +104,7 @@ export function StatusBar({
       <div className="flex h-9 shrink-0 items-center justify-between gap-4 border-t border-border bg-card px-3 text-xs">
         <div className="flex min-w-0 items-center gap-3">
           <SaveIndicator state={saveState} />
+          <SaveAnnouncer state={saveState} />
         </div>
 
         <p className="hidden font-mono text-muted-foreground tabular-nums sm:block">
@@ -96,6 +126,7 @@ export function StatusBar({
               {pendingCount > 0 ? (
                 <span className="rounded-full bg-ai-soft px-1.5 font-mono text-[10px] text-ai tabular-nums">
                   {pendingCount}
+                  <span className="sr-only"> pending</span>
                 </span>
               ) : null}
             </Button>

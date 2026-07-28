@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { BookOpenCheck, Check, SlidersHorizontal, Sparkles, Unlink, X } from "lucide-react";
 
 import {
@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { SuggestionDTO } from "@/lib/editor/types";
 
-import { suggestionTypeLabel } from "./suggestion-card";
+import { severityLabels, suggestionTypeLabel } from "./suggestion-card";
 
 const severityRank: Record<SuggestionDTO["severity"], number> = {
   error: 0,
@@ -58,9 +58,14 @@ function groupSuggestions(suggestions: SuggestionDTO[]): [string, SuggestionDTO[
   );
 }
 
+/**
+ * Placeholder while a review runs. Not a live region: the region is created at
+ * the same moment as its content so nothing would be announced anyway — the
+ * editor shell owns the polite announcement for review start and completion.
+ */
 function ReviewingState({ chapterNumber }: { chapterNumber: number }) {
   return (
-    <div className="space-y-3 p-4" aria-live="polite">
+    <div className="space-y-3 p-4" aria-busy="true">
       <p className="flex items-center gap-2 text-xs text-ai">
         <span
           aria-hidden="true"
@@ -69,7 +74,11 @@ function ReviewingState({ chapterNumber }: { chapterNumber: number }) {
         The editor is reading chapter {chapterNumber}…
       </p>
       {Array.from({ length: 3 }).map((_, i) => (
-        <div key={i} className="space-y-2 rounded-lg border border-ai/20 bg-ai-soft/20 p-3">
+        <div
+          key={i}
+          aria-hidden="true"
+          className="space-y-2 rounded-lg border border-ai/20 bg-ai-soft/20 p-3"
+        >
           <Skeleton className="h-3 w-24" />
           <Skeleton className="h-3 w-full" />
           <Skeleton className="h-3 w-3/4" />
@@ -107,6 +116,10 @@ function SuggestionRow({
       )}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
+      // Focus events bubble, so keyboard users get the same in-text highlight
+      // that hovering the row gives mouse users.
+      onFocus={() => onHover(true)}
+      onBlur={() => onHover(false)}
     >
       <button
         type="button"
@@ -115,12 +128,13 @@ function SuggestionRow({
       >
         <span className="flex items-center gap-1.5">
           <span
-            aria-hidden="true"
             className={cn(
               "size-1.5 shrink-0 rounded-full",
               severityDotClasses[suggestion.severity],
             )}
-          />
+          >
+            <span className="sr-only">{severityLabels[suggestion.severity]}.</span>
+          </span>
           <span className="text-[11px] font-medium text-muted-foreground">
             {suggestionTypeLabel(suggestion.suggestionType)}
           </span>
@@ -131,10 +145,10 @@ function SuggestionRow({
           ) : null}
         </span>
         <span className="mt-1 line-clamp-2 block font-serif text-xs leading-relaxed">
-          <span className="text-muted-foreground line-through decoration-destructive/40">
+          <del className="text-muted-foreground line-through decoration-destructive/40">
             {suggestion.anchor.originalText}
-          </span>{" "}
-          <span className="text-ai">{suggestion.suggestedText}</span>
+          </del>{" "}
+          <ins className="text-ai no-underline">{suggestion.suggestedText}</ins>
         </span>
         <span className="mt-1 line-clamp-2 block text-[11px] leading-relaxed text-muted-foreground">
           {suggestion.explanation}
@@ -188,6 +202,28 @@ export function ReviewPanel({
   const [instruction, setInstruction] = useState("");
   const [focusOpen, setFocusOpen] = useState(false);
   const count = suggestions.length;
+  const focusLabelId = useId();
+  const listRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef(false);
+
+  // Resolving a suggestion unmounts the row its button lived on. Catch the
+  // dropped focus and park it on the list so keyboard users keep their place.
+  useEffect(() => {
+    if (!restoreFocusRef.current) return;
+    restoreFocusRef.current = false;
+    // A frame late, so a closing dialog gets first refusal on the focus.
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && document.body.contains(active)) return;
+      listRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [suggestions]);
+
+  function resolving(action: () => void) {
+    restoreFocusRef.current = true;
+    action();
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -196,6 +232,7 @@ export function ReviewPanel({
         {count > 0 ? (
           <span className="rounded-full bg-ai-soft px-1.5 font-mono text-[10px] text-ai tabular-nums">
             {count}
+            <span className="sr-only"> pending</span>
           </span>
         ) : null}
         <div className="ml-auto flex items-center gap-1">
@@ -205,7 +242,11 @@ export function ReviewPanel({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  aria-label="Set a focus for the review"
+                  // The tinted icon is the only visual cue that a focus is
+                  // set; carry that state in the name too.
+                  aria-label={
+                    instruction ? "Review focus set — change it" : "Set a focus for the review"
+                  }
                   className={cn(instruction && "text-ai")}
                 />
               }
@@ -213,12 +254,15 @@ export function ReviewPanel({
               <SlidersHorizontal aria-hidden="true" className="size-3.5" />
             </PopoverTrigger>
             <PopoverContent align="end" className="w-72 p-3">
-              <p className="mb-2 text-xs font-medium">Focus this review (optional)</p>
+              <p id={focusLabelId} className="mb-2 text-xs font-medium">
+                Focus this review (optional)
+              </p>
               <Input
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 placeholder="e.g. dialogue rhythm, pacing in the middle"
                 className="h-8 text-xs"
+                aria-labelledby={focusLabelId}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") setFocusOpen(false);
                 }}
@@ -237,7 +281,13 @@ export function ReviewPanel({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={listRef}
+        role="group"
+        tabIndex={-1}
+        aria-label="Suggestion list"
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {reviewing ? (
           <ReviewingState chapterNumber={chapterNumber} />
         ) : count === 0 ? (
@@ -265,8 +315,8 @@ export function ReviewPanel({
                       busy={busy}
                       onSelect={() => onSelect(s.id)}
                       onHover={(h) => onHover(h ? s.id : null)}
-                      onAccept={() => onAccept(s.id)}
-                      onReject={() => onReject(s.id)}
+                      onAccept={() => resolving(() => onAccept(s.id))}
+                      onReject={() => resolving(() => onReject(s.id))}
                     />
                   ))}
                 </ul>
@@ -292,7 +342,7 @@ export function ReviewPanel({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onAcceptAll}>
+                <AlertDialogAction onClick={() => resolving(onAcceptAll)}>
                   Accept {count} suggestion{count === 1 ? "" : "s"}
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -313,7 +363,7 @@ export function ReviewPanel({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onRejectAll}>
+                <AlertDialogAction onClick={() => resolving(onRejectAll)}>
                   Reject {count} suggestion{count === 1 ? "" : "s"}
                 </AlertDialogAction>
               </AlertDialogFooter>

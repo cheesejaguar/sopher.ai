@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "sopher.ai — Your brief. A finished book.";
+export const alt = "sopher.ai — Any book you can imagine, made for the people you love";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -47,7 +47,7 @@ export default function OpengraphImage() {
           letterSpacing: "-0.01em",
         }}
       >
-        Your brief. A finished book.
+        Any book you can imagine.
       </div>
     </div>,
     { ...size },
