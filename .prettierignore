@@ -4,3 +4,5 @@ pnpm-lock.yaml
 drizzle
 .agents
 .claude
+doc
+src/app/.well-known
