@@ -85,8 +85,7 @@ export async function generateBook(
 
     if (config.tier !== "draft") {
       await emitProgress(ref, { type: "stage", stage: "editing", pct: 72 });
-      const gateList =
-        config.tier === "premium" ? chapterNumbers : await readQualityGate(ref, 0.7);
+      const gateList = config.tier === "premium" ? chapterNumbers : await readQualityGate(ref, 0.7);
       for (const wave of chunk(gateList, config.waveSize)) {
         await Promise.all(wave.map((n) => editChapterStep(ref, config, n)));
       }
@@ -105,12 +104,12 @@ export async function generateBook(
     if (config.tier !== "draft" && report.score < 0.7 && report.worstChapters.length > 0) {
       await emitProgress(ref, { type: "stage", stage: "revising", pct: 92 });
       const issueNotes = report.issues
-        .map((i) => `[${i.severity}] ch ${i.chapters.join(",")}: ${i.description} → ${i.suggestedFix}`)
+        .map(
+          (i) => `[${i.severity}] ch ${i.chapters.join(",")}: ${i.description} → ${i.suggestedFix}`,
+        )
         .join("\n");
       await Promise.all(
-        report.worstChapters
-          .slice(0, 3)
-          .map((n) => editChapterStep(ref, config, n, issueNotes)),
+        report.worstChapters.slice(0, 3).map((n) => editChapterStep(ref, config, n, issueNotes)),
       );
       await emitCost(ref);
     }

@@ -46,7 +46,8 @@ export type RunStreamState = {
   connection: RunConnection;
 };
 
-export type RunStatus = "queued" | "running" | "awaiting_input" | "completed" | "failed" | "cancelled";
+export type RunStatus =
+  "queued" | "running" | "awaiting_input" | "completed" | "failed" | "cancelled";
 
 /** Page-load snapshot (run row + persisted progress events + DB chapter statuses). */
 export type RunSnapshot = {

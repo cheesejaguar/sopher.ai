@@ -92,7 +92,10 @@ describe("manuscriptToMarkdown", () => {
 
   it("omits the synopsis line when absent", () => {
     const md = manuscriptToMarkdown(
-      buildManuscript({ title: "Untitled", chapters: [{ number: 1, title: null, content: "Hi." }] }),
+      buildManuscript({
+        title: "Untitled",
+        chapters: [{ number: 1, title: null, content: "Hi." }],
+      }),
     );
     expect(md.startsWith("# Untitled\n\nWritten with sopher.ai\n")).toBe(true);
   });

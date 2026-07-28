@@ -97,9 +97,7 @@ export default async function ManuscriptPage({
 
       <div className="paper-surface px-6 py-12 sm:px-12 sm:py-16">
         {isOpening ? (
-          <header
-            className="mx-auto max-w-2xl py-10 text-center sm:py-16 [content-visibility:auto]"
-          >
+          <header className="mx-auto max-w-2xl py-10 text-center sm:py-16 [content-visibility:auto]">
             {project.genre ? (
               <p className="font-sans text-xs tracking-[0.25em] text-paper-muted uppercase">
                 {project.genre}
@@ -141,11 +139,16 @@ export default async function ManuscriptPage({
         projectId={projectId}
         previous={
           previous
-            ? { number: previous.chapterNumber, title: previous.title ?? `Chapter ${previous.chapterNumber}` }
+            ? {
+                number: previous.chapterNumber,
+                title: previous.title ?? `Chapter ${previous.chapterNumber}`,
+              }
             : null
         }
         next={
-          next ? { number: next.chapterNumber, title: next.title ?? `Chapter ${next.chapterNumber}` } : null
+          next
+            ? { number: next.chapterNumber, title: next.title ?? `Chapter ${next.chapterNumber}` }
+            : null
         }
       />
     </div>

@@ -112,7 +112,9 @@ export function StageTimeline({
 }) {
   const steps = buildSteps(tier);
   const parallelNote =
-    draftingCount > 0 && plannedTotal > 0 ? `${draftingCount} of ${plannedTotal} drafting` : undefined;
+    draftingCount > 0 && plannedTotal > 0
+      ? `${draftingCount} of ${plannedTotal} drafting`
+      : undefined;
 
   return (
     <section aria-label="Generation progress" className="space-y-3">

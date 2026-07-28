@@ -206,8 +206,7 @@ export async function writeChapterStep(
   if (!outlineRow) throw new FatalError("No outline to write from");
   const outline = outlineRow.content as BookOutline;
   const chapterOutline = outline.chapters.find((c) => c.number === chapterNumber) as
-    | ChapterOutlinePlan
-    | undefined;
+    ChapterOutlinePlan | undefined;
   if (!chapterOutline) throw new FatalError(`Chapter ${chapterNumber} missing from outline`);
 
   const prevSummaries = await db
@@ -230,10 +229,7 @@ export async function writeChapterStep(
     .update(schema.chapters)
     .set({ status: "drafting", updatedAt: new Date() })
     .where(
-      and(
-        eq(schema.chapters.bookId, book.id),
-        eq(schema.chapters.chapterNumber, chapterNumber),
-      ),
+      and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
     );
   await writeEvent(PROGRESS_NS, { type: "chapter", chapterNumber, status: "drafting" });
 
@@ -356,10 +352,7 @@ export async function editChapterStep(
   }
 }
 
-export async function readQualityGate(
-  ref: RunRef,
-  threshold: number,
-): Promise<number[]> {
+export async function readQualityGate(ref: RunRef, threshold: number): Promise<number[]> {
   "use step";
   const db = getDb();
   const { book } = await loadRunContext(ref);

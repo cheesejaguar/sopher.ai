@@ -120,7 +120,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ projectId: stri
   if (run.status === "completed") {
     const format = (run.config as { format?: ExportFormat }).format;
     const [row] = await db
-      .select({ id: schema.assets.id, meta: schema.assets.meta, pathname: schema.assets.blobPathname })
+      .select({
+        id: schema.assets.id,
+        meta: schema.assets.meta,
+        pathname: schema.assets.blobPathname,
+      })
       .from(schema.assets)
       .where(
         and(

@@ -44,8 +44,8 @@ async function BudgetCard() {
         </p>
         <BudgetBar pct={usedPct} warnAtPct={budget.alertThresholdPct} />
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
-          {Math.round(usedPct)}% used ·{" "}
-          {formatUsd(Math.max(0, budget.monthlyLimitUsd - spent))} remaining
+          {Math.round(usedPct)}% used · {formatUsd(Math.max(0, budget.monthlyLimitUsd - spent))}{" "}
+          remaining
         </p>
       </CardContent>
     </Card>

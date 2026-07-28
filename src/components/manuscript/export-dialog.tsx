@@ -25,8 +25,18 @@ const FORMATS: {
   blurb: string;
   icon: React.ComponentType<{ className?: string }>;
 }[] = [
-  { id: "md", name: "Markdown", blurb: "Best for editing anywhere plain text goes", icon: FileText },
-  { id: "docx", name: "Word", blurb: "Best for Word, Google Docs, and human editors", icon: FileType2 },
+  {
+    id: "md",
+    name: "Markdown",
+    blurb: "Best for editing anywhere plain text goes",
+    icon: FileText,
+  },
+  {
+    id: "docx",
+    name: "Word",
+    blurb: "Best for Word, Google Docs, and human editors",
+    icon: FileType2,
+  },
   { id: "epub", name: "EPUB", blurb: "Best for Kindle, Kobo, and Apple Books", icon: BookOpenText },
   { id: "pdf", name: "PDF", blurb: "Best for print-ready proofs and sharing", icon: FileDown },
 ];

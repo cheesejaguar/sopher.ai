@@ -23,11 +23,7 @@ const ARC_LABELS: Record<BookOutline["chapters"][number]["emotionalArc"], string
   transition: "Transition",
 };
 
-export default async function OutlinePage({
-  params,
-}: {
-  params: Promise<{ projectId: string }>;
-}) {
+export default async function OutlinePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const { userId } = await requireUser();
   const data = await getProjectWithBook(userId, projectId);

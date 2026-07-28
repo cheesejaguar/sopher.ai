@@ -1,10 +1,5 @@
 import epub, { type Chapter } from "epub-gen-memory";
-import {
-  chapterHeading,
-  markdownToHtml,
-  READING_LINE,
-  type AssembledManuscript,
-} from "./assemble";
+import { chapterHeading, markdownToHtml, READING_LINE, type AssembledManuscript } from "./assemble";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 const CSS = `

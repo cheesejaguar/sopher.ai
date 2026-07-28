@@ -203,7 +203,9 @@ export async function loadManuscript(
       content: schema.chapters.content,
     })
     .from(schema.chapters)
-    .where(and(eq(schema.chapters.bookId, row.bookId), gt(sql`length(${schema.chapters.content})`, 0)))
+    .where(
+      and(eq(schema.chapters.bookId, row.bookId), gt(sql`length(${schema.chapters.content})`, 0)),
+    )
     .orderBy(schema.chapters.chapterNumber);
 
   return buildManuscript({

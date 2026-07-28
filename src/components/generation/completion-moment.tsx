@@ -63,7 +63,9 @@ export function CompletionMoment({
               key={i}
               className="h-28 w-2 rounded-[3px] bg-primary transition-transform duration-700 ease-in-out"
               style={{
-                transform: closed ? `translateX(${((mid - i) * PITCH_REM).toFixed(3)}rem)` : undefined,
+                transform: closed
+                  ? `translateX(${((mid - i) * PITCH_REM).toFixed(3)}rem)`
+                  : undefined,
                 transitionDelay: `${i * 20}ms`,
               }}
             />

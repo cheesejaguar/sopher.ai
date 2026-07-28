@@ -168,7 +168,9 @@ function ChapterProseView({
         <div className="prose-manuscript mt-5">
           {paragraphs.length === 0 ? (
             <p className={cn("text-paper-muted", live && "stream-caret")}>
-              {live ? "The writer is opening the chapter" : "No prose has streamed for this chapter yet."}
+              {live
+                ? "The writer is opening the chapter"
+                : "No prose has streamed for this chapter yet."}
             </p>
           ) : (
             paragraphs.map((paragraph, index) => {

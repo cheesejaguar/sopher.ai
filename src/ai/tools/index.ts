@@ -277,7 +277,9 @@ const knowledgePlotStructure = tool({
   }),
   execute: async ({ structure, chapterNumber, totalChapters }) => {
     if (chapterNumber && totalChapters) {
-      return chapterGuidance(structure, chapterNumber, totalChapters) ?? { error: "Unknown structure" };
+      return (
+        chapterGuidance(structure, chapterNumber, totalChapters) ?? { error: "Unknown structure" }
+      );
     }
     return getTemplateSummary(structure) ?? { error: "Unknown structure" };
   },

@@ -1,10 +1,5 @@
 import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
-import {
-  markdownToBlocks,
-  READING_LINE,
-  stripInline,
-  type AssembledManuscript,
-} from "./assemble";
+import { markdownToBlocks, READING_LINE, stripInline, type AssembledManuscript } from "./assemble";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 // 6in × 9in trade page, in PDF points.
@@ -45,7 +40,10 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
   });
   if (m.synopsis) {
     doc.moveDown(1.5);
-    doc.font(SERIF_ITALIC).fontSize(11).text(pdfSafe(m.synopsis), { width: BODY_WIDTH, align: "center" });
+    doc
+      .font(SERIF_ITALIC)
+      .fontSize(11)
+      .text(pdfSafe(m.synopsis), { width: BODY_WIDTH, align: "center" });
   }
   doc.moveDown(2);
   doc.font(SERIF).fontSize(9).text(pdfSafe(READING_LINE), { width: BODY_WIDTH, align: "center" });
@@ -55,14 +53,11 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
   // Chapters — each opens on a fresh page with a title block.
   for (const chapter of m.chapters) {
     doc.addPage();
-    doc
-      .font(SERIF)
-      .fontSize(10)
-      .text(`CHAPTER ${chapter.number}`, MARGIN, 140, {
-        width: BODY_WIDTH,
-        align: "center",
-        characterSpacing: 2,
-      });
+    doc.font(SERIF).fontSize(10).text(`CHAPTER ${chapter.number}`, MARGIN, 140, {
+      width: BODY_WIDTH,
+      align: "center",
+      characterSpacing: 2,
+    });
     if (chapter.title !== `Chapter ${chapter.number}`) {
       doc.moveDown(0.6);
       doc.fontSize(18).text(pdfSafe(chapter.title), { width: BODY_WIDTH, align: "center" });
@@ -73,10 +68,13 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
       switch (block.kind) {
         case "heading":
           doc.moveDown(0.6);
-          doc.font(SERIF_BOLD).fontSize(13).text(pdfSafe(stripInline(block.text)), {
-            width: BODY_WIDTH,
-            align: "left",
-          });
+          doc
+            .font(SERIF_BOLD)
+            .fontSize(13)
+            .text(pdfSafe(stripInline(block.text)), {
+              width: BODY_WIDTH,
+              align: "left",
+            });
           doc.moveDown(0.3);
           break;
         case "quote":
@@ -97,13 +95,16 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
           doc.moveDown(0.5);
           break;
         case "paragraph":
-          doc.font(SERIF).fontSize(11).text(pdfSafe(stripInline(block.text)), {
-            width: BODY_WIDTH,
-            align: "justify",
-            indent: 18,
-            lineGap: 3,
-            paragraphGap: 8,
-          });
+          doc
+            .font(SERIF)
+            .fontSize(11)
+            .text(pdfSafe(stripInline(block.text)), {
+              width: BODY_WIDTH,
+              align: "justify",
+              indent: 18,
+              lineGap: 3,
+              paragraphGap: 8,
+            });
           break;
       }
     }
