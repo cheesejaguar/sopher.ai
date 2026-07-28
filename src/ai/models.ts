@@ -15,10 +15,7 @@ export type TierModels = {
   image: string;
 };
 
-// TODO(credits): restore to "anthropic/claude-haiku-4.5" once AI Gateway
-// credits are added — the gateway's free-credit tier blocks haiku today, and
-// sonnet-5 is the cheapest unblocked model.
-const HAIKU = "anthropic/claude-sonnet-5";
+const HAIKU = "anthropic/claude-haiku-4.5";
 const SONNET = "anthropic/claude-sonnet-5";
 const OPUS = "anthropic/claude-opus-5";
 const IMAGE = "google/gemini-3.1-flash-image";

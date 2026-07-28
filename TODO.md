@@ -41,15 +41,19 @@ in-document Mermaid figure → valid EPUB + 115-page PDF exports → $6.39 acros
 
 ## Blocked on operator actions (not completable from code)
 
-- [ ] Top up AI Gateway credits (Vercel → AI → Top up; Pro hosting does not
-      include gateway model credits), then restore the cheap tier: revert the
-      `TODO(credits)` alias in `src/ai/models.ts` to `anthropic/claude-haiku-4.5`
-      and recalibrate `src/ai/estimate.ts` against real `llm_calls` data.
-      Last checked 2026-07-27: haiku still returns the free-tier restriction.
-- [ ] Create a Clerk production instance for sopher.ai (dashboard + DNS records);
-      sign-in currently runs on the dev instance.
-- [ ] After a soak week: tear down the GKE cluster and revoke legacy GCP secrets
-      (steps in doc/CUTOVER.md).
+- [x] Top up AI Gateway credits — done by the operator 2026-07-27 (verified:
+      haiku-4.5 responds through the gateway). Cheap tier restored to
+      `anthropic/claude-haiku-4.5` in `src/ai/models.ts` and
+      `src/ai/estimate.ts` recalibrated against the real `llm_calls` data from
+      the first production book (12×3,000 words now quotes ≈ $1.05 draft /
+      $1.73 standard / $3.09 premium, ~34-40 min). Estimator unit tests added;
+      268/268 unit tests + 12/12 E2E green.
+- [ ] Create a Clerk production instance for sopher.ai (Clerk dashboard + DNS
+      records on the domain — operator-owned); sign-in currently runs on the
+      dev instance.
+- [ ] After a soak week (from 2026-07-27): tear down the GKE cluster and revoke
+      legacy GCP secrets (steps in doc/CUTOVER.md). Deliberately time-gated —
+      do not automate.
 
 ## Nice-to-have (post-launch) — complete
 
