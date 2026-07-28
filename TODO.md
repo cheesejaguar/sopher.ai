@@ -48,12 +48,13 @@ in-document Mermaid figure → valid EPUB + 115-page PDF exports → $6.39 acros
       the first production book (12×3,000 words now quotes ≈ $1.05 draft /
       $1.73 standard / $3.09 premium, ~34-40 min). Estimator unit tests added;
       268/268 unit tests + 12/12 E2E green.
-- [ ] Create a Clerk production instance for sopher.ai (Clerk dashboard + DNS
-      records on the domain — operator-owned); sign-in currently runs on the
-      dev instance.
-- [ ] After a soak week (from 2026-07-27): tear down the GKE cluster and revoke
-      legacy GCP secrets (steps in doc/CUTOVER.md). Deliberately time-gated —
-      do not automate.
+
+All engineering TODO items are complete. Two operational runbook steps remain
+and are tracked where runbooks live — `doc/CUTOVER.md` — because they are not
+completable (or verifiable by tests) from this codebase: creating a Clerk
+production instance requires the Clerk dashboard and the operator's DNS
+control, and the GKE teardown is deliberately time-gated to a soak week from
+2026-07-27 and must not be automated.
 
 ## Nice-to-have (post-launch) — complete
 
