@@ -5,6 +5,7 @@ import {
   HeadingLevel,
   Packer,
   PageNumber,
+  ImageRun,
   Paragraph,
   TextRun,
   convertInchesToTwip,
@@ -18,6 +19,7 @@ import {
   type AssembledManuscript,
   type ProseBlock,
 } from "./assemble";
+import { fitWidth } from "./figures";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 const SERIF = "Georgia";
@@ -61,6 +63,36 @@ function blockToParagraph(block: ProseBlock): Paragraph {
         indent: { firstLine: convertInchesToTwip(0.3) },
         spacing: { after: 120 },
         children: runsFor(block.text),
+      });
+    case "figure": {
+      const { pngBytes, width, height, alt } = block.figure;
+      if (!pngBytes || !width || !height) {
+        // No cached render — keep the alt text so the figure is not silently lost.
+        return new Paragraph({
+          alignment: AlignmentType.CENTER,
+          spacing: { before: 160, after: 160 },
+          children: [new TextRun({ text: alt, italics: true })],
+        });
+      }
+      // 6in usable width at 96dpi; scale down only when the image exceeds it.
+      const fitted = fitWidth({ width, height }, 576);
+      return new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 240, after: 240 },
+        children: [
+          new ImageRun({
+            type: "png",
+            data: pngBytes,
+            transformation: fitted,
+            altText: { name: alt, description: alt, title: alt },
+          }),
+        ],
+      });
+    }
+    case "code":
+      return new Paragraph({
+        spacing: { before: 160, after: 160 },
+        children: [new TextRun({ text: block.text, font: "Consolas", size: 18 })],
       });
   }
 }
@@ -129,7 +161,7 @@ function chapterSection(m: AssembledManuscript, index: number): ISectionOptions 
         spacing: { before: 1200, after: 480 },
         children: [new TextRun({ text: chapterHeading(chapter) })],
       }),
-      ...markdownToBlocks(chapter.markdown).map(blockToParagraph),
+      ...markdownToBlocks(chapter.markdown, m.figures).map(blockToParagraph),
     ],
   };
 }

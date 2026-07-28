@@ -43,7 +43,9 @@ export async function exportEpub(m: AssembledManuscript): Promise<ExportResult> 
     },
     ...m.chapters.map((chapter) => ({
       title: chapterHeading(chapter),
-      content: `<h2>${escapeHtml(chapterHeading(chapter))}</h2>\n${markdownToHtml(chapter.markdown)}`,
+      // PNG rather than SVG: epub-gen-memory downloads referenced images, and
+      // reader support for inline SVG is far less dependable than for raster.
+      content: `<h2>${escapeHtml(chapterHeading(chapter))}</h2>\n${markdownToHtml(chapter.markdown, m.figures, "png")}`,
     })),
   ];
 

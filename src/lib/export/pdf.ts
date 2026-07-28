@@ -64,7 +64,7 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
     }
     doc.moveDown(2);
 
-    for (const block of markdownToBlocks(chapter.markdown)) {
+    for (const block of markdownToBlocks(chapter.markdown, m.figures)) {
       switch (block.kind) {
         case "heading":
           doc.moveDown(0.6);
@@ -105,6 +105,30 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
               lineGap: 3,
               paragraphGap: 8,
             });
+          break;
+        case "figure": {
+          const { pngBytes, alt } = block.figure;
+          if (!pngBytes) break;
+          doc.moveDown(0.8);
+          // fit() keeps the aspect ratio and never overflows the text block.
+          doc.image(Buffer.from(pngBytes), { fit: [BODY_WIDTH, 320], align: "center" });
+          doc.moveDown(0.4);
+          doc
+            .font(SERIF_ITALIC)
+            .fontSize(9)
+            .text(pdfSafe(alt), { width: BODY_WIDTH, align: "center" });
+          doc.moveDown(0.8);
+          break;
+        }
+        case "code":
+          // Only reached when a diagram has no cached render. Monospace-ish
+          // fallback so the content survives even if it is not pretty.
+          doc.moveDown(0.5);
+          doc
+            .font("Courier")
+            .fontSize(8)
+            .text(pdfSafe(block.text), { width: BODY_WIDTH, align: "left", lineGap: 1 });
+          doc.moveDown(0.5);
           break;
       }
     }

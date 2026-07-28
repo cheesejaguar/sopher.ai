@@ -3,15 +3,25 @@ import type { NodeView } from "@tiptap/pm/view";
 
 /**
  * A vanilla ProseMirror node view for code blocks. Non-mermaid languages get
- * the default pre/code rendering; ```mermaid blocks additionally render a
- * live diagram preview above the (still editable) source, with a designed
- * error state when the source does not parse. Mermaid itself is lazy-loaded
- * on first render. The document keeps storing a plain fenced code block, so
- * everything round-trips through markdown untouched.
+ * the default pre/code rendering; ```mermaid blocks render a live diagram and
+ * keep the source collapsed until the block has focus, so a finished diagram
+ * reads as a diagram rather than a diagram stacked on its own source.
+ *
+ * The collapsed source stays in the DOM (height 0, not display:none) so
+ * ProseMirror can still place a cursor in it and keyboard navigation through
+ * the document is unaffected — focusing it expands it.
+ *
+ * On each successful render the SVG plus a PNG rasterization are posted to
+ * /api/assets/diagram. Mermaid needs a DOM, so this is the only place a render
+ * can happen; the server-side surfaces (reading view, EPUB, PDF, DOCX) read
+ * that cache instead of re-rendering.
  */
 
 let initializedTheme: "default" | "dark" | null = null;
 let viewCounter = 0;
+
+/** Source hashes already uploaded this session — avoids re-posting on every keystroke. */
+const uploaded = new Set<string>();
 
 const PREVIEW_CLASS =
   "flex justify-center overflow-x-auto rounded-md border border-paper-edge bg-paper p-4 [&_svg]:h-auto [&_svg]:max-w-full";
@@ -19,8 +29,85 @@ const ERROR_CLASS =
   "mt-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 font-sans text-xs leading-relaxed text-destructive";
 const SOURCE_CLASS =
   "mt-2 overflow-x-auto rounded-md bg-muted/70 p-3 font-mono text-xs leading-relaxed";
+// Collapsed: removed from view but still focusable and cursor-addressable.
+const SOURCE_COLLAPSED_CLASS = "h-0 overflow-hidden opacity-0 mt-0 p-0 border-0";
+const TOGGLE_CLASS =
+  "mt-1 inline-flex items-center rounded px-1.5 py-0.5 font-sans text-[0.68rem] text-muted-foreground hover:text-foreground";
 
 const RENDER_DEBOUNCE_MS = 600;
+const RASTER_SCALE = 2;
+
+/** Normalization must match `normalizeDiagramSource` on the server exactly. */
+function normalizeSource(source: string): string {
+  return source
+    .trim()
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .join("\n");
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/** Node labels from the rendered SVG make a far better alt text than the source. */
+function altTextFrom(svgEl: SVGElement | null, fallback: string): string {
+  const labels = Array.from(svgEl?.querySelectorAll("text, .nodeLabel") ?? [])
+    .map((el) => (el.textContent ?? "").trim())
+    .filter(Boolean);
+  const unique = Array.from(new Set(labels));
+  if (unique.length === 0) return fallback;
+  return `Diagram: ${unique.slice(0, 12).join(", ")}`.slice(0, 480);
+}
+
+/** Rasterizes an SVG string to base64 PNG. Returns null when the browser refuses. */
+async function rasterize(svg: string, svgEl: SVGElement | null): Promise<string | null> {
+  const viewBox = svgEl
+    ?.getAttribute("viewBox")
+    ?.split(/[\s,]+/)
+    .map(Number);
+  const width = viewBox && viewBox.length === 4 ? viewBox[2] : (svgEl?.clientWidth ?? 800);
+  const height = viewBox && viewBox.length === 4 ? viewBox[3] : (svgEl?.clientHeight ?? 600);
+  if (!width || !height) return null;
+
+  // Explicit dimensions: mermaid emits width="100%", which canvas cannot size from.
+  const sized = svg.replace(/<svg([^>]*)>/, (match, attrs: string) => {
+    const cleaned = attrs.replace(/\s(width|height)="[^"]*"/g, "");
+    return `<svg${cleaned} width="${width}" height="${height}">`;
+  });
+
+  const blob = new Blob([sized], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const image = new Image();
+    image.decoding = "sync";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("SVG failed to load"));
+      image.src = url;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * RASTER_SCALE);
+    canvas.height = Math.round(height * RASTER_SCALE);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Diagrams are line art on transparent ground; flatten onto white so the
+    // PNG reads correctly in PDF and DOCX.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/png").split(",")[1] ?? null;
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export class MermaidCodeBlockView implements NodeView {
   dom: HTMLElement;
@@ -29,13 +116,19 @@ export class MermaidCodeBlockView implements NodeView {
   private node: PMNode;
   private preview: HTMLDivElement | null = null;
   private errorEl: HTMLDivElement | null = null;
+  private sourceEl: HTMLPreElement | null = null;
+  private toggle: HTMLButtonElement | null = null;
   private timer: number | null = null;
   private renderedSource: string | null = null;
   private lastRenderId: string | null = null;
   private destroyed = false;
+  private expanded = false;
   private readonly viewId = `editor-mermaid-${++viewCounter}`;
 
-  constructor(node: PMNode) {
+  constructor(
+    node: PMNode,
+    private readonly chapterId?: string,
+  ) {
     this.node = node;
     const language: string = node.attrs.language ?? "";
 
@@ -50,8 +143,7 @@ export class MermaidCodeBlockView implements NodeView {
       figure.setAttribute("data-mermaid-figure", "true");
 
       // The rendered SVG is an unlabelled blob of shapes and stray text runs.
-      // Hide it from assistive tech and let the Mermaid source below act as
-      // the text alternative — it is right there in the figure, and editable.
+      // Hide it from assistive tech; the figcaption carries the description.
       this.preview = document.createElement("div");
       this.preview.className = PREVIEW_CLASS;
       this.preview.contentEditable = "false";
@@ -62,15 +154,38 @@ export class MermaidCodeBlockView implements NodeView {
       this.errorEl.contentEditable = "false";
       this.errorEl.setAttribute("role", "alert");
 
-      pre.className = SOURCE_CLASS;
+      this.sourceEl = pre;
+      pre.className = `${SOURCE_CLASS} ${SOURCE_COLLAPSED_CLASS}`;
       code.className = "language-mermaid";
+
+      this.toggle = document.createElement("button");
+      this.toggle.type = "button";
+      this.toggle.className = TOGGLE_CLASS;
+      this.toggle.contentEditable = "false";
+      this.toggle.textContent = "Edit source";
+      this.toggle.setAttribute("aria-expanded", "false");
+      this.toggle.addEventListener("mousedown", (event) => {
+        // Keep the editor selection intact when toggling.
+        event.preventDefault();
+        this.setExpanded(!this.expanded);
+        if (this.expanded) this.contentDOM.focus();
+      });
 
       const caption = document.createElement("figcaption");
       caption.className = "sr-only";
       caption.contentEditable = "false";
-      caption.textContent = "Diagram, described by the Mermaid source below.";
+      caption.textContent = "Diagram. Its Mermaid source follows and is editable.";
 
-      figure.append(this.preview, this.errorEl, pre, caption);
+      // Focus anywhere inside the figure (including the source) expands it.
+      figure.addEventListener("focusin", () => this.setExpanded(true));
+      figure.addEventListener("focusout", () => {
+        window.setTimeout(() => {
+          if (this.destroyed) return;
+          if (!figure.contains(document.activeElement)) this.setExpanded(false);
+        }, 0);
+      });
+
+      figure.append(this.preview, this.errorEl, pre, this.toggle, caption);
       this.dom = figure;
       this.scheduleRender(0);
     } else {
@@ -78,6 +193,14 @@ export class MermaidCodeBlockView implements NodeView {
       if (language) code.className = `language-${language}`;
       this.dom = pre;
     }
+  }
+
+  private setExpanded(expanded: boolean): void {
+    if (!this.sourceEl || this.expanded === expanded) return;
+    this.expanded = expanded;
+    this.sourceEl.className = expanded ? SOURCE_CLASS : `${SOURCE_CLASS} ${SOURCE_COLLAPSED_CLASS}`;
+    this.toggle?.setAttribute("aria-expanded", String(expanded));
+    if (this.toggle) this.toggle.textContent = expanded ? "Hide source" : "Edit source";
   }
 
   update(node: PMNode): boolean {
@@ -130,6 +253,8 @@ export class MermaidCodeBlockView implements NodeView {
       this.preview.innerHTML = svg;
       this.preview.classList.remove("hidden");
       this.errorEl.classList.add("hidden");
+
+      void this.cache(source, svg);
     } catch (error) {
       if (this.destroyed) return;
       // Mermaid can leave an orphaned scratch element behind on parse errors.
@@ -145,12 +270,51 @@ export class MermaidCodeBlockView implements NodeView {
       // so typing through a broken diagram doesn't interrupt over and over.
       if (this.errorEl.textContent !== text) this.errorEl.textContent = text;
       this.errorEl.classList.remove("hidden");
+      // Expand so the source the reader must fix is actually visible.
+      this.setExpanded(true);
       if (!this.preview.innerHTML) this.preview.classList.add("hidden");
+    }
+  }
+
+  /**
+   * Uploads the render so server-rendered surfaces can show a diagram. Entirely
+   * best-effort: a failure here only means an export falls back to source text.
+   */
+  private async cache(source: string, svg: string): Promise<void> {
+    if (!this.chapterId || this.destroyed) return;
+    try {
+      const normalized = normalizeSource(source);
+      const hash = await sha256Hex(normalized);
+      if (uploaded.has(hash)) return;
+      uploaded.add(hash);
+
+      const svgEl = this.preview?.querySelector("svg") ?? null;
+      const pngBase64 = await rasterize(svg, svgEl);
+      if (!pngBase64) {
+        uploaded.delete(hash);
+        return;
+      }
+
+      const response = await fetch("/api/assets/diagram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chapterId: this.chapterId,
+          source: normalized,
+          svg,
+          pngBase64,
+          alt: altTextFrom(svgEl, "Diagram"),
+        }),
+      });
+      // Allow a retry on the next render if the server rejected it.
+      if (!response.ok) uploaded.delete(hash);
+    } catch {
+      // Non-fatal by design.
     }
   }
 }
 
 /** `editorProps.nodeViews` factory for the codeBlock node. */
-export function mermaidCodeBlockView(node: PMNode): NodeView {
-  return new MermaidCodeBlockView(node);
+export function mermaidCodeBlockView(chapterId?: string) {
+  return (node: PMNode): NodeView => new MermaidCodeBlockView(node, chapterId);
 }

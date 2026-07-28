@@ -252,7 +252,7 @@ export function EditorShell({
         "aria-label": `Chapter ${chapterNumber} manuscript`,
         "aria-describedby": shortcutsId,
       },
-      nodeViews: { codeBlock: mermaidCodeBlockView },
+      nodeViews: { codeBlock: mermaidCodeBlockView(chapterId) },
     },
     onUpdate: () => {
       if (!suppressDirtyRef.current) autosaveRef.current.markDirty();
