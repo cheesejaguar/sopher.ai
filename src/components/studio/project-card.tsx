@@ -6,9 +6,44 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/studio/status-badge";
 import { RelativeTime } from "@/components/relative-time";
-import { formatUsd, stageForStatus, type Project } from "@/lib/placeholder-data";
+import { genreLabel } from "@/lib/genres";
 
-export function ProjectCard({ project }: { project: Project }) {
+export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete";
+
+/** Serializable card shape, assembled from the DB by the dashboard. */
+export interface ProjectCardData {
+  id: string;
+  title: string;
+  genre: string | null;
+  status: ProjectCardStatus;
+  /** ISO timestamp of the last change to the book. */
+  updatedAt: string;
+  wordCount: number;
+  chaptersDone: number;
+  chaptersTotal: number;
+  spendUsd: number;
+  estimateUsd: number;
+}
+
+/** The workspace stage a book naturally opens on, given its status. */
+function stageForStatus(status: ProjectCardStatus): "brief" | "write" | "editor" | "manuscript" {
+  switch (status) {
+    case "draft":
+      return "brief";
+    case "generating":
+      return "write";
+    case "editing":
+      return "editor";
+    case "complete":
+      return "manuscript";
+  }
+}
+
+function formatUsd(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+export function ProjectCard({ project }: { project: ProjectCardData }) {
   const progress =
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
 
@@ -23,7 +58,7 @@ export function ProjectCard({ project }: { project: Project }) {
             {project.title}
           </CardTitle>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <Badge variant="outline">{project.genre}</Badge>
+            {project.genre ? <Badge variant="outline">{genreLabel(project.genre)}</Badge> : null}
             <StatusBadge status={project.status} />
           </div>
         </CardHeader>

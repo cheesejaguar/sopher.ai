@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 
 export async function listProjects(userId: string) {
@@ -8,6 +8,59 @@ export async function listProjects(userId: string) {
     .from(schema.projects)
     .where(eq(schema.projects.userId, userId))
     .orderBy(desc(schema.projects.updatedAt));
+}
+
+export type ProjectWithStats = Awaited<ReturnType<typeof listProjectsWithStats>>[number];
+
+/**
+ * Dashboard listing: every non-archived project with chapter progress, word
+ * count, and metered spend — batched into three queries total (no N+1).
+ */
+export async function listProjectsWithStats(userId: string) {
+  const db = getDb();
+  const projects = await db
+    .select()
+    .from(schema.projects)
+    .where(and(eq(schema.projects.userId, userId), ne(schema.projects.status, "archived")))
+    .orderBy(desc(schema.projects.updatedAt));
+  if (projects.length === 0) return [];
+
+  const projectIds = projects.map((p) => p.id);
+  const [chapterRows, spendRows] = await Promise.all([
+    db
+      .select({
+        projectId: schema.books.projectId,
+        chapterCount: sql<number>`count(${schema.chapters.id})::int`,
+        chaptersDone: sql<number>`count(${schema.chapters.id}) filter (where ${schema.chapters.status} in ('drafted', 'edited', 'final'))::int`,
+        wordCount: sql<number>`coalesce(sum(${schema.chapters.wordCount}), 0)::int`,
+      })
+      .from(schema.books)
+      .leftJoin(schema.chapters, eq(schema.chapters.bookId, schema.books.id))
+      .where(inArray(schema.books.projectId, projectIds))
+      .groupBy(schema.books.projectId),
+    db
+      .select({
+        projectId: schema.llmCalls.projectId,
+        usd: sql<string>`sum(${schema.llmCalls.usd})`,
+      })
+      .from(schema.llmCalls)
+      .where(inArray(schema.llmCalls.projectId, projectIds))
+      .groupBy(schema.llmCalls.projectId),
+  ]);
+
+  const chaptersByProject = new Map(chapterRows.map((row) => [row.projectId, row]));
+  const spendByProject = new Map(spendRows.map((row) => [row.projectId, Number(row.usd)]));
+
+  return projects.map((project) => {
+    const chapterStats = chaptersByProject.get(project.id);
+    return {
+      ...project,
+      chaptersDone: chapterStats?.chaptersDone ?? 0,
+      chaptersTotal: Math.max(project.targetChapters, chapterStats?.chapterCount ?? 0),
+      wordCount: chapterStats?.wordCount ?? 0,
+      spendUsd: spendByProject.get(project.id) ?? 0,
+    };
+  });
 }
 
 export async function getProject(userId: string, projectId: string) {

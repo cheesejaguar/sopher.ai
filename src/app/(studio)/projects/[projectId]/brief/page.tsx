@@ -1,14 +1,51 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatWords, qualityTierLabels, sampleBrief } from "@/lib/placeholder-data";
+import { notFound } from "next/navigation";
 
-export default function BriefPage() {
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireUser } from "@/lib/auth";
+import { getProjectWithBook } from "@/db/queries/books";
+import { TIER_LABELS } from "@/ai/models";
+
+function words(value: number): string {
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
+const POV_LABELS = {
+  first: "First person",
+  third_limited: "Third person, limited",
+  third_omniscient: "Third person, omniscient",
+} as const;
+
+const TENSE_LABELS = { past: "Past tense", present: "Present tense" } as const;
+
+export default async function BriefPage({ params }: { params: Promise<{ projectId: string }> }) {
+  const { projectId } = await params;
+  const { userId } = await requireUser();
+  const data = await getProjectWithBook(userId, projectId);
+  if (!data) notFound();
+  const { project } = data;
+  const settings = project.settings;
+
+  const paragraphs = (project.brief ?? "")
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
   const facts = [
-    { label: "Genre", value: sampleBrief.genre },
-    { label: "Audience", value: sampleBrief.audience },
-    { label: "Tone", value: sampleBrief.tone },
-    { label: "Target length", value: `${formatWords(sampleBrief.targetWords)} words` },
-    { label: "Quality tier", value: qualityTierLabels[sampleBrief.qualityTier] },
-  ];
+    { label: "Genre", value: project.genre },
+    { label: "Tone", value: settings.tone },
+    { label: "Point of view", value: settings.pov ? POV_LABELS[settings.pov] : null },
+    { label: "Tense", value: settings.tense ? TENSE_LABELS[settings.tense] : null },
+    {
+      label: "Target length",
+      value: `${project.targetChapters} chapters · ~${words(
+        project.targetChapters * project.targetWordsPerChapter,
+      )} words`,
+    },
+    {
+      label: "Quality tier",
+      value: TIER_LABELS[settings.qualityTier ?? "standard"].name,
+    },
+  ].filter((fact): fact is { label: string; value: string } => Boolean(fact.value));
 
   return (
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_16rem]">
@@ -19,9 +56,13 @@ export default function BriefPage() {
           The brief, as written
         </p>
         <div className="prose-manuscript mt-6">
-          {sampleBrief.paragraphs.map((paragraph, index) => (
-            <p key={index}>{paragraph}</p>
-          ))}
+          {paragraphs.length > 0 ? (
+            paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)
+          ) : (
+            <p className="text-paper-muted italic">
+              This project has no brief yet — the agents will be working from the title alone.
+            </p>
+          )}
         </div>
       </article>
 

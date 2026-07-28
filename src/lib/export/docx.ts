@@ -1,0 +1,166 @@
+import {
+  AlignmentType,
+  Document,
+  Footer,
+  HeadingLevel,
+  Packer,
+  PageNumber,
+  Paragraph,
+  TextRun,
+  convertInchesToTwip,
+  type ISectionOptions,
+} from "docx";
+import {
+  chapterHeading,
+  markdownToBlocks,
+  parseInline,
+  READING_LINE,
+  type AssembledManuscript,
+  type ProseBlock,
+} from "./assemble";
+import { FORMAT_META, filenameStem, type ExportResult } from "./types";
+
+const SERIF = "Georgia";
+const BODY_SIZE = 24; // half-points → 12pt
+
+function runsFor(text: string, extra?: { italics?: boolean }): TextRun[] {
+  return parseInline(text).map(
+    (segment) =>
+      new TextRun({
+        text: segment.text,
+        bold: segment.bold,
+        italics: segment.italic || extra?.italics,
+      }),
+  );
+}
+
+function blockToParagraph(block: ProseBlock): Paragraph {
+  switch (block.kind) {
+    case "heading":
+      return new Paragraph({
+        heading: block.depth === 1 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3,
+        spacing: { before: 320, after: 160 },
+        children: runsFor(block.text),
+      });
+    case "quote":
+      return new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        indent: { left: convertInchesToTwip(0.5) },
+        spacing: { before: 160, after: 160 },
+        children: runsFor(block.text, { italics: true }),
+      });
+    case "scene-break":
+      return new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 240, after: 240 },
+        children: [new TextRun({ text: "⁂" })],
+      });
+    case "paragraph":
+      return new Paragraph({
+        alignment: AlignmentType.JUSTIFIED,
+        indent: { firstLine: convertInchesToTwip(0.3) },
+        spacing: { after: 120 },
+        children: runsFor(block.text),
+      });
+  }
+}
+
+function frontMatterSection(m: AssembledManuscript): ISectionOptions {
+  const children: Paragraph[] = [
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 2800, after: 400 },
+      children: [new TextRun({ text: m.title, size: 56, bold: true })],
+    }),
+  ];
+  if (m.synopsis) {
+    children.push(
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: 300 },
+        children: [new TextRun({ text: m.synopsis, italics: true })],
+      }),
+    );
+  }
+  children.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 200 },
+      children: [new TextRun({ text: READING_LINE, italics: true, size: 20 })],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: m.author, size: 20 })],
+    }),
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      pageBreakBefore: true,
+      spacing: { after: 240 },
+      children: [new TextRun({ text: "Contents" })],
+    }),
+    ...m.chapters.map(
+      (chapter) =>
+        new Paragraph({
+          spacing: { after: 80 },
+          children: [new TextRun({ text: `${chapter.number}. ${chapter.title}` })],
+        }),
+    ),
+  );
+  return { children };
+}
+
+function chapterSection(m: AssembledManuscript, index: number): ISectionOptions {
+  const chapter = m.chapters[index];
+  return {
+    footers: {
+      default: new Footer({
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new TextRun({ children: [PageNumber.CURRENT], size: 18 })],
+          }),
+        ],
+      }),
+    },
+    children: [
+      new Paragraph({
+        heading: HeadingLevel.HEADING_1,
+        alignment: AlignmentType.CENTER,
+        spacing: { before: 1200, after: 480 },
+        children: [new TextRun({ text: chapterHeading(chapter) })],
+      }),
+      ...markdownToBlocks(chapter.markdown).map(blockToParagraph),
+    ],
+  };
+}
+
+export async function exportDocx(m: AssembledManuscript): Promise<ExportResult> {
+  const doc = new Document({
+    creator: m.author,
+    title: m.title,
+    description: m.synopsis ?? undefined,
+    styles: {
+      default: {
+        document: { run: { font: SERIF, size: BODY_SIZE } },
+        heading1: {
+          run: { font: SERIF, size: 36, bold: true, color: "000000" },
+        },
+        heading2: {
+          run: { font: SERIF, size: 30, bold: true, color: "000000" },
+        },
+        heading3: {
+          run: { font: SERIF, size: 26, bold: true, color: "000000" },
+        },
+      },
+    },
+    sections: [frontMatterSection(m), ...m.chapters.map((_, i) => chapterSection(m, i))],
+  });
+
+  const buffer = await Packer.toBuffer(doc);
+  const meta = FORMAT_META.docx;
+  return {
+    buffer,
+    contentType: meta.contentType,
+    filename: `${filenameStem(m.title)}.${meta.extension}`,
+  };
+}

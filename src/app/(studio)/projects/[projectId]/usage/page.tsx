@@ -1,15 +1,81 @@
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatUsd, formatWords, getProject, sampleAgentSpend } from "@/lib/placeholder-data";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EstimateReceipt } from "@/components/usage/estimate-receipt";
+import { formatUsd } from "@/components/usage/format";
+import { RoleTable } from "@/components/usage/role-table";
+import { estimateBookCost } from "@/ai/estimate";
+import { requireUser } from "@/lib/auth";
+import { getProjectSpend, getProjectWithBook, getSpendByRole } from "@/db/queries/books";
+
+async function ProjectUsage({ projectId }: { projectId: string }) {
+  const { userId } = await requireUser();
+  const data = await getProjectWithBook(userId, projectId);
+  if (!data) notFound();
+  const { project } = data;
+
+  const [spend, byRole] = await Promise.all([
+    getProjectSpend(projectId),
+    getSpendByRole(userId, projectId),
+  ]);
+  const estimate = estimateBookCost(
+    project.settings.qualityTier ?? "standard",
+    project.targetChapters,
+    project.targetWordsPerChapter,
+  );
+
+  return (
+    <>
+      <header className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-xl font-semibold tracking-tight">Usage</h2>
+        <p className="font-mono text-sm tabular-nums">
+          <span className="text-ember">{formatUsd(spend)}</span>{" "}
+          <span className="text-xs text-muted-foreground">
+            of ~{formatUsd(estimate.totalUsd)} estimated
+          </span>
+        </p>
+      </header>
+
+      <EstimateReceipt estimate={estimate} actualUsd={spend} />
+
+      <div className="rounded-xl bg-card px-4 py-2 ring-1 ring-foreground/10">
+        <RoleTable
+          rows={byRole.map((r) => ({
+            agentRole: r.agentRole,
+            model: r.model,
+            calls: r.calls,
+            inputTokens: Number(r.inputTokens),
+            outputTokens: Number(r.outputTokens),
+            cachedInputTokens: Number(r.cachedInputTokens),
+            usd: Number(r.usd),
+          }))}
+        />
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Costs are metered per model call and update live during generation. Estimates carry ±30%
+        uncertainty.
+      </p>
+    </>
+  );
+}
+
+function UsageSkeleton() {
+  return (
+    <>
+      <div className="flex items-baseline justify-between">
+        <Skeleton className="h-7 w-24" />
+        <Skeleton className="h-5 w-40" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Skeleton className="h-56 w-full rounded-xl" />
+        <Skeleton className="h-56 w-full rounded-xl" />
+      </div>
+      <Skeleton className="h-48 w-full rounded-xl" />
+    </>
+  );
+}
 
 export default async function ProjectUsagePage({
   params,
@@ -17,69 +83,11 @@ export default async function ProjectUsagePage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const project = getProject(projectId);
-  if (!project) notFound();
-  const total = sampleAgentSpend.reduce((sum, row) => sum + row.usd, 0);
-
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="font-display text-xl font-semibold tracking-tight">Usage</h2>
-        <p className="font-mono text-sm tabular-nums">
-          <span className="text-ember">{formatUsd(project.spendUsd)}</span>{" "}
-          <span className="text-xs text-muted-foreground">
-            of ~{formatUsd(project.estimateUsd)} estimated
-          </span>
-        </p>
-      </header>
-
-      <div className="rounded-xl bg-card px-4 py-2 ring-1 ring-foreground/10">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Agent</TableHead>
-              <TableHead className="hidden md:table-cell">What it did</TableHead>
-              <TableHead className="text-right">Calls</TableHead>
-              <TableHead className="text-right">Tokens</TableHead>
-              <TableHead className="text-right">Cost</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {sampleAgentSpend.map((row) => (
-              <TableRow key={row.agent}>
-                <TableCell className="font-medium">{row.agent}</TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {row.role}
-                </TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground tabular-nums">
-                  {row.calls}
-                </TableCell>
-                <TableCell className="text-right font-mono text-muted-foreground tabular-nums">
-                  {formatWords(row.tokens)}
-                </TableCell>
-                <TableCell className="text-right font-mono tabular-nums">
-                  {formatUsd(row.usd)}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-          <TableFooter>
-            <TableRow>
-              <TableCell>Total</TableCell>
-              <TableCell className="hidden md:table-cell" />
-              <TableCell />
-              <TableCell />
-              <TableCell className="text-right font-mono tabular-nums">
-                {formatUsd(total)}
-              </TableCell>
-            </TableRow>
-          </TableFooter>
-        </Table>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Costs are metered per model call and update live during generation.
-      </p>
+      <Suspense fallback={<UsageSkeleton />}>
+        <ProjectUsage projectId={projectId} />
+      </Suspense>
     </div>
   );
 }

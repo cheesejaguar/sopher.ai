@@ -338,6 +338,7 @@ export function buildToolset(role: AgentRole, ctx: ToolCtx): ToolSet {
         chaptersGetText: chaptersGetText(ctx),
         storySoFarSearch: storySoFarSearch(ctx),
         characterBibleGet: characterBibleGet(ctx),
+        outlineGetStructure: outlineGetStructure(ctx),
         continuityRecordIssue: continuityRecordIssue(ctx),
       };
     case "concept":

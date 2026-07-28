@@ -32,6 +32,19 @@ function ProjectCardSkeleton() {
   );
 }
 
+export function ProjectGridSkeleton() {
+  return (
+    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      <ProjectCardSkeleton />
+      <ProjectCardSkeleton />
+      <ProjectCardSkeleton />
+      <div className="flex min-h-44 items-center justify-center rounded-xl border border-dashed border-border">
+        <Skeleton className="size-9 rounded-full" />
+      </div>
+    </div>
+  );
+}
+
 export default function StudioDashboardLoading() {
   return (
     <div className="space-y-8">
@@ -39,14 +52,7 @@ export default function StudioDashboardLoading() {
         <Skeleton className="h-8 w-44" />
         <Skeleton className="h-4 w-72" />
       </header>
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        <ProjectCardSkeleton />
-        <ProjectCardSkeleton />
-        <ProjectCardSkeleton />
-        <div className="flex min-h-44 items-center justify-center rounded-xl border border-dashed border-border">
-          <Skeleton className="size-9 rounded-full" />
-        </div>
-      </div>
+      <ProjectGridSkeleton />
     </div>
   );
 }

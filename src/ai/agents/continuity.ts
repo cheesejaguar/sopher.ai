@@ -165,7 +165,11 @@ export async function runContinuityReview(input: {
           instructions: anthropicCachedSystem(CONTINUITY_SYSTEM_PROMPT),
           prompt: phaseUserPrompt(phase.key, corpus),
           tools: toolset,
-          stopWhen: isStepCount(4),
+          stopWhen: isStepCount(5),
+          // Force the final step to produce the structured result — without
+          // this, a phase that spends every step on tool spot-checks ends with
+          // no output and the whole review fails.
+          prepareStep: ({ stepNumber }) => (stepNumber >= 3 ? { activeTools: [] } : {}),
           output: Output.object({ schema: reviewPhaseResultSchema }),
           providerOptions: gatewayOptions(input.meter, "continuity"),
         }),

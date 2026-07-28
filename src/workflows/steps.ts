@@ -11,13 +11,7 @@ import { runContinuityReview, type ContinuityReport } from "@/ai/agents/continui
 import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
 import { estimateBookCost } from "@/ai/estimate";
 import { getOrCreateBook } from "@/db/queries/projects";
-import {
-  chapterNs,
-  PROGRESS_NS,
-  type GenerationConfig,
-  type RunEvent,
-  type Stage,
-} from "@/lib/run-events";
+import { chapterNs, PROGRESS_NS, type GenerationConfig, type RunEvent } from "@/lib/run-events";
 import type { BookConcept, BookOutline, ChapterOutlinePlan } from "@/ai/schemas";
 import type { MeterCtx } from "@/ai/metering";
 import type { ToolCtx } from "@/ai/tools";
@@ -74,7 +68,16 @@ function toWorkflowError(error: unknown): never {
     }
     throw new FatalError(error.message);
   }
-  throw error;
+  // Gateway errors and anything else: preserve the message across the step
+  // boundary (raw errors serialize without it) and honor retryability hints.
+  if (error && typeof error === "object" && "isRetryable" in error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if ((error as { isRetryable?: boolean }).isRetryable) {
+      throw new RetryableError(message, { retryAfter: "30s" });
+    }
+    throw new FatalError(message);
+  }
+  throw new FatalError(error instanceof Error ? error.message : String(error));
 }
 
 async function loadRunContext(ref: RunRef) {

@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { StageNav } from "@/components/studio/stage-nav";
 import { StatusBadge } from "@/components/studio/status-badge";
 import { WorkspaceRail } from "@/components/studio/workspace-rail";
-import { getProject, sampleChapters } from "@/lib/placeholder-data";
+import { requireUser } from "@/lib/auth";
+import { getChapterList, getProjectWithBook } from "@/db/queries/books";
 
 interface ProjectLayoutProps {
   children: React.ReactNode;
@@ -18,15 +19,23 @@ export async function generateMetadata({
   params: Promise<{ projectId: string }>;
 }): Promise<Metadata> {
   const { projectId } = await params;
-  return { title: getProject(projectId)?.title ?? "Project" };
+  const { userId } = await requireUser();
+  const data = await getProjectWithBook(userId, projectId);
+  return { title: data?.project.title ?? "Project" };
 }
 
 export default async function ProjectLayout({ children, params }: ProjectLayoutProps) {
   const { projectId } = await params;
-  const project = getProject(projectId);
-  if (!project) notFound();
+  const { userId } = await requireUser();
+  const data = await getProjectWithBook(userId, projectId);
+  if (!data) notFound();
+  const { project, book } = data;
 
-  const railChapters = sampleChapters.map(({ number, status }) => ({ number, status }));
+  const chapters = book ? await getChapterList(book.id) : [];
+  const railChapters = chapters.map(({ chapterNumber, status }) => ({
+    number: chapterNumber,
+    status,
+  }));
 
   return (
     <div className="space-y-6">
@@ -35,7 +44,7 @@ export default async function ProjectLayout({ children, params }: ProjectLayoutP
           {project.title}
         </h1>
         <div className="flex items-center gap-1.5">
-          <Badge variant="outline">{project.genre}</Badge>
+          {project.genre ? <Badge variant="outline">{project.genre}</Badge> : null}
           <StatusBadge status={project.status} />
         </div>
       </header>
@@ -43,9 +52,11 @@ export default async function ProjectLayout({ children, params }: ProjectLayoutP
       <StageNav projectId={project.id} />
 
       <div className="flex items-start gap-8">
-        <aside aria-label="Chapter overview" className="hidden shrink-0 lg:block">
-          <WorkspaceRail projectId={project.id} chapters={railChapters} />
-        </aside>
+        {railChapters.length > 0 ? (
+          <aside aria-label="Chapter overview" className="hidden shrink-0 lg:block">
+            <WorkspaceRail projectId={project.id} chapters={railChapters} />
+          </aside>
+        ) : null}
         <div className="min-w-0 flex-1">{children}</div>
       </div>
     </div>
