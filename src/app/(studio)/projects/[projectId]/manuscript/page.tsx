@@ -7,6 +7,7 @@ import { ExportDialog } from "@/components/manuscript/export-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
 import { buttonVariants } from "@/components/ui/button";
 import { markdownToHtml } from "@/lib/export/assemble";
+import { loadFigures } from "@/lib/export/figures";
 import { requireUser } from "@/lib/auth";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 
@@ -66,6 +67,9 @@ export default async function ManuscriptPage({
   const active = readable[activeIndex];
   const chapter = await getChapterWithContent(book.id, active.chapterNumber);
   if (!chapter) notFound();
+
+  // Cached diagram renders, so mermaid fences read as diagrams rather than source.
+  const figures = await loadFigures(projectId);
 
   const previous = activeIndex > 0 ? readable[activeIndex - 1] : null;
   const next = activeIndex < readable.length - 1 ? readable[activeIndex + 1] : null;
@@ -132,7 +136,7 @@ export default async function ManuscriptPage({
           </h2>
           <div
             // Manuscript markdown rendered server-side; raw HTML is escaped in markdownToHtml.
-            dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content) }}
+            dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content, figures) }}
           />
         </section>
       </div>

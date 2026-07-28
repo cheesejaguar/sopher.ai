@@ -1,5 +1,6 @@
 import type { AssembledManuscript } from "./assemble";
 import { exportDocx } from "./docx";
+import { hydrateFigureBytes } from "./figures";
 import { exportEpub } from "./epub";
 import { exportMarkdown } from "./markdown";
 import { exportPdf } from "./pdf";
@@ -18,11 +19,13 @@ export async function renderExport(
   switch (format) {
     case "md":
       return exportMarkdown(manuscript);
+    // PDF and DOCX embed image bytes directly, so figures must be downloaded
+    // first. EPUB fetches referenced images itself; markdown keeps the source.
     case "docx":
-      return exportDocx(manuscript);
+      return exportDocx({ ...manuscript, figures: await hydrateFigureBytes(manuscript.figures) });
     case "epub":
       return exportEpub(manuscript);
     case "pdf":
-      return exportPdf(manuscript);
+      return exportPdf({ ...manuscript, figures: await hydrateFigureBytes(manuscript.figures) });
   }
 }

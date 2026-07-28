@@ -1,6 +1,7 @@
 import { Marked } from "marked";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { diagramSourceHash, loadFigures, type FigureAsset, type FigureMap } from "./figures";
 
 /**
  * Manuscript assembly: turns a project's book + ordered chapters into a
@@ -25,6 +26,8 @@ export type AssembledManuscript = {
   genre: string | null;
   chapters: ManuscriptChapter[];
   totalWords: number;
+  /** Cached diagram/image renders, keyed by source hash or image URL. */
+  figures: FigureMap;
 };
 
 export type ManuscriptSourceChapter = {
@@ -39,6 +42,7 @@ export function buildManuscript(input: {
   synopsis?: string | null;
   genre?: string | null;
   chapters: ManuscriptSourceChapter[];
+  figures?: FigureMap;
 }): AssembledManuscript {
   const chapters = input.chapters
     .filter((c) => c.content.trim().length > 0)
@@ -59,6 +63,7 @@ export function buildManuscript(input: {
     genre: input.genre?.trim() || null,
     chapters,
     totalWords: chapters.reduce((sum, c) => sum + c.wordCount, 0),
+    figures: input.figures ?? {},
   };
 }
 
@@ -91,18 +96,56 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-const renderer = new Marked({ async: false, gfm: true, breaks: false });
-// Chapter prose is AI/user markdown; escape raw HTML rather than passing it through.
-renderer.use({
-  renderer: {
-    html(token) {
-      return escapeHtml(token.text);
-    },
-  },
-});
+function figureHtml(figure: FigureAsset, prefer: "svg" | "png"): string {
+  const src =
+    prefer === "svg" ? (figure.svgUrl ?? figure.pngUrl) : (figure.pngUrl ?? figure.svgUrl);
+  if (!src) return "";
+  return [
+    `<figure class="manuscript-figure">`,
+    `<img src="${escapeHtml(src)}" alt="${escapeHtml(figure.alt)}" />`,
+    `</figure>`,
+  ].join("");
+}
 
-/** Markdown → HTML with raw HTML escaped. Used by the reading view and HTML-based exporters. */
-export function markdownToHtml(markdown: string): string {
+/**
+ * A Marked instance is built per call so the mermaid renderer can close over
+ * this render's figure map. Instances are cheap; correctness beats reuse here.
+ */
+function createRenderer(figures: FigureMap, prefer: "svg" | "png"): Marked {
+  const renderer = new Marked({ async: false, gfm: true, breaks: false });
+  renderer.use({
+    renderer: {
+      // Chapter prose is AI/user markdown; escape raw HTML rather than pass it through.
+      html(token) {
+        return escapeHtml(token.text);
+      },
+      code(token) {
+        if (token.lang !== "mermaid") return false as unknown as string;
+        const figure = figures[diagramSourceHash(token.text)];
+        // Uncached diagram: fall through to the default fenced-code rendering
+        // so the source is still visible rather than lost.
+        if (!figure) return false as unknown as string;
+        return figureHtml(figure, prefer);
+      },
+    },
+  });
+  return renderer;
+}
+
+const defaultRenderer = createRenderer({}, "svg");
+
+/**
+ * Markdown → HTML with raw HTML escaped. Used by the reading view and the
+ * HTML-based exporters. `prefer` picks the image variant: the web view wants
+ * crisp SVG, EPUB readers are far more reliable with PNG.
+ */
+export function markdownToHtml(
+  markdown: string,
+  figures?: FigureMap,
+  prefer: "svg" | "png" = "svg",
+): string {
+  const renderer =
+    figures && Object.keys(figures).length > 0 ? createRenderer(figures, prefer) : defaultRenderer;
   return renderer.parse(markdown) as string;
 }
 
@@ -114,14 +157,48 @@ export type ProseBlock =
   | { kind: "heading"; depth: 1 | 2 | 3; text: string }
   | { kind: "paragraph"; text: string }
   | { kind: "quote"; text: string }
-  | { kind: "scene-break" };
+  | { kind: "scene-break" }
+  | { kind: "figure"; figure: FigureAsset }
+  /** A diagram with no cached render — exporters print the source instead. */
+  | { kind: "code"; language: string; text: string };
 
-/** Minimal, deterministic markdown block parser for prose (no lists/tables/code). */
-export function markdownToBlocks(markdown: string): ProseBlock[] {
+const MERMAID_FENCE_RE = /^```mermaid[ \t]*\n([\s\S]*?)\n?```$/;
+const IMAGE_ONLY_RE = /^!\[([^\]]*)\]\(([^)\s]+)\)$/;
+
+/**
+ * Minimal, deterministic markdown block parser for prose. Handles headings,
+ * quotes, scene breaks, paragraphs, plus standalone figures (mermaid fences and
+ * image-only lines) so the non-HTML exporters can embed them.
+ */
+export function markdownToBlocks(markdown: string, figures: FigureMap = {}): ProseBlock[] {
   const blocks: ProseBlock[] = [];
   for (const raw of markdown.split(/\n[ \t]*\n+/)) {
     const block = raw.trim();
     if (!block) continue;
+
+    const mermaid = block.match(MERMAID_FENCE_RE);
+    if (mermaid) {
+      const source = mermaid[1];
+      const figure = figures[diagramSourceHash(source)];
+      // No cached render (diagram never opened in the editor) — keep the source
+      // rather than dropping the content entirely.
+      blocks.push(
+        figure ? { kind: "figure", figure } : { kind: "code", language: "mermaid", text: source },
+      );
+      continue;
+    }
+
+    const image = block.match(IMAGE_ONLY_RE);
+    if (image) {
+      const [, alt, url] = image;
+      const known = figures[url];
+      blocks.push({
+        kind: "figure",
+        figure: known ?? { svgUrl: null, pngUrl: url, alt: alt || "Illustration" },
+      });
+      continue;
+    }
+
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(block)) {
       blocks.push({ kind: "scene-break" });
       continue;
@@ -213,5 +290,6 @@ export async function loadManuscript(
     synopsis: row.synopsis,
     genre: row.genre,
     chapters,
+    figures: await loadFigures(row.projectId),
   });
 }

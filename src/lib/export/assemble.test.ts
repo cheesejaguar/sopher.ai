@@ -10,6 +10,7 @@ import {
   stripInline,
   MANUSCRIPT_AUTHOR,
 } from "./assemble";
+import { diagramSourceHash, fitWidth, pngDimensions } from "./figures";
 import { filenameStem } from "./types";
 
 const source = {
@@ -150,5 +151,109 @@ describe("filenameStem", () => {
   it("slugs titles and falls back for empty ones", () => {
     expect(filenameStem("The Salt Road!")).toBe("the-salt-road");
     expect(filenameStem("   ")).toBe("manuscript");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Figures: mermaid diagrams and inline images.
+// ---------------------------------------------------------------------------
+
+const DIAGRAM = "flowchart TD\n  A[Start] --> B[End]";
+const DIAGRAM_MD = "```mermaid\n" + DIAGRAM + "\n```";
+const diagramFigures = {
+  [diagramSourceHash(DIAGRAM)]: {
+    svgUrl: "https://blob.example/d.svg",
+    pngUrl: "https://blob.example/d.png",
+    alt: "Diagram: Start, End",
+  },
+};
+
+describe("diagramSourceHash", () => {
+  it("ignores trailing whitespace so editor and stored markdown agree", () => {
+    expect(diagramSourceHash("flowchart TD\n  A --> B  \n")).toBe(
+      diagramSourceHash("flowchart TD\n  A --> B"),
+    );
+  });
+
+  it("distinguishes different diagrams", () => {
+    expect(diagramSourceHash("flowchart TD\n A-->B")).not.toBe(
+      diagramSourceHash("flowchart TD\n A-->C"),
+    );
+  });
+});
+
+describe("markdownToHtml figures", () => {
+  it("renders a cached mermaid fence as an image, not source", () => {
+    const html = markdownToHtml(DIAGRAM_MD, diagramFigures);
+    expect(html).toContain('<img src="https://blob.example/d.svg"');
+    expect(html).toContain('alt="Diagram: Start, End"');
+    expect(html).not.toContain("flowchart TD");
+  });
+
+  it("prefers the PNG when asked (EPUB readers handle SVG poorly)", () => {
+    expect(markdownToHtml(DIAGRAM_MD, diagramFigures, "png")).toContain(
+      'src="https://blob.example/d.png"',
+    );
+  });
+
+  it("falls back to the source block when the diagram is not cached", () => {
+    const html = markdownToHtml(DIAGRAM_MD, {});
+    expect(html).toContain("flowchart TD");
+    expect(html).not.toContain("<img");
+  });
+
+  it("leaves non-mermaid code blocks alone", () => {
+    const html = markdownToHtml("```ts\nconst a = 1;\n```", diagramFigures);
+    expect(html).toContain("const a = 1;");
+  });
+});
+
+describe("markdownToBlocks figures", () => {
+  it("emits a figure block for a cached diagram", () => {
+    const blocks = markdownToBlocks(DIAGRAM_MD, diagramFigures);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ kind: "figure", figure: { alt: "Diagram: Start, End" } });
+  });
+
+  it("degrades an uncached diagram to a code block rather than dropping it", () => {
+    const blocks = markdownToBlocks(DIAGRAM_MD, {});
+    expect(blocks[0]).toMatchObject({ kind: "code", language: "mermaid", text: DIAGRAM });
+  });
+
+  it("treats a standalone image line as a figure", () => {
+    const blocks = markdownToBlocks("![A harbour at dusk](https://blob.example/i.png)");
+    expect(blocks[0]).toMatchObject({
+      kind: "figure",
+      figure: { pngUrl: "https://blob.example/i.png", alt: "A harbour at dusk" },
+    });
+  });
+
+  it("keeps prose around a diagram intact", () => {
+    const blocks = markdownToBlocks(`Before.\n\n${DIAGRAM_MD}\n\nAfter.`, diagramFigures);
+    expect(blocks.map((b) => b.kind)).toEqual(["paragraph", "figure", "paragraph"]);
+  });
+});
+
+describe("pngDimensions", () => {
+  it("reads width and height from the IHDR chunk", () => {
+    const png = new Uint8Array(24);
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+    new DataView(png.buffer).setUint32(16, 640);
+    new DataView(png.buffer).setUint32(20, 480);
+    expect(pngDimensions(png)).toEqual({ width: 640, height: 480 });
+  });
+
+  it("returns null for non-PNG bytes", () => {
+    expect(pngDimensions(new Uint8Array([1, 2, 3]))).toBeNull();
+  });
+});
+
+describe("fitWidth", () => {
+  it("leaves images narrower than the limit untouched", () => {
+    expect(fitWidth({ width: 300, height: 200 }, 576)).toEqual({ width: 300, height: 200 });
+  });
+
+  it("scales down preserving aspect ratio", () => {
+    expect(fitWidth({ width: 1200, height: 600 }, 600)).toEqual({ width: 600, height: 300 });
   });
 });
