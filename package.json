@@ -15,7 +15,8 @@
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:check": "drizzle-kit check",
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
-    "vercel-build": "drizzle-kit migrate && next build"
+    "vercel-build": "drizzle-kit migrate && next build",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.28",
@@ -57,6 +58,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.0",
     "@testing-library/react": "^16.3.2",

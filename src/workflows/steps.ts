@@ -7,11 +7,19 @@ import { generateOutline, persistOutline } from "@/ai/agents/outline";
 import { writeChapter, persistChapter } from "@/ai/agents/chapter-writer";
 import { summarizeChapter } from "@/ai/agents/summarizer";
 import { editChapter } from "@/ai/agents/editor";
-import { runContinuityReview, type ContinuityReport } from "@/ai/agents/continuity";
+import {
+  aggregateContinuityOutcomes,
+  persistContinuityIssues,
+  runContinuityPhase,
+  type ContinuityOutcome,
+  type ContinuityReport,
+} from "@/ai/agents/continuity";
+import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
 import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
 import { estimateBookCost } from "@/ai/estimate";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { chapterNs, PROGRESS_NS, type GenerationConfig, type RunEvent } from "@/lib/run-events";
+import { isChapterComplete } from "./resume";
 import type { BookConcept, BookOutline, ChapterOutlinePlan } from "@/ai/schemas";
 import type { MeterCtx } from "@/ai/metering";
 import type { ToolCtx } from "@/ai/tools";
@@ -197,6 +205,34 @@ export async function writeChapterStep(
   const { project, book, meter } = await loadRunContext(ref);
   const db = getDb();
 
+  // Resume: a retry run reuses chapters a prior run already finished.
+  const [existing] = await db
+    .select({
+      status: schema.chapters.status,
+      content: schema.chapters.content,
+      wordCount: schema.chapters.wordCount,
+      qualityScore: schema.chapters.qualityScore,
+    })
+    .from(schema.chapters)
+    .where(
+      and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
+    )
+    .limit(1);
+  if (isChapterComplete(existing)) {
+    await writeEvent(PROGRESS_NS, {
+      type: "chapter",
+      chapterNumber,
+      status: existing.status as "drafted" | "edited" | "final",
+      wordCount: existing.wordCount,
+      qualityScore: existing.qualityScore ? Number(existing.qualityScore) : undefined,
+    });
+    return {
+      chapterNumber,
+      wordCount: existing.wordCount,
+      qualityScore: existing.qualityScore ? Number(existing.qualityScore) : 0.75,
+    };
+  }
+
   const [outlineRow] = await db
     .select()
     .from(schema.outlines)
@@ -368,29 +404,46 @@ export async function readQualityGate(ref: RunRef, threshold: number): Promise<n
     .map((r) => r.chapterNumber);
 }
 
-export async function continuityStep(
+/**
+ * One rubric phase per step: a retry after a mid-review failure replays the
+ * finished phases from their checkpoints instead of re-billing them.
+ */
+export async function continuityPhaseStep(
   ref: RunRef,
   config: GenerationConfig,
-): Promise<ContinuityReport> {
+  phaseKey: ReviewPhaseKey,
+): Promise<ContinuityOutcome> {
   "use step";
   const { book, meter } = await loadRunContext(ref);
   try {
-    const report = await runContinuityReview({
-      meter,
-      tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id },
-      tier: config.tier,
-      runId: ref.dbRunId,
-    });
-    await writeEvent(PROGRESS_NS, {
-      type: "review",
-      score: report.score,
-      recommendation: report.recommendation,
-      issueCount: report.issues.length,
-    });
-    return report;
+    return await runContinuityPhase(
+      {
+        meter,
+        tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id },
+        tier: config.tier,
+      },
+      phaseKey,
+    );
   } catch (error) {
     toWorkflowError(error);
   }
+}
+
+export async function continuityFinalizeStep(
+  ref: RunRef,
+  outcomes: ContinuityOutcome[],
+): Promise<ContinuityReport> {
+  "use step";
+  const { book } = await loadRunContext(ref);
+  const report = aggregateContinuityOutcomes(outcomes);
+  await persistContinuityIssues(book.id, ref.dbRunId, report.issues);
+  await writeEvent(PROGRESS_NS, {
+    type: "review",
+    score: report.score,
+    recommendation: report.recommendation,
+    issueCount: report.issues.length,
+  });
+  return report;
 }
 
 export async function finalizeStep(ref: RunRef): Promise<void> {
