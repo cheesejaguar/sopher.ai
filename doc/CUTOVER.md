@@ -29,35 +29,65 @@ an instance that has no real domain attached — it does **not** imply
 So the remaining task is not "create a production instance" — it is **change the
 existing production instance's domain to `sopher.ai`**.
 
-### Step 1 — configure the domain on the Vercel side
+### Root cause — the domain is a create-only field that was never set
 
-This Clerk account was provisioned through the **Vercel Marketplace**, so the
-domain is Vercel-managed. Consequences:
+This Clerk account came from the **Vercel Marketplace**, so its domain is
+Vercel-managed. The resource was provisioned with `metadata: {}` — no domain —
+and Vercel's product schema declares:
 
-- The Clerk dashboard shows the domain as *"managed by Vercel"* and will not let
-  you edit it. `POST /v1/instance/change_domain` is likewise not the path here.
-- Vercel shows *"Production domain required — your production deployment is
-  currently using development keys. Configure a domain to start using Clerk's
-  production environment."*
-- **No CLI can do this.** `vercel integration` offers only add, accept-terms,
-  balance, categories, discover, guide, installations, list, open, resource,
-  update; `vercel integration resource` only connect, disconnect, remove,
-  claim, create-threshold. None configure a resource's domain.
+```json
+"domain": {
+  "ui:label": "Production domain (optional)",
+  "ui:readonly": "update",
+  "ui:control": "domain"
+}
+```
 
-Configure it on the Clerk resource card in the Vercel dashboard (the card in
-Installed Products showing "Production domain required"). `vercel integration
-open clerk clerk-camel-basket` opens the resource dashboard via SSO.
+`ui:readonly: "update"` means the field is settable **only at resource
+creation**. Verified consequences:
 
-> **Match the canonical domain.** Clerk provisions its subdomains under whatever
-> production domain it is given, so `sopher.ai` yields `clerk.sopher.ai` while
-> `www.sopher.ai` would yield `clerk.www.sopher.ai`. The project is configured
-> apex-canonical (below) precisely so the existing DNS records apply.
+- Clerk's dashboard shows the domain as *"managed by Vercel"* and will not edit
+  it; `POST /v1/instance/change_domain` does not apply to managed resources.
+- Vercel's *"Production domain required"* notice is a tooltip, not a control.
+- The REST API refuses it too. `PATCH /v1/storage/stores/integration/{id}`
+  accepts an empty body but rejects both `{"domain":…}` and
+  `{"metadata":{"domain":…}}` with *"should NOT have additional property"*.
+- No CLI reaches it: `vercel integration` = add, accept-terms, balance,
+  categories, discover, guide, installations, list, open, resource, update;
+  `vercel integration resource` = connect, disconnect, remove, claim,
+  create-threshold.
 
-Changing a Clerk domain regenerates the Publishable Key. Since the integration
-owns that variable it re-syncs on its own — never copy a `pk_live_` by hand.
+Everything downstream — the production instance stuck on a `.lcl.dev`
+placeholder, production serving `pk_test_` — follows from that one empty field.
+The only fix inside the Marketplace is to **recreate the resource with the
+domain set during install**.
 
-No downtime results: the live site keeps using the development instance until
-the integration publishes production keys.
+### Step 1 — recreate the Clerk resource with a domain
+
+State being replaced (for reference/rollback):
+
+| | |
+|---|---|
+| Resource | `clerk-camel-basket` (`ir_hwgYOYUxHAiFtFmf`) |
+| Clerk app | `app_3H6bP5BDzHMZLyN2XrbLPV5TIxd` |
+| Integration | `oac_7uYNbc9CdDAZmNqbt3LEkO3a`, config `icfg_2xSONU7uZ1l3PUqwrcUkiQd0` |
+| Owns env vars | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` (all 3 targets) |
+
+Order matters — removing the resource deletes those env vars, so the site is
+down until the new one is connected. Do it in one sitting.
+
+1. Vercel dashboard → the `clerk-camel-basket` resource → **Remove**. (CLI
+   equivalent: `vercel integration resource remove clerk-camel-basket`.)
+2. Install Clerk again — `vercel integration add clerk`, or the dashboard's
+   Marketplace flow. Both are interactive and need human confirmation.
+3. **In the install form, fill "Production domain (optional)" with `sopher.ai`.**
+   This is the entire point of the exercise and the one field that cannot be
+   fixed later. Not `www.sopher.ai` — see the canonical-domain note in step 2.
+4. Connect the resource to project `sopher-ai` for all three environments.
+
+Clerk then provisions a production instance on `sopher.ai` and the integration
+syncs `pk_live_`/`sk_live_` into the Production target itself. Never hand-copy
+those keys; the integration owns them and would overwrite or reject the edit.
 
 ### Step 2 — DNS
 
