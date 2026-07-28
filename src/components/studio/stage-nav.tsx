@@ -1,0 +1,58 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Suspense } from "react";
+
+import { cn } from "@/lib/utils";
+
+const stages = [
+  { slug: "brief", label: "Brief" },
+  { slug: "outline", label: "Outline" },
+  { slug: "write", label: "Write" },
+  { slug: "editor", label: "Editor" },
+  { slug: "manuscript", label: "Manuscript" },
+  { slug: "usage", label: "Usage" },
+] as const;
+
+function StageTabs({ projectId, pathname }: { projectId: string; pathname?: string }) {
+  return (
+    <div className="flex w-fit items-center gap-1 rounded-lg bg-muted p-1">
+      {stages.map((stage) => {
+        const href = `/projects/${projectId}/${stage.slug}` as const;
+        const active =
+          pathname !== undefined && (pathname === href || pathname.startsWith(`${href}/`));
+        return (
+          <Link
+            key={stage.slug}
+            href={href}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "inline-flex h-7 items-center rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors",
+              active
+                ? "bg-background text-foreground shadow-sm dark:bg-input/30"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {stage.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function StageTabsWithPathname({ projectId }: { projectId: string }) {
+  const pathname = usePathname();
+  return <StageTabs projectId={projectId} pathname={pathname} />;
+}
+
+export function StageNav({ projectId }: { projectId: string }) {
+  return (
+    <nav aria-label="Workspace stages" className="max-w-full overflow-x-auto">
+      <Suspense fallback={<StageTabs projectId={projectId} />}>
+        <StageTabsWithPathname projectId={projectId} />
+      </Suspense>
+    </nav>
+  );
+}

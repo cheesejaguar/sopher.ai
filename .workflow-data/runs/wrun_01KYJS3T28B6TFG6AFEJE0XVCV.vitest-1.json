@@ -1,0 +1,27 @@
+{
+  "runId": "wrun_01KYJS3T28B6TFG6AFEJE0XVCV",
+  "deploymentId": "dpl_local@4.2.2",
+  "workflowName": "workflow//./src/workflows/spike//spikeWorkflow",
+  "specVersion": 3,
+  "executionContext": {
+    "traceCarrier": {},
+    "workflowCoreVersion": "4.6.2",
+    "features": {
+      "encryption": false
+    }
+  },
+  "input": {
+    "__type": "Uint8Array",
+    "data": "ZGV2bFtbMV0sImFhcm9uIl0="
+  },
+  "createdAt": "2026-07-27T21:53:50.668Z",
+  "startedAt": "2026-07-27T21:53:50.671Z",
+  "status": "failed",
+  "error": {
+    "message": "require is not defined",
+    "stack": "./src/workflows/spike:13\n    throw mod = 0, e;\n    ^\n\nReferenceError: require is not defined\n    at node_modules/.pnpm/builtin-modules@3.3.0/node_modules/builtin-modules/index.js (node_modules/.pnpm/builtin-modules@3.3.0/node_modules/builtin-modules/index.js:2:27)\n    at __require (./src/workflows/spike:11:52)\n    at anonymous (node_modules/.pnpm/@workflow+builders@4.1.3/node_modules/@workflow/builders/src/serde-checker.ts:12:3)\n    at Script.runInContext (node:vm:150:12)\n    at runCachedWorkflowScript (file:///Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+core@4.6.2/node_modules/@workflow/core/dist/vm/script-cache.js:124:52)\n    at file:///Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+core@4.6.2/node_modules/@workflow/core/dist/workflow.js:596:9\n    at processTicksAndRejections (node:internal/process/task_queues:104:5)\n    at trace (file:///Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+core@4.6.2/node_modules/@workflow/core/dist/telemetry.js:75:16)\n    at file:///Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+core@4.6.2/node_modules/@workflow/core/dist/runtime.js:481:36\n    at trace (file:///Users/aaron/Documents/sopher.ai/node_modules/.pnpm/@workflow+core@4.6.2/node_modules/@workflow/core/dist/telemetry.js:75:16)",
+    "code": "USER_ERROR"
+  },
+  "completedAt": "2026-07-27T21:53:50.734Z",
+  "updatedAt": "2026-07-27T21:53:50.734Z"
+}

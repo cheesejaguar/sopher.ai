@@ -1,0 +1,118 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+
+import { Button } from "@/components/ui/button";
+
+const MAX_SEGMENTS = 24;
+/** Segment width (0.5rem) + gap (0.25rem) — used to slide segments to center. */
+const PITCH_REM = 0.75;
+
+/**
+ * The completion moment: the chapter rail closes into a single spine bearing
+ * the book's title. Pure CSS transforms; the global reduced-motion rules
+ * collapse the choreography into an instant crossfade.
+ */
+export function CompletionMoment({
+  projectId,
+  projectTitle,
+  chapterCount,
+  recommendation,
+  review,
+}: {
+  projectId: string;
+  projectTitle: string;
+  chapterCount: number;
+  recommendation?: string;
+  review?: { score: number; issueCount: number };
+}) {
+  const [closed, setClosed] = React.useState(false);
+
+  React.useEffect(() => {
+    // Double rAF so the open state paints before the transition begins.
+    let inner: number | undefined;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => setClosed(true));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      if (inner !== undefined) cancelAnimationFrame(inner);
+    };
+  }, []);
+
+  const segments = Math.max(1, Math.min(chapterCount, MAX_SEGMENTS));
+  const mid = (segments - 1) / 2;
+
+  return (
+    <section
+      aria-label="Book complete"
+      className="flex flex-col items-center gap-8 rounded-xl bg-card px-6 py-12 ring-1 ring-foreground/10"
+    >
+      <div className="relative flex h-40 items-center justify-center">
+        <div
+          aria-hidden="true"
+          className="flex items-center gap-1 transition-opacity duration-300"
+          style={{
+            opacity: closed ? 0 : 1,
+            transitionDelay: closed ? "850ms" : "0ms",
+          }}
+        >
+          {Array.from({ length: segments }, (_, i) => (
+            <span
+              key={i}
+              className="h-28 w-2 rounded-[3px] bg-primary transition-transform duration-700 ease-in-out"
+              style={{
+                transform: closed
+                  ? `translateX(${((mid - i) * PITCH_REM).toFixed(3)}rem)`
+                  : undefined,
+                transitionDelay: `${i * 20}ms`,
+              }}
+            />
+          ))}
+        </div>
+        <div
+          className="absolute inset-0 flex items-center justify-center transition-opacity duration-500"
+          style={{ opacity: closed ? 1 : 0, transitionDelay: closed ? "900ms" : "0ms" }}
+        >
+          <div className="glow-primary flex h-36 w-11 items-center justify-center overflow-hidden rounded-md bg-primary px-1">
+            <span
+              className="max-h-32 truncate font-display text-sm font-semibold text-primary-foreground [writing-mode:vertical-rl]"
+              title={projectTitle}
+            >
+              {projectTitle}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-2 text-center">
+        <h2 className="font-display text-2xl font-semibold tracking-tight text-balance">
+          Your book is written.
+        </h2>
+        {recommendation ? (
+          <p className="mx-auto max-w-md text-sm text-muted-foreground">{recommendation}</p>
+        ) : null}
+        {review ? (
+          <p className="font-mono text-xs text-muted-foreground tabular-nums">
+            continuity score {review.score.toFixed(2)} ·{" "}
+            {review.issueCount === 1 ? "1 note" : `${review.issueCount} notes`}
+          </p>
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button render={<Link href={`/projects/${projectId}/manuscript`} />} nativeButton={false}>
+          Open your manuscript
+        </Button>
+        <Button
+          variant="outline"
+          render={<Link href={`/projects/${projectId}/editor`} />}
+          nativeButton={false}
+        >
+          Start editing
+        </Button>
+      </div>
+    </section>
+  );
+}

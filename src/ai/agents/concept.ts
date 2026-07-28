@@ -1,0 +1,116 @@
+import { generateText, isStepCount, Output } from "ai";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
+import { MODELS, type QualityTier } from "@/ai/models";
+import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import { buildToolset, type ToolCtx } from "@/ai/tools";
+import { CONCEPT_SYSTEM_PROMPT, buildConceptUserPrompt } from "@/ai/prompts/concept";
+import { conceptSchema, type BookConcept } from "@/ai/schemas";
+import { anthropicCachedSystem } from "@/ai/cache";
+
+export type ConceptCtx = {
+  meter: MeterCtx;
+  tools: ToolCtx;
+  tier: QualityTier;
+  brief: string;
+  genre?: string;
+  targetAudience?: string;
+  contentGuidelines?: string;
+};
+
+function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
+  return [
+    `You previously expanded an author brief into the draft book concept below. Now critique and refine it in one pass.`,
+    `## Draft concept\n${JSON.stringify(draft, null, 2)}`,
+    `## Original author brief\n${ctx.brief}`,
+    ctx.genre ? `## Genre\n${ctx.genre}` : "",
+    ctx.targetAudience ? `## Target audience\n${ctx.targetAudience}` : "",
+    `Identify the 2-3 weakest elements of this concept judged against what ${
+      ctx.genre ? `${ctx.genre} readers` : "readers of this genre"
+    } expect — a generic logline, a low-stakes central conflict, interchangeable characters, themes that don't connect to the plot, or "unique" elements that are actually common tropes.`,
+    `Then return the REFINED concept: rewrite the weak elements to fix them, keep everything that already works, and preserve the same structure. Return the complete refined concept, not a critique.`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Expands an author brief into a full book concept, then critiques and refines
+ * it in a second pass. The expand step may consult genre conventions via tools.
+ */
+export async function generateConcept(input: ConceptCtx): Promise<BookConcept> {
+  const model = MODELS[input.tier].concept;
+
+  const expanded = await metered(
+    input.meter,
+    { role: "concept", operation: "concept.expand", model },
+    () =>
+      generateText({
+        model,
+        instructions: anthropicCachedSystem(CONCEPT_SYSTEM_PROMPT),
+        prompt: buildConceptUserPrompt({
+          brief: input.brief,
+          genre: input.genre,
+          targetAudience: input.targetAudience,
+          contentGuidelines: input.contentGuidelines,
+        }),
+        tools: buildToolset("concept", input.tools),
+        stopWhen: isStepCount(3),
+        prepareStep: ({ stepNumber }) => (stepNumber >= 2 ? { activeTools: [] } : {}),
+        output: Output.object({ schema: conceptSchema }),
+        providerOptions: gatewayOptions(input.meter, "concept"),
+      }),
+  );
+
+  const refined = await metered(
+    input.meter,
+    { role: "concept", operation: "concept.refine", model },
+    () =>
+      generateText({
+        model,
+        instructions: anthropicCachedSystem(CONCEPT_SYSTEM_PROMPT),
+        prompt: refinePrompt(input, expanded.output),
+        output: Output.object({ schema: conceptSchema }),
+        providerOptions: gatewayOptions(input.meter, "concept"),
+      }),
+  );
+
+  return refined.output;
+}
+
+/**
+ * Persists the concept onto the book row and seeds the character bible from
+ * the concept's cast. Existing bible entries win (onConflictDoNothing on the
+ * uq_character_name (bookId, name) index) so re-running never clobbers facts
+ * later chapters added.
+ */
+export async function persistConcept(bookId: string, concept: BookConcept): Promise<void> {
+  const db = getDb();
+  await db
+    .update(schema.books)
+    .set({
+      title: concept.title,
+      synopsis: concept.synopsis,
+      concept,
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.books.id, bookId));
+
+  if (concept.characters.length > 0) {
+    await db
+      .insert(schema.characterBible)
+      .values(
+        concept.characters.map((c) => ({
+          bookId,
+          name: c.name,
+          facts: {
+            role: c.role,
+            facts: [c.description, `Arc: ${c.arc}`],
+          },
+        })),
+      )
+      .onConflictDoNothing({
+        target: [schema.characterBible.bookId, schema.characterBible.name],
+      });
+  }
+}
