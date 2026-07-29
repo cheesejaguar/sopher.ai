@@ -95,9 +95,16 @@ export function AuthorInputsPanel({ inputs }: { inputs: AuthorInputs }) {
   const settingKeys = (Object.keys(SETTING_LABELS) as (keyof ProjectSettings)[]).filter(
     (key) => inputs.settings[key] !== undefined,
   );
-  // The tier as of the run, which can differ from the project's current
-  // setting if the author changed it afterwards.
-  const bookRun = inputs.runs.find((run) => run.kind === "full_book");
+  // The tier as of the run that actually produced this manuscript, which can
+  // differ from the project's current setting if the author changed it after.
+  //
+  // Runs arrive newest-first, so taking the first full_book row would report a
+  // failed or still-running rerun's tier rather than the one the book was
+  // written at. Prefer the earliest completed run; fall back to the earliest
+  // run of any status only when nothing has completed yet.
+  const bookRuns = inputs.runs.filter((run) => run.kind === "full_book");
+  const completedRuns = bookRuns.filter((run) => run.status === "completed");
+  const bookRun = (completedRuns.length > 0 ? completedRuns : bookRuns).at(-1);
   const runTier =
     bookRun && typeof bookRun.config === "object" && bookRun.config !== null
       ? ((bookRun.config as { tier?: string }).tier ?? null)
