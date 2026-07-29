@@ -4,11 +4,13 @@ import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SpendTable } from "@/components/studio/spend-table";
-import { BudgetBar } from "@/components/usage/budget-bar";
-import { formatUsd } from "@/components/usage/format";
+import Link from "next/link";
+
+import { formatCredits, formatUsd } from "@/components/usage/format";
 import { RoleTable } from "@/components/usage/role-table";
 import { requireUser } from "@/lib/auth";
-import { getBudget, getMonthToDateSpend } from "@/lib/billing/meter";
+import { getMonthToDateSpend } from "@/lib/billing/meter";
+import { CREDIT_MARKUP, getBalance } from "@/lib/billing/credits";
 import { getSpendByProject, getSpendByRole } from "@/db/queries/books";
 
 export const metadata: Metadata = {
@@ -20,35 +22,37 @@ function monthStartUtc(): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 }
 
-async function BudgetCard() {
+async function WalletCard() {
   const { userId } = await requireUser();
-  const [spent, budget] = await Promise.all([getMonthToDateSpend(userId), getBudget(userId)]);
-  const usedPct = budget.monthlyLimitUsd > 0 ? (spent / budget.monthlyLimitUsd) * 100 : 100;
+  const [spentUsd, balance] = await Promise.all([getMonthToDateSpend(userId), getBalance(userId)]);
+  const spentCredits = spentUsd * CREDIT_MARKUP;
   const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date());
 
   return (
     <Card>
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
-          {monthName} budget
+          Credits
         </CardTitle>
         <CardDescription>
-          Resets on the 1st.{" "}
-          {budget.hardLimit ? "Generation pauses at the cap." : "Soft cap — generation continues."}
+          Your prepaid balance is the spending limit — writing pauses when it runs out and resumes
+          after a top-up.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="font-mono text-2xl tabular-nums">
-          <span className="text-ember">{formatUsd(spent)}</span>{" "}
-          <span className="text-sm text-muted-foreground">
-            of {formatUsd(budget.monthlyLimitUsd)}
-          </span>
+          <span className={balance <= 0 ? "text-ember" : undefined}>{formatCredits(balance)}</span>{" "}
+          <span className="text-sm text-muted-foreground">available</span>
         </p>
-        <BudgetBar pct={usedPct} warnAtPct={budget.alertThresholdPct} />
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
-          {Math.round(usedPct)}% used · {formatUsd(Math.max(0, budget.monthlyLimitUsd - spent))}{" "}
-          remaining
+          {formatCredits(spentCredits)} used in {monthName} ({formatUsd(spentUsd)} metered)
         </p>
+        <Link
+          href="/studio/credits"
+          className="inline-block text-sm font-medium text-primary hover:underline"
+        >
+          Buy credits or view the ledger
+        </Link>
       </CardContent>
     </Card>
   );
@@ -128,7 +132,7 @@ export default function UsagePage() {
       </header>
 
       <Suspense fallback={<CardSkeleton lines={3} />}>
-        <BudgetCard />
+        <WalletCard />
       </Suspense>
 
       <Suspense fallback={<CardSkeleton lines={4} />}>

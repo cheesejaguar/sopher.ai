@@ -16,9 +16,11 @@ const KIND_LABELS: Record<string, string> = {
 export default async function CreditsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ purchase?: string }>;
+  searchParams: Promise<{ purchase?: string; return?: string }>;
 }) {
-  const { purchase } = await searchParams;
+  const { purchase, return: returnTo } = await searchParams;
+  // Only ever navigate back inside the app.
+  const safeReturn = returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : null;
   const { userId } = await requireUser();
   const [balance, ledger] = await Promise.all([getBalance(userId), listLedger(userId)]);
 
@@ -39,6 +41,14 @@ export default async function CreditsPage({
         >
           Payment received. Credits appear here once Stripe confirms the charge — usually within a
           few seconds. Refresh if the balance below looks unchanged.
+          {safeReturn ? (
+            <>
+              {" "}
+              <a href={safeReturn} className="font-medium underline">
+                Back to your book
+              </a>
+            </>
+          ) : null}
         </p>
       ) : null}
       {purchase === "cancelled" ? (
@@ -64,7 +74,7 @@ export default async function CreditsPage({
         <h3 id="packs-heading" className="font-sans font-semibold">
           Add credits
         </h3>
-        <PackButtons packs={CREDIT_PACKS} />
+        <PackButtons packs={CREDIT_PACKS} returnTo={safeReturn ?? undefined} />
       </section>
 
       <section aria-labelledby="ledger-heading" className="space-y-3">

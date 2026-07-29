@@ -14,7 +14,15 @@ import { getStripe, stripeConfigured } from "@/lib/payments/stripe";
 
 export const maxDuration = 60;
 
-const bodySchema = z.object({ packId: z.string().min(1).max(40) });
+const bodySchema = z.object({
+  packId: z.string().min(1).max(40),
+  /** In-app path to send the buyer back to (e.g. a paused run). */
+  returnTo: z
+    .string()
+    .max(300)
+    .regex(/^\/(?!\/)/, "must be an in-app path")
+    .optional(),
+});
 
 function originFrom(req: Request): string {
   const explicit = process.env.NEXT_PUBLIC_APP_URL;
@@ -47,7 +55,8 @@ export async function POST(req: Request) {
 
   // Price comes from our own catalog, never from the request — otherwise a
   // caller could name their own price for a pack.
-  const pack = getPack(parsed.data.packId);
+  const { packId, returnTo } = parsed.data;
+  const pack = getPack(packId);
   if (!pack) return Response.json({ error: "Unknown pack" }, { status: 404 });
 
   const origin = originFrom(req);
@@ -72,7 +81,7 @@ export async function POST(req: Request) {
         },
       },
     ],
-    success_url: `${origin}/studio/credits?purchase=complete`,
+    success_url: `${origin}/studio/credits?purchase=complete${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`,
     cancel_url: `${origin}/studio/credits?purchase=cancelled`,
   });
 

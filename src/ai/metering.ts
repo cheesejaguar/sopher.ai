@@ -1,6 +1,6 @@
 import type { JSONValue, LanguageModelUsage } from "ai";
-import { checkBudget, recordLlmCall } from "@/lib/billing/meter";
-import { debitCredits } from "@/lib/billing/credits";
+import { recordLlmCall } from "@/lib/billing/meter";
+import { assertAboveFloor, debitCredits } from "@/lib/billing/credits";
 import { PROSE_FALLBACK_MODELS } from "./models";
 
 export type MeterCtx = {
@@ -45,7 +45,9 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   info: MeteredCallInfo,
   fn: () => Promise<T>,
 ): Promise<T> {
-  await checkBudget(ctx.userId);
+  // The credit system gates at route/workflow level; this is only the backstop
+  // that keeps the deliberate mid-wave overshoot bounded.
+  await assertAboveFloor(ctx.userId);
   const startedAt = Date.now();
   const result = await fn();
   // Image models bill per generated image, not per token — count returned image files.

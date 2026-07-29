@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CREDIT_MARKUP, CREDIT_PACKS, creditsForUsd, getPack } from "./credits";
+import { CREDIT_MARKUP, CREDIT_PACKS, creditsForUsd, getPack } from "./credits-shared";
 
 /**
  * The pricing model is calibrated against two production books that measured
@@ -82,5 +82,19 @@ describe("creditsForUsd", () => {
     const meteredUsd = 10;
     const retail = creditsForUsd(meteredUsd);
     expect((retail - meteredUsd) / retail).toBeGreaterThan(0.6);
+  });
+});
+
+describe("welcome grant economics", () => {
+  it("lets a new user watch a standard book begin", () => {
+    // The pre-flight covers one wave (4 chapters), not the whole book. From
+    // production data a 12-chapter standard book meters ~$6.39, so one wave
+    // plus overhead is roughly a third of that.
+    const oneWaveUsd = (6.39 / 12) * 4 * 1.4; // + overhead margin
+    expect(creditsForUsd(oneWaveUsd)).toBeLessThan(10);
+  });
+
+  it("does not cover a whole standard book (the funnel pauses mid-book)", () => {
+    expect(creditsForUsd(6.39)).toBeGreaterThan(10);
   });
 });

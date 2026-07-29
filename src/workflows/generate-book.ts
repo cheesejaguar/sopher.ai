@@ -3,7 +3,6 @@ import type { GenerationConfig } from "@/lib/run-events";
 import type { BookOutline } from "@/ai/schemas";
 import { continuityPhaseKeys, type ContinuityOutcome } from "@/ai/agents/continuity";
 import {
-  checkBudgetStep,
   conceptStep,
   continuityFinalizeStep,
   continuityPhaseStep,
@@ -38,7 +37,25 @@ export async function generateBook(
 
   try {
     await markRunStatus(ref, "running");
-    await checkBudgetStep(ref, config);
+
+    // Pre-flight: suspend BEFORE any metered work unless the wallet covers the
+    // opening stretch (concept/outline/bible + the first wave). Deliberately
+    // not the whole book — the welcome grant is sized to let a book begin and
+    // pause at a natural seam, and zero-balance runs must burn nothing.
+    const preflight = await creditCheckStep(ref, config, config.waveSize);
+    if (!preflight.sufficient) {
+      await markRunStatus(ref, "awaiting_input");
+      await emitProgress(ref, {
+        type: "stage",
+        stage: "awaiting_credits",
+        pct: 1,
+        detail: `${preflight.balance.toFixed(0)} of ${preflight.required.toFixed(0)} credits needed to start`,
+      });
+      const hook = createHook<{ toppedUp: boolean }>({ token: `credits-topup:${dbRunId}` });
+      const go = await hook;
+      if (!go.toppedUp) throw new FatalError("Run cancelled while waiting for credits");
+      await markRunStatus(ref, "running");
+    }
 
     await emitProgress(ref, { type: "stage", stage: "concept", pct: 2 });
     await emitProgress(ref, { type: "agent", agent: "concept", message: "Expanding the brief" });
@@ -95,14 +112,14 @@ export async function generateBook(
       // can outrun its estimate. Running short suspends the run instead of
       // failing it, so every chapter already drafted is kept and no work is
       // re-billed on resume.
-      const credit = await creditCheckStep(ref, config, total - done);
+      const credit = await creditCheckStep(ref, config, Math.min(config.waveSize, total - done));
       if (!credit.sufficient) {
         await markRunStatus(ref, "awaiting_input");
         await emitProgress(ref, {
           type: "stage",
           stage: "awaiting_credits",
           pct: 15 + Math.round(55 * (done / total)),
-          detail: `${credit.balance.toFixed(0)} of ${credit.required.toFixed(0)} credits needed to finish`,
+          detail: `${credit.balance.toFixed(0)} of ${credit.required.toFixed(0)} credits needed to continue`,
         });
         const topUp = createHook<{ toppedUp: boolean }>({
           token: `credits-topup:${dbRunId}`,

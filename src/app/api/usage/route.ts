@@ -1,7 +1,8 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { getBudget, getMonthToDateSpend } from "@/lib/billing/meter";
+import { getMonthToDateSpend } from "@/lib/billing/meter";
+import { CREDIT_MARKUP, getBalance } from "@/lib/billing/credits";
 
 export async function GET() {
   let userId: string;
@@ -19,9 +20,9 @@ export async function GET() {
   monthStart.setUTCDate(1);
   monthStart.setUTCHours(0, 0, 0, 0);
 
-  const [spent, budget, byProject, byModel] = await Promise.all([
+  const [spent, balance, byProject, byModel] = await Promise.all([
     getMonthToDateSpend(userId),
-    getBudget(userId),
+    getBalance(userId),
     db
       .select({
         projectId: schema.llmCalls.projectId,
@@ -49,7 +50,8 @@ export async function GET() {
 
   return Response.json({
     monthToDateUsd: spent,
-    budget,
+    monthToDateCredits: spent * CREDIT_MARKUP,
+    balance,
     byProject: byProject.map((r) => ({ ...r, usd: Number(r.usd) })),
     byModel: byModel.map((r) => ({
       ...r,

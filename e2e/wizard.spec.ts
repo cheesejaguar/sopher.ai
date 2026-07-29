@@ -3,8 +3,8 @@
  *
  * DB-free by design: the page and its layout render no server data, and the
  * estimate step's POST /api/estimates is pure computation (src/app/api/
- * estimates/route.ts → estimateBookCost). The step also fires GET /api/usage
- * for budget context, but treats any failure as a nicety it can live without.
+ * estimates/route.ts → estimateBookCost, quoted in credits). Balance context
+ * rides on the same response; an unauthenticated quote simply omits it.
  *
  * The wizard is never submitted — "Start the book" writes to the DB and
  * kicks off a paid generation run.

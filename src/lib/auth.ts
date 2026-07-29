@@ -2,6 +2,8 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { clerkEnabled, devAuthAllowed } from "@/lib/clerk";
+import { grantCredits } from "@/lib/billing/credits";
+import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -59,6 +61,17 @@ export async function requireUser(): Promise<{ userId: string }> {
         imageUrl: user?.imageUrl ?? null,
       })
       .onConflictDoNothing();
+
+    // Welcome grant — enough to watch a real book begin. Keyed on the user id
+    // behind the ledger's unique external_ref index, so the webhook path and
+    // this lazy path cannot double-grant however they race.
+    await grantCredits({
+      userId,
+      credits: SIGNUP_GRANT_CREDITS,
+      description: "Welcome credits",
+      externalRef: `signup:${userId}`,
+      kind: "grant",
+    });
   }
 
   return { userId };

@@ -3,8 +3,6 @@
  */
 import { axeCheck, expect, fullPageScreenshot, test } from "./helpers";
 
-const TIERS = ["Draft", "Standard", "Premium"] as const;
-
 test.describe("landing page", () => {
   test("shows hero, nav, and pricing tiers", async ({ page }, testInfo) => {
     await page.goto("/");
@@ -24,13 +22,13 @@ test.describe("landing page", () => {
     await expect(nav.getByRole("link", { name: "Pricing" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Start your book" })).toBeVisible();
 
-    // Pricing section with the three tiers (tier names appear in each card's CTA).
-    const pricing = page.getByRole("region", { name: "Pay per book, not per month" });
+    // Pricing section with the credit packs.
+    const pricing = page.getByRole("region", { name: "Credits, not subscriptions" });
     await expect(
-      pricing.getByRole("heading", { name: "Pay per book, not per month" }),
+      pricing.getByRole("heading", { name: "Credits, not subscriptions" }),
     ).toBeVisible();
-    for (const tier of TIERS) {
-      await expect(pricing.getByRole("link", { name: `Start with ${tier}` })).toBeVisible();
+    for (const pack of ["Starter", "Author", "Studio", "Press"]) {
+      await expect(pricing.getByRole("link", { name: `Get ${pack}` })).toBeVisible();
     }
 
     await axeCheck(page);
@@ -86,20 +84,24 @@ test.describe("landing page", () => {
 });
 
 test.describe("pricing page", () => {
-  test("shows the three tiers and prices", async ({ page }, testInfo) => {
+  test("shows the credit packs and per-book costs", async ({ page }, testInfo) => {
     await page.goto("/pricing");
 
-    const pricing = page.getByRole("region", { name: "Pay per book, not per month" });
+    const pricing = page.getByRole("region", { name: "Credits, not subscriptions" });
     await expect(
-      pricing.getByRole("heading", { name: "Pay per book, not per month" }),
+      pricing.getByRole("heading", { name: "Credits, not subscriptions" }),
     ).toBeVisible();
-    for (const tier of TIERS) {
-      await expect(pricing.getByRole("link", { name: `Start with ${tier}` })).toBeVisible();
+
+    // The four packs, priced from the same CREDIT_PACKS the checkout sells.
+    for (const pack of ["Starter", "Author", "Studio", "Press"]) {
+      await expect(pricing.getByRole("link", { name: `Get ${pack}` })).toBeVisible();
     }
-    // One flat price per tier.
-    await expect(pricing.getByText("$9.99")).toBeVisible();
-    await expect(pricing.getByText("$19.99")).toBeVisible();
-    await expect(pricing.getByText("$49.99")).toBeVisible();
+    await expect(pricing.getByText("$25")).toBeVisible();
+    await expect(pricing.getByText("$300")).toBeVisible();
+
+    // The welcome grant and the honest per-book cost table.
+    await expect(pricing.getByText(/free credits/)).toBeVisible();
+    await expect(pricing.getByRole("heading", { name: "What does a book cost?" })).toBeVisible();
 
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, "pricing");

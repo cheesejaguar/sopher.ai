@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/studio/status-badge";
 import { RelativeTime } from "@/components/relative-time";
 import { genreLabel } from "@/lib/genres";
+import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
 
 export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete";
 
@@ -39,8 +40,8 @@ function stageForStatus(status: ProjectCardStatus): "brief" | "write" | "editor"
   }
 }
 
-function formatUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
+function formatSpendCredits(value: number): string {
+  return `${(value * CREDIT_MARKUP).toFixed(1)} cr`;
 }
 
 export function ProjectCard({ project }: { project: ProjectCardData }) {
@@ -81,8 +82,10 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
         </CardContent>
         <CardFooter className="justify-between text-xs">
           <span className="font-mono tabular-nums">
-            {formatUsd(project.spendUsd)}{" "}
-            <span className="text-muted-foreground">of ~{formatUsd(project.estimateUsd)}</span>
+            {formatSpendCredits(project.spendUsd)}{" "}
+            <span className="text-muted-foreground">
+              of ~{formatSpendCredits(project.estimateUsd)}
+            </span>
           </span>
           <span className="text-muted-foreground">
             Updated <RelativeTime iso={project.updatedAt} />

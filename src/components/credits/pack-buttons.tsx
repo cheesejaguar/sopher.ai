@@ -4,10 +4,10 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type { CreditPack } from "@/lib/billing/credits";
+import type { CreditPack } from "@/lib/billing/credits-shared";
 
 /** Starts Stripe Checkout. Credits are granted by the webhook, never here. */
-export function PackButtons({ packs }: { packs: CreditPack[] }) {
+export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo?: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,7 +18,7 @@ export function PackButtons({ packs }: { packs: CreditPack[] }) {
       const response = await fetch("/api/credits/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId }),
+        body: JSON.stringify({ packId, returnTo }),
       });
       const body = (await response.json()) as { url?: string; error?: string };
       if (!response.ok || !body.url) {

@@ -1,5 +1,7 @@
 import { Webhook } from "svix";
 import { getDb, schema } from "@/db";
+import { grantCredits } from "@/lib/billing/credits";
+import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 
 type ClerkUserEvent = {
   type: string;
@@ -48,6 +50,18 @@ export async function POST(req: Request) {
         target: schema.users.id,
         set: { email: primaryEmail, name, imageUrl: data.image_url ?? null, updatedAt: new Date() },
       });
+
+    if (event.type === "user.created") {
+      // Same idempotency key as the lazy path in requireUser — whichever runs
+      // second no-ops on the unique external_ref index.
+      await grantCredits({
+        userId: data.id,
+        credits: SIGNUP_GRANT_CREDITS,
+        description: "Welcome credits",
+        externalRef: `signup:${data.id}`,
+        kind: "grant",
+      });
+    }
   }
 
   return Response.json({ received: true });

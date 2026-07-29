@@ -55,3 +55,6 @@ next-env.d.ts
 
 # Playwright MCP session artifacts
 .playwright-mcp/
+
+# Filesystem-sync duplicate artifacts (sync-duplicate guard; also enforced in CI)
+* [0-9].*
