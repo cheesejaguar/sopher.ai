@@ -115,9 +115,7 @@ export async function sendReceiptEmail(input: {
       "Thanks — credits added.",
       p(
         `Your ${input.packName} purchase of <strong>${input.credits} credits</strong> ($${input.usd.toFixed(2)}) is on your balance now.`,
-      ) +
-        p(`Unspent credits are refundable within 14 days — just reply to this email.`) +
-        cta("https://sopher.ai/studio/credits", "View your balance"),
+      ) + cta("https://sopher.ai/studio/credits", "View your balance"),
     ),
   );
 }

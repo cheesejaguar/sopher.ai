@@ -60,8 +60,8 @@ export default function TermsPage() {
         </li>
         <li>Costs shown before a run are estimates; actual consumption is metered.</li>
         <li>
-          Credits are not transferable, have no cash value except as described in the refund policy,
-          and do not expire.
+          Credits are not transferable, have no cash value, do not expire, and — as set out in the
+          refund policy — are not refundable once purchased.
         </li>
         <li>Payments are processed by Stripe. We never see your card details.</li>
         <li>Refunds are governed by the refund policy, which is part of these terms.</li>
@@ -77,9 +77,9 @@ export default function TermsPage() {
       <h2>Termination</h2>
       <p>
         You can delete your account at any time. We may suspend or terminate accounts that break
-        these terms, with a refund of unspent credits unless the breach involves fraud or abuse. On
-        deletion, your projects and manuscripts are removed from our systems as described in the
-        privacy policy — export anything you want to keep first.
+        these terms. Unspent credits are not refunded on deletion or termination. On deletion, your
+        projects and manuscripts are removed from our systems as described in the privacy policy —
+        export anything you want to keep first.
       </p>
 
       <h2>Disclaimers and liability</h2>
