@@ -10,7 +10,7 @@ import { genreLabel } from "@/lib/genres";
 import { ProjectMenu } from "@/components/studio/project-menu";
 import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
 
-export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete";
+export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete" | "archived";
 
 /** Serializable card shape, assembled from the DB by the dashboard. */
 export interface ProjectCardData {
@@ -39,6 +39,9 @@ function stageForStatus(status: ProjectCardStatus): "brief" | "write" | "editor"
       return "editor";
     case "complete":
       return "manuscript";
+    case "archived":
+      // Read-only stroll through what exists; brief is the safest landing.
+      return "brief";
   }
 }
 

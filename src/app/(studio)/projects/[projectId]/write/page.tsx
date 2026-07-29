@@ -46,7 +46,7 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
         .where(eq(schema.llmCalls.runId, run.id)),
     ]);
     snapshot = {
-      run: { id: run.id, status: run.status as RunStatus, error: run.error },
+      run: { id: run.id, status: run.status as RunStatus, error: run.error, kind: run.kind },
       events: events.map((event) => event.payload),
       chapters: chapters.map((chapter) => ({
         number: chapter.chapterNumber,

@@ -17,7 +17,7 @@ function toCard(project: ProjectWithStats): ProjectCardData {
     id: project.id,
     title: project.title,
     genre: project.genre,
-    status: project.status === "archived" ? "draft" : project.status,
+    status: project.status,
     archived: project.status === "archived",
     updatedAt: project.updatedAt.toISOString(),
     wordCount: project.wordCount,

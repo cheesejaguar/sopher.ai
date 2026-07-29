@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { revalidatePath } from "next/cache";
@@ -9,6 +9,26 @@ import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser } from "@/lib/auth";
 import { countWords } from "@/lib/editor/anchors";
+
+/**
+ * Structural edits renumber chapters, and an in-flight run addresses chapters
+ * by number — reordering under it would desynchronize the workflow's targets.
+ * Rename is exempt (titles are cosmetic to the pipeline).
+ */
+async function assertNoActiveRun(projectId: string): Promise<void> {
+  const db = getDb();
+  const [active] = await db
+    .select({ id: schema.generationRuns.id })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+      ),
+    )
+    .limit(1);
+  if (active) throw new Error("Finish or stop the current run before restructuring chapters");
+}
 
 export type SaveChapterResult =
   | { ok: true; version: number; wordCount: number }
@@ -116,6 +136,7 @@ export async function deleteChapter(chapterId: string): Promise<void> {
 
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+  await assertNoActiveRun(ownership.projectId);
 
   const db = getDb();
   const [chapter] = await db
@@ -154,6 +175,7 @@ export async function addChapter(
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
     .limit(1);
   if (!book) throw new Error("Book not found");
+  await assertNoActiveRun(projectId);
 
   const insertAt = Math.max(0, Math.trunc(afterNumber)) + 1;
   // Same two-phase shift, upward this time, to open the slot.
@@ -182,6 +204,7 @@ export async function moveChapter(chapterId: string, direction: "up" | "down"): 
 
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+  await assertNoActiveRun(ownership.projectId);
 
   const db = getDb();
   const [chapter] = await db

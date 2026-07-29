@@ -299,10 +299,14 @@ export async function resetChapterStep(ref: RunRef, chapterNumber: number): Prom
     .update(schema.chapters)
     .set({
       content: "",
-      summary: null,
+      // Summary stays: it doubles as regeneration context when the outline no
+      // longer has an entry for this number (user-added or reordered chapters).
       wordCount: 0,
       qualityScore: null,
       status: "planned",
+      // Invalidate any open editor tab: a stale baseVersion must conflict
+      // rather than silently overwrite the freshly generated prose.
+      version: sql`${schema.chapters.version} + 1`,
       updatedAt: new Date(),
     })
     .where(eq(schema.chapters.id, chapter.id));
@@ -371,9 +375,26 @@ export async function writeChapterStep(
     .limit(1);
   if (!outlineRow) throw new FatalError("No outline to write from");
   const outline = outlineRow.content as BookOutline;
-  const chapterOutline = outline.chapters.find((c) => c.number === chapterNumber) as
+  let chapterOutline = outline.chapters.find((c) => c.number === chapterNumber) as
     ChapterOutlinePlan | undefined;
-  if (!chapterOutline) throw new FatalError(`Chapter ${chapterNumber} missing from outline`);
+  if (!chapterOutline) {
+    // The author restructured chapters after the outline was written (added,
+    // moved, or is regenerating one) — synthesize an entry from what the
+    // chapter row itself knows rather than refusing.
+    chapterOutline = {
+      number: chapterNumber,
+      title: existing?.title ?? `Chapter ${chapterNumber}`,
+      summary:
+        existing?.summary ??
+        "Continue the story naturally from the surrounding chapters, honoring the story bible.",
+      keyEvents: [],
+      charactersPresent: [],
+      emotionalArc: "transition",
+      openingHook: "Pick up where the previous chapter's summary leaves off.",
+      closingHook: "Hand off cleanly to the next chapter's summary.",
+      targetWords: project.targetWordsPerChapter,
+    };
+  }
 
   const prevSummaries = await db
     .select({

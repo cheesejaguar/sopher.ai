@@ -51,7 +51,12 @@ export type RunStatus =
 
 /** Page-load snapshot (run row + persisted progress events + DB chapter statuses). */
 export type RunSnapshot = {
-  run: { id: string; status: RunStatus; error: string | null };
+  run: {
+    id: string;
+    status: RunStatus;
+    error: string | null;
+    kind?: "full_book" | "chapter" | "edit_pass" | "continuity" | "export";
+  };
   /** Persisted event payloads in seq order (validated here; invalid ones dropped). */
   events: unknown[];
   /** Chapter statuses read from the DB at render time. */

@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { deleteProject, updateProject } from "@/lib/actions/projects";
+import { deleteProject, setProjectArchived, updateProject } from "@/lib/actions/projects";
 
 /**
  * The card's overflow menu — the first place a project can be renamed,
@@ -64,7 +64,7 @@ export function ProjectMenu({
   function setArchived(next: boolean) {
     startTransition(async () => {
       try {
-        await updateProject(projectId, { status: next ? "archived" : "draft" });
+        await setProjectArchived(projectId, next);
       } catch {
         // The card simply doesn't move; nothing destructive happened.
       }

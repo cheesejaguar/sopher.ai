@@ -2,13 +2,14 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
+import { isActiveRunConflict } from "@/lib/run-conflict";
 import type { GenerationConfig } from "@/lib/run-events";
 import {
   createProjectSchema,
@@ -47,14 +48,6 @@ const startBookSchema = z.object({
   targetWordsPerChapter: z.number().int().min(800).max(8_000),
   settings: projectSettingsSchema.default({}),
 });
-
-/** Postgres unique violation on uq_runs_active_per_project, possibly wrapped by the driver. */
-function isActiveRunConflict(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  const { code, message, cause } = error as { code?: string; message?: string; cause?: unknown };
-  if (code === "23505" || message?.includes("uq_runs_active_per_project")) return true;
-  return cause !== undefined && isActiveRunConflict(cause);
-}
 
 /**
  * Shared run-start logic — the server-side equivalent of
@@ -154,7 +147,50 @@ export async function updateProject(projectId: string, input: unknown) {
     .returning({ id: schema.projects.id });
 
   if (!updated) throw new Error("Project not found");
+  // Mirror a rename onto the book row so exports and the reading view agree
+  // with the dashboard (see updateBook for the reverse direction).
+  if (data.title !== undefined) {
+    await db
+      .update(schema.books)
+      .set({ title: data.title, updatedAt: new Date() })
+      .where(eq(schema.books.projectId, projectId));
+  }
   revalidatePath(`/projects/${projectId}`);
+  revalidatePath("/studio");
+}
+
+/**
+ * Archive/unarchive. Restoring derives the status from the book's actual state
+ * rather than resetting to draft, so a finished book comes back as finished.
+ */
+export async function setProjectArchived(projectId: string, archived: boolean) {
+  const { userId } = await requireUser();
+  const db = getDb();
+
+  let status: "draft" | "editing" | "complete" | "archived" = "archived";
+  if (!archived) {
+    const [stats] = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        written: sql<number>`count(*) filter (where length(${schema.chapters.content}) > 0)::int`,
+      })
+      .from(schema.chapters)
+      .innerJoin(schema.books, eq(schema.books.id, schema.chapters.bookId))
+      .where(eq(schema.books.projectId, projectId));
+    status =
+      stats && stats.written > 0
+        ? stats.written >= stats.total
+          ? "complete"
+          : "editing"
+        : "draft";
+  }
+
+  const [updated] = await db
+    .update(schema.projects)
+    .set({ status, updatedAt: new Date() })
+    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
+    .returning({ id: schema.projects.id });
+  if (!updated) throw new Error("Project not found");
   revalidatePath("/studio");
 }
 

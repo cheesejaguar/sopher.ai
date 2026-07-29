@@ -8,6 +8,7 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { estimateBookCost } from "@/ai/estimate";
 import { generateChapter } from "@/workflows/generate-chapter";
+import { isActiveRunConflict } from "@/lib/run-conflict";
 import type { GenerationConfig } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
 
@@ -80,16 +81,26 @@ export async function POST(_req: Request, ctx: { params: Promise<{ chapterId: st
     throw error;
   }
 
-  const [run] = await db
-    .insert(schema.generationRuns)
-    .values({
-      projectId: ownership.projectId,
-      userId,
-      kind: "chapter",
-      status: "queued",
-      config,
-    })
-    .returning({ id: schema.generationRuns.id });
+  let run: { id: string };
+  try {
+    [run] = await db
+      .insert(schema.generationRuns)
+      .values({
+        projectId: ownership.projectId,
+        userId,
+        kind: "chapter",
+        status: "queued",
+        config,
+      })
+      .returning({ id: schema.generationRuns.id });
+  } catch (error) {
+    // Concurrent request won the race past the pre-check; the partial unique
+    // index is the backstop, and it deserves a 409 rather than a 500.
+    if (isActiveRunConflict(error)) {
+      return Response.json({ error: "A run is already in progress" }, { status: 409 });
+    }
+    throw error;
+  }
 
   const workflowRun = await start(generateChapter, [
     run.id,

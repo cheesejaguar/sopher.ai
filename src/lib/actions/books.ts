@@ -45,6 +45,15 @@ export async function updateBook(projectId: string, input: unknown): Promise<voi
   }
 
   await db.update(schema.books).set(patch).where(eq(schema.books.id, book.id));
+  // Title lives on both rows — the studio grid and project header read the
+  // project, exports and the reading view read the book. Keep them mirrored so
+  // neither edit path leaves the other surface stale.
+  if (data.title !== undefined) {
+    await db
+      .update(schema.projects)
+      .set({ title: data.title.trim(), updatedAt: new Date() })
+      .where(eq(schema.projects.id, projectId));
+  }
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/studio");
 }
