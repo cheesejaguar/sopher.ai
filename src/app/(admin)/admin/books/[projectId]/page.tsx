@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { markdownToHtml } from "@/lib/export/assemble";
 import { getAdminBook } from "@/db/queries/admin";
+import { AuthorInputsPanel } from "@/components/admin/author-inputs";
 
 export const metadata = { title: "Book — admin" };
 
@@ -38,6 +39,8 @@ export default async function AdminBookView({
         This is the author&rsquo;s private work, shown read-only for terms enforcement. Access is
         disclosed in the privacy policy.
       </p>
+
+      <AuthorInputsPanel inputs={book} />
 
       {book.flags.length > 0 ? (
         <section aria-labelledby="b-flags" className="space-y-2">

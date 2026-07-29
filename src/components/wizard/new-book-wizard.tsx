@@ -226,6 +226,9 @@ export function NewBookWizard() {
       title: composeTitle(state),
       brief: composeBrief(state),
       genre: state.genre,
+      ...(state.subgenre ? { subgenre: state.subgenre } : {}),
+      ...(state.protagonist.trim() ? { protagonist: state.protagonist.trim() } : {}),
+      ...(state.setting.trim() ? { setting: state.setting.trim() } : {}),
       targetChapters: state.chapters,
       targetWordsPerChapter: state.wordsPerChapter,
       settings: {

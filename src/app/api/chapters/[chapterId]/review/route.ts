@@ -121,6 +121,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       anchor: { start: range.start, end: range.end, originalText: s.anchorText },
       suggestedText: s.replacement,
       explanation: s.rationale,
+      // The focus the author asked for, if any — same reasoning as the
+      // selection path.
+      instruction: parsed.data.instruction ?? null,
       status: "pending",
     });
   }

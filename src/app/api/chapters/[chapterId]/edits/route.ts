@@ -173,6 +173,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       },
       suggestedText: output.replacement,
       explanation: output.rationale,
+      // The author's own words. Went into the prompt and was then dropped, so
+      // the record held the answer with no trace of the question.
+      instruction,
       status: "pending",
     })
     .returning();

@@ -76,6 +76,16 @@ export const projects = pgTable(
     title: text("title").notNull(),
     brief: text("brief"),
     genre: text("genre"),
+    /**
+     * The wizard collects these as separate fields and then glues them onto the
+     * end of the brief as English (composeBrief). Persisting them structured
+     * too means answering "which subgenres do people pick" is a GROUP BY rather
+     * than a regex over prose. The brief text is unchanged, so generation
+     * output is identical.
+     */
+    subgenre: text("subgenre"),
+    protagonist: text("protagonist"),
+    setting: text("setting"),
     targetChapters: integer("target_chapters").default(10).notNull(),
     targetWordsPerChapter: integer("target_words_per_chapter").default(3000).notNull(),
     styleGuide: text("style_guide"),
@@ -251,6 +261,13 @@ export const generationRuns = pgTable(
       .default("queued")
       .notNull(),
     config: jsonb("config").default({}).notNull(),
+    /**
+     * What the author wrote when sending the outline back for revision. Lived
+     * only inside Workflow DevKit's durable state, reachable by `workflow
+     * inspect` but not by SQL — so the one place an author says, in their own
+     * words, what the plan got wrong was invisible to everything.
+     */
+    approvalNotes: text("approval_notes"),
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -387,6 +404,15 @@ export const suggestions = pgTable(
     anchor: jsonb("anchor").$type<SuggestionAnchor>().notNull(),
     suggestedText: text("suggested_text").notNull(),
     explanation: text("explanation").notNull(),
+    /**
+     * What the author actually asked for. Went into the prompt and was then
+     * discarded, so the record showed the model's answer with no trace of the
+     * question — useless for understanding a complaint about a bad rewrite,
+     * and the single most direct signal of what people want from the editor.
+     * Null on rows written before this existed, and on passes with no
+     * instruction.
+     */
+    instruction: text("instruction"),
     status: text("status", { enum: ["pending", "applied", "rejected"] })
       .default("pending")
       .notNull(),
