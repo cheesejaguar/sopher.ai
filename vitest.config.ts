@@ -12,6 +12,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // `server-only` is a build-time guard with no runtime module resolvable
+      // outside Next's bundler. Stubbing it lets server-only libraries be unit
+      // tested without weakening the guard in the app build.
+      "server-only": path.resolve(__dirname, "./tests/stubs/server-only.ts"),
     },
   },
 });

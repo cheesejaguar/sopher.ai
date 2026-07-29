@@ -6,6 +6,7 @@ import { type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 
 export const maxDuration = 120;
@@ -35,6 +36,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     }
     throw error;
   }
+
+  // Paid path: the balance pre-check above is a read, so concurrent callers all
+  // pass it. This is what bounds how far past the floor they can get.
+  const limited = await rateLimit(LIMITS.llmTool, req, userId);
+  if (limited.limited) return limited.response;
 
   const { toolId } = await ctx.params;
   const tool = getContentTool(toolId);

@@ -6,6 +6,7 @@ import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { diagramSourceHash } from "@/lib/export/figures";
+import { sanitizeSvg } from "@/lib/security/svg";
 
 /**
  * Caches a client-rendered Mermaid diagram so server-side surfaces (reading
@@ -76,11 +77,19 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid PNG payload" }, { status: 400 });
   }
 
+  // The server can't render Mermaid, so it can't verify this SVG matches the
+  // source it claims — it only knows the caller owns the chapter. Sanitize
+  // before it reaches a public blob URL.
+  const safeSvg = sanitizeSvg(svg);
+  if (!safeSvg) {
+    return Response.json({ error: "Invalid SVG payload" }, { status: 400 });
+  }
+
   const meta = { sourceHash, alt: alt || "Diagram" };
   const base = `diagrams/${ownership.projectId}/${sourceHash}`;
 
   const [svgBlob, pngBlob] = await Promise.all([
-    put(`${base}.svg`, svg, {
+    put(`${base}.svg`, safeSvg, {
       access: "public",
       contentType: "image/svg+xml",
       addRandomSuffix: false,
@@ -100,7 +109,7 @@ export async function POST(req: Request) {
       blobUrl: svgBlob.url,
       blobPathname: svgBlob.pathname,
       contentType: "image/svg+xml",
-      sizeBytes: Buffer.byteLength(svg),
+      sizeBytes: Buffer.byteLength(safeSvg),
       meta,
     },
     {

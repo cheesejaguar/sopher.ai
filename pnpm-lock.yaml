@@ -41,6 +41,9 @@ importers:
       '@vercel/blob':
         specifier: ^2.6.1
         version: 2.6.1
+      '@vercel/firewall':
+        specifier: ^1.2.2
+        version: 1.2.2
       '@vercel/functions':
         specifier: ^3.7.6
         version: 3.7.6(@aws-sdk/credential-provider-web-identity@3.972.49)
@@ -68,6 +71,9 @@ importers:
       epub-gen-memory:
         specifier: ^1.1.2
         version: 1.1.2
+      isomorphic-dompurify:
+        specifier: ^3.20.0
+        version: 3.20.0(@noble/hashes@1.8.0)
       lucide-react:
         specifier: ^1.27.0
         version: 1.27.0(react@19.2.4)
@@ -2686,6 +2692,10 @@ packages:
     resolution: {integrity: sha512-kQF8LGie/Hbdq9/psJxLE7owRTcqMQMhgybU04gCeR7cbQAr5t8OrjefDNColJv1QSSucFt4pLwRiARVmlOnug==}
     engines: {node: '>= 18'}
 
+  '@vercel/firewall@1.2.2':
+    resolution: {integrity: sha512-y5bzJ9xkYSKNVmGNjFvLB9Rv0mr+ZXsHZYF8Kw99NJpgo6Sahynk8epd+EGI3womRG0WhW9NZ7c92FfVY82cng==}
+    engines: {node: '>= 20'}
+
   '@vercel/functions@3.7.6':
     resolution: {integrity: sha512-QKlSfrgvo4pGEnzHw8Dha9GRTb5hhLBbImKi4rL4CmxClaVs+36hxgjW0MOqez57wWShstpKOWZY/mU8KuYoUQ==}
     engines: {node: '>= 20'}
@@ -4781,6 +4791,10 @@ packages:
   isexe@4.0.0:
     resolution: {integrity: sha512-FFUtZMpoZ8RqHS3XeXEmHWLA4thH+ZxCv2lOiPIn1Xc7CxrqhWzNSDzD+/chS/zbYezmiwWLdQC09JdQKmthOw==}
     engines: {node: '>=20'}
+
+  isomorphic-dompurify@3.20.0:
+    resolution: {integrity: sha512-WH3UcdmOrqLJF6qHaGnGINNMRwkQXVtvxlhEdygP3FdbuPjfFEsvjaqA5E16uYlNvAT5uGqK4MPvJBvtTtriEA==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   iterare@1.2.1:
     resolution: {integrity: sha512-RKYVTCjAnRthyJes037NX/IiqeidgN1xc3j1RjFfECFp28A1GVwK9nA+i0rJPaHqSZwygLzRnFlzUuHFoWWy+Q==}
@@ -8962,6 +8976,8 @@ snapshots:
     dependencies:
       execa: 5.1.1
 
+  '@vercel/firewall@1.2.2': {}
+
   '@vercel/functions@3.7.6(@aws-sdk/credential-provider-web-identity@3.972.49)':
     dependencies:
       '@vercel/oidc': 3.8.1
@@ -11436,6 +11452,14 @@ snapshots:
   isexe@3.1.5: {}
 
   isexe@4.0.0: {}
+
+  isomorphic-dompurify@3.20.0(@noble/hashes@1.8.0):
+    dependencies:
+      dompurify: 3.4.12
+      jsdom: 30.0.0(@noble/hashes@1.8.0)
+    transitivePeerDependencies:
+      - '@noble/hashes'
+      - canvas
 
   iterare@1.2.1: {}
 
