@@ -9,6 +9,7 @@ import {
   continuityPhaseStep,
   editChapterStep,
   emitCost,
+  creditCheckStep,
   entityBibleStep,
   emitProgress,
   finalizeStep,
@@ -90,6 +91,29 @@ export async function generateBook(
     await emitProgress(ref, { type: "stage", stage: "chapters", pct: 15 });
 
     for (const wave of chunk(chapterNumbers, config.waveSize)) {
+      // Check the wallet between waves rather than only up front: a long book
+      // can outrun its estimate. Running short suspends the run instead of
+      // failing it, so every chapter already drafted is kept and no work is
+      // re-billed on resume.
+      const credit = await creditCheckStep(ref, config, total - done);
+      if (!credit.sufficient) {
+        await markRunStatus(ref, "awaiting_input");
+        await emitProgress(ref, {
+          type: "stage",
+          stage: "awaiting_credits",
+          pct: 15 + Math.round(55 * (done / total)),
+          detail: `${credit.balance.toFixed(0)} of ${credit.required.toFixed(0)} credits needed to finish`,
+        });
+        const topUp = createHook<{ toppedUp: boolean }>({
+          token: `credits-topup:${dbRunId}`,
+        });
+        const resumed = await topUp;
+        if (!resumed.toppedUp) {
+          throw new FatalError("Run cancelled while waiting for credits");
+        }
+        await markRunStatus(ref, "running");
+      }
+
       await Promise.all(wave.map((n) => writeChapterStep(ref, config, n)));
       done += wave.length;
       await emitProgress(ref, {

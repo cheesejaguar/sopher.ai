@@ -11,6 +11,7 @@ import { ThemeToggle } from "@/components/studio/theme-toggle";
 
 const links = [
   { href: "/studio", label: "Projects" },
+  { href: "/studio/credits", label: "Credits" },
   { href: "/studio/usage", label: "Usage" },
 ] as const;
 

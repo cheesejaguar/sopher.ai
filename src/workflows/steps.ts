@@ -17,6 +17,7 @@ import {
 } from "@/ai/agents/continuity";
 import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
 import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
+import { creditsForUsd, getBalance } from "@/lib/billing/credits";
 import { estimateBookCost } from "@/ai/estimate";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { listEntities } from "@/db/queries/entities";
@@ -151,6 +152,33 @@ export async function checkBudgetStep(ref: RunRef, config: GenerationConfig) {
   } catch (error) {
     toWorkflowError(error);
   }
+}
+
+/**
+ * Reports the wallet against what the rest of the run is expected to cost.
+ *
+ * Returns rather than throws: the orchestrator suspends on a top-up hook when
+ * the balance runs short, so an author who runs out mid-book keeps every
+ * chapter already drafted instead of losing the run.
+ */
+export async function creditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  remainingChapters: number,
+): Promise<{ balance: number; required: number; sufficient: boolean }> {
+  "use step";
+  const db = getDb();
+  const [project] = await db
+    .select({ words: schema.projects.targetWordsPerChapter })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, ref.projectId))
+    .limit(1);
+  if (!project) throw new FatalError("Project not found");
+
+  const estimate = estimateBookCost(config.tier, remainingChapters, project.words);
+  const required = creditsForUsd(estimate.totalUsd);
+  const balance = await getBalance(ref.userId);
+  return { balance, required, sufficient: balance >= required };
 }
 
 export async function conceptStep(ref: RunRef, config: GenerationConfig): Promise<BookConcept> {

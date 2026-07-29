@@ -32,7 +32,7 @@ function buildSteps(tier: QualityTier): Step[] {
   const steps: Step[] = [
     { key: "concept", label: "Concept", stages: ["concept"] },
     { key: "outline", label: "Outline", stages: ["outline", "awaiting_approval"] },
-    { key: "chapters", label: "Chapters", stages: ["chapters"] },
+    { key: "chapters", label: "Chapters", stages: ["chapters", "awaiting_credits"] },
   ];
   if (tier !== "draft") steps.push({ key: "editing", label: "Editing", stages: ["editing"] });
   steps.push({ key: "continuity", label: "Continuity", stages: ["continuity", "revising"] });
@@ -46,6 +46,7 @@ const STAGE_RANK: Record<Stage, number> = {
   outline: 2,
   awaiting_approval: 2,
   chapters: 3,
+  awaiting_credits: 3,
   editing: 4,
   continuity: 5,
   revising: 5,

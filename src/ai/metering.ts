@@ -1,5 +1,6 @@
 import type { JSONValue, LanguageModelUsage } from "ai";
 import { checkBudget, recordLlmCall } from "@/lib/billing/meter";
+import { debitCredits } from "@/lib/billing/credits";
 import { PROSE_FALLBACK_MODELS } from "./models";
 
 export type MeterCtx = {
@@ -52,7 +53,7 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     (result as { files?: Array<{ mediaType?: string }> }).files?.filter((f) =>
       f.mediaType?.startsWith("image/"),
     ).length ?? 0;
-  await recordLlmCall({
+  const usd = await recordLlmCall({
     userId: ctx.userId,
     projectId: ctx.projectId,
     runId: ctx.runId,
@@ -69,5 +70,16 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     },
     latencyMs: Date.now() - startedAt,
   });
+
+  // Debit the wallet from the same place the cost is recorded, so the ledger
+  // and llm_calls can never disagree about what was spent.
+  await debitCredits({
+    userId: ctx.userId,
+    meteredUsd: usd,
+    description: info.operation,
+    projectId: ctx.projectId ?? undefined,
+    runId: ctx.runId ?? undefined,
+  });
+
   return result;
 }
