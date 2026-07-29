@@ -6,7 +6,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { assertNotSuspended, requireUser } from "@/lib/auth";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
 import { isActiveRunConflict } from "@/lib/run-conflict";
@@ -108,6 +108,7 @@ async function startGenerationRun(
  */
 export async function startBook(input: unknown) {
   const { userId } = await requireUser();
+  await assertNotSuspended(userId);
   const data = startBookSchema.parse(input);
 
   const db = getDb();

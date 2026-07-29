@@ -3,6 +3,8 @@ import type { NextRequest } from "next/server";
 import { devAuthAllowed } from "@/lib/clerk";
 
 const isProtected = createRouteMatcher([
+  "/admin(.*)",
+  "/api/admin(.*)",
   "/studio(.*)",
   "/projects(.*)",
   "/api/usage(.*)",

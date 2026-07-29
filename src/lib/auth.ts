@@ -12,6 +12,20 @@ export class UnauthorizedError extends Error {
   }
 }
 
+export class ForbiddenError extends Error {
+  constructor() {
+    super("Not allowed");
+    this.name = "ForbiddenError";
+  }
+}
+
+export class SuspendedError extends Error {
+  constructor() {
+    super("This account is suspended — contact support@sopher.ai");
+    this.name = "SuspendedError";
+  }
+}
+
 const DEV_USER_ID = "dev-user";
 
 async function devFallbackUser(): Promise<{ userId: string }> {
@@ -84,4 +98,35 @@ export async function requireUser(): Promise<{ userId: string }> {
   }
 
   return { userId };
+}
+
+/**
+ * Admin gate. Role lives on the users row (bootstrapped by migration for the
+ * founder account and the dev identity); everything admin-shaped calls this
+ * and treats failure as 404, so the surface stays quiet.
+ */
+export async function requireAdmin(): Promise<{ userId: string }> {
+  const { userId } = await requireUser();
+  const db = getDb();
+  const [row] = await db
+    .select({ role: schema.users.role })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+  if (row?.role !== "admin") throw new ForbiddenError();
+  return { userId };
+}
+
+/**
+ * Suspension blocks the spend paths — generation, edits, image work, checkout
+ * — but never reading or exporting: a suspended author keeps their work.
+ */
+export async function assertNotSuspended(userId: string): Promise<void> {
+  const db = getDb();
+  const [row] = await db
+    .select({ suspended: schema.users.suspended })
+    .from(schema.users)
+    .where(eq(schema.users.id, userId))
+    .limit(1);
+  if (row?.suspended) throw new SuspendedError();
 }

@@ -48,6 +48,11 @@ export default function PrivacyPage() {
           <strong>Infrastructure</strong> — Vercel (hosting, file storage), Neon (database), Clerk
           (authentication), Stripe (payments).
         </li>
+        <li>
+          <strong>Google Analytics</strong> — anonymous usage measurement (pages visited, rough
+          location, device type), so we can see what to improve. It never receives your manuscripts
+          or account content.
+        </li>
       </ul>
       <p>
         We do not sell personal data, run third-party advertising trackers, or share your
@@ -56,17 +61,20 @@ export default function PrivacyPage() {
 
       <h2>Cookies</h2>
       <p>
-        We use only the cookies required for sign-in sessions (set by Clerk) and your theme
-        preference. There are no advertising or cross-site tracking cookies, which is why there is
-        no cookie banner.
+        We use cookies for sign-in sessions (set by Clerk), your theme preference, and Google
+        Analytics measurement (the <code>_ga</code> family). There are no advertising cookies. You
+        can block analytics cookies in your browser or with Google&rsquo;s{" "}
+        <a href="https://tools.google.com/dlpage/gaoptout">opt-out add-on</a> without affecting the
+        product.
       </p>
 
       <h2>Retention and deletion</h2>
       <p>
-        Your content is kept while your account exists. Deleting a project removes its manuscript,
-        story bible, and generated files. Deleting your account removes your account record and all
-        projects; transaction records are retained as required for tax and accounting. To delete
-        your account, use your account menu or email us.
+        Your content is kept while your account exists. We may review content when required to
+        enforce our terms or comply with law; such review is limited to that purpose. Deleting a
+        project removes its manuscript, story bible, and generated files. Deleting your account
+        removes your account record and all projects; transaction records are retained as required
+        for tax and accounting. To delete your account, use your account menu or email us.
       </p>
 
       <h2>Your rights</h2>

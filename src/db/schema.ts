@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   index,
   integer,
   jsonb,
@@ -23,6 +24,11 @@ export const users = pgTable("users", {
   email: text("email").notNull(),
   name: text("name"),
   imageUrl: text("image_url"),
+  role: text("role", { enum: ["user", "admin"] })
+    .default("user")
+    .notNull(),
+  /** Suspension blocks spend paths only; reading and exporting always work. */
+  suspended: boolean("suspended").default(false).notNull(),
   ...timestamps,
 });
 
@@ -376,6 +382,37 @@ export const continuityIssues = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("idx_continuity_book").on(t.bookId, t.status)],
+);
+
+/**
+ * Quiet content-safety review. Rows are written by the moderation checks that
+ * ride the concept and summarizer calls; nothing here is ever shown to the
+ * author. "Inappropriate" means provider-AUP / illegal categories only — the
+ * product deliberately writes explicit fiction when its settings ask for it,
+ * so heat level alone is never a flag.
+ */
+export const moderationFlags = pgTable(
+  "moderation_flags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    chapterNumber: integer("chapter_number"),
+    source: text("source", { enum: ["brief", "chapter"] }).notNull(),
+    category: text("category").notNull(),
+    severity: text("severity", { enum: ["review", "urgent"] })
+      .default("review")
+      .notNull(),
+    excerpt: text("excerpt"),
+    detail: text("detail"),
+    status: text("status", { enum: ["open", "dismissed", "actioned"] })
+      .default("open")
+      .notNull(),
+    reviewedBy: text("reviewed_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("idx_flags_status").on(t.status, t.createdAt)],
 );
 
 export const contentToolRuns = pgTable(

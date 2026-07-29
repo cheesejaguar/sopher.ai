@@ -5,7 +5,7 @@ import { and, eq } from "drizzle-orm";
 import { gatewayOptions, metered } from "@/ai/metering";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
-import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import {
   assertCreditsForUsd,
   creditsForUsd,
@@ -44,6 +44,15 @@ export async function POST(_req: Request, ctx: { params: Promise<{ projectId: st
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return Response.json({ error: "Not signed in" }, { status: 401 });
+    }
+    throw error;
+  }
+
+  try {
+    await assertNotSuspended(userId);
+  } catch (error) {
+    if (error instanceof SuspendedError) {
+      return Response.json({ error: error.message }, { status: 403 });
     }
     throw error;
   }
