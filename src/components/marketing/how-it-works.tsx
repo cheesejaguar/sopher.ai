@@ -2,45 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type Step = {
-  num: string;
-  name: string;
-  note?: string;
-  description: string;
-};
-
-const STEPS: Step[] = [
-  {
-    num: "01",
-    name: "Concept",
-    description:
-      "Reads your brief and develops the premise, world, and cast into a concept worth writing.",
-  },
-  {
-    num: "02",
-    name: "Outline",
-    description:
-      "Structures the story into a chapter-by-chapter plan with arcs, beats, and payoffs.",
-  },
-  {
-    num: "03",
-    name: "Chapters",
-    note: "four at a time",
-    description:
-      "A team of writers drafts every chapter in parallel, each following the outline and your style guide.",
-  },
-  {
-    num: "04",
-    name: "Editor",
-    description: "Critiques and rewrites each chapter for pacing, voice, and prose quality.",
-  },
-  {
-    num: "05",
-    name: "Continuity",
-    description:
-      "Checks names, timelines, and details across the whole manuscript before it ships.",
-  },
-];
+import { PIPELINE_STEPS as STEPS } from "./content";
 
 const STAGGER_MS = 150;
 

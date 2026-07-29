@@ -6,6 +6,7 @@ import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SkipLink } from "@/components/ui/skip-link";
 import { clerkEnabled } from "@/lib/clerk";
+import { SITE_URL, SiteJsonLd } from "@/components/seo/json-ld";
 import "./globals.css";
 
 const fraunces = Fraunces({
@@ -30,25 +31,51 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+/** Under the ~160 characters Google renders; the old one was 244 and got cut. */
+const DESCRIPTION =
+  "Describe any book in a sentence. A team of AI agents plans it, writes every chapter, and edits the whole manuscript — usually in under an hour.";
+
 export const metadata: Metadata = {
-  metadataBase: new URL("https://sopher.ai"),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "sopher.ai — Any book you can imagine, made for the people you love",
     template: "%s · sopher.ai",
   },
-  description:
-    "Describe any book in a sentence — a bedtime story where your dog is the superhero, a mystery set on your street, a family memoir — and a team of AI agents plans it, writes every chapter, and edits the whole manuscript while you watch.",
+  description: DESCRIPTION,
+  applicationName: "sopher.ai",
+  authors: [{ name: "sopher.ai", url: SITE_URL }],
+  creator: "sopher.ai",
+  publisher: "sopher.ai",
+  category: "technology",
+  keywords: [
+    "AI book writing",
+    "write a book with AI",
+    "AI novel generator",
+    "AI manuscript editor",
+    "personalized book",
+    "custom story generator",
+    "AI ghostwriter",
+  ],
+  // Every page gets a canonical. Without one, a single ?utm_source= tag turns
+  // one page into two indexable URLs competing with each other.
+  alternates: { canonical: "/" },
   openGraph: {
     siteName: "sopher.ai",
     type: "website",
-    url: "https://sopher.ai",
+    url: SITE_URL,
+    locale: "en_US",
+    title: "sopher.ai — Any book you can imagine, made for the people you love",
+    description: DESCRIPTION,
   },
   twitter: {
     card: "summary_large_image",
     title: "sopher.ai — Any book you can imagine, made for the people you love",
-    description:
-      "Describe the book in a sentence. A team of AI agents plans it, writes every chapter, and edits the whole manuscript while you watch.",
+    description: DESCRIPTION,
   },
+  // Set GOOGLE_SITE_VERIFICATION once Search Console issues the token.
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
 };
 
 export default function RootLayout({
@@ -63,6 +90,7 @@ export default function RootLayout({
       className={`${fraunces.variable} ${literata.variable} ${instrumentSans.variable} ${geistMono.variable}`}
     >
       <body className="min-h-dvh antialiased">
+        <SiteJsonLd />
         <SkipLink />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           {clerkEnabled ? <ClerkProvider>{children}</ClerkProvider> : children}

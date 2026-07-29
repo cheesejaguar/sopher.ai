@@ -4,7 +4,9 @@ import { LegalPage } from "../legal-page";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
-  description: "The terms that govern your use of sopher.ai.",
+  description:
+    "The terms that govern your use of sopher.ai — who owns the manuscripts you generate, how credits work, and what we do and do not permit.",
+  alternates: { canonical: "/terms" },
 };
 
 export default function TermsPage() {

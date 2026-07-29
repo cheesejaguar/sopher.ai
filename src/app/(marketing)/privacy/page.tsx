@@ -4,7 +4,9 @@ import { LegalPage } from "../legal-page";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
-  description: "What sopher.ai collects, why, and what happens to your manuscripts.",
+  description:
+    "What sopher.ai collects and why, who processes it, how long it is kept, and what happens to the manuscripts you write.",
+  alternates: { canonical: "/privacy" },
 };
 
 export default function PrivacyPage() {

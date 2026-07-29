@@ -28,6 +28,9 @@ const PACK_TAGLINES: Record<string, string> = {
 
 export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
+  // Shifts with the section heading. Hardcoded h3 gave /pricing an h1 -> h3
+  // skip, since there is no h2 between them on that page.
+  const SubHeading = headingLevel === 1 ? "h2" : "h3";
   return (
     <section id="pricing" aria-labelledby="pricing-heading">
       <div className="mx-auto w-full max-w-6xl px-6 py-24 sm:py-32">
@@ -115,7 +118,9 @@ export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
         </div>
 
         <div className="mt-10 rounded-xl border bg-card p-5">
-          <h3 className="font-sans text-sm font-semibold">What does a book cost?</h3>
+          <SubHeading className="font-sans text-sm font-semibold">
+            What does a book cost?
+          </SubHeading>
           <dl className="mt-3 grid gap-3 sm:grid-cols-3">
             {BOOK_COSTS.map((row) => (
               <div key={row.tier} className="flex items-baseline gap-2">
