@@ -50,7 +50,9 @@ export async function generateBook(
     // pause at a natural seam, and zero-balance runs must burn nothing.
     // Loop, not if: a resume only proves the user clicked the button, so the
     // balance is re-checked until it actually covers the opening stretch.
-    let preflight = await creditCheckStep(ref, config, config.waveSize);
+    let preflight = await creditCheckStep(ref, config, config.waveSize, {
+      includeBookOverhead: true,
+    });
     while (!preflight.sufficient) {
       await markRunStatus(ref, "awaiting_input");
       await emitProgress(ref, {
@@ -62,7 +64,9 @@ export async function generateBook(
       const go = await topUpEvents.next();
       if (!go.value?.toppedUp) throw new FatalError("Run cancelled while waiting for credits");
       await markRunStatus(ref, "running");
-      preflight = await creditCheckStep(ref, config, config.waveSize);
+      preflight = await creditCheckStep(ref, config, config.waveSize, {
+        includeBookOverhead: true,
+      });
     }
 
     await emitProgress(ref, { type: "stage", stage: "concept", pct: 2 });

@@ -144,6 +144,7 @@ export async function creditCheckStep(
   ref: RunRef,
   config: GenerationConfig,
   chaptersToCover: number,
+  opts?: { includeBookOverhead?: boolean },
 ): Promise<{ balance: number; required: number; sufficient: boolean }> {
   "use step";
   const db = getDb();
@@ -168,10 +169,13 @@ export async function creditCheckStep(
     "Editorial pass",
     "Summaries + character bible",
   ]);
-  const waveUsd = estimate.stages
-    .filter((stage) => perChapterStages.has(stage.stage))
+  // Pre-flight also charges for the book-level stages (concept, outline,
+  // bible, continuity) that run before/after the chapters; mid-book wave
+  // checks must not, since that work already ran or runs once at the end.
+  const requiredUsd = estimate.stages
+    .filter((stage) => opts?.includeBookOverhead || perChapterStages.has(stage.stage))
     .reduce((acc, stage) => acc + stage.usd, 0);
-  const required = creditsForUsd(waveUsd);
+  const required = creditsForUsd(requiredUsd);
   const balance = await getBalance(ref.userId);
   return { balance, required, sufficient: balance >= required };
 }

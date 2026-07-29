@@ -74,7 +74,11 @@ export async function POST(req: Request) {
     // `amount_refunded` is CUMULATIVE across partial refunds, so each event is
     // recorded per refund object — its own id, its own amount — and the unique
     // external_ref index makes redelivery of the same refund a no-op.
-    const refunds = charge.refunds?.data ?? [];
+    // Webhook payloads do not expand the refunds list on current API versions,
+    // so fetch it rather than trusting the (usually absent) inline data.
+    const refunds =
+      charge.refunds?.data ??
+      (await getStripe().refunds.list({ charge: charge.id, limit: 100 })).data;
     if (userId) {
       for (const refund of refunds) {
         const usd = (refund.amount ?? 0) / 100;
