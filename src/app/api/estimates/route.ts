@@ -1,5 +1,5 @@
 import { estimateBookCost } from "@/ai/estimate";
-import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { creditsForUsd, getBalance } from "@/lib/billing/credits";
 import { estimateRequestSchema } from "@/lib/validation/project";
 
@@ -16,12 +16,15 @@ export async function POST(req: Request) {
   const { tier, chapters, wordsPerChapter } = parsed.data;
   const estimate = estimateBookCost(tier, chapters, wordsPerChapter);
 
+  // Best-effort: the quote itself is pure computation and must stay usable
+  // when auth or the database is unavailable (signed-out visitors, CI without
+  // a DATABASE_URL). Balance context is a nicety, never a dependency.
   let balance: number | null = null;
   try {
     const { userId } = await requireUser();
     balance = await getBalance(userId);
-  } catch (error) {
-    if (!(error instanceof UnauthorizedError)) throw error;
+  } catch {
+    balance = null;
   }
 
   return Response.json({
