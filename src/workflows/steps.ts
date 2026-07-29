@@ -1,5 +1,5 @@
 import { FatalError, RetryableError, getWritable } from "workflow";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
 import { getDb, schema } from "@/db";
 import { generateConcept, persistConcept } from "@/ai/agents/concept";
@@ -606,6 +606,18 @@ export async function finalizeStep(ref: RunRef): Promise<void> {
     .where(
       sql`${schema.chapters.bookId} = (select id from ${schema.books} where ${schema.books.projectId} = ${ref.projectId}) and ${schema.chapters.status} in ('drafted', 'edited')`,
     );
+
+  // The moment a book is actually finished. Only ever set once — a re-run of a
+  // finished book must not restart the clock, and time-to-first-book is
+  // measured from the first completion.
+  //
+  // Note this is deliberately independent of projects.status, which moves to
+  // "editing" here rather than "complete" (authors edit after generation, and
+  // the status reflects where they are, not whether the book exists).
+  await db
+    .update(schema.projects)
+    .set({ completedAt: new Date() })
+    .where(and(eq(schema.projects.id, ref.projectId), isNull(schema.projects.completedAt)));
 
   // Tell the author. Best-effort: a book that finished but could not say so
   // is still a finished book, so email failures never fail the step.

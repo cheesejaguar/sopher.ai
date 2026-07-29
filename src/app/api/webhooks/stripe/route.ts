@@ -67,6 +67,10 @@ export async function POST(req: Request) {
       credits,
       description: `${packId} pack — ${credits} credits`,
       externalRef: session.id,
+      // What Stripe actually collected. Credits are not dollars once bonus
+      // tiers exist ($60 buys 66 credits), so this is the only figure that
+      // reconciles with the Stripe dashboard.
+      usdPaid: (session.amount_total ?? 0) / 100,
     });
 
     // Receipt only on first fulfilment — a retried delivery must not re-mail.
@@ -116,6 +120,8 @@ export async function POST(req: Request) {
           description: `Refund — $${usd.toFixed(2)}`,
           externalRef: `refund:${refund.id}`,
           kind: "refund",
+          // Negative so net revenue is a plain sum over usd_paid.
+          usdPaid: -usd,
         });
       }
     }

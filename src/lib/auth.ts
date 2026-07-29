@@ -1,7 +1,9 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import type { Acquisition } from "@/db/schema";
 import { clerkEnabled, devAdminAllowed, devAuthAllowed } from "@/lib/clerk";
+import { ATTRIBUTION_COOKIE, parseAttributionCookie } from "@/lib/analytics/attribution";
 import { grantCredits } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 
@@ -59,6 +61,21 @@ async function devFallbackUser(): Promise<{ userId: string }> {
 }
 
 /**
+ * Reads the first-touch attribution cookie set by the proxy on the landing
+ * request. Never throws: attribution is a nice-to-have, and a user who cannot
+ * be attributed must still be able to sign up.
+ */
+async function firstTouch(): Promise<Acquisition | null> {
+  try {
+    const { cookies } = await import("next/headers");
+    const raw = (await cookies()).get(ATTRIBUTION_COOKIE)?.value;
+    return parseAttributionCookie(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolves the signed-in Clerk user and lazily upserts the users row so the
  * Clerk webhook is reconciliation, not a critical path. Without Clerk keys the
  * shared dev identity is used only when explicitly allowed (development or
@@ -79,13 +96,25 @@ export async function requireUser(): Promise<{ userId: string }> {
   if (!userId) throw new UnauthorizedError();
 
   const db = getDb();
-  const existing = await db
-    .select({ id: schema.users.id })
+  const [existing] = await db
+    .select({ id: schema.users.id, acquisition: schema.users.acquisition })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .limit(1);
 
-  if (existing.length === 0) {
+  // The Clerk user.created webhook usually wins the race and inserts the row
+  // before the first authenticated request reaches us, so the insert branch
+  // below never runs and attribution would be lost for essentially everyone.
+  // Backfilling here is still first-touch: the cookie is written once, on the
+  // landing request, and never refreshed.
+  if (existing && !existing.acquisition) {
+    const acquisition = await firstTouch();
+    if (acquisition) {
+      await db.update(schema.users).set({ acquisition }).where(eq(schema.users.id, userId));
+    }
+  }
+
+  if (!existing) {
     const user = await currentUser();
     await db
       .insert(schema.users)
@@ -94,6 +123,10 @@ export async function requireUser(): Promise<{ userId: string }> {
         email: user?.primaryEmailAddress?.emailAddress ?? "",
         name: user?.fullName ?? null,
         imageUrl: user?.imageUrl ?? null,
+        // First touch, stamped exactly once. This branch runs only the first
+        // time we see a user, which is both the correct moment for first-touch
+        // attribution and the reason it costs nothing on every later request.
+        acquisition: await firstTouch(),
       })
       .onConflictDoNothing();
 

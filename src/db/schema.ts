@@ -29,8 +29,28 @@ export const users = pgTable("users", {
     .notNull(),
   /** Suspension blocks spend paths only; reading and exporting always work. */
   suspended: boolean("suspended").default(false).notNull(),
+  /**
+   * First-touch acquisition, captured once and never overwritten. This is what
+   * makes "which channel produced paying customers" a join against
+   * credit_ledger rather than a guess — GA can attribute a session, but it
+   * cannot tell you a specific user's lifetime revenue.
+   */
+  acquisition: jsonb("acquisition").$type<Acquisition | null>(),
   ...timestamps,
 });
+
+export type Acquisition = {
+  source?: string;
+  medium?: string;
+  campaign?: string;
+  term?: string;
+  content?: string;
+  /** Referring host only — never the full URL, which can carry PII in a query. */
+  referrerHost?: string;
+  /** First page of the first visit. */
+  landingPath?: string;
+  capturedAt: string;
+};
 
 export type ProjectSettings = {
   pov?: "first" | "third_limited" | "third_omniscient";
@@ -65,6 +85,12 @@ export const projects = pgTable(
     })
       .default("draft")
       .notNull(),
+    /**
+     * When the book first reached "complete". Distinct from updatedAt, which
+     * the admin overview was using as a proxy — that is wrong the moment the
+     * author edits a finished book, which is exactly what they do next.
+     */
+    completedAt: timestamp("completed_at", { withTimezone: true }),
     ...timestamps,
   },
   (t) => [index("idx_projects_user").on(t.userId, t.updatedAt)],
@@ -316,6 +342,14 @@ export const creditLedger = pgTable(
     externalRef: text("external_ref"),
     /** Metered USD this debit corresponds to, for margin reconciliation. */
     meteredUsd: numeric("metered_usd", { precision: 12, scale: 6 }),
+    /**
+     * Dollars actually charged, on purchase and refund rows only.
+     *
+     * Credits are not dollars once bonuses exist: the Author pack is $60 for 66
+     * credits, so summing purchase credits overstated revenue by the bonus on
+     * every tier. This is the number that reconciles with Stripe.
+     */
+    usdPaid: numeric("usd_paid", { precision: 12, scale: 2 }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
@@ -464,4 +498,41 @@ export const assets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("idx_assets_project").on(t.projectId, t.kind)],
+);
+
+/**
+ * Product analytics events.
+ *
+ * Deliberately small. Postgres already answers almost every business question
+ * from the tables above — signups, first-book conversion, purchases, repeat
+ * purchase, revenue against COGS — because all of those leave a durable row
+ * behind. This table exists for the questions that leave no row: the wizard is
+ * localStorage-only until submit, so step-level drop-off is invisible, and a
+ * visitor who bounces off pricing never appears anywhere.
+ *
+ * Money never comes from here. credit_ledger stays the source of truth for
+ * anything financial; this is for behaviour only, and it is allowed to be
+ * lossy (fire-and-forget writes, no retry).
+ */
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Closed union, enforced at the route. Free-form names make this unusable. */
+    name: text("name").notNull(),
+    /** Null before sign-up — that is most of the funnel. */
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * First-party random id from a cookie, so a pre-signup session can be
+     * stitched to the account it becomes. Not an identifier of a person and
+     * never derived from one.
+     */
+    anonId: text("anon_id"),
+    props: jsonb("props").$type<Record<string, string | number | boolean>>().default({}).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_events_name_created").on(t.name, t.createdAt),
+    index("idx_events_anon").on(t.anonId, t.createdAt),
+  ],
 );

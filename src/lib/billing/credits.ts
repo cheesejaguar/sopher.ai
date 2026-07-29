@@ -53,6 +53,12 @@ export async function grantCredits(input: {
   description: string;
   externalRef: string;
   kind?: "purchase" | "refund" | "grant" | "adjustment";
+  /**
+   * Dollars actually charged. Purchases and refunds only — credits are not
+   * dollars once bonus tiers exist, and this is the figure that reconciles
+   * with Stripe.
+   */
+  usdPaid?: number;
 }): Promise<boolean> {
   const inserted = await getDb()
     .insert(schema.creditLedger)
@@ -62,6 +68,7 @@ export async function grantCredits(input: {
       kind: input.kind ?? "purchase",
       description: input.description,
       externalRef: input.externalRef,
+      usdPaid: input.usdPaid === undefined ? null : String(input.usdPaid),
     })
     .onConflictDoNothing({ target: schema.creditLedger.externalRef })
     .returning({ id: schema.creditLedger.id });

@@ -5,6 +5,7 @@ import { ArrowLeft, ArrowRight, Feather } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { startBook } from "@/lib/actions/projects";
+import { track } from "@/lib/analytics/track";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StepBrief } from "@/components/wizard/step-brief";
@@ -152,6 +153,44 @@ export function NewBookWizard() {
     headingRef.current?.focus();
   }, [state.step]);
 
+  // Wizard progress is the only funnel stage that leaves no row behind — the
+  // draft lives in localStorage until submit, so an author who gives up on the
+  // shape step is otherwise indistinguishable from one who never started.
+  const furthestStep = React.useRef(-1);
+  React.useEffect(() => {
+    if (state.step <= furthestStep.current) return;
+    const from = furthestStep.current + 1;
+    furthestStep.current = state.step;
+    // Emits every step between the last one seen and this one, not just the
+    // new one. Restoring a saved draft jumps straight to a later step, and
+    // skipping the intervening ones would make the funnel non-monotonic —
+    // step 3 showing more people than step 2, which reads as a bug in the
+    // chart rather than in the data.
+    for (let step = from; step <= state.step; step += 1) {
+      track("wizard_step", {
+        step,
+        stepId: WIZARD_STEPS[step]?.id ?? "unknown",
+        ...(step < state.step ? { inferred: true } : {}),
+        ...(state.genre ? { genre: state.genre } : {}),
+      });
+    }
+  }, [state.step, state.genre]);
+
+  // Abandonment. Only fires when they leave mid-wizard with real content —
+  // submit clears the ref first, so a completed wizard never counts as one.
+  const submitted = React.useRef(false);
+  React.useEffect(() => {
+    function onLeave() {
+      if (submitted.current || furthestStep.current < 1) return;
+      track("wizard_abandon", {
+        step: furthestStep.current,
+        stepId: WIZARD_STEPS[furthestStep.current]?.id ?? "unknown",
+      });
+    }
+    window.addEventListener("pagehide", onLeave);
+    return () => window.removeEventListener("pagehide", onLeave);
+  }, []);
+
   // Resume a saved draft (or apply the device's default tier) once, on mount.
   React.useEffect(() => {
     const draft = restoreDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY));
@@ -200,6 +239,14 @@ export function NewBookWizard() {
         ...(state.voiceProfile !== "none" ? { voiceProfile: state.voiceProfile } : {}),
       },
     };
+    submitted.current = true;
+    track("book_started", {
+      genre: state.genre,
+      tier: state.tier,
+      chapters: state.chapters,
+      wordsPerChapter: state.wordsPerChapter,
+      outlineApproval: state.requireOutlineApproval,
+    });
     startTransition(async () => {
       // Clear the draft first — a successful action redirects away immediately.
       window.localStorage.removeItem(WIZARD_DRAFT_KEY);
