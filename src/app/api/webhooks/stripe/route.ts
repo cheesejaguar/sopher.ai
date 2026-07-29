@@ -70,19 +70,25 @@ export async function POST(req: Request) {
     });
 
     // Receipt only on first fulfilment — a retried delivery must not re-mail.
+    // And never let the receipt path fail the response: a 500 here would make
+    // Stripe redeliver into the idempotent no-op, losing the receipt forever.
     if (granted) {
-      const [user] = await getDb()
-        .select({ email: schema.users.email })
-        .from(schema.users)
-        .where(eq(schema.users.id, userId))
-        .limit(1);
-      if (user?.email) {
-        await sendReceiptEmail({
-          to: user.email,
-          packName: packId,
-          credits,
-          usd: (session.amount_total ?? 0) / 100,
-        });
+      try {
+        const [user] = await getDb()
+          .select({ email: schema.users.email })
+          .from(schema.users)
+          .where(eq(schema.users.id, userId))
+          .limit(1);
+        if (user?.email) {
+          await sendReceiptEmail({
+            to: user.email,
+            packName: packId,
+            credits,
+            usd: (session.amount_total ?? 0) / 100,
+          });
+        }
+      } catch (error) {
+        console.warn("[email] receipt failed after grant:", error);
       }
     }
 
