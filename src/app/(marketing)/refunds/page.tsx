@@ -4,7 +4,9 @@ import { LegalPage } from "../legal-page";
 
 export const metadata: Metadata = {
   title: "Refund Policy",
-  description: "How refunds work for sopher.ai credits.",
+  description:
+    "How refunds work for sopher.ai credits: unspent credits are not refundable, and what to do if a charge or a generation run went wrong.",
+  alternates: { canonical: "/refunds" },
 };
 
 export default function RefundsPage() {

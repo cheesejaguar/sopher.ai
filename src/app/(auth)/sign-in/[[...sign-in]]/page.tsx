@@ -4,7 +4,12 @@ import { clerkEnabled } from "@/lib/clerk";
 import { AuthPending } from "@/components/auth-pending";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export const metadata = { title: "Sign in" };
+export const metadata = {
+  title: "Sign in",
+  // Thin, duplicated-by-Clerk, and useless as a landing page — but public, so
+  // without this it competes with the homepage for brand queries.
+  robots: { index: false, follow: true },
+};
 
 export default function SignInPage() {
   return (

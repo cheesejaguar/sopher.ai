@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { CREDIT_PACKS, getBalance, listLedger } from "@/lib/billing/credits";
 import { safeInternalPath } from "@/lib/security/url";
 
-export const metadata = { title: "Credits — sopher.ai" };
+export const metadata = { title: "Credits" };
 
 const KIND_LABELS: Record<string, string> = {
   purchase: "Purchase",
