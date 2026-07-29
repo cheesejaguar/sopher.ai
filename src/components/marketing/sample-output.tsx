@@ -68,8 +68,14 @@ export function SampleOutput() {
               </TabsTrigger>
             ))}
           </TabsList>
+          {/*
+            keepMounted holds all three excerpts in the DOM. Base UI still hides
+            the inactive panels, but ~180 words of the only real prose sample on
+            the site were otherwise unreachable to crawlers and text extractors,
+            which unmount-by-default removed from the document entirely.
+          */}
           {SAMPLES.map((sample) => (
-            <TabsContent key={sample.value} value={sample.value}>
+            <TabsContent key={sample.value} value={sample.value} keepMounted>
               <article className="paper-surface mt-4 px-6 py-10 sm:px-12 sm:py-12">
                 <div className="mx-auto max-w-[68ch]">
                   <p className="font-sans text-[0.65rem] font-medium tracking-[0.2em] text-paper-muted uppercase">

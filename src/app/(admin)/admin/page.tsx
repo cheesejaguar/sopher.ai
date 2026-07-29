@@ -7,7 +7,7 @@ import { formatCredits, formatUsd } from "@/components/usage/format";
 import { getOverviewKpis } from "@/db/queries/admin";
 import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
 
-export const metadata = { title: "Admin — sopher.ai" };
+export const metadata = { title: "Admin" };
 
 function Kpi({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
