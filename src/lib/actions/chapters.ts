@@ -239,3 +239,64 @@ export async function moveChapter(chapterId: string, direction: "up" | "down"): 
   `);
   revalidatePath(`/projects/${ownership.projectId}`);
 }
+
+/** Revision history for the editor's History panel, newest first. */
+export async function listChapterRevisions(chapterId: string) {
+  const { userId } = await requireUser();
+  if (!z.uuid().safeParse(chapterId).success) throw new Error("Chapter not found");
+  const ownership = await getChapterOwnership(chapterId);
+  if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+
+  return getDb()
+    .select({
+      id: schema.chapterRevisions.id,
+      content: schema.chapterRevisions.content,
+      source: schema.chapterRevisions.source,
+      createdAt: schema.chapterRevisions.createdAt,
+    })
+    .from(schema.chapterRevisions)
+    .where(eq(schema.chapterRevisions.chapterId, chapterId))
+    .orderBy(sql`${schema.chapterRevisions.createdAt} desc`)
+    .limit(30);
+}
+
+/**
+ * Restores a past revision by saving it as the newest content. Restoring is
+ * itself a save, so the pre-restore text lands in the history too — nothing is
+ * ever lost by restoring.
+ */
+export async function restoreChapterRevision(
+  chapterId: string,
+  revisionId: string,
+): Promise<SaveChapterResult> {
+  const { userId } = await requireUser();
+  if (!z.uuid().safeParse(revisionId).success) return { ok: false, error: "not_found" };
+  const ownership = await getChapterOwnership(chapterId);
+  if (!ownership || ownership.userId !== userId) return { ok: false, error: "not_found" };
+
+  const db = getDb();
+  const [revision] = await db
+    .select({ content: schema.chapterRevisions.content })
+    .from(schema.chapterRevisions)
+    .where(
+      and(
+        eq(schema.chapterRevisions.id, revisionId),
+        eq(schema.chapterRevisions.chapterId, chapterId),
+      ),
+    )
+    .limit(1);
+  if (!revision) return { ok: false, error: "not_found" };
+
+  const [current] = await db
+    .select({ content: schema.chapters.content, version: schema.chapters.version })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.id, chapterId))
+    .limit(1);
+  if (!current) return { ok: false, error: "not_found" };
+
+  // Snapshot what is being replaced, then force-save the revision content.
+  await db
+    .insert(schema.chapterRevisions)
+    .values({ chapterId, content: current.content, source: "pre-restore" });
+  return saveChapter(chapterId, revision.content, current.version, { force: true });
+}

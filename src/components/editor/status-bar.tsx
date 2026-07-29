@@ -2,7 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useEditorState, type Editor } from "@tiptap/react";
-import { AlertTriangle, Check, Maximize2, MessageSquareText, Minimize2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Maximize2,
+  MessageSquareText,
+  Minimize2,
+  Redo2,
+  Undo2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -82,6 +90,7 @@ export function StatusBar({
   zen,
   onToggleZen,
   onOpenReview,
+  extras,
 }: {
   editor: Editor | null;
   saveState: SaveState;
@@ -89,12 +98,21 @@ export function StatusBar({
   pendingCount: number;
   zen: boolean;
   onToggleZen: () => void;
+  /** Slot for chapter-scoped tools (history, find & replace). */
+  extras?: React.ReactNode;
   /** Present when the review panel is hidden (<xl) — opens it as a sheet. */
   onOpenReview?: () => void;
 }) {
   const words = useEditorState({
     editor,
     selector: (ctx) => (ctx.editor?.storage.characterCount.words() as number | undefined) ?? 0,
+  });
+  const historyState = useEditorState({
+    editor,
+    selector: (ctx) => ({
+      canUndo: ctx.editor?.can().undo() ?? false,
+      canRedo: ctx.editor?.can().redo() ?? false,
+    }),
   });
   const wordCount = words ?? 0;
   const readingMinutes = Math.max(1, Math.round(wordCount / READING_WPM));
@@ -114,6 +132,41 @@ export function StatusBar({
         </p>
 
         <div className="flex items-center gap-1">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label="Undo"
+                  disabled={!historyState?.canUndo}
+                  onClick={() => editor?.chain().focus().undo().run()}
+                />
+              }
+            >
+              <Undo2 aria-hidden="true" className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent side="top">Undo (⌘Z)</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-7"
+                  aria-label="Redo"
+                  disabled={!historyState?.canRedo}
+                  onClick={() => editor?.chain().focus().redo().run()}
+                />
+              }
+            >
+              <Redo2 aria-hidden="true" className="size-3.5" />
+            </TooltipTrigger>
+            <TooltipContent side="top">Redo (⌘⇧Z)</TooltipContent>
+          </Tooltip>
+          {extras}
           {onOpenReview ? (
             <Button
               variant="ghost"

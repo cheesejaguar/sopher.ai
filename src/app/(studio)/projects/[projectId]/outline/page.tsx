@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { getActiveRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
 import { bookOutlineSchema, type BookOutline } from "@/ai/schemas";
 import { OutlineApprovalBar } from "@/components/generation/outline-approval-bar";
+import { OutlineEditor } from "@/components/studio/outline-editor";
 
 function words(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
@@ -66,10 +67,14 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
     <div className="space-y-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-xl font-semibold tracking-tight">Outline</h2>
-        <p className="font-mono text-xs text-muted-foreground tabular-nums">
-          v{outlineRow?.version ?? 1} · {outline.chapters.length} chapters · ~{words(plannedWords)}{" "}
-          words planned
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="font-mono text-xs text-muted-foreground tabular-nums">
+            v{outlineRow?.version ?? 1}
+            {outlineRow?.source === "user" ? " (edited)" : ""} · {outline.chapters.length} chapters
+            · ~{words(plannedWords)} words planned
+          </p>
+          {!awaitingApproval ? <OutlineEditor projectId={projectId} outline={outline} /> : null}
+        </div>
       </header>
 
       <article className="paper-surface px-6 py-8 sm:px-10 sm:py-10">
