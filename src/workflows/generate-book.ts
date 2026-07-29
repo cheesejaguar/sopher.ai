@@ -35,6 +35,12 @@ export async function generateBook(
   "use workflow";
   const ref = { dbRunId, projectId, userId };
 
+  // One top-up hook for the entire run: tokens belong to a single active hook,
+  // and both the pre-flight and the per-wave checks may need to wait on it —
+  // possibly more than once, since resuming only proves a button was clicked.
+  const topUps = createHook<{ toppedUp: boolean }>({ token: `credits-topup:${dbRunId}` });
+  const topUpEvents = topUps[Symbol.asyncIterator]();
+
   try {
     await markRunStatus(ref, "running");
 
@@ -42,8 +48,10 @@ export async function generateBook(
     // opening stretch (concept/outline/bible + the first wave). Deliberately
     // not the whole book — the welcome grant is sized to let a book begin and
     // pause at a natural seam, and zero-balance runs must burn nothing.
-    const preflight = await creditCheckStep(ref, config, config.waveSize);
-    if (!preflight.sufficient) {
+    // Loop, not if: a resume only proves the user clicked the button, so the
+    // balance is re-checked until it actually covers the opening stretch.
+    let preflight = await creditCheckStep(ref, config, config.waveSize);
+    while (!preflight.sufficient) {
       await markRunStatus(ref, "awaiting_input");
       await emitProgress(ref, {
         type: "stage",
@@ -51,10 +59,10 @@ export async function generateBook(
         pct: 1,
         detail: `${preflight.balance.toFixed(0)} of ${preflight.required.toFixed(0)} credits needed to start`,
       });
-      const hook = createHook<{ toppedUp: boolean }>({ token: `credits-topup:${dbRunId}` });
-      const go = await hook;
-      if (!go.toppedUp) throw new FatalError("Run cancelled while waiting for credits");
+      const go = await topUpEvents.next();
+      if (!go.value?.toppedUp) throw new FatalError("Run cancelled while waiting for credits");
       await markRunStatus(ref, "running");
+      preflight = await creditCheckStep(ref, config, config.waveSize);
     }
 
     await emitProgress(ref, { type: "stage", stage: "concept", pct: 2 });
@@ -112,8 +120,8 @@ export async function generateBook(
       // can outrun its estimate. Running short suspends the run instead of
       // failing it, so every chapter already drafted is kept and no work is
       // re-billed on resume.
-      const credit = await creditCheckStep(ref, config, Math.min(config.waveSize, total - done));
-      if (!credit.sufficient) {
+      let credit = await creditCheckStep(ref, config, Math.min(config.waveSize, total - done));
+      while (!credit.sufficient) {
         await markRunStatus(ref, "awaiting_input");
         await emitProgress(ref, {
           type: "stage",
@@ -121,14 +129,12 @@ export async function generateBook(
           pct: 15 + Math.round(55 * (done / total)),
           detail: `${credit.balance.toFixed(0)} of ${credit.required.toFixed(0)} credits needed to continue`,
         });
-        const topUp = createHook<{ toppedUp: boolean }>({
-          token: `credits-topup:${dbRunId}`,
-        });
-        const resumed = await topUp;
-        if (!resumed.toppedUp) {
+        const resumed = await topUpEvents.next();
+        if (!resumed.value?.toppedUp) {
           throw new FatalError("Run cancelled while waiting for credits");
         }
         await markRunStatus(ref, "running");
+        credit = await creditCheckStep(ref, config, Math.min(config.waveSize, total - done));
       }
 
       await Promise.all(wave.map((n) => writeChapterStep(ref, config, n)));

@@ -208,7 +208,7 @@ export const generationRuns = pgTable(
       .references(() => projects.id, { onDelete: "cascade" }),
     userId: text("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     workflowRunId: text("workflow_run_id"),
     kind: text("kind", {
       enum: ["full_book", "chapter", "edit_pass", "continuity", "export"],
@@ -257,7 +257,8 @@ export const llmCalls = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: text("user_id")
       .notNull()
-      .references(() => users.id),
+      // Cascade so Clerk account deletion can remove the user row cleanly.
+      .references(() => users.id, { onDelete: "cascade" }),
     projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
     runId: uuid("run_id").references(() => generationRuns.id, { onDelete: "set null" }),
     agentRole: text("agent_role").notNull(),
@@ -383,7 +384,8 @@ export const contentToolRuns = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: text("user_id")
       .notNull()
-      .references(() => users.id),
+      // Cascade so Clerk account deletion can remove the user row cleanly.
+      .references(() => users.id, { onDelete: "cascade" }),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),

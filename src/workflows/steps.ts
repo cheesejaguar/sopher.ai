@@ -158,8 +158,20 @@ export async function creditCheckStep(
   if (!project) throw new FatalError("Project not found");
 
   const count = Math.min(Math.max(chaptersToCover, 1), project.chapters);
+  // Only the per-chapter stages: estimateBookCost totals book-level overhead
+  // (concept, outline, continuity) too, which for a mid-book wave check would
+  // demand credits for work that already ran or runs once at the end.
   const estimate = estimateBookCost(config.tier, count, project.words);
-  const required = creditsForUsd(estimate.totalUsd);
+  const perChapterStages = new Set([
+    "Chapter drafting",
+    "Critique + revisions",
+    "Editorial pass",
+    "Summaries + character bible",
+  ]);
+  const waveUsd = estimate.stages
+    .filter((stage) => perChapterStages.has(stage.stage))
+    .reduce((acc, stage) => acc + stage.usd, 0);
+  const required = creditsForUsd(waveUsd);
   const balance = await getBalance(ref.userId);
   return { balance, required, sufficient: balance >= required };
 }

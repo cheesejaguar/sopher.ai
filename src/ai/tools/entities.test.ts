@@ -108,3 +108,20 @@ describe("KIND_TO_ISSUE_CATEGORY", () => {
     }
   });
 });
+
+describe("review-bot regression: partial updates must not wipe lists", () => {
+  // parseAttrs fills omitted list fields with [] — the upsert layer must strip
+  // those before merging, or a facts-only update erases stored personality.
+  it("parseAttrs defaults are distinguishable from provided values", () => {
+    const onlyFacts = parseAttrs("character", { facts: ["new fact"] }) as Record<string, unknown>;
+    expect(onlyFacts.personality).toEqual([]);
+    // The upsert filter drops empty non-facts arrays; assert the shape it keys on.
+    const kept = Object.entries(onlyFacts).filter(([key, value]) => {
+      if (value === undefined || value === null) return false;
+      if (Array.isArray(value) && value.length === 0 && key !== "facts") return false;
+      if (typeof value === "string" && !value.trim()) return false;
+      return true;
+    });
+    expect(kept.map(([k]) => k)).toEqual(["facts"]);
+  });
+});

@@ -65,6 +65,12 @@ export async function POST(req: Request) {
     // Reconciled by the webhook; also lets us show the right pack on return.
     client_reference_id: userId,
     metadata: { userId, packId: pack.id, credits: String(pack.credits) },
+    // Charges only inherit metadata from the payment intent, and the refund
+    // webhook resolves the user from the charge — without this, refunds have
+    // no idea whose credits to claw back.
+    payment_intent_data: {
+      metadata: { userId, packId: pack.id, credits: String(pack.credits) },
+    },
     line_items: [
       {
         quantity: 1,

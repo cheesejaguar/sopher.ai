@@ -10,7 +10,7 @@ import { selectionEditSchema } from "@/ai/schemas";
 import { getDb, schema } from "@/db";
 import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { InsufficientCreditsError } from "@/lib/billing/credits";
+import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { contextWindow } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 
@@ -106,6 +106,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
 
   let output: z.infer<typeof selectionEditSchema>;
   try {
+    // Pre-gate: a selection edit meters ~$0.01-0.05; refuse before the call
+    // rather than letting metered() spend into the floor.
+    await assertCreditsForUsd(userId, 0.05);
     const result = await metered(
       meter,
       { role: "editor", operation: "editor.selection", model },

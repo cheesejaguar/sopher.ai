@@ -70,17 +70,24 @@ export async function POST(req: Request) {
 
   if (event.type === "charge.refunded") {
     const charge = event.data.object;
-    const usd = (charge.amount_refunded ?? 0) / 100;
     const userId = charge.metadata?.userId;
-    if (userId && usd > 0) {
-      await grantCredits({
-        userId,
-        // Refunds claw back at face value, not at the bonus-inclusive rate.
-        credits: -usd,
-        description: `Refund — $${usd.toFixed(2)}`,
-        externalRef: `refund:${charge.id}`,
-        kind: "refund",
-      });
+    // `amount_refunded` is CUMULATIVE across partial refunds, so each event is
+    // recorded per refund object — its own id, its own amount — and the unique
+    // external_ref index makes redelivery of the same refund a no-op.
+    const refunds = charge.refunds?.data ?? [];
+    if (userId) {
+      for (const refund of refunds) {
+        const usd = (refund.amount ?? 0) / 100;
+        if (usd <= 0) continue;
+        await grantCredits({
+          userId,
+          // Refunds claw back at face value, not at the bonus-inclusive rate.
+          credits: -usd,
+          description: `Refund — $${usd.toFixed(2)}`,
+          externalRef: `refund:${refund.id}`,
+          kind: "refund",
+        });
+      }
     }
     return Response.json({ received: true });
   }
