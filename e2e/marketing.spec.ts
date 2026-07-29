@@ -107,3 +107,27 @@ test.describe("pricing page", () => {
     await fullPageScreenshot(page, testInfo, "pricing");
   });
 });
+
+test.describe("trust pages", () => {
+  test("legal pages render and the footer links to them", async ({ page }) => {
+    await page.goto("/");
+    const footer = page.getByRole("navigation", { name: "Footer" });
+    for (const name of ["Terms", "Privacy", "Refunds", "Support"]) {
+      await expect(footer.getByRole("link", { name })).toBeVisible();
+    }
+
+    await page.goto("/terms");
+    await expect(page.getByRole("heading", { name: "Terms of Service" })).toBeVisible();
+    await page.goto("/privacy");
+    await expect(page.getByRole("heading", { name: "Privacy Policy" })).toBeVisible();
+    await page.goto("/refunds");
+    await expect(page.getByRole("heading", { name: "Refund Policy" })).toBeVisible();
+    await axeCheck(page);
+  });
+
+  test("unknown routes get the styled 404", async ({ page }) => {
+    await page.goto("/definitely-not-a-page");
+    await expect(page.getByRole("heading", { name: /isn.t in the manuscript/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open the studio" })).toBeVisible();
+  });
+});

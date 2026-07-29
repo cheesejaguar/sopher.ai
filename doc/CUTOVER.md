@@ -117,7 +117,18 @@ One harmless leftover: `users` still holds
 `user_3H6zLw7xAgKc7NqVOROUMGgZWkJ` from the deleted Clerk app — 0 projects,
 orphaned. Safe to delete; left in place to avoid an unnecessary cascade.
 
-## 2. Decommission the old GKE stack (after soak — no earlier than 2026-08-03)
+## 2. Operator steps for launch
+
+- **support@sopher.ai** is now linked from the site footer and legal pages.
+  Set up Cloudflare Email Routing (dash → sopher.ai → Email → Email Routing →
+  route `support@sopher.ai` → your inbox). ~5 minutes, free tier.
+- **Stripe is still a sandbox** (test mode). Before taking real money:
+  `vercel integration resource claim sopher-payments`, then set
+  `STRIPE_WEBHOOK_SECRET` for the live-mode webhook endpoint and redeploy.
+- The legal pages (/terms, /privacy, /refunds) are honest drafts written for
+  this product, **not legal advice** — have them reviewed before serious volume.
+
+## 3. Decommission the old GKE stack (after soak — no earlier than 2026-08-03)
 
 Deliberately time-gated; do not automate.
 

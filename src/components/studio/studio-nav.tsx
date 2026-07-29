@@ -1,6 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
+
+import { clerkEnabled } from "@/lib/clerk";
 import { usePathname } from "next/navigation";
 import { Suspense } from "react";
 import { Feather } from "lucide-react";
@@ -80,11 +83,24 @@ export function StudioNav() {
 
         <div className="flex items-center gap-3">
           <ThemeToggle />
-          <Link href="/studio/settings" aria-label="Account and settings" className="rounded-full">
-            <Avatar>
-              <AvatarFallback>A</AvatarFallback>
-            </Avatar>
-          </Link>
+          {clerkEnabled ? (
+            // Clerk's own menu: profile, sessions, sign out. This is the app's
+            // only sign-out affordance — do not remove without replacing it.
+            <UserButton
+              appearance={{ elements: { userButtonAvatarBox: "size-8" } }}
+              userProfileMode="modal"
+            />
+          ) : (
+            <Link
+              href="/studio/settings"
+              aria-label="Account and settings"
+              className="rounded-full"
+            >
+              <Avatar>
+                <AvatarFallback>A</AvatarFallback>
+              </Avatar>
+            </Link>
+          )}
         </div>
       </div>
     </header>
