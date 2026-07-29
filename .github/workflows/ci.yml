@@ -30,6 +30,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm test
+      - name: Migration files match the journal
+        # drizzle-kit check finds schema drift but not a journal entry whose
+        # .sql file is gone — which is what broke three deploys after a rebase
+        # renamed one to "... 2.sql" and the apparent duplicate was deleted.
+        run: pnpm check:migrations
       - name: Check migration drift
         run: pnpm db:check
         env:
