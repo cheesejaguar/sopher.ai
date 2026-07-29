@@ -30,6 +30,7 @@ const DEV_USER_ID = "dev-user";
 
 async function devFallbackUser(): Promise<{ userId: string }> {
   const db = getDb();
+  const devRole = devAdminAllowed ? "admin" : "user";
   await db
     .insert(schema.users)
     // Admin role: the dev identity exists precisely so local dev and DB-gated
@@ -37,13 +38,14 @@ async function devFallbackUser(): Promise<{ userId: string }> {
     // pre-existing rows; this covers a fresh database where the row is born
     // after the migration ran. devAdminAllowed is already false on any
     // deployment — set DEV_ADMIN=0 to drop it locally too.
-    .values({
-      id: DEV_USER_ID,
-      email: "dev@sopher.ai",
-      name: "Studio Guest",
-      role: devAdminAllowed ? "admin" : "user",
-    })
-    .onConflictDoNothing();
+    .values({ id: DEV_USER_ID, email: "dev@sopher.ai", name: "Studio Guest", role: devRole })
+    // Update rather than do-nothing: an opt-out has to actually revoke. With
+    // do-nothing, a dev-user row created while DEV_ADMIN was unset kept admin
+    // forever, so setting DEV_ADMIN=0 looked like it worked and did not.
+    .onConflictDoUpdate({
+      target: schema.users.id,
+      set: { role: devRole, updatedAt: new Date() },
+    });
   // Same welcome grant real users get, so local dev exercises the same
   // credit-gated paths instead of instantly suspending on a zero balance.
   await grantCredits({
