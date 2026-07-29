@@ -1,6 +1,6 @@
 {
-  "id": "0a0a0a0a-0000-4000-8000-000000000010",
-  "prevId": "5e63f437-c1b8-437e-abe9-a0f8a3f5d4b6",
+  "id": "7456f6c2-1d49-4f6d-997a-914f0a41f6f3",
+  "prevId": "0a0a0a0a-0000-4000-8000-000000000010",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1412,6 +1412,12 @@
           "notNull": true,
           "default": "'{}'::jsonb"
         },
+        "approval_notes": {
+          "name": "approval_notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "error": {
           "name": "error",
           "type": "text",
@@ -1970,6 +1976,24 @@
           "primaryKey": false,
           "notNull": false
         },
+        "subgenre": {
+          "name": "subgenre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "protagonist": {
+          "name": "protagonist",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "setting": {
+          "name": "setting",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "target_chapters": {
           "name": "target_chapters",
           "type": "integer",
@@ -2134,6 +2158,12 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "instruction": {
+          "name": "instruction",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "status": {
           "name": "status",
