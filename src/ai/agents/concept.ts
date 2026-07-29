@@ -2,6 +2,7 @@ import { generateText, isStepCount, Output } from "ai";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { seedEntities } from "@/db/queries/entities";
+import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
@@ -30,6 +31,7 @@ function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
       ctx.genre ? `${ctx.genre} readers` : "readers of this genre"
     } expect — a generic logline, a low-stakes central conflict, interchangeable characters, themes that don't connect to the plot, or "unique" elements that are actually common tropes.`,
     `Then return the REFINED concept: rewrite the weak elements to fix them, keep everything that already works, and preserve the same structure. Return the complete refined concept, not a critique.`,
+    MODERATION_PROMPT,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -86,12 +88,33 @@ export async function generateConcept(input: ConceptCtx): Promise<BookConcept> {
  */
 export async function persistConcept(bookId: string, concept: BookConcept): Promise<void> {
   const db = getDb();
+
+  // Quiet brief-level moderation: the verdict rode the concept call itself.
+  if (concept.moderation?.flagged) {
+    const [book] = await db
+      .select({ projectId: schema.books.projectId })
+      .from(schema.books)
+      .where(eq(schema.books.id, bookId))
+      .limit(1);
+    if (book) {
+      await recordModerationFlag({
+        projectId: book.projectId,
+        source: "brief",
+        verdict: concept.moderation,
+      });
+    }
+  }
+
+  // The verdict is admin-only bookkeeping; the author-owned concept jsonb
+  // (loaded by getProjectWithBook) must never carry it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring strips the field
+  const { moderation, ...persistableConcept } = concept;
   await db
     .update(schema.books)
     .set({
       title: concept.title,
       synopsis: concept.synopsis,
-      concept,
+      concept: persistableConcept,
       updatedAt: new Date(),
     })
     .where(eq(schema.books.id, bookId));

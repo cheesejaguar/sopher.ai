@@ -5,6 +5,7 @@ import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { chapterSummarySchema, type ChapterSummary } from "@/ai/schemas";
 import { applyEntityDeltas } from "@/db/queries/entities";
+import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
 
 /**
  * Writes the rolling ~250-token summary + the story-bible delta after a chapter
@@ -36,6 +37,7 @@ export async function summarizeChapter(input: {
           `Summarize chapter ${input.chapterNumber} ("${input.chapterTitle ?? "untitled"}") in at most 200 words, covering plot events, character developments, and any objects/promises/injuries that matter later.`,
           `Then list new canonical facts per entity this chapter established — not only characters but also locations (what a place contains), objects (who holds it, what it does), organizations and named events. Record only durable facts a later chapter must honor: appearance, heritage, possessions, wounds, secrets, commitments, contents, ownership.`,
           `Also list any relationships the chapter established between named entities (family ties especially — they govern surnames).`,
+          MODERATION_PROMPT,
           `## Chapter text\n${input.content}`,
         ].join("\n\n"),
         output: Output.object({ schema: chapterSummarySchema }),
@@ -61,6 +63,22 @@ export async function summarizeChapter(input: {
     newFacts: summary.newFacts,
     relationships: summary.relationships,
   });
+
+  if (summary.moderation?.flagged) {
+    const [book] = await db
+      .select({ projectId: schema.books.projectId })
+      .from(schema.books)
+      .where(eq(schema.books.id, input.bookId))
+      .limit(1);
+    if (book) {
+      await recordModerationFlag({
+        projectId: book.projectId,
+        source: "chapter",
+        chapterNumber: input.chapterNumber,
+        verdict: summary.moderation,
+      });
+    }
+  }
 
   return summary;
 }

@@ -50,6 +50,13 @@
       "when": 1785301063778,
       "tag": "0006_conscious_sabretooth",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1785339918546,
+      "tag": "0007_acoustic_wind_dancer",
+      "breakpoints": true
     }
   ]
 }

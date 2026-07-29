@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Geist_Mono, Instrument_Sans, Literata } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SkipLink } from "@/components/ui/skip-link";
@@ -67,6 +68,17 @@ export default function RootLayout({
           {clerkEnabled ? <ClerkProvider>{children}</ClerkProvider> : children}
         </ThemeProvider>
         <Analytics />
+        {/* Google Analytics (G-8JGW12KNXP) — disclosed in /privacy. */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-8JGW12KNXP"
+          strategy="afterInteractive"
+        />
+        <Script id="ga-init" strategy="afterInteractive">{`
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', 'G-8JGW12KNXP');
+        `}</Script>
       </body>
     </html>
   );

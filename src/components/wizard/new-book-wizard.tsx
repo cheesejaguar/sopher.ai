@@ -204,7 +204,11 @@ export function NewBookWizard() {
       // Clear the draft first — a successful action redirects away immediately.
       window.localStorage.removeItem(WIZARD_DRAFT_KEY);
       try {
-        await startBook(payload);
+        const result = await startBook(payload);
+        if (result?.error) {
+          window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
+          setError(result.error);
+        }
       } catch {
         window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
         setError("The book could not be started. Your brief is saved — please try again.");

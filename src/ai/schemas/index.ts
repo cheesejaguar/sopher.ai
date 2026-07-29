@@ -1,6 +1,21 @@
 import { z } from "zod";
 import { ENTITY_KINDS } from "./entities";
 
+/**
+ * Content-safety verdict that rides the concept and summarizer calls. The
+ * product writes explicit fiction on request, so this is scoped strictly to
+ * provider-AUP / illegal categories — never heat level.
+ */
+export const moderationVerdictSchema = z.object({
+  flagged: z.boolean().default(false),
+  category: z
+    .enum(["minors", "nonconsent", "real_person", "hate_incitement", "self_harm", "other"])
+    .optional(),
+  excerpt: z.string().max(500).optional(),
+  reason: z.string().max(300).optional(),
+});
+export type ModerationVerdict = z.infer<typeof moderationVerdictSchema>;
+
 export const conceptSchema = z.object({
   title: z.string(),
   logline: z.string(),
@@ -19,6 +34,7 @@ export const conceptSchema = z.object({
       }),
     )
     .max(10),
+  moderation: moderationVerdictSchema.default({ flagged: false }),
 });
 export type BookConcept = z.infer<typeof conceptSchema>;
 
@@ -129,6 +145,7 @@ export const chapterSummarySchema = z.object({
     .max(10)
     .default([]),
   timelineNote: z.string().optional(),
+  moderation: moderationVerdictSchema.default({ flagged: false }),
 });
 export type ChapterSummary = z.infer<typeof chapterSummarySchema>;
 

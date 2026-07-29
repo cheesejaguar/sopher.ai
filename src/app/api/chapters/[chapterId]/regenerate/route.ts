@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
-import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { estimateBookCost } from "@/ai/estimate";
 import { generateChapter } from "@/workflows/generate-chapter";
@@ -25,6 +25,15 @@ export async function POST(_req: Request, ctx: { params: Promise<{ chapterId: st
   } catch (error) {
     if (error instanceof UnauthorizedError) {
       return Response.json({ error: "Not signed in" }, { status: 401 });
+    }
+    throw error;
+  }
+
+  try {
+    await assertNotSuspended(userId);
+  } catch (error) {
+    if (error instanceof SuspendedError) {
+      return Response.json({ error: error.message }, { status: 403 });
     }
     throw error;
   }
