@@ -3,12 +3,18 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { getBalance } from "@/lib/billing/credits";
 
-const bodySchema = z.object({
-  kind: z.literal("outline-approval"),
-  approved: z.boolean(),
-  notes: z.string().max(5_000).optional(),
-});
+const bodySchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("outline-approval"),
+    approved: z.boolean(),
+    notes: z.string().max(5_000).optional(),
+  }),
+  // Resumes a run suspended mid-book because the wallet ran short. The balance
+  // is re-checked here so a resume cannot be forced without actually paying.
+  z.object({ kind: z.literal("credits-topup") }),
+]);
 
 /** Resumes a paused run (human-in-the-loop input, e.g. outline approval). */
 export async function POST(req: Request, ctx: { params: Promise<{ runId: string }> }) {
@@ -39,6 +45,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
   if (!run) return Response.json({ error: "Run not found" }, { status: 404 });
   if (run.status !== "awaiting_input") {
     return Response.json({ error: "Run is not waiting for input" }, { status: 409 });
+  }
+
+  if (parsed.data.kind === "credits-topup") {
+    const balance = await getBalance(userId);
+    if (balance <= 0) {
+      return Response.json({ error: "Add credits before resuming", balance }, { status: 402 });
+    }
+    await resumeHook(`credits-topup:${runId}`, { toppedUp: true });
+    return Response.json({ resumed: true, balance });
   }
 
   await resumeHook(`outline-approval:${runId}`, {

@@ -35,6 +35,8 @@ function announcementFor(stage: Stage, draftedCount: number, plannedTotal: numbe
       return "Paused. The outline is ready for your approval.";
     case "chapters":
       return `Drafting chapters: ${draftedCount} of ${plannedTotal} done.`;
+    case "awaiting_credits":
+      return "Paused. Add credits to finish the book — drafted chapters are kept.";
     case "editing":
       return "Editing the chapters.";
     case "continuity":

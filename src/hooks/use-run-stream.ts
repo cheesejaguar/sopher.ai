@@ -70,6 +70,10 @@ const STAGE_ORDER: Record<Stage, number> = {
   outline: 2,
   awaiting_approval: 3,
   chapters: 4,
+  // Same rank as `chapters` deliberately: a credit pause happens *inside* the
+  // chapter phase and returns to it. A higher rank would trap the UI on the
+  // pause forever, since stage merges are upgrade-only (>=).
+  awaiting_credits: 4,
   editing: 5,
   continuity: 6,
   revising: 7,

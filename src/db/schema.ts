@@ -279,6 +279,47 @@ export const llmCalls = pgTable(
   ],
 );
 
+/**
+ * Prepaid credits, as an append-only ledger.
+ *
+ * Balance is the SUM of entries, never a stored mutable number. That is the
+ * whole point: a webhook Stripe retries, a double-clicked checkout, or a
+ * concurrent debit cannot silently inflate or corrupt a balance, and every
+ * movement stays auditable against the `llm_calls` row that caused it.
+ *
+ * Amounts are in credits (1 credit = $1 retail), stored to 4 decimal places so
+ * a single metered call can be debited exactly rather than rounded.
+ */
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Positive for purchases and refunds, negative for usage. */
+    amount: numeric("amount", { precision: 12, scale: 4 }).notNull(),
+    kind: text("kind", {
+      enum: ["purchase", "usage", "refund", "grant", "adjustment"],
+    }).notNull(),
+    /** Free text for the UI: "Author pack", "Chapter 7 draft". */
+    description: text("description").notNull(),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    runId: uuid("run_id").references(() => generationRuns.id, { onDelete: "set null" }),
+    /** Stripe checkout session or payment intent id — the idempotency anchor. */
+    externalRef: text("external_ref"),
+    /** Metered USD this debit corresponds to, for margin reconciliation. */
+    meteredUsd: numeric("metered_usd", { precision: 12, scale: 6 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("idx_ledger_user").on(t.userId, t.createdAt),
+    // Idempotency: one credit entry per Stripe object, enforced by the database
+    // rather than by application logic that a retry could race.
+    uniqueIndex("uq_ledger_external_ref").on(t.externalRef),
+  ],
+);
+
 export const budgets = pgTable("budgets", {
   userId: text("user_id")
     .primaryKey()

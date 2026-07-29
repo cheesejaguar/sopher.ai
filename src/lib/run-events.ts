@@ -9,6 +9,7 @@ export const stageSchema = z.enum([
   "concept",
   "outline",
   "awaiting_approval",
+  "awaiting_credits",
   "chapters",
   "editing",
   "continuity",
