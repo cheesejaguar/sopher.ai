@@ -43,7 +43,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     throw error;
   }
 
-
   // Paid path: the balance pre-check above is a read, so concurrent callers all
   // pass it. This is what bounds how far past the floor they can get.
   const limited = await rateLimit(LIMITS.imageGen, req, userId);

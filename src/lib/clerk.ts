@@ -14,8 +14,7 @@ export const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KE
 const isDeployed = Boolean(process.env.VERCEL_ENV);
 
 export const devAuthAllowed =
-  !isDeployed &&
-  (process.env.NODE_ENV === "development" || process.env.ALLOW_DEV_AUTH === "1");
+  !isDeployed && (process.env.NODE_ENV === "development" || process.env.ALLOW_DEV_AUTH === "1");
 
 /**
  * Whether the shared dev identity gets the admin role. Separated from

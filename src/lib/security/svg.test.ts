@@ -20,14 +20,18 @@ describe("sanitizeSvg", () => {
   });
 
   it("strips inline scripts", () => {
-    const clean = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect/></svg>`);
+    const clean = sanitizeSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><rect/></svg>`,
+    );
     expect(clean).not.toContain("<script");
     expect(clean).not.toContain("alert(1)");
     expect(clean).toContain("<rect");
   });
 
   it("strips event handlers", () => {
-    const clean = sanitizeSvg(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><rect onclick="alert(2)"/></svg>`);
+    const clean = sanitizeSvg(
+      `<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><rect onclick="alert(2)"/></svg>`,
+    );
     expect(clean).not.toContain("onload");
     expect(clean).not.toContain("onclick");
     expect(clean).not.toContain("alert");
