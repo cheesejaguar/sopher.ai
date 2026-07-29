@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { estimateBookCost } from "@/ai/estimate";
 import { generateChapter } from "@/workflows/generate-chapter";
@@ -18,7 +19,7 @@ export const maxDuration = 60;
  * Regenerates one chapter through the full writing pipeline. The current
  * prose is snapshotted to the revision history before anything is replaced.
  */
-export async function POST(_req: Request, ctx: { params: Promise<{ chapterId: string }> }) {
+export async function POST(req: Request, ctx: { params: Promise<{ chapterId: string }> }) {
   let userId: string;
   try {
     ({ userId } = await requireUser());
@@ -38,6 +39,11 @@ export async function POST(_req: Request, ctx: { params: Promise<{ chapterId: st
     throw error;
   }
 
+
+  // Paid path: the balance pre-check above is a read, so concurrent callers all
+  // pass it. This is what bounds how far past the floor they can get.
+  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
+  if (limited.limited) return limited.response;
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {
     return Response.json({ error: "Chapter not found" }, { status: 404 });

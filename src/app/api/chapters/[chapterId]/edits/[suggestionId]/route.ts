@@ -7,6 +7,8 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { countWords, resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 
+export const maxDuration = 30;
+
 const bodySchema = z.object({ action: z.enum(["accept", "reject"]) });
 
 /**

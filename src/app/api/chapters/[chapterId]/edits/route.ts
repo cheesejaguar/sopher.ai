@@ -10,6 +10,7 @@ import { selectionEditSchema } from "@/ai/schemas";
 import { getDb, schema } from "@/db";
 import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { contextWindow } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
@@ -73,6 +74,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     }
     throw error;
   }
+
+  // Paid path: the balance pre-check above is a read, so concurrent callers all
+  // pass it. This is what bounds how far past the floor they can get.
+  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
+  if (limited.limited) return limited.response;
 
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {

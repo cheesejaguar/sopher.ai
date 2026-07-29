@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 
+export const maxDuration = 30;
+
 /** Page-load snapshot of a run (never polled — the stream endpoint is the live channel). */
 export async function GET(_req: Request, ctx: { params: Promise<{ runId: string }> }) {
   let userId: string;
@@ -35,7 +37,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ runId: string 
     })
     .from(schema.generationEvents)
     .where(eq(schema.generationEvents.runId, runId))
-    .orderBy(schema.generationEvents.seq);
+    .orderBy(schema.generationEvents.seq)
+    // A long run emits thousands of events; the debug view never needs all of
+    // them at once and an unbounded select is a slow-request lever.
+    .limit(2000);
 
   return Response.json({ run, events });
 }

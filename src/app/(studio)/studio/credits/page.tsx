@@ -2,6 +2,7 @@ import { PackButtons } from "@/components/credits/pack-buttons";
 import { RelativeTime } from "@/components/relative-time";
 import { requireUser } from "@/lib/auth";
 import { CREDIT_PACKS, getBalance, listLedger } from "@/lib/billing/credits";
+import { safeInternalPath } from "@/lib/security/url";
 
 export const metadata = { title: "Credits — sopher.ai" };
 
@@ -19,8 +20,10 @@ export default async function CreditsPage({
   searchParams: Promise<{ purchase?: string; return?: string }>;
 }) {
   const { purchase, return: returnTo } = await searchParams;
-  // Only ever navigate back inside the app.
-  const safeReturn = returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : null;
+  // Only ever navigate back inside the app. The old startsWith pair accepted
+  // "/\evil.com", which browsers normalize to "//evil.com" — an off-site link
+  // rendered on a signed-in page right after a payment.
+  const safeReturn = safeInternalPath(returnTo);
   const { userId } = await requireUser();
   const [balance, ledger] = await Promise.all([getBalance(userId), listLedger(userId)]);
 

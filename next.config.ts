@@ -1,9 +1,14 @@
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
 
+import { securityHeaders } from "./src/lib/security/headers";
+
 const nextConfig: NextConfig = {
   cacheComponents: true,
   typedRoutes: true,
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders() }];
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "img.clerk.com" },

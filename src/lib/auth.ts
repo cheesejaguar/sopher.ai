@@ -1,7 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { clerkEnabled, devAuthAllowed } from "@/lib/clerk";
+import { clerkEnabled, devAdminAllowed, devAuthAllowed } from "@/lib/clerk";
 import { grantCredits } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 
@@ -35,8 +35,14 @@ async function devFallbackUser(): Promise<{ userId: string }> {
     // Admin role: the dev identity exists precisely so local dev and DB-gated
     // e2e can exercise every surface, admin included. The migration promotes
     // pre-existing rows; this covers a fresh database where the row is born
-    // after the migration ran.
-    .values({ id: DEV_USER_ID, email: "dev@sopher.ai", name: "Studio Guest", role: "admin" })
+    // after the migration ran. devAdminAllowed is already false on any
+    // deployment — set DEV_ADMIN=0 to drop it locally too.
+    .values({
+      id: DEV_USER_ID,
+      email: "dev@sopher.ai",
+      name: "Studio Guest",
+      role: devAdminAllowed ? "admin" : "user",
+    })
     .onConflictDoNothing();
   // Same welcome grant real users get, so local dev exercises the same
   // credit-gated paths instead of instantly suspending on a zero balance.

@@ -4,6 +4,8 @@ import { getDb, schema } from "@/db";
 import { grantCredits } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 
+export const maxDuration = 60;
+
 type ClerkUserEvent = {
   type: string;
   data: {
