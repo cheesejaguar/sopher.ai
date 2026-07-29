@@ -120,10 +120,12 @@ orphaned. Safe to delete; left in place to avoid an unnecessary cascade.
 ## 2. Operator steps for launch
 
 - ~~support@sopher.ai email routing~~ — DONE 2026-07-29 (Cloudflare Email Routing).
-- ~~Stripe sandbox claim~~ — DONE 2026-07-29. Keys are still `sk_test_` until the
-  Stripe account completes activation; when live keys arrive, recreate the
-  fulfilment webhook in live mode (one command, creates the endpoint via the
-  API and pipes the secret straight into the env, never displaying it):
+- ~~Stripe sandbox claim + live conversion~~ — DONE 2026-07-29. The conversion
+  created a SECOND resource (`stripe-live-sopher.ai`) rather than mutating
+  `sopher-payments`; the project now connects live→Production and
+  test→Preview/Development. The live-mode fulfilment webhook is
+  `we_1TyZ96AChRHMGy2tgzoejfwo` with its secret in the Production env. If the
+  endpoint ever needs recreating:
 
   ```bash
   vercel env pull /tmp/sk.txt --environment=production --yes
