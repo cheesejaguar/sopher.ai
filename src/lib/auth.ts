@@ -96,13 +96,25 @@ export async function requireUser(): Promise<{ userId: string }> {
   if (!userId) throw new UnauthorizedError();
 
   const db = getDb();
-  const existing = await db
-    .select({ id: schema.users.id })
+  const [existing] = await db
+    .select({ id: schema.users.id, acquisition: schema.users.acquisition })
     .from(schema.users)
     .where(eq(schema.users.id, userId))
     .limit(1);
 
-  if (existing.length === 0) {
+  // The Clerk user.created webhook usually wins the race and inserts the row
+  // before the first authenticated request reaches us, so the insert branch
+  // below never runs and attribution would be lost for essentially everyone.
+  // Backfilling here is still first-touch: the cookie is written once, on the
+  // landing request, and never refreshed.
+  if (existing && !existing.acquisition) {
+    const acquisition = await firstTouch();
+    if (acquisition) {
+      await db.update(schema.users).set({ acquisition }).where(eq(schema.users.id, userId));
+    }
+  }
+
+  if (!existing) {
     const user = await currentUser();
     await db
       .insert(schema.users)

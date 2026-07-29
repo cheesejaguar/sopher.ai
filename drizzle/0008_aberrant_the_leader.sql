@@ -12,9 +12,20 @@ ALTER TABLE "users" ADD COLUMN "acquisition" jsonb;--> statement-breakpoint
 ALTER TABLE "analytics_events" ADD CONSTRAINT "analytics_events_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "idx_events_name_created" ON "analytics_events" USING btree ("name","created_at");--> statement-breakpoint
 CREATE INDEX "idx_events_anon" ON "analytics_events" USING btree ("anon_id","created_at");--> statement-breakpoint
--- Backfill: for books already marked complete, updated_at is the best estimate
--- we have of when they finished. It is an approximation (an author who edited
--- afterwards moved it), but leaving these null would drop every existing book
--- out of the completion funnel entirely, which is a worse answer than a
--- slightly late one. New rows get a real timestamp.
+-- Backfill from the generation runs, which are the actual record of a book
+-- finishing. Filtering on status = 'complete' would have been self-defeating:
+-- the whole reason this column exists is that a finished book is left in
+-- 'editing', so that filter matches almost nothing.
+UPDATE "projects" p
+SET "completed_at" = r.finished_at
+FROM (
+  SELECT "project_id", min("completed_at") AS finished_at
+  FROM "generation_runs"
+  WHERE "kind" = 'full_book' AND "status" = 'completed' AND "completed_at" IS NOT NULL
+  GROUP BY "project_id"
+) r
+WHERE p."id" = r."project_id" AND p."completed_at" IS NULL;--> statement-breakpoint
+-- Anything still unattributed but explicitly marked complete: updated_at is the
+-- only estimate available. Approximate, but better than dropping the book out
+-- of the completion funnel entirely.
 UPDATE "projects" SET "completed_at" = "updated_at" WHERE "status" = 'complete' AND "completed_at" IS NULL;

@@ -159,12 +159,21 @@ export function NewBookWizard() {
   const furthestStep = React.useRef(-1);
   React.useEffect(() => {
     if (state.step <= furthestStep.current) return;
+    const from = furthestStep.current + 1;
     furthestStep.current = state.step;
-    track("wizard_step", {
-      step: state.step,
-      stepId: WIZARD_STEPS[state.step]?.id ?? "unknown",
-      ...(state.genre ? { genre: state.genre } : {}),
-    });
+    // Emits every step between the last one seen and this one, not just the
+    // new one. Restoring a saved draft jumps straight to a later step, and
+    // skipping the intervening ones would make the funnel non-monotonic —
+    // step 3 showing more people than step 2, which reads as a bug in the
+    // chart rather than in the data.
+    for (let step = from; step <= state.step; step += 1) {
+      track("wizard_step", {
+        step,
+        stepId: WIZARD_STEPS[step]?.id ?? "unknown",
+        ...(step < state.step ? { inferred: true } : {}),
+        ...(state.genre ? { genre: state.genre } : {}),
+      });
+    }
   }, [state.step, state.genre]);
 
   // Abandonment. Only fires when they leave mid-wizard with real content —
