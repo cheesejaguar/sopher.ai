@@ -2,6 +2,9 @@ import { eq, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 
+export * from "./credits-shared";
+import { CREDIT_FLOOR, creditsForUsd } from "./credits-shared";
+
 /**
  * Prepaid credit wallet.
  *
@@ -14,33 +17,6 @@ import { getDb, schema } from "@/db";
  * $6.39 and $8.61 to generate, and roughly 50% more to finish with light
  * editing. See doc/PRICING.md.
  */
-
-export const CREDIT_MARKUP = 2.75;
-
-export type CreditPack = {
-  id: string;
-  name: string;
-  usd: number;
-  credits: number;
-  /** Bonus share, for display only — `credits` is already inclusive. */
-  bonus: number;
-};
-
-export const CREDIT_PACKS: CreditPack[] = [
-  { id: "starter", name: "Starter", usd: 25, credits: 25, bonus: 0 },
-  { id: "author", name: "Author", usd: 60, credits: 66, bonus: 0.1 },
-  { id: "studio", name: "Studio", usd: 120, credits: 138, bonus: 0.15 },
-  { id: "press", name: "Press", usd: 300, credits: 360, bonus: 0.2 },
-];
-
-export function getPack(id: string): CreditPack | undefined {
-  return CREDIT_PACKS.find((p) => p.id === id);
-}
-
-/** Retail credits for a metered dollar amount. */
-export function creditsForUsd(usd: number): number {
-  return usd * CREDIT_MARKUP;
-}
 
 export class InsufficientCreditsError extends Error {
   constructor(
@@ -124,6 +100,19 @@ export async function assertCredits(userId: string, requiredCredits: number): Pr
   const balance = await getBalance(userId);
   if (balance < requiredCredits) {
     throw new InsufficientCreditsError(balance, requiredCredits);
+  }
+}
+
+/** Route-level gate: covers a metered-USD estimate at retail markup. */
+export async function assertCreditsForUsd(userId: string, estimateUsd: number): Promise<void> {
+  await assertCredits(userId, creditsForUsd(estimateUsd));
+}
+
+/** Hard backstop for in-flight work: refuses once the floor is breached. */
+export async function assertAboveFloor(userId: string): Promise<void> {
+  const balance = await getBalance(userId);
+  if (balance <= CREDIT_FLOOR) {
+    throw new InsufficientCreditsError(balance, 0);
   }
 }
 

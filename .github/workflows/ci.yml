@@ -14,6 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: No sync-duplicate files
+        run: |
+          if git ls-files | grep -E ' [0-9]+\.' ; then
+            echo "Filesystem-sync duplicate files are tracked; remove them." >&2
+            exit 1
+          fi
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

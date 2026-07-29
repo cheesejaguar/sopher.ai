@@ -1,7 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
   bigint,
-  boolean,
   index,
   integer,
   jsonb,
@@ -319,18 +318,6 @@ export const creditLedger = pgTable(
     uniqueIndex("uq_ledger_external_ref").on(t.externalRef),
   ],
 );
-
-export const budgets = pgTable("budgets", {
-  userId: text("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  monthlyLimitUsd: numeric("monthly_limit_usd", { precision: 10, scale: 2 })
-    .default("20.00")
-    .notNull(),
-  hardLimit: boolean("hard_limit").default(true).notNull(),
-  alertThresholdPct: integer("alert_threshold_pct").default(80).notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
 
 export type SuggestionAnchor = {
   start: number;

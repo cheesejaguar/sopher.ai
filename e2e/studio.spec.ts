@@ -23,14 +23,14 @@ test.describe("studio dashboard", () => {
 });
 
 test.describe("studio usage", () => {
-  test("renders the monthly budget bar and spend tables", async ({ page }, testInfo) => {
+  test("renders the credit wallet and spend tables", async ({ page }, testInfo) => {
     await page.goto("/studio/usage");
     await expect(page.getByRole("heading", { level: 1, name: "Usage" })).toBeVisible();
 
-    // Budget card streams in from the DB.
-    await expect(page.getByText("Resets on the 1st.")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByRole("progressbar", { name: "Monthly budget used" })).toBeVisible();
-    await expect(page.getByText(/% used ·/)).toBeVisible();
+    // Wallet card streams in from the ledger.
+    await expect(page.getByRole("heading", { name: "Credits" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByText(/available/)).toBeVisible();
+    await expect(page.getByRole("link", { name: /Buy credits/ })).toBeVisible();
 
     // Spend breakdowns. Queried by role: each card title is a heading, and the
     // tables carry sr-only captions that would also match a bare text query.

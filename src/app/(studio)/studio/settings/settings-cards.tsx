@@ -3,11 +3,8 @@
 import * as React from "react";
 import { useTheme } from "next-themes";
 
-import { updateBudget } from "@/lib/actions/budget";
 import { DEFAULT_TIER_KEY } from "@/components/wizard/wizard-state";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -17,7 +14,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Spinner } from "@/components/ui/spinner";
 import type { QualityTier } from "@/ai/models";
 
 const themeItems: Record<string, string> = {
@@ -192,123 +188,6 @@ export function DefaultsCard() {
             <Skeleton className="h-8 w-64" />
           )}
         </SettingRow>
-      </CardContent>
-    </Card>
-  );
-}
-
-export function BudgetCard({
-  monthlyLimitUsd,
-  spentUsd,
-}: {
-  monthlyLimitUsd: number;
-  spentUsd: number;
-}) {
-  const [limit, setLimit] = React.useState(String(monthlyLimitUsd));
-  const [message, setMessage] = React.useState<{ kind: "saved" | "error"; text: string } | null>(
-    null,
-  );
-  const [pending, startTransition] = React.useTransition();
-
-  const usedPct = monthlyLimitUsd > 0 ? Math.min((spentUsd / monthlyLimitUsd) * 100, 100) : 0;
-
-  function handleSave() {
-    const parsed = Number(limit);
-    if (!Number.isFinite(parsed) || parsed < 5 || parsed > 500) {
-      setMessage({ kind: "error", text: "Choose a limit between $5 and $500." });
-      return;
-    }
-    setMessage(null);
-    startTransition(async () => {
-      try {
-        await updateBudget({ monthlyLimitUsd: parsed });
-        setMessage({ kind: "saved", text: "Budget saved." });
-      } catch {
-        setMessage({ kind: "error", text: "Could not save the budget. Please try again." });
-      }
-    });
-  }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle role="heading" aria-level={2}>
-          Monthly budget
-        </CardTitle>
-        <CardDescription>
-          Generation pauses before a run would cross it. Never a surprise invoice.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="space-y-1.5">
-          <div className="flex items-baseline justify-between text-xs">
-            <span className="text-muted-foreground">This month</span>
-            <span className="font-mono tabular-nums">
-              <span className="text-ember">${spentUsd.toFixed(2)}</span>
-              <span className="text-muted-foreground"> of ${monthlyLimitUsd.toFixed(2)}</span>
-            </span>
-          </div>
-          <div
-            role="meter"
-            aria-label="Month-to-date spend"
-            aria-valuemin={0}
-            aria-valuemax={monthlyLimitUsd}
-            aria-valuenow={Math.min(spentUsd, monthlyLimitUsd)}
-            // Without this the meter announces a bare number, not an amount.
-            aria-valuetext={`$${spentUsd.toFixed(2)} of $${monthlyLimitUsd.toFixed(2)}`}
-            className="h-1.5 overflow-hidden rounded-full bg-muted"
-          >
-            <div
-              className="h-full rounded-full bg-ember transition-[width]"
-              style={{ width: `${usedPct}%` }}
-            />
-          </div>
-        </div>
-
-        <SettingRow
-          htmlFor="monthly-budget"
-          label="Monthly limit"
-          description="Between $5 and $500. Applies from the next generation call."
-          descriptionId="monthly-budget-hint"
-        >
-          <div className="flex items-center gap-2">
-            <span aria-hidden="true" className="font-mono text-sm text-muted-foreground">
-              $
-            </span>
-            <Input
-              id="monthly-budget"
-              type="number"
-              min={5}
-              max={500}
-              step={1}
-              required
-              inputMode="numeric"
-              value={limit}
-              aria-invalid={message?.kind === "error" || undefined}
-              aria-describedby={
-                message ? "monthly-budget-hint monthly-budget-message" : "monthly-budget-hint"
-              }
-              onChange={(event) => setLimit(event.target.value)}
-              className="w-24 font-mono tabular-nums"
-            />
-            <Button onClick={handleSave} disabled={pending} variant="secondary">
-              {pending ? <Spinner data-icon="inline-start" /> : null}
-              Save
-            </Button>
-          </div>
-        </SettingRow>
-
-        {message ? (
-          <p
-            id="monthly-budget-message"
-            role={message.kind === "error" ? "alert" : "status"}
-            className={
-              message.kind === "error" ? "text-xs text-destructive" : "text-xs text-success"
-            }
-          >
-            {message.text}
-          </p>
-        ) : null}
       </CardContent>
     </Card>
   );

@@ -6,7 +6,7 @@ import { type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
+import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 
 export const maxDuration = 120;
 
@@ -51,7 +51,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
 
   try {
-    await checkBudget(userId, tool.estUsd);
+    await assertCreditsForUsd(userId, tool.estUsd);
     const output = await tool.run(
       {
         meter: { userId, projectId: ownership.projectId },
@@ -76,7 +76,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
 
     return Response.json({ output });
   } catch (error) {
-    if (error instanceof BudgetExceededError) {
+    if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: error.message }, { status: 402 });
     }
     if (error instanceof ContentToolError) {

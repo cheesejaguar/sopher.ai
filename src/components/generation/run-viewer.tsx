@@ -13,6 +13,7 @@ import { AgentFeed } from "@/components/generation/agent-feed";
 import { CostTicker } from "@/components/generation/cost-ticker";
 import { RunControls } from "@/components/generation/run-controls";
 import { ApprovalBanner } from "@/components/generation/approval-banner";
+import { CreditsBanner } from "@/components/generation/credits-banner";
 import { CompletionMoment } from "@/components/generation/completion-moment";
 import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
@@ -156,6 +157,10 @@ export function RunViewer({
         />
 
         {state.stage === "awaiting_approval" ? <ApprovalBanner projectId={projectId} /> : null}
+
+        {state.stage === "awaiting_credits" ? (
+          <CreditsBanner projectId={projectId} runId={runId} detail={state.detail} />
+        ) : null}
 
         {state.error && !state.error.fatal ? (
           <p

@@ -16,7 +16,6 @@ import {
   type ContinuityReport,
 } from "@/ai/agents/continuity";
 import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
-import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
 import { creditsForUsd, getBalance } from "@/lib/billing/credits";
 import { estimateBookCost } from "@/ai/estimate";
 import { getOrCreateBook } from "@/db/queries/projects";
@@ -70,9 +69,6 @@ export async function emitCost(ref: RunRef) {
 }
 
 function toWorkflowError(error: unknown): never {
-  if (error instanceof BudgetExceededError) {
-    throw new FatalError(error.message);
-  }
   if (APICallError.isInstance(error)) {
     if (error.statusCode === 429 || (error.statusCode ?? 0) >= 500) {
       throw new RetryableError(error.message, { retryAfter: "30s" });
@@ -134,48 +130,35 @@ export async function markRunStatus(
   }
 }
 
-export async function checkBudgetStep(ref: RunRef, config: GenerationConfig) {
+/**
+ * Reports the wallet against the cost of the NEXT stretch of work — one wave of
+ * chapters — not the whole remaining book. That is deliberate: the welcome
+ * grant should let an author watch a real book begin (concept, outline, bible,
+ * the first chapters) and pause at a natural seam, rather than being refused at
+ * the door for not affording the ending.
+ *
+ * Returns rather than throws: the orchestrator suspends on a top-up hook when
+ * the balance runs short, so every chapter already drafted is kept.
+ */
+export async function creditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  chaptersToCover: number,
+): Promise<{ balance: number; required: number; sufficient: boolean }> {
   "use step";
   const db = getDb();
   const [project] = await db
     .select({
-      chapters: schema.projects.targetChapters,
       words: schema.projects.targetWordsPerChapter,
+      chapters: schema.projects.targetChapters,
     })
     .from(schema.projects)
     .where(eq(schema.projects.id, ref.projectId))
     .limit(1);
   if (!project) throw new FatalError("Project not found");
-  const estimate = estimateBookCost(config.tier, project.chapters, project.words);
-  try {
-    await checkBudget(ref.userId, estimate.totalUsd);
-  } catch (error) {
-    toWorkflowError(error);
-  }
-}
 
-/**
- * Reports the wallet against what the rest of the run is expected to cost.
- *
- * Returns rather than throws: the orchestrator suspends on a top-up hook when
- * the balance runs short, so an author who runs out mid-book keeps every
- * chapter already drafted instead of losing the run.
- */
-export async function creditCheckStep(
-  ref: RunRef,
-  config: GenerationConfig,
-  remainingChapters: number,
-): Promise<{ balance: number; required: number; sufficient: boolean }> {
-  "use step";
-  const db = getDb();
-  const [project] = await db
-    .select({ words: schema.projects.targetWordsPerChapter })
-    .from(schema.projects)
-    .where(eq(schema.projects.id, ref.projectId))
-    .limit(1);
-  if (!project) throw new FatalError("Project not found");
-
-  const estimate = estimateBookCost(config.tier, remainingChapters, project.words);
+  const count = Math.min(Math.max(chaptersToCover, 1), project.chapters);
+  const estimate = estimateBookCost(config.tier, count, project.words);
   const required = creditsForUsd(estimate.totalUsd);
   const balance = await getBalance(ref.userId);
   return { balance, required, sufficient: balance >= required };

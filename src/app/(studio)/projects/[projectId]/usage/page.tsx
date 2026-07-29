@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { EstimateReceipt } from "@/components/usage/estimate-receipt";
-import { formatUsd } from "@/components/usage/format";
+import { formatCredits } from "@/components/usage/format";
+import { CREDIT_MARKUP } from "@/lib/billing/credits";
 import { RoleTable } from "@/components/usage/role-table";
 import { estimateBookCost } from "@/ai/estimate";
 import { requireUser } from "@/lib/auth";
@@ -30,9 +31,9 @@ async function ProjectUsage({ projectId }: { projectId: string }) {
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="font-display text-xl font-semibold tracking-tight">Usage</h2>
         <p className="font-mono text-sm tabular-nums">
-          <span className="text-ember">{formatUsd(spend)}</span>{" "}
+          <span className="text-ember">{formatCredits(spend * CREDIT_MARKUP)}</span>{" "}
           <span className="text-xs text-muted-foreground">
-            of ~{formatUsd(estimate.totalUsd)} estimated
+            of ~{formatCredits(estimate.totalUsd * CREDIT_MARKUP)} estimated
           </span>
         </p>
       </header>

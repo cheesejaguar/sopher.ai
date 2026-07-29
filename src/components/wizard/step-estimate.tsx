@@ -32,16 +32,14 @@ function modelMix(tier: QualityTier): string {
   return parts.join(" · ");
 }
 
-function formatUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
+function formatCredits(value: number): string {
+  return `${value.toFixed(1)} cr`;
 }
 
-type EstimateMap = Partial<Record<QualityTier, BookEstimate>>;
+/** What the wallet is actually debited: metered USD at retail markup. */
+type QuotedEstimate = BookEstimate & { credits: number; balance: number | null };
 
-type BudgetSnapshot = {
-  monthToDateUsd: number;
-  monthlyLimitUsd: number;
-};
+type EstimateMap = Partial<Record<QualityTier, QuotedEstimate>>;
 
 export function StepEstimate({
   state,
@@ -52,7 +50,6 @@ export function StepEstimate({
 }) {
   const [estimates, setEstimates] = React.useState<EstimateMap>({});
   const [loading, setLoading] = React.useState(true);
-  const [budget, setBudget] = React.useState<BudgetSnapshot | null>(null);
 
   const { chapters, wordsPerChapter } = state;
 
@@ -71,7 +68,7 @@ export function StepEstimate({
               signal: controller.signal,
             });
             if (!res.ok) return null;
-            return (await res.json()) as BookEstimate;
+            return (await res.json()) as QuotedEstimate;
           }),
         );
         const next: EstimateMap = {};
@@ -90,37 +87,15 @@ export function StepEstimate({
     };
   }, [chapters, wordsPerChapter]);
 
-  // Month-to-date spend, fetched once so the receipt can say whether this fits.
-  React.useEffect(() => {
-    const controller = new AbortController();
-    (async () => {
-      try {
-        const res = await fetch("/api/usage", { signal: controller.signal });
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          monthToDateUsd: number;
-          budget: { monthlyLimitUsd: number };
-        };
-        setBudget({
-          monthToDateUsd: data.monthToDateUsd,
-          monthlyLimitUsd: data.budget.monthlyLimitUsd,
-        });
-      } catch {
-        // Budget context is a nicety; the workflow enforces the cap regardless.
-      }
-    })();
-    return () => controller.abort();
-  }, []);
-
   const selected = estimates[state.tier];
-  const remaining = budget ? budget.monthlyLimitUsd - budget.monthToDateUsd : null;
-  const overBudget = selected !== undefined && remaining !== null && selected.totalUsd > remaining;
+  const balance = selected?.balance ?? null;
+  const short = selected !== undefined && balance !== null && balance < selected.credits;
 
   // Announced once the quote has settled — never while it is still being fetched,
   // and never per keystroke (the quote itself is debounced).
   const announcement =
     selected && !loading
-      ? `${TIER_LABELS[state.tier].name} estimate: ${formatUsd(selected.totalUsd)}, about ${
+      ? `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}, about ${
           selected.estimatedMinutes
         } minutes.`
       : "";
@@ -144,7 +119,7 @@ export function StepEstimate({
           // option's name rather than only in adjacent text.
           const optionLabel =
             estimate && !loading
-              ? `${TIER_LABELS[tier].name} — ${formatUsd(estimate.totalUsd)}, about ${
+              ? `${TIER_LABELS[tier].name} — ${formatCredits(estimate.credits)}, about ${
                   estimate.estimatedMinutes
                 } minutes`
               : `${TIER_LABELS[tier].name} — estimate still loading`;
@@ -167,7 +142,7 @@ export function StepEstimate({
               <span className="mt-auto pt-1.5 font-mono text-sm tabular-nums">
                 {estimate && !loading ? (
                   <>
-                    {formatUsd(estimate.totalUsd)}
+                    {formatCredits(estimate.credits)}
                     <span className="text-muted-foreground">
                       {" "}
                       · ~{estimate.estimatedMinutes} min
@@ -198,18 +173,23 @@ export function StepEstimate({
                       aria-hidden="true"
                       className="flex-1 border-b border-dotted border-paper-edge"
                     />
-                    <span className="tabular-nums">{formatUsd(stage.usd)}</span>
+                    <span className="tabular-nums">
+                      {formatCredits(
+                        stage.usd * (selected.credits / Math.max(selected.totalUsd, 0.0001)),
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
               <div className="mt-3 flex items-baseline gap-2 border-t border-paper-edge pt-3 font-semibold">
                 <span>Total</span>
                 <span aria-hidden="true" className="flex-1" />
-                <span className="tabular-nums">{formatUsd(selected.totalUsd)}</span>
+                <span className="tabular-nums">{formatCredits(selected.credits)}</span>
               </div>
               <p className="mt-3 text-xs text-paper-muted">
-                ±30% — billed only for what actually runs, never past your monthly cap. Roughly{" "}
-                {selected.estimatedMinutes} minutes start to finish.
+                ±30% — credits are only debited for what actually runs, and writing pauses (not
+                fails) if your balance runs out. Roughly {selected.estimatedMinutes} minutes start
+                to finish.
               </p>
             </>
           ) : (
@@ -222,15 +202,20 @@ export function StepEstimate({
         </div>
       </div>
 
-      {budget && selected ? (
-        <p className={cn("text-xs", overBudget ? "text-ember" : "text-muted-foreground")}>
-          {overBudget
-            ? `This estimate exceeds what's left of your monthly budget (${formatUsd(
-                Math.max(remaining ?? 0, 0),
-              )} remaining) — generation will pause at the cap.`
-            : `Fits your monthly budget: ${formatUsd(budget.monthToDateUsd)} of ${formatUsd(
-                budget.monthlyLimitUsd,
-              )} used so far.`}
+      {selected && balance !== null ? (
+        <p className={cn("text-xs", short ? "text-ember" : "text-muted-foreground")}>
+          {short ? (
+            <>
+              Your balance is {formatCredits(balance)} — this book needs about{" "}
+              {formatCredits(selected.credits)}. Writing will pause until you{" "}
+              <a href="/studio/credits" className="font-medium underline">
+                add credits
+              </a>
+              .
+            </>
+          ) : (
+            `Covered by your balance: ${formatCredits(balance)} available.`
+          )}
         </p>
       ) : null}
 

@@ -6,7 +6,7 @@ import { Pricing } from "@/components/marketing/pricing";
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Pay per book, not per month. Draft, Standard, and Premium quality tiers with a full cost report for every manuscript.",
+    "Prepaid credits, no subscription. A finished book runs about 21\u201336 credits, new accounts start with free credits, and every manuscript comes with a full cost report.",
 };
 
 export default function PricingPage() {

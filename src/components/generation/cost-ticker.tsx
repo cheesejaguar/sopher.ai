@@ -4,8 +4,11 @@ import { CircleDollarSign } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-function usd(value: number): string {
-  return `$${value.toFixed(2)}`;
+import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
+
+/** Credits are what the wallet is debited — always the primary figure. */
+function credits(value: number): string {
+  return `${(value * CREDIT_MARKUP).toFixed(1)} cr`;
 }
 
 /**
@@ -32,10 +35,10 @@ export function CostTicker({ totalUsd, estimateUsd }: { totalUsd: number; estima
           over ? "text-ember" : "text-foreground",
         )}
       >
-        {usd(totalUsd)}
+        {credits(totalUsd)}
       </p>
       <p className="mt-0.5 font-mono text-xs text-muted-foreground tabular-nums">
-        estimated {usd(estimateUsd)}
+        estimated {credits(estimateUsd)}
         {over ? <span className="text-ember"> · over estimate</span> : null}
       </p>
     </section>

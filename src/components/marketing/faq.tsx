@@ -22,7 +22,7 @@ const FAQS: FaqItem[] = [
   {
     question: "What exactly am I paying for?",
     answer:
-      "The models that write and edit your book. Every book includes a full cost report showing what each agent spent — token by token.",
+      "Credits, spent only on work that actually runs — the models that draft, edit, and check your book. One credit is one dollar of writing; a finished novella runs about 21\u201336 credits, and every book includes a report of where they went.",
   },
 ];
 

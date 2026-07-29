@@ -7,7 +7,7 @@ import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getEntityForPortrait } from "@/db/queries/entities";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { BudgetExceededError, checkBudget } from "@/lib/billing/meter";
+import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { PORTRAIT_KINDS, PORTRAIT_USD, portraitPrompt } from "@/lib/bible/portraits";
 import type { EntityKind } from "@/ai/schemas/entities";
 
@@ -53,7 +53,7 @@ export async function POST(_req: Request, ctx: { params: Promise<{ entityId: str
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
 
   try {
-    await checkBudget(userId, PORTRAIT_USD);
+    await assertCreditsForUsd(userId, PORTRAIT_USD);
 
     const model = MODELS[tier].image;
     const prompt = portraitPrompt({
@@ -112,8 +112,8 @@ export async function POST(_req: Request, ctx: { params: Promise<{ entityId: str
 
     return Response.json({ url: blob.url });
   } catch (error) {
-    if (error instanceof BudgetExceededError) {
-      return Response.json({ error: "Monthly budget reached" }, { status: 402 });
+    if (error instanceof InsufficientCreditsError) {
+      return Response.json({ error: "Not enough credits" }, { status: 402 });
     }
     throw error;
   }

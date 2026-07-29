@@ -15,3 +15,8 @@ export function formatTokens(tokens: number): string {
   if (tokens >= 10_000) return `${(tokens / 1_000).toFixed(1)}k`;
   return tokens.toLocaleString("en-US");
 }
+
+/** "12.4 cr" — credits are the user-facing currency; USD is the metered detail. */
+export function formatCredits(credits: number): string {
+  return `${credits.toFixed(credits >= 100 ? 0 : 1)} cr`;
+}

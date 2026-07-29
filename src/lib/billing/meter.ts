@@ -3,17 +3,12 @@ import { and, eq, gte, sum } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { calculateUsd, type UsageTokens } from "./pricing";
 
-export class BudgetExceededError extends Error {
-  constructor(
-    public readonly spentUsd: number,
-    public readonly limitUsd: number,
-  ) {
-    super(`Monthly budget exceeded: $${spentUsd.toFixed(2)} of $${limitUsd.toFixed(2)}`);
-    this.name = "BudgetExceededError";
-  }
-}
-
-export const DEFAULT_MONTHLY_LIMIT_USD = 20;
+/**
+ * Metering: every LLM call lands in `llm_calls` as ground truth for margins.
+ * Spending is gated by the prepaid credit wallet (`src/lib/billing/credits.ts`)
+ * — the former monthly USD budget system was removed when credits arrived,
+ * since a prepaid balance already is a hard spending cap.
+ */
 
 function monthStart(): Date {
   const now = new Date();
@@ -23,7 +18,7 @@ function monthStart(): Date {
 const SPEND_CACHE_TTL_SECONDS = 60;
 
 function spendCacheKey(userId: string) {
-  return `budget-spend:${userId}`;
+  return `spend:${userId}`;
 }
 
 export async function getMonthToDateSpend(userId: string): Promise<number> {
@@ -40,35 +35,10 @@ export async function getMonthToDateSpend(userId: string): Promise<number> {
   const spent = Number(row?.total ?? 0);
   await cache.set(spendCacheKey(userId), spent, {
     ttl: SPEND_CACHE_TTL_SECONDS,
-    tags: [`budget:${userId}`],
-    name: "budget-spend",
+    tags: [`spend:${userId}`],
+    name: "spend",
   });
   return spent;
-}
-
-export async function getBudget(userId: string) {
-  const db = getDb();
-  const [budget] = await db
-    .select()
-    .from(schema.budgets)
-    .where(eq(schema.budgets.userId, userId))
-    .limit(1);
-  return {
-    monthlyLimitUsd: budget ? Number(budget.monthlyLimitUsd) : DEFAULT_MONTHLY_LIMIT_USD,
-    hardLimit: budget?.hardLimit ?? true,
-    alertThresholdPct: budget?.alertThresholdPct ?? 80,
-  };
-}
-
-/**
- * Throws BudgetExceededError when a hard-limited user is at/over budget.
- * `upcomingEstimateUsd` lets callers pre-flight an operation's estimated cost.
- */
-export async function checkBudget(userId: string, upcomingEstimateUsd = 0): Promise<void> {
-  const [spent, budget] = await Promise.all([getMonthToDateSpend(userId), getBudget(userId)]);
-  if (budget.hardLimit && spent + upcomingEstimateUsd > budget.monthlyLimitUsd) {
-    throw new BudgetExceededError(spent, budget.monthlyLimitUsd);
-  }
 }
 
 export type LlmCallRecord = {
