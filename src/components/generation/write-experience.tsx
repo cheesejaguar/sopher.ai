@@ -114,6 +114,7 @@ export function WriteExperience({
       <RunViewer
         key={snapshot.run.id}
         runId={snapshot.run.id}
+        runKind={snapshot.run.kind ?? "full_book"}
         projectId={projectId}
         projectTitle={projectTitle}
         snapshot={snapshot}

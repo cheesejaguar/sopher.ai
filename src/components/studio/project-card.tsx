@@ -7,9 +7,10 @@ import { Progress } from "@/components/ui/progress";
 import { StatusBadge } from "@/components/studio/status-badge";
 import { RelativeTime } from "@/components/relative-time";
 import { genreLabel } from "@/lib/genres";
+import { ProjectMenu } from "@/components/studio/project-menu";
 import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
 
-export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete";
+export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete" | "archived";
 
 /** Serializable card shape, assembled from the DB by the dashboard. */
 export interface ProjectCardData {
@@ -24,6 +25,7 @@ export interface ProjectCardData {
   chaptersTotal: number;
   spendUsd: number;
   estimateUsd: number;
+  archived?: boolean;
 }
 
 /** The workspace stage a book naturally opens on, given its status. */
@@ -37,6 +39,9 @@ function stageForStatus(status: ProjectCardStatus): "brief" | "write" | "editor"
       return "editor";
     case "complete":
       return "manuscript";
+    case "archived":
+      // Read-only stroll through what exists; brief is the safest landing.
+      return "brief";
   }
 }
 
@@ -49,50 +54,57 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
 
   return (
-    <Link
-      href={`/projects/${project.id}/${stageForStatus(project.status)}`}
-      className="group block h-full rounded-xl"
-    >
-      <Card className="h-full transition-shadow group-hover:ring-foreground/25">
-        <CardHeader>
-          <CardTitle className="font-display text-lg leading-snug font-semibold tracking-tight text-balance">
-            {project.title}
-          </CardTitle>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {project.genre ? <Badge variant="outline">{genreLabel(project.genre)}</Badge> : null}
-            <StatusBadge status={project.status} />
-          </div>
-        </CardHeader>
-        <CardContent className="mt-auto space-y-2">
-          <div className="flex items-baseline justify-between text-xs text-muted-foreground">
-            <span>
-              Chapters{" "}
+    <div className="group relative h-full">
+      {/* The menu floats above the link so it is clickable without nesting
+          interactive elements inside the anchor. */}
+      <div className="absolute top-3 right-3 z-10">
+        <ProjectMenu projectId={project.id} title={project.title} archived={project.archived} />
+      </div>
+      <Link
+        href={`/projects/${project.id}/${stageForStatus(project.status)}`}
+        className="block h-full rounded-xl"
+      >
+        <Card className="h-full transition-shadow group-hover:ring-foreground/25">
+          <CardHeader>
+            <CardTitle className="pr-8 font-display text-lg leading-snug font-semibold tracking-tight text-balance">
+              {project.title}
+            </CardTitle>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {project.genre ? <Badge variant="outline">{genreLabel(project.genre)}</Badge> : null}
+              <StatusBadge status={project.status} />
+            </div>
+          </CardHeader>
+          <CardContent className="mt-auto space-y-2">
+            <div className="flex items-baseline justify-between text-xs text-muted-foreground">
+              <span>
+                Chapters{" "}
+                <span className="font-mono tabular-nums">
+                  {project.chaptersDone}/{project.chaptersTotal}
+                </span>
+              </span>
               <span className="font-mono tabular-nums">
-                {project.chaptersDone}/{project.chaptersTotal}
+                {new Intl.NumberFormat("en-US").format(project.wordCount)} words
+              </span>
+            </div>
+            <Progress
+              value={progress}
+              aria-label={`Chapters completed: ${project.chaptersDone} of ${project.chaptersTotal}`}
+            />
+          </CardContent>
+          <CardFooter className="justify-between text-xs">
+            <span className="font-mono tabular-nums">
+              {formatSpendCredits(project.spendUsd)}{" "}
+              <span className="text-muted-foreground">
+                of ~{formatSpendCredits(project.estimateUsd)}
               </span>
             </span>
-            <span className="font-mono tabular-nums">
-              {new Intl.NumberFormat("en-US").format(project.wordCount)} words
-            </span>
-          </div>
-          <Progress
-            value={progress}
-            aria-label={`Chapters completed: ${project.chaptersDone} of ${project.chaptersTotal}`}
-          />
-        </CardContent>
-        <CardFooter className="justify-between text-xs">
-          <span className="font-mono tabular-nums">
-            {formatSpendCredits(project.spendUsd)}{" "}
             <span className="text-muted-foreground">
-              of ~{formatSpendCredits(project.estimateUsd)}
+              Updated <RelativeTime iso={project.updatedAt} />
             </span>
-          </span>
-          <span className="text-muted-foreground">
-            Updated <RelativeTime iso={project.updatedAt} />
-          </span>
-        </CardFooter>
-      </Card>
-    </Link>
+          </CardFooter>
+        </Card>
+      </Link>
+    </div>
   );
 }
 

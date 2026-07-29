@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { estimateBookCost } from "@/ai/estimate";
 import { EmptyLibrary } from "@/components/studio/empty-library";
 import { NewBookCard, ProjectCard, type ProjectCardData } from "@/components/studio/project-card";
-import { listProjectsWithStats } from "@/db/queries/projects";
+import { listProjectsWithStats, type ProjectWithStats } from "@/db/queries/projects";
 import { requireUser } from "@/lib/auth";
 import { ProjectGridSkeleton } from "./loading";
 
@@ -12,19 +12,13 @@ export const metadata: Metadata = {
   title: "Your books",
 };
 
-async function ProjectGrid() {
-  const { userId } = await requireUser();
-  const projects = await listProjectsWithStats(userId);
-
-  if (projects.length === 0) {
-    return <EmptyLibrary />;
-  }
-
-  const cards: ProjectCardData[] = projects.map((project) => ({
+function toCard(project: ProjectWithStats): ProjectCardData {
+  return {
     id: project.id,
     title: project.title,
     genre: project.genre,
-    status: project.status === "archived" ? "draft" : project.status,
+    status: project.status,
+    archived: project.status === "archived",
     updatedAt: project.updatedAt.toISOString(),
     wordCount: project.wordCount,
     chaptersDone: project.chaptersDone,
@@ -35,15 +29,42 @@ async function ProjectGrid() {
       project.targetChapters,
       project.targetWordsPerChapter,
     ).totalUsd,
-  }));
+  };
+}
+
+async function ProjectGrid() {
+  const { userId } = await requireUser();
+  const [projects, archived] = await Promise.all([
+    listProjectsWithStats(userId),
+    listProjectsWithStats(userId, { archived: true }),
+  ]);
+
+  if (projects.length === 0 && archived.length === 0) {
+    return <EmptyLibrary />;
+  }
 
   return (
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-      {cards.map((card) => (
-        <ProjectCard key={card.id} project={card} />
-      ))}
-      <NewBookCard />
-    </div>
+    <>
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {projects.map((project) => (
+          <ProjectCard key={project.id} project={toCard(project)} />
+        ))}
+        <NewBookCard />
+      </div>
+
+      {archived.length > 0 ? (
+        <details className="mt-8">
+          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+            Archived · {archived.length}
+          </summary>
+          <div className="mt-4 grid gap-5 opacity-80 sm:grid-cols-2 lg:grid-cols-3">
+            {archived.map((project) => (
+              <ProjectCard key={project.id} project={toCard(project)} />
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </>
   );
 }
 

@@ -62,6 +62,7 @@ function announcementFor(stage: Stage, draftedCount: number, plannedTotal: numbe
  */
 export function RunViewer({
   runId,
+  runKind = "full_book",
   projectId,
   projectTitle,
   snapshot,
@@ -74,6 +75,8 @@ export function RunViewer({
   restartError,
 }: {
   runId: string;
+  /** Restart affordances re-run the FULL BOOK — hide them for scoped runs. */
+  runKind?: "full_book" | "chapter" | "edit_pass" | "continuity" | "export";
   projectId: string;
   projectTitle: string;
   snapshot: RunSnapshot;
@@ -115,6 +118,7 @@ export function RunViewer({
             ? { score: state.review.score, issueCount: state.review.issueCount }
             : undefined
         }
+        onWriteAgain={runKind === "full_book" ? onRestart : undefined}
       />
     );
   } else if (state.stage === "failed") {
@@ -126,8 +130,8 @@ export function RunViewer({
           state.error?.message ??
           "Something went wrong while writing. Chapters already drafted are saved."
         }
-        actionLabel="Try again"
-        onAction={onRestart}
+        actionLabel={runKind === "full_book" ? "Try again" : undefined}
+        onAction={runKind === "full_book" ? onRestart : undefined}
         pending={restartPending}
         error={restartError}
       />
@@ -138,8 +142,8 @@ export function RunViewer({
         icon={<OctagonX aria-hidden="true" className="size-5 text-muted-foreground" />}
         title="You stopped this run."
         body="Everything drafted before the stop is saved. A new run starts fresh from the brief."
-        actionLabel="Start a new run"
-        onAction={onRestart}
+        actionLabel={runKind === "full_book" ? "Start a new run" : undefined}
+        onAction={runKind === "full_book" ? onRestart : undefined}
         pending={restartPending}
         error={restartError}
       />
@@ -223,8 +227,8 @@ function EndCard({
   icon: React.ReactNode;
   title: string;
   body: string;
-  actionLabel: string;
-  onAction: () => void;
+  actionLabel?: string;
+  onAction?: () => void;
   pending: boolean;
   error: string | null;
 }) {
@@ -235,10 +239,12 @@ function EndCard({
         <h2 className="font-display text-xl font-semibold tracking-tight">{title}</h2>
         <p className="mx-auto max-w-md text-sm text-muted-foreground">{body}</p>
       </div>
-      <Button onClick={onAction} disabled={pending}>
-        {pending ? <Spinner /> : null}
-        {actionLabel}
-      </Button>
+      {actionLabel && onAction ? (
+        <Button onClick={onAction} disabled={pending}>
+          {pending ? <Spinner /> : null}
+          {actionLabel}
+        </Button>
+      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
