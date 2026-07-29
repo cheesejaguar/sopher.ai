@@ -13,6 +13,7 @@ import {
   emitProgress,
   finalizeStep,
   markRunStatus,
+  notifyCreditsPausedStep,
   outlineStep,
   readQualityGate,
   writeChapterStep,
@@ -53,6 +54,7 @@ export async function generateBook(
     let preflight = await creditCheckStep(ref, config, config.waveSize, {
       includeBookOverhead: true,
     });
+    let preflightNotified = false;
     while (!preflight.sufficient) {
       await markRunStatus(ref, "awaiting_input");
       await emitProgress(ref, {
@@ -61,6 +63,12 @@ export async function generateBook(
         pct: 1,
         detail: `${preflight.balance.toFixed(0)} of ${preflight.required.toFixed(0)} credits needed to start`,
       });
+      // One email per pause episode — a resume click without a top-up loops
+      // back here and must not mail again.
+      if (!preflightNotified) {
+        await notifyCreditsPausedStep(ref, preflight.balance, preflight.required);
+        preflightNotified = true;
+      }
       const go = await topUpEvents.next();
       if (!go.value?.toppedUp) throw new FatalError("Run cancelled while waiting for credits");
       await markRunStatus(ref, "running");
@@ -125,6 +133,7 @@ export async function generateBook(
       // failing it, so every chapter already drafted is kept and no work is
       // re-billed on resume.
       let credit = await creditCheckStep(ref, config, Math.min(config.waveSize, total - done));
+      let pauseNotified = false;
       while (!credit.sufficient) {
         await markRunStatus(ref, "awaiting_input");
         await emitProgress(ref, {
@@ -133,6 +142,10 @@ export async function generateBook(
           pct: 15 + Math.round(55 * (done / total)),
           detail: `${credit.balance.toFixed(0)} of ${credit.required.toFixed(0)} credits needed to continue`,
         });
+        if (!pauseNotified) {
+          await notifyCreditsPausedStep(ref, credit.balance, credit.required);
+          pauseNotified = true;
+        }
         const resumed = await topUpEvents.next();
         if (!resumed.value?.toppedUp) {
           throw new FatalError("Run cancelled while waiting for credits");

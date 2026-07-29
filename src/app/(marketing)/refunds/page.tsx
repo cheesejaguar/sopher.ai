@@ -10,21 +10,24 @@ export const metadata: Metadata = {
 export default function RefundsPage() {
   return (
     <LegalPage title="Refund Policy" updated="July 29, 2026">
-      <p>Credits are prepaid, and the honest thing is to be precise about when money comes back.</p>
-
-      <h2>Unspent credits</h2>
       <p>
-        Credits you have purchased but not spent are refundable at face value (excluding any bonus
-        credits) within <strong>14 days</strong> of purchase — email{" "}
-        <a href="mailto:support@sopher.ai">support@sopher.ai</a> from your account address. Refunds
-        go back to the original payment method via Stripe, usually within 5–10 business days.
+        Credits are prepaid, and the honest thing is to be precise up front:{" "}
+        <strong>all credit purchases are final</strong>.
+      </p>
+
+      <h2>All sales are final</h2>
+      <p>
+        Credits — spent or unspent — are not refundable. Before you buy, the pricing page shows
+        exactly what a book costs, every account starts with free credits to try the product first,
+        and every run shows its estimate before anything is charged. Where local consumer law grants
+        you a mandatory withdrawal right, that law prevails.
       </p>
 
       <h2>Spent credits</h2>
       <p>
         Credits consumed by generation, editing, or image work paid for computation that already
-        ran, and are not refundable. This includes books you decide you do not like — AI output
-        varies, and the estimate shown before each run is how we keep that risk visible up front.
+        ran. This includes books you decide you do not like — AI output varies, and the estimate
+        shown before each run is how we keep that risk visible up front.
       </p>
 
       <h2>Failures on our side</h2>
