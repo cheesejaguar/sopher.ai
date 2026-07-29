@@ -20,6 +20,15 @@ async function devFallbackUser(): Promise<{ userId: string }> {
     .insert(schema.users)
     .values({ id: DEV_USER_ID, email: "dev@sopher.ai", name: "Studio Guest" })
     .onConflictDoNothing();
+  // Same welcome grant real users get, so local dev exercises the same
+  // credit-gated paths instead of instantly suspending on a zero balance.
+  await grantCredits({
+    userId: DEV_USER_ID,
+    credits: SIGNUP_GRANT_CREDITS,
+    description: "Welcome credits",
+    externalRef: `signup:${DEV_USER_ID}`,
+    kind: "grant",
+  });
   return { userId: DEV_USER_ID };
 }
 

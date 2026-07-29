@@ -168,17 +168,25 @@ export function entityUpsert(ctx: EntityToolCtx) {
       const db = getDb();
       const parsed = parseAttrs(kind, attrs) as Record<string, unknown>;
 
+      // Case-insensitive resolution, then reuse the stored casing: get/search/
+      // relate all match case-insensitively, so "biscuit" must update Biscuit
+      // rather than minting a duplicate row the unique index cannot catch.
       const [existing] = await db
-        .select({ id: schema.entities.id, attrs: schema.entities.attrs })
+        .select({
+          id: schema.entities.id,
+          name: schema.entities.name,
+          attrs: schema.entities.attrs,
+        })
         .from(schema.entities)
         .where(
           and(
             eq(schema.entities.bookId, ctx.bookId),
             eq(schema.entities.kind, kind),
-            eq(schema.entities.name, name),
+            sql`lower(${schema.entities.name}) = lower(${name})`,
           ),
         )
         .limit(1);
+      const canonicalName = existing?.name ?? name;
 
       const conflicts = existing ? findConflicts(kind, existing.attrs, parsed) : [];
       if (conflicts.length > 0) {
@@ -188,16 +196,25 @@ export function entityUpsert(ctx: EntityToolCtx) {
             chapters: ctx.chapterNumber ? [ctx.chapterNumber] : [],
             category: KIND_TO_ISSUE_CATEGORY[kind],
             severity: "major" as const,
-            description: `${kind} "${name}": ${c.field} was established as "${c.from}" but chapter ${ctx.chapterNumber ?? "?"} says "${c.to}".`,
+            description: `${kind} "${canonicalName}": ${c.field} was established as "${c.from}" but chapter ${ctx.chapterNumber ?? "?"} says "${c.to}".`,
             suggestedFix: `Keep the established "${c.from}" unless the change is deliberate and explained in the prose.`,
           })),
         );
       }
 
       // Guarded scalars stay as first established; everything else may refine.
+      // Also drop empty values: parseAttrs fills omitted list fields with []
+      // defaults, and merging those would wipe stored personality/contents/etc
+      // on any partial update.
       const conflicted = new Set(conflicts.map((c) => c.field));
       const safeAttrs = Object.fromEntries(
-        Object.entries(parsed).filter(([key]) => !conflicted.has(key)),
+        Object.entries(parsed).filter(([key, value]) => {
+          if (conflicted.has(key)) return false;
+          if (value === undefined || value === null) return false;
+          if (Array.isArray(value) && value.length === 0 && key !== "facts") return false;
+          if (typeof value === "string" && !value.trim()) return false;
+          return true;
+        }),
       );
       const { facts: incomingFacts = [], ...scalars } = safeAttrs as {
         facts?: string[];
@@ -213,7 +230,7 @@ export function entityUpsert(ctx: EntityToolCtx) {
         .values({
           bookId: ctx.bookId,
           kind,
-          name,
+          name: canonicalName,
           aliases,
           attrs: { ...scalars, facts: incomingFacts },
           firstAppearanceChapter: ctx.chapterNumber,
@@ -239,7 +256,7 @@ export function entityUpsert(ctx: EntityToolCtx) {
       return {
         recorded: true,
         kind,
-        name,
+        name: canonicalName,
         conflicts: conflicts.map((c) => `${c.field}: "${c.from}" vs "${c.to}"`),
       };
     },

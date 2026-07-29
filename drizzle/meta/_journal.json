@@ -43,6 +43,13 @@
       "when": 1785299689382,
       "tag": "0005_pale_starbolt",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785301063778,
+      "tag": "0006_conscious_sabretooth",
+      "breakpoints": true
     }
   ]
 }

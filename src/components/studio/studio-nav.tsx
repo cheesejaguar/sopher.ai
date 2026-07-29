@@ -16,6 +16,7 @@ const links = [
   { href: "/studio", label: "Projects" },
   { href: "/studio/credits", label: "Credits" },
   { href: "/studio/usage", label: "Usage" },
+  { href: "/studio/settings", label: "Settings" },
 ] as const;
 
 /**

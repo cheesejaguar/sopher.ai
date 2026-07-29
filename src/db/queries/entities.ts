@@ -64,10 +64,21 @@ export async function applyEntityDeltas(input: {
   for (const rel of input.relationships ?? []) {
     if (!rel.from?.trim() || !rel.to?.trim()) continue;
     const rows = await db
-      .select({ id: schema.entities.id, name: schema.entities.name })
+      .select({ id: schema.entities.id, name: schema.entities.name, kind: schema.entities.kind })
       .from(schema.entities)
       .where(eq(schema.entities.bookId, input.bookId));
-    const find = (name: string) => rows.find((r) => r.name.toLowerCase() === name.toLowerCase());
+    // Prefer an exact-case match; among case-insensitive matches prefer a
+    // character (family ties are the common case). Ambiguity across kinds with
+    // no better signal drops the relationship rather than guessing wrong.
+    const find = (name: string) => {
+      const matches = rows.filter((r) => r.name.toLowerCase() === name.toLowerCase());
+      if (matches.length <= 1) return matches[0];
+      return (
+        matches.find((r) => r.name === name) ??
+        matches.find((r) => r.kind === "character") ??
+        undefined
+      );
+    };
     const from = find(rel.from);
     const to = find(rel.to);
     // Relationships between entities we do not know about are dropped rather
