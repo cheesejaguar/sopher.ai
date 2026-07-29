@@ -3,6 +3,7 @@ import type { Route } from "next";
 import { notFound } from "next/navigation";
 
 import { ChapterPager } from "@/components/manuscript/chapter-pager";
+import { BookIdentityDialog } from "@/components/manuscript/book-identity-dialog";
 import { ExportDialog } from "@/components/manuscript/export-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
 import { buttonVariants } from "@/components/ui/button";
@@ -96,7 +97,15 @@ export default async function ManuscriptPage({
             activeChapter={active.chapterNumber}
           />
         </div>
-        <ExportDialog projectId={projectId} />
+        <div className="flex items-center gap-2">
+          <BookIdentityDialog
+            projectId={projectId}
+            title={book.title}
+            synopsis={book.synopsis}
+            author={(book.frontMatter as { author?: string }).author ?? null}
+          />
+          <ExportDialog projectId={projectId} />
+        </div>
       </header>
 
       <div className="paper-surface px-6 py-12 sm:px-12 sm:py-16">

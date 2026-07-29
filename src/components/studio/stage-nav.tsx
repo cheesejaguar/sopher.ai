@@ -14,6 +14,7 @@ const stages = [
   { slug: "editor", label: "Editor" },
   { slug: "manuscript", label: "Manuscript" },
   { slug: "usage", label: "Usage" },
+  { slug: "settings", label: "Settings" },
 ] as const;
 
 function StageTabs({ projectId, pathname }: { projectId: string; pathname?: string }) {

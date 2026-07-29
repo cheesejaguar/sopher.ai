@@ -16,12 +16,19 @@ export type ProjectWithStats = Awaited<ReturnType<typeof listProjectsWithStats>>
  * Dashboard listing: every non-archived project with chapter progress, word
  * count, and metered spend — batched into three queries total (no N+1).
  */
-export async function listProjectsWithStats(userId: string) {
+export async function listProjectsWithStats(userId: string, opts?: { archived?: boolean }) {
   const db = getDb();
   const projects = await db
     .select()
     .from(schema.projects)
-    .where(and(eq(schema.projects.userId, userId), ne(schema.projects.status, "archived")))
+    .where(
+      and(
+        eq(schema.projects.userId, userId),
+        opts?.archived
+          ? eq(schema.projects.status, "archived")
+          : ne(schema.projects.status, "archived"),
+      ),
+    )
     .orderBy(desc(schema.projects.updatedAt));
   if (projects.length === 0) return [];
 

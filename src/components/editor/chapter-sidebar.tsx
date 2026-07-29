@@ -12,6 +12,7 @@ import {
   formatWordCount,
 } from "@/lib/editor/chapter-status";
 import type { ChapterNavItem } from "@/lib/editor/types";
+import { ChapterMenu } from "@/components/editor/chapter-menu";
 
 export function ChapterSidebar({
   projectId,
@@ -85,18 +86,30 @@ export function ChapterSidebar({
                 active && "bg-accent text-accent-foreground",
               );
               return (
-                <li key={chapter.id}>
+                <li key={chapter.id} className="group/chapter relative">
                   {drafted ? (
                     <Link
                       href={`/projects/${projectId}/editor/${chapter.chapterNumber}`}
                       aria-current={active ? "page" : undefined}
-                      className={cn(itemClass, "transition-colors hover:bg-accent/70")}
+                      className={cn(itemClass, "pr-8 transition-colors hover:bg-accent/70")}
                     >
                       {inner}
                     </Link>
                   ) : (
-                    <div className={cn(itemClass, "opacity-50")}>{inner}</div>
+                    <div className={cn(itemClass, "pr-8 opacity-50")}>{inner}</div>
                   )}
+                  <span className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-focus-within/chapter:opacity-100 group-hover/chapter:opacity-100">
+                    <ChapterMenu
+                      projectId={projectId}
+                      chapterId={chapter.id}
+                      chapterNumber={chapter.chapterNumber}
+                      title={chapter.title}
+                      isFirst={chapter.chapterNumber === chapters[0]?.chapterNumber}
+                      isLast={
+                        chapter.chapterNumber === chapters[chapters.length - 1]?.chapterNumber
+                      }
+                    />
+                  </span>
                 </li>
               );
             })}

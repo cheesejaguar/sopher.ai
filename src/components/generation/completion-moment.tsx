@@ -20,12 +20,14 @@ export function CompletionMoment({
   chapterCount,
   recommendation,
   review,
+  onWriteAgain,
 }: {
   projectId: string;
   projectTitle: string;
   chapterCount: number;
   recommendation?: string;
   review?: { score: number; issueCount: number };
+  onWriteAgain?: () => void;
 }) {
   const [closed, setClosed] = React.useState(false);
 
@@ -112,6 +114,11 @@ export function CompletionMoment({
         >
           Start editing
         </Button>
+        {onWriteAgain ? (
+          <Button variant="ghost" onClick={onWriteAgain}>
+            Write again
+          </Button>
+        ) : null}
       </div>
     </section>
   );

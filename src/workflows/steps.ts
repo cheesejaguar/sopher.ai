@@ -272,6 +272,42 @@ export async function entityBibleStep(
   }
 }
 
+/**
+ * Prepares a chapter for regeneration: snapshots the current prose into the
+ * revision history, then clears content and status so writeChapterStep's
+ * resume check treats it as unwritten. The old text is one restore away.
+ */
+export async function resetChapterStep(ref: RunRef, chapterNumber: number): Promise<void> {
+  "use step";
+  const { book } = await loadRunContext(ref);
+  const db = getDb();
+  const [chapter] = await db
+    .select({ id: schema.chapters.id, content: schema.chapters.content })
+    .from(schema.chapters)
+    .where(
+      and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
+    )
+    .limit(1);
+  if (!chapter) return;
+
+  if (chapter.content.trim().length > 0) {
+    await db
+      .insert(schema.chapterRevisions)
+      .values({ chapterId: chapter.id, content: chapter.content, source: "regenerate" });
+  }
+  await db
+    .update(schema.chapters)
+    .set({
+      content: "",
+      summary: null,
+      wordCount: 0,
+      qualityScore: null,
+      status: "planned",
+      updatedAt: new Date(),
+    })
+    .where(eq(schema.chapters.id, chapter.id));
+}
+
 export async function writeChapterStep(
   ref: RunRef,
   config: GenerationConfig,

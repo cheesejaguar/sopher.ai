@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BriefEditor } from "@/components/studio/brief-editor";
 import { requireUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 import { TIER_LABELS } from "@/ai/models";
@@ -63,6 +64,9 @@ export default async function BriefPage({ params }: { params: Promise<{ projectI
               This project has no brief yet — the agents will be working from the title alone.
             </p>
           )}
+        </div>
+        <div className="mt-8">
+          <BriefEditor projectId={projectId} brief={project.brief ?? ""} />
         </div>
       </article>
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { ImagePlus, Loader2, TriangleAlert } from "lucide-react";
 
@@ -8,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { BibleEntity } from "@/db/queries/entities";
 import { PORTRAIT_USD, PORTRAIT_KINDS } from "@/lib/bible/portraits";
+import { setContinuityIssueStatus } from "@/lib/actions/continuity";
 import { cn } from "@/lib/utils";
 
 type Conflict = { id: string; severity: string; description: string };
@@ -78,9 +80,23 @@ function asList(value: unknown): string[] {
 }
 
 export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflicts: Conflict[] }) {
+  const router = useRouter();
   const [portraitUrl, setPortraitUrl] = useState(entity.portraitUrl);
   const [busy, setBusy] = useState(false);
+  const [busyIssue, setBusyIssue] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  async function settleIssue(issueId: string, status: "resolved" | "dismissed") {
+    setBusyIssue(issueId);
+    try {
+      await setContinuityIssueStatus(issueId, status);
+      router.refresh();
+    } catch {
+      // The row simply stays; nothing destructive happened.
+    } finally {
+      setBusyIssue(null);
+    }
+  }
 
   const attrs = entity.attrs as Record<string, unknown>;
   const facts = asList(attrs.facts);
@@ -184,9 +200,29 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
       ) : null}
 
       {conflicts.length > 0 ? (
-        <ul className="space-y-1 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+        <ul className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
           {conflicts.map((c) => (
-            <li key={c.id}>{c.description}</li>
+            <li key={c.id} className="space-y-1">
+              <p>{c.description}</p>
+              <span className="flex gap-1.5">
+                <button
+                  type="button"
+                  disabled={busyIssue !== null}
+                  onClick={() => settleIssue(c.id, "resolved")}
+                  className="rounded border border-destructive/40 px-1.5 py-0.5 font-sans font-medium hover:bg-destructive/10 disabled:opacity-50"
+                >
+                  {busyIssue === c.id ? "…" : "Mark resolved"}
+                </button>
+                <button
+                  type="button"
+                  disabled={busyIssue !== null}
+                  onClick={() => settleIssue(c.id, "dismissed")}
+                  className="rounded px-1.5 py-0.5 font-sans text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  Dismiss
+                </button>
+              </span>
+            </li>
           ))}
         </ul>
       ) : null}

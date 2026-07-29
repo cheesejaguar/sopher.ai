@@ -115,6 +115,7 @@ export function RunViewer({
             ? { score: state.review.score, issueCount: state.review.issueCount }
             : undefined
         }
+        onWriteAgain={onRestart}
       />
     );
   } else if (state.stage === "failed") {
