@@ -80,7 +80,7 @@ export default async function AdminPurchases() {
         <TableFooter>
           <TableRow>
             <TableCell colSpan={4}>Purchased credits (face value)</TableCell>
-            <TableCell className="text-right font-mono tabular-nums">{total.toFixed(2)}</TableCell>
+            <TableCell className="text-right font-mono tabular-nums">{purchasedTotal.toFixed(2)}</TableCell>
             <TableCell />
           </TableRow>
         </TableFooter>
