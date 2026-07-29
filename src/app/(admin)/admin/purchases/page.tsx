@@ -22,10 +22,7 @@ function stripeLink(ref: string | null): string | null {
 }
 
 export default async function AdminPurchases() {
-  const rows = await listPurchases();
-  const total = rows
-    .filter((r) => r.kind === "purchase")
-    .reduce((acc, r) => acc + Number(r.amount), 0);
+  const { rows, purchasedTotal } = await listPurchases();
 
   return (
     <div className="space-y-4">

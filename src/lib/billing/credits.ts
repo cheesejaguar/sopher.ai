@@ -52,7 +52,7 @@ export async function grantCredits(input: {
   credits: number;
   description: string;
   externalRef: string;
-  kind?: "purchase" | "refund" | "grant";
+  kind?: "purchase" | "refund" | "grant" | "adjustment";
 }): Promise<boolean> {
   const inserted = await getDb()
     .insert(schema.creditLedger)

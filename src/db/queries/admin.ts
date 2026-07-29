@@ -122,13 +122,18 @@ export async function getUserDetail(userId: string) {
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   if (!user) return null;
 
-  const [ledger, projects, runs, callStats] = await Promise.all([
+  const [ledger, balanceRow, projects, runs, callStats] = await Promise.all([
     db
       .select()
       .from(schema.creditLedger)
       .where(eq(schema.creditLedger.userId, userId))
       .orderBy(desc(schema.creditLedger.createdAt))
       .limit(50),
+    // Balance over the WHOLE ledger — the 50-row page above is display only.
+    db
+      .select({ balance: sql<string>`coalesce(sum(${schema.creditLedger.amount}), 0)` })
+      .from(schema.creditLedger)
+      .where(eq(schema.creditLedger.userId, userId)),
     db
       .select({
         id: schema.projects.id,
@@ -161,14 +166,19 @@ export async function getUserDetail(userId: string) {
     ledger,
     projects,
     runs,
-    balance: ledger.reduce((acc, e) => acc + Number(e.amount), 0),
+    balance: Number(balanceRow[0]?.balance ?? 0),
     callStats: { calls: callStats[0].calls, usd: Number(callStats[0].usd) },
   };
 }
 
 export async function listPurchases() {
   const db = getDb();
-  return db
+  const [totals] = await db
+    .select({
+      purchased: sql<string>`coalesce(sum(${schema.creditLedger.amount}) filter (where ${schema.creditLedger.kind} = 'purchase'), 0)`,
+    })
+    .from(schema.creditLedger);
+  const rows = await db
     .select({
       id: schema.creditLedger.id,
       createdAt: schema.creditLedger.createdAt,
@@ -184,6 +194,7 @@ export async function listPurchases() {
     .where(inArray(schema.creditLedger.kind, ["purchase", "refund", "adjustment"]))
     .orderBy(desc(schema.creditLedger.createdAt))
     .limit(200);
+  return { rows, purchasedTotal: Number(totals.purchased) };
 }
 
 export async function listAllBooks() {

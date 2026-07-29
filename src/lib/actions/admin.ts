@@ -30,7 +30,7 @@ export async function adminAdjustCredits(input: unknown): Promise<void> {
     description: `Adjustment: ${data.reason}`,
     // The acting admin travels in the idempotency ref — audit and uniqueness.
     externalRef: `admin:${adminId}:${crypto.randomUUID()}`,
-    kind: "grant",
+    kind: "adjustment",
   });
   revalidatePath(`/admin/users/${data.userId}`);
   revalidatePath("/admin");
