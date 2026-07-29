@@ -28,7 +28,9 @@ export const createProjectSchema = z.object({
   settings: projectSettingsSchema.default({}),
 });
 
-export const updateProjectSchema = createProjectSchema.partial();
+export const updateProjectSchema = createProjectSchema.partial().extend({
+  status: z.enum(["draft", "generating", "editing", "complete", "archived"]).optional(),
+});
 
 export const estimateRequestSchema = z.object({
   tier: qualityTierSchema,

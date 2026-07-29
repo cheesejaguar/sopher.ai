@@ -41,6 +41,8 @@ export function buildManuscript(input: {
   title: string;
   synopsis?: string | null;
   genre?: string | null;
+  /** Author byline; falls back to the house line when unset. */
+  author?: string | null;
   chapters: ManuscriptSourceChapter[];
   figures?: FigureMap;
 }): AssembledManuscript {
@@ -58,7 +60,7 @@ export function buildManuscript(input: {
     });
   return {
     title: input.title.trim(),
-    author: MANUSCRIPT_AUTHOR,
+    author: input.author?.trim() || MANUSCRIPT_AUTHOR,
     synopsis: input.synopsis?.trim() || null,
     genre: input.genre?.trim() || null,
     chapters,
@@ -266,6 +268,7 @@ export async function loadManuscript(
       bookId: schema.books.id,
       bookTitle: schema.books.title,
       synopsis: schema.books.synopsis,
+      frontMatter: schema.books.frontMatter,
     })
     .from(schema.projects)
     .innerJoin(schema.books, eq(schema.books.projectId, schema.projects.id))
@@ -285,10 +288,12 @@ export async function loadManuscript(
     )
     .orderBy(schema.chapters.chapterNumber);
 
+  const author = (row.frontMatter as { author?: string } | null)?.author;
   return buildManuscript({
     title: row.bookTitle,
     synopsis: row.synopsis,
     genre: row.genre,
+    author,
     chapters,
     figures: await loadFigures(row.projectId),
   });
