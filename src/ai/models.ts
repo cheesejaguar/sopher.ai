@@ -62,6 +62,9 @@ export const MODELS: Record<QualityTier, TierModels> = {
 // Gateway-side fallback chain for prose calls (provider hiccups, not quality tiers).
 export const PROSE_FALLBACK_MODELS = ["anthropic/claude-sonnet-4.6"];
 
+/** Canonical tier order, cheapest first. Both the API and the wizard read this. */
+export const QUALITY_TIERS: readonly QualityTier[] = ["draft", "standard", "premium"];
+
 export const TIER_LABELS: Record<QualityTier, { name: string; blurb: string }> = {
   draft: { name: "Draft", blurb: "Fast single-pass draft with heuristic quality checks" },
   standard: { name: "Standard", blurb: "Drafted, critiqued, and selectively edited" },

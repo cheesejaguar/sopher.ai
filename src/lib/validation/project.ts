@@ -33,7 +33,12 @@ export const updateProjectSchema = createProjectSchema.partial().extend({
 });
 
 export const estimateRequestSchema = z.object({
-  tier: qualityTierSchema,
+  /**
+   * Ignored — the route quotes every tier in one response. Still accepted so a
+   * browser running the previous bundle across a deploy gets a valid quote
+   * rather than a 400 that would leave the wizard stuck loading.
+   */
+  tier: qualityTierSchema.optional(),
   chapters: z.number().int().min(3).max(60),
   wordsPerChapter: z.number().int().min(800).max(8_000),
 });

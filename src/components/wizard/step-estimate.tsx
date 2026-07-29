@@ -3,7 +3,7 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
-import { MODELS, TIER_LABELS, type QualityTier } from "@/ai/models";
+import { MODELS, QUALITY_TIERS, TIER_LABELS, type QualityTier } from "@/ai/models";
 import type { BookEstimate } from "@/ai/estimate";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import type { WizardActionEvent, WizardState } from "@/components/wizard/wizard-state";
 
-const TIERS: readonly QualityTier[] = ["draft", "standard", "premium"];
+const TIERS = QUALITY_TIERS;
 
 const MODEL_NAMES: Record<string, string> = {
   "anthropic/claude-haiku-4.5": "Haiku",
@@ -59,21 +59,19 @@ export function StepEstimate({
     const timer = setTimeout(async () => {
       setLoading(true);
       try {
-        const results = await Promise.all(
-          TIERS.map(async (tier) => {
-            const res = await fetch("/api/estimates", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ tier, chapters, wordsPerChapter }),
-              signal: controller.signal,
-            });
-            if (!res.ok) return null;
-            return (await res.json()) as QuotedEstimate;
-          }),
-        );
+        // One request for all three tiers. This used to fan out to three
+        // parallel requests, each repeating the same per-user balance query.
+        const res = await fetch("/api/estimates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chapters, wordsPerChapter }),
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const body = (await res.json()) as { tiers: QuotedEstimate[] };
         const next: EstimateMap = {};
-        for (const estimate of results) {
-          if (estimate) next[estimate.tier] = estimate;
+        for (const estimate of body.tiers ?? []) {
+          next[estimate.tier] = estimate;
         }
         setEstimates(next);
         setLoading(false);
