@@ -1,0 +1,86 @@
+import type { Metadata } from "next";
+
+import { LegalPage } from "../legal-page";
+
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description: "What sopher.ai collects, why, and what happens to your manuscripts.",
+};
+
+export default function PrivacyPage() {
+  return (
+    <LegalPage title="Privacy Policy" updated="July 29, 2026">
+      <p>
+        This policy explains what we collect when you use sopher.ai, why we collect it, and what
+        control you have over it. The short version: we collect what the product needs to work, your
+        manuscripts are private to your account, and we do not sell data.
+      </p>
+
+      <h2>What we collect</h2>
+      <ul>
+        <li>
+          <strong>Account data</strong> — your name, email address, and avatar, from the sign-in
+          provider you choose. Authentication is operated by Clerk.
+        </li>
+        <li>
+          <strong>Your writing</strong> — briefs, outlines, manuscripts, story-bible entries, and
+          edits, stored so you can return to them.
+        </li>
+        <li>
+          <strong>Usage metering</strong> — a record of each AI model call your account makes
+          (model, token counts, cost) so we can show you exactly what you spent. This record
+          contains counts, not the text of your book.
+        </li>
+        <li>
+          <strong>Payment records</strong> — handled by Stripe. We store the transaction reference
+          and credit amount; we never see or store card numbers.
+        </li>
+      </ul>
+
+      <h2>Who processes it</h2>
+      <ul>
+        <li>
+          <strong>AI model providers</strong> (currently Anthropic and Google, via Vercel&rsquo;s AI
+          Gateway) receive your brief and manuscript text to generate and edit your book, under
+          terms that do not permit training on your content.
+        </li>
+        <li>
+          <strong>Infrastructure</strong> — Vercel (hosting, file storage), Neon (database), Clerk
+          (authentication), Stripe (payments).
+        </li>
+      </ul>
+      <p>
+        We do not sell personal data, run third-party advertising trackers, or share your
+        manuscripts with anyone except the processors above, as needed to run the Service.
+      </p>
+
+      <h2>Cookies</h2>
+      <p>
+        We use only the cookies required for sign-in sessions (set by Clerk) and your theme
+        preference. There are no advertising or cross-site tracking cookies, which is why there is
+        no cookie banner.
+      </p>
+
+      <h2>Retention and deletion</h2>
+      <p>
+        Your content is kept while your account exists. Deleting a project removes its manuscript,
+        story bible, and generated files. Deleting your account removes your account record and all
+        projects; transaction records are retained as required for tax and accounting. To delete
+        your account, use your account menu or email us.
+      </p>
+
+      <h2>Your rights</h2>
+      <p>
+        You can export your manuscripts at any time from the product. Depending on where you live
+        you may have additional rights (access, correction, deletion, portability) — email{" "}
+        <a href="mailto:support@sopher.ai">support@sopher.ai</a> and we will honor them.
+      </p>
+
+      <h2>Changes</h2>
+      <p>
+        Material changes to this policy will be posted here with a new &ldquo;last updated&rdquo;
+        date.
+      </p>
+    </LegalPage>
+  );
+}

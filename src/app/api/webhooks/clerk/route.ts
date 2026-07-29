@@ -1,4 +1,5 @@
 import { Webhook } from "svix";
+import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { grantCredits } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
@@ -62,6 +63,13 @@ export async function POST(req: Request) {
         kind: "grant",
       });
     }
+  }
+
+  if (event.type === "user.deleted") {
+    // Cascades take everything else: projects, books, chapters, entities,
+    // ledger, llm_calls. Transaction records live in Stripe, not here.
+    await getDb().delete(schema.users).where(eq(schema.users.id, event.data.id));
+    return Response.json({ received: true, deleted: true });
   }
 
   return Response.json({ received: true });

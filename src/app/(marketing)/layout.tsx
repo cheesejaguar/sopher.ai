@@ -56,36 +56,77 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
             </p>
             <p className="mt-6 text-xs text-muted-foreground">© 2026 sopher.ai</p>
           </div>
-          <nav aria-label="Footer">
-            <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-              Product
-            </p>
-            <ul className="mt-3 flex flex-col gap-2 text-sm">
-              <li>
-                <Link
-                  href="/#how-it-works"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  How it works
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/pricing"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Pricing
-                </Link>
-              </li>
-              <li>
-                <Link
-                  href="/studio"
-                  className="text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  Studio
-                </Link>
-              </li>
-            </ul>
+          <nav aria-label="Footer" className="flex gap-12 sm:gap-16">
+            <div>
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                Product
+              </p>
+              <ul className="mt-3 flex flex-col gap-2 text-sm">
+                <li>
+                  <Link
+                    href="/#how-it-works"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    How it works
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/pricing"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Pricing
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/studio"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Studio
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                Company
+              </p>
+              <ul className="mt-3 flex flex-col gap-2 text-sm">
+                <li>
+                  <Link
+                    href="/terms"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Terms
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/privacy"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Privacy
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/refunds"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Refunds
+                  </Link>
+                </li>
+                <li>
+                  <a
+                    href="mailto:support@sopher.ai"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Support
+                  </a>
+                </li>
+              </ul>
+            </div>
           </nav>
         </div>
       </footer>

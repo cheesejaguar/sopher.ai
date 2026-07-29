@@ -42,6 +42,12 @@ export const metadata: Metadata = {
     type: "website",
     url: "https://sopher.ai",
   },
+  twitter: {
+    card: "summary_large_image",
+    title: "sopher.ai — Any book you can imagine, made for the people you love",
+    description:
+      "Describe the book in a sentence. A team of AI agents plans it, writes every chapter, and edits the whole manuscript while you watch.",
+  },
 };
 
 export default function RootLayout({
