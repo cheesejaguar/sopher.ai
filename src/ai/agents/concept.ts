@@ -105,12 +105,16 @@ export async function persistConcept(bookId: string, concept: BookConcept): Prom
     }
   }
 
+  // The verdict is admin-only bookkeeping; the author-owned concept jsonb
+  // (loaded by getProjectWithBook) must never carry it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring strips the field
+  const { moderation, ...persistableConcept } = concept;
   await db
     .update(schema.books)
     .set({
       title: concept.title,
       synopsis: concept.synopsis,
-      concept,
+      concept: persistableConcept,
       updatedAt: new Date(),
     })
     .where(eq(schema.books.id, bookId));

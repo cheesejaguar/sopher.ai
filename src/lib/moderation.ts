@@ -22,9 +22,10 @@ export async function recordModerationFlag(input: {
         chapterNumber: input.chapterNumber,
         source: input.source,
         category: verdict.category ?? "other",
-        // Minors involved in sexual content is the one category that always
-        // escalates; everything else starts as ordinary review.
-        severity: verdict.category === "minors" ? "urgent" : "review",
+        // Minors always escalates — and so does a flag with NO category, since
+        // an unclassified flag cannot rule the worst case out. An explicit
+        // "other" stays ordinary review.
+        severity: verdict.category === "minors" || !verdict.category ? "urgent" : "review",
         excerpt: verdict.excerpt?.slice(0, 500),
         detail: verdict.reason?.slice(0, 300),
       });

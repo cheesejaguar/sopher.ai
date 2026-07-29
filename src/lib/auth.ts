@@ -32,7 +32,11 @@ async function devFallbackUser(): Promise<{ userId: string }> {
   const db = getDb();
   await db
     .insert(schema.users)
-    .values({ id: DEV_USER_ID, email: "dev@sopher.ai", name: "Studio Guest" })
+    // Admin role: the dev identity exists precisely so local dev and DB-gated
+    // e2e can exercise every surface, admin included. The migration promotes
+    // pre-existing rows; this covers a fresh database where the row is born
+    // after the migration ran.
+    .values({ id: DEV_USER_ID, email: "dev@sopher.ai", name: "Studio Guest", role: "admin" })
     .onConflictDoNothing();
   // Same welcome grant real users get, so local dev exercises the same
   // credit-gated paths instead of instantly suspending on a zero balance.

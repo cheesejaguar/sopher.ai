@@ -6,7 +6,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
-import { assertNotSuspended, requireUser } from "@/lib/auth";
+import { assertNotSuspended, requireUser, SuspendedError } from "@/lib/auth";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
 import { isActiveRunConflict } from "@/lib/run-conflict";
@@ -106,9 +106,16 @@ async function startGenerationRun(
  * The wizard's submit: creates the project and immediately starts the
  * full-book generation workflow, then lands the author on the Write stage.
  */
-export async function startBook(input: unknown) {
+export async function startBook(input: unknown): Promise<{ error: string } | void> {
   const { userId } = await requireUser();
-  await assertNotSuspended(userId);
+  // Server-action throw messages are redacted in production, so suspension is
+  // returned as data — the wizard shows it verbatim.
+  try {
+    await assertNotSuspended(userId);
+  } catch (error) {
+    if (error instanceof SuspendedError) return { error: error.message };
+    throw error;
+  }
   const data = startBookSchema.parse(input);
 
   const db = getDb();
