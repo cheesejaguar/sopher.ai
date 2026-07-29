@@ -6,6 +6,7 @@ import { gatewayOptions, metered } from "@/ai/metering";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import {
   assertCreditsForUsd,
   creditsForUsd,
@@ -37,7 +38,7 @@ function coverPrompt(input: { title: string; synopsis: string | null; genre: str
     .join(" ");
 }
 
-export async function POST(_req: Request, ctx: { params: Promise<{ projectId: string }> }) {
+export async function POST(req: Request, ctx: { params: Promise<{ projectId: string }> }) {
   let userId: string;
   try {
     ({ userId } = await requireUser());
@@ -57,6 +58,11 @@ export async function POST(_req: Request, ctx: { params: Promise<{ projectId: st
     throw error;
   }
 
+
+  // Paid path: the balance pre-check above is a read, so concurrent callers all
+  // pass it. This is what bounds how far past the floor they can get.
+  const limited = await rateLimit(LIMITS.imageGen, req, userId);
+  if (limited.limited) return limited.response;
   const { projectId } = await ctx.params;
   const db = getDb();
   const [row] = await db

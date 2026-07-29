@@ -1,8 +1,10 @@
 import { z } from "zod";
 
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { getPack } from "@/lib/billing/credits";
 import { getStripe, stripeConfigured } from "@/lib/payments/stripe";
+import { safeInternalPath } from "@/lib/security/url";
 
 /**
  * Starts a Stripe Checkout session for a credit pack.
@@ -16,11 +18,17 @@ export const maxDuration = 60;
 
 const bodySchema = z.object({
   packId: z.string().min(1).max(40),
-  /** In-app path to send the buyer back to (e.g. a paused run). */
+  /**
+   * In-app path to send the buyer back to (e.g. a paused run). Transformed
+   * rather than merely matched: `safeInternalPath` resolves the value and
+   * returns the normalized path, so what ends up in `success_url` is the thing
+   * that was validated, not a sibling spelling of it.
+   */
   returnTo: z
     .string()
     .max(300)
-    .regex(/^\/(?!\/)/, "must be an in-app path")
+    .transform(safeInternalPath)
+    .refine((path) => path !== null, "must be an in-app path")
     .optional(),
 });
 
@@ -56,6 +64,12 @@ export async function POST(req: Request) {
     }
     throw error;
   }
+
+  // Nothing here costs us money, but each call creates a real Stripe Checkout
+  // session — unbounded, that is Stripe API quota exhaustion and a dashboard
+  // full of abandoned sessions.
+  const limited = await rateLimit(LIMITS.checkout, req, userId);
+  if (limited.limited) return limited.response;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

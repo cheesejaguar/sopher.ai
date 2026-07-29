@@ -1,6 +1,7 @@
 import { Marked } from "marked";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { isSafeHref } from "@/lib/security/url";
 import { diagramSourceHash, loadFigures, type FigureAsset, type FigureMap } from "./figures";
 
 /**
@@ -123,6 +124,20 @@ function createRenderer(figures: FigureMap, prefer: "svg" | "png"): Marked {
     renderer: {
       // Chapter prose is AI/user markdown; escape raw HTML rather than pass it through.
       html(token) {
+        return escapeHtml(token.text);
+      },
+      // marked v18 removed URL-protocol filtering, so `[x](javascript:…)` would
+      // otherwise reach an `href`. That matters most in the admin book view,
+      // which renders one user's chapters inside another's (admin) session.
+      // Safe hrefs return false and fall through to marked's own rendering;
+      // unsafe ones degrade to plain text so the words survive but the link
+      // does not.
+      link(token) {
+        if (isSafeHref(token.href)) return false as unknown as string;
+        return escapeHtml(token.text);
+      },
+      image(token) {
+        if (isSafeHref(token.href)) return false as unknown as string;
         return escapeHtml(token.text);
       },
       code(token) {

@@ -8,6 +8,17 @@ import { PROGRESS_NS } from "@/lib/run-events";
 export const maxDuration = 300;
 
 /**
+ * The two namespaces the workflow actually publishes: the RunEvent progress
+ * stream, and one prose-delta channel per chapter. Anything else is either a
+ * typo or someone fishing for internal channels.
+ */
+function readableNamespace(raw: string | null): string | null {
+  if (raw === null || raw === PROGRESS_NS) return PROGRESS_NS;
+  const chapter = raw.match(/^chapter:(\d{1,4})$/);
+  return chapter ? raw : null;
+}
+
+/**
  * Streams a run's namespaced events as NDJSON. Resumable: pass ?startIndex=N
  * to replay from a known position after a disconnect or reload.
  */
@@ -26,7 +37,13 @@ export async function GET(req: Request, ctx: { params: Promise<{ runId: string }
     return Response.json({ error: "Not found" }, { status: 404 });
   }
   const url = new URL(req.url);
-  const namespace = url.searchParams.get("ns") ?? PROGRESS_NS;
+  // Confined to the caller's own run by the ownership check below, but an
+  // arbitrary namespace still exposes internal event channels the UI never
+  // asks for. Only the two the client actually reads are accepted.
+  const namespace = readableNamespace(url.searchParams.get("ns"));
+  if (!namespace) {
+    return Response.json({ error: "Unknown namespace" }, { status: 400 });
+  }
   const startIndex = Number(url.searchParams.get("startIndex") ?? "0");
 
   const db = getDb();

@@ -5,6 +5,8 @@ import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { getBalance } from "@/lib/billing/credits";
 
+export const maxDuration = 30;
+
 const bodySchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("outline-approval"),

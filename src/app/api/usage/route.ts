@@ -4,6 +4,8 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { getMonthToDateSpend } from "@/lib/billing/meter";
 import { CREDIT_MARKUP, getBalance } from "@/lib/billing/credits";
 
+export const maxDuration = 30;
+
 export async function GET() {
   let userId: string;
   try {

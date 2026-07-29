@@ -7,6 +7,7 @@ import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { assertNotSuspended, requireUser, SuspendedError } from "@/lib/auth";
+import { isActionRateLimited, LIMITS } from "@/lib/security/rate-limit";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
 import { isActiveRunConflict } from "@/lib/run-conflict";
@@ -115,6 +116,12 @@ export async function startBook(input: unknown): Promise<{ error: string } | voi
   } catch (error) {
     if (error instanceof SuspendedError) return { error: error.message };
     throw error;
+  }
+  // The other entry point to a full book run (POST /api/projects/[id]/generate)
+  // is rate limited; this one is the wizard's submit and needs the same bound,
+  // since each run is the single most expensive thing a user can trigger.
+  if (await isActionRateLimited(LIMITS.bookStart, userId)) {
+    return { error: "Too many books started at once — give it a moment and try again." };
   }
   const data = startBookSchema.parse(input);
 

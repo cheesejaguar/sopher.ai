@@ -1,10 +1,14 @@
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
+import { requireAdmin } from "@/lib/auth";
 
 /**
- * Admin aggregates. Every function here is called ONLY behind requireAdmin();
- * they read across all users by design. Single-pass SQL, no N+1.
+ * Admin aggregates. Every function here reads across ALL users by design, so
+ * every one of them calls requireAdmin() itself rather than trusting the
+ * layout to have done it. Layout-only auth is the pattern Next and Clerk both
+ * warn against under PPR — a page that renders before its layout's guard
+ * resolves would otherwise leak. Single-pass SQL, no N+1.
  */
 
 // Time cutoffs live in SQL: cacheComponents forbids Date.now() in a server
@@ -12,6 +16,7 @@ import { getDb, schema } from "@/db";
 const weekAgoSql = sql`now() - interval '7 days'`;
 
 export async function getOverviewKpis() {
+  await requireAdmin();
   const db = getDb();
 
   const [users, books, money, runs, flags] = await Promise.all([
@@ -70,6 +75,7 @@ export async function getOverviewKpis() {
 }
 
 export async function listUsersWithStats() {
+  await requireAdmin();
   const db = getDb();
   const users = await db.select().from(schema.users).orderBy(desc(schema.users.createdAt));
   if (users.length === 0) return [];
@@ -118,6 +124,7 @@ export async function listUsersWithStats() {
 }
 
 export async function getUserDetail(userId: string) {
+  await requireAdmin();
   const db = getDb();
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId)).limit(1);
   if (!user) return null;
@@ -172,6 +179,7 @@ export async function getUserDetail(userId: string) {
 }
 
 export async function listPurchases() {
+  await requireAdmin();
   const db = getDb();
   const [totals] = await db
     .select({
@@ -198,6 +206,7 @@ export async function listPurchases() {
 }
 
 export async function listAllBooks() {
+  await requireAdmin();
   const db = getDb();
   return db
     .select({
@@ -220,6 +229,7 @@ export async function listAllBooks() {
 }
 
 export async function listFlags(status?: "open" | "dismissed" | "actioned") {
+  await requireAdmin();
   const db = getDb();
   return db
     .select({
@@ -254,6 +264,7 @@ const STUCK_AWAITING_MS = 24 * 3_600_000;
 const STUCK_RUNNING_MS = 2 * 3_600_000;
 
 export async function listRuns() {
+  await requireAdmin();
   const db = getDb();
   const rows = await db
     .select({
@@ -290,6 +301,7 @@ export async function listRuns() {
 }
 
 export async function getRunEvents(runId: string) {
+  await requireAdmin();
   const db = getDb();
   const [run] = await db
     .select({
@@ -325,6 +337,7 @@ export async function getRunEvents(runId: string) {
 }
 
 export async function getAdminBook(projectId: string) {
+  await requireAdmin();
   const db = getDb();
   const [row] = await db
     .select({
@@ -360,12 +373,16 @@ export async function getAdminBook(projectId: string) {
           gte(sql`length(${schema.chapters.content})`, 1),
         ),
       )
-      .orderBy(schema.chapters.chapterNumber),
+      .orderBy(schema.chapters.chapterNumber)
+      // A 60-chapter book at the 400k-char chapter cap is a 24 MB response
+      // that then goes through markdownToHtml per chapter. Bounded.
+      .limit(200),
     db
       .select()
       .from(schema.moderationFlags)
       .where(eq(schema.moderationFlags.projectId, projectId))
-      .orderBy(desc(schema.moderationFlags.createdAt)),
+      .orderBy(desc(schema.moderationFlags.createdAt))
+      .limit(100),
   ]);
 
   return { ...row, chapters, flags };

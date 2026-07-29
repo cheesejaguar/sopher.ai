@@ -7,6 +7,7 @@ import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getEntityForPortrait } from "@/db/queries/entities";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { PORTRAIT_KINDS, PORTRAIT_USD, portraitPrompt } from "@/lib/bible/portraits";
 import type { EntityKind } from "@/ai/schemas/entities";
@@ -22,7 +23,7 @@ import type { EntityKind } from "@/ai/schemas/entities";
 
 export const maxDuration = 120;
 
-export async function POST(_req: Request, ctx: { params: Promise<{ entityId: string }> }) {
+export async function POST(req: Request, ctx: { params: Promise<{ entityId: string }> }) {
   let userId: string;
   try {
     ({ userId } = await requireUser());
@@ -42,6 +43,11 @@ export async function POST(_req: Request, ctx: { params: Promise<{ entityId: str
     throw error;
   }
 
+
+  // Paid path: the balance pre-check above is a read, so concurrent callers all
+  // pass it. This is what bounds how far past the floor they can get.
+  const limited = await rateLimit(LIMITS.imageGen, req, userId);
+  if (limited.limited) return limited.response;
   const { entityId } = await ctx.params;
   const entity = await getEntityForPortrait(entityId);
   if (!entity || entity.userId !== userId) {

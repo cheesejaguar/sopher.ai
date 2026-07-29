@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 
+export const maxDuration = 60;
+
 const paramsSchema = z.object({ assetId: z.uuid() });
 
 /**

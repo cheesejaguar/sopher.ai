@@ -2,16 +2,19 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import type { NextRequest } from "next/server";
 import { devAuthAllowed } from "@/lib/clerk";
 
+// Deny by default. The previous enumeration listed API routes one by one, which
+// meant every new route was unprotected until someone remembered to add it —
+// /api/credits/checkout, /api/projects/*/generate, /api/projects/*/cover,
+// /api/entities/*/portrait and /api/assets/diagram had all fallen through that
+// way. Inverting it makes forgetting fail safe instead of open.
+//
+// Webhooks authenticate by signature (Stripe, svix) and estimates is
+// deliberately public, so those two are the only carve-outs.
 const isProtected = createRouteMatcher([
   "/admin(.*)",
-  "/api/admin(.*)",
   "/studio(.*)",
   "/projects(.*)",
-  "/api/usage(.*)",
-  "/api/runs(.*)",
-  "/api/chapters(.*)",
-  "/api/content-tools(.*)",
-  "/api/export(.*)",
+  "/api/((?!webhooks|estimates).*)",
 ]);
 
 const hasClerkKeys = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);

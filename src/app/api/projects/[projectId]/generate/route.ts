@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
 import type { GenerationConfig } from "@/lib/run-events";
@@ -41,6 +42,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     }
     throw error;
   }
+
+  // Paid path: the balance pre-check above is a read, so concurrent callers all
+  // pass it. This is what bounds how far past the floor they can get.
+  const limited = await rateLimit(LIMITS.bookStart, req, userId);
+  if (limited.limited) return limited.response;
   const { projectId } = await ctx.params;
   if (!z.uuid().safeParse(projectId).success) {
     return Response.json({ error: "Not found" }, { status: 404 });
