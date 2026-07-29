@@ -48,11 +48,18 @@ function timestamp(value: Date): string {
 export function HistoryPanel({
   chapterId,
   getCurrentContent,
+  flush,
   onRestored,
 }: {
   chapterId: string;
   /** Called when the dialog opens; serializing the doc per keystroke would be waste. */
   getCurrentContent: () => string;
+  /**
+   * Flushes unsaved editor content to the server. Restore calls this first so
+   * the server-side pre-restore snapshot captures what the author actually
+   * sees, not the last autosave.
+   */
+  flush: () => Promise<boolean>;
   onRestored: (content: string, version: number) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -84,6 +91,8 @@ export function HistoryPanel({
   function restore(revision: Revision) {
     setError(null);
     startTransition(async () => {
+      // Unsaved keystrokes must reach the server before the snapshot happens.
+      await flush();
       const result = await restoreChapterRevision(chapterId, revision.id);
       if (result.ok) {
         onRestored(revision.content, result.version);

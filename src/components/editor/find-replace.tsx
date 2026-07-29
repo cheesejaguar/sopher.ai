@@ -27,7 +27,9 @@ function findMatches(editor: Editor, query: string): Match[] {
     let index = haystack.indexOf(needle);
     while (index !== -1) {
       matches.push({ from: pos + index, to: pos + index + query.length });
-      index = haystack.indexOf(needle, index + 1);
+      // Non-overlapping, like every editor: the next search starts after the
+      // match, which is also what keeps replace-all ranges disjoint.
+      index = haystack.indexOf(needle, index + query.length);
     }
   });
   return matches;

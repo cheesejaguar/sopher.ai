@@ -6,7 +6,12 @@ import { gatewayOptions, metered } from "@/ai/metering";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
-import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
+import {
+  assertCreditsForUsd,
+  creditsForUsd,
+  grantCredits,
+  InsufficientCreditsError,
+} from "@/lib/billing/credits";
 import { MODEL_PRICING } from "@/lib/billing/pricing";
 
 /**
@@ -84,37 +89,55 @@ export async function POST(_req: Request, ctx: { params: Promise<{ projectId: st
       }),
   );
 
-  const file = result.files.find((f) => f.mediaType?.startsWith("image/"));
-  if (!file) {
-    return Response.json({ error: "The image model returned no image" }, { status: 502 });
+  // From here the user has already been debited (metered() charged the model
+  // call). Any failure to actually deliver a cover refunds that debit — a
+  // charge with nothing to show for it is the one outcome we never allow.
+  async function refundAndFail(message: string): Promise<Response> {
+    await grantCredits({
+      userId,
+      credits: creditsForUsd(COVER_USD),
+      description: "Cover generation failed after billing — refunded",
+      externalRef: `cover-refund:${crypto.randomUUID()}`,
+      kind: "grant",
+    });
+    return Response.json({ error: message }, { status: 502 });
   }
 
-  const contentType = file.mediaType ?? "image/png";
-  const blob = await put(
-    `covers/${projectId}/${crypto.randomUUID()}.png`,
-    Buffer.from(file.uint8Array),
-    { access: "public", contentType },
-  );
+  const file = result.files.find((f) => f.mediaType?.startsWith("image/"));
+  if (!file) {
+    return refundAndFail("The image model returned no image");
+  }
 
-  await db.insert(schema.assets).values({
-    projectId,
-    kind: "cover",
-    blobUrl: blob.url,
-    blobPathname: blob.pathname,
-    contentType,
-    sizeBytes: file.uint8Array.byteLength,
-    meta: { title: row.title },
-  });
+  try {
+    const contentType = file.mediaType ?? "image/png";
+    const blob = await put(
+      `covers/${projectId}/${crypto.randomUUID()}.png`,
+      Buffer.from(file.uint8Array),
+      { access: "public", contentType },
+    );
 
-  // The cover URL rides in front_matter next to the author byline, so the
-  // exports and reading view read one place for the book's identity.
-  await db
-    .update(schema.books)
-    .set({
-      frontMatter: { ...(row.frontMatter as Record<string, unknown>), coverUrl: blob.url },
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.books.id, row.bookId));
+    await db.insert(schema.assets).values({
+      projectId,
+      kind: "cover",
+      blobUrl: blob.url,
+      blobPathname: blob.pathname,
+      contentType,
+      sizeBytes: file.uint8Array.byteLength,
+      meta: { title: row.title },
+    });
 
-  return Response.json({ url: blob.url });
+    // The cover URL rides in front_matter next to the author byline, so the
+    // exports and reading view read one place for the book's identity.
+    await db
+      .update(schema.books)
+      .set({
+        frontMatter: { ...(row.frontMatter as Record<string, unknown>), coverUrl: blob.url },
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.books.id, row.bookId));
+
+    return Response.json({ url: blob.url });
+  } catch {
+    return refundAndFail("Could not store the cover");
+  }
 }

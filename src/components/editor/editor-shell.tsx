@@ -860,6 +860,7 @@ export function EditorShell({
           <HistoryPanel
             chapterId={chapterId}
             getCurrentContent={() => (editor ? serializeDoc(editor.state.doc) : "")}
+            flush={() => autosave.flush()}
             onRestored={(content, version) => {
               editor?.commands.setContent(content);
               autosave.markSynced(version);

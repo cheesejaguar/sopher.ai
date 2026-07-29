@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { saveOutline } from "@/lib/actions/outline";
  * source "user", never overwriting the original.
  */
 export function OutlineEditor({ projectId, outline }: { projectId: string; outline: BookOutline }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(outline);
   const [pending, startTransition] = useTransition();
@@ -52,6 +54,10 @@ export function OutlineEditor({ projectId, outline }: { projectId: string; outli
       try {
         await saveOutline(projectId, draft);
         setEditing(false);
+        // Refresh so the props reflect the saved version — otherwise reopening
+        // the editor would start from stale data and a second save could undo
+        // this one.
+        router.refresh();
       } catch (cause) {
         setError(
           cause instanceof Error && cause.message.includes("current run")
