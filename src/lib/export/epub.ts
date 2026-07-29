@@ -53,6 +53,7 @@ export async function exportEpub(m: AssembledManuscript): Promise<ExportResult> 
     {
       title: m.title,
       author: m.author,
+      cover: m.coverUrl ?? undefined,
       description: m.synopsis ?? undefined,
       tocTitle: "Contents",
       prependChapterTitles: false,

@@ -3,7 +3,10 @@ import type { Route } from "next";
 import { notFound } from "next/navigation";
 
 import { ChapterPager } from "@/components/manuscript/chapter-pager";
+import Image from "next/image";
+
 import { BookIdentityDialog } from "@/components/manuscript/book-identity-dialog";
+import { CoverButton } from "@/components/manuscript/cover-button";
 import { ExportDialog } from "@/components/manuscript/export-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
 import { buttonVariants } from "@/components/ui/button";
@@ -98,6 +101,10 @@ export default async function ManuscriptPage({
           />
         </div>
         <div className="flex items-center gap-2">
+          <CoverButton
+            projectId={projectId}
+            hasCover={Boolean((book.frontMatter as { coverUrl?: string }).coverUrl)}
+          />
           <BookIdentityDialog
             projectId={projectId}
             title={book.title}
@@ -111,6 +118,15 @@ export default async function ManuscriptPage({
       <div className="paper-surface px-6 py-12 sm:px-12 sm:py-16">
         {isOpening ? (
           <header className="mx-auto max-w-2xl py-10 text-center sm:py-16 [content-visibility:auto]">
+            {(book.frontMatter as { coverUrl?: string }).coverUrl ? (
+              <Image
+                src={(book.frontMatter as { coverUrl?: string }).coverUrl as string}
+                alt={`Cover of ${book.title}`}
+                width={288}
+                height={432}
+                className="mx-auto mb-8 h-auto w-48 rounded-sm shadow-lg sm:w-56"
+              />
+            ) : null}
             {project.genre ? (
               <p className="font-sans text-xs tracking-[0.25em] text-paper-muted uppercase">
                 {project.genre}

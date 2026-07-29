@@ -18,7 +18,20 @@ function pdfSafe(text: string): string {
     .replace(/[\u00a0\u2000-\u200b\u2028\u2029\u202f\u205f]/g, " ");
 }
 
+async function fetchCover(url: string | null): Promise<Buffer | null> {
+  if (!url) return null;
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return Buffer.from(await response.arrayBuffer());
+  } catch {
+    // A missing cover degrades to the plain title page, never a failed export.
+    return null;
+  }
+}
+
 export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
+  const cover = await fetchCover(m.coverUrl);
   const doc = new PDFDocument({
     size: PAGE,
     margins: { top: MARGIN, bottom: MARGIN, left: MARGIN, right: MARGIN },
@@ -32,6 +45,12 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
   });
+
+  // Cover, full-bleed on its own page, when one was generated.
+  if (cover) {
+    doc.image(cover, 0, 0, { cover: [PAGE[0], PAGE[1]], align: "center", valign: "center" });
+    doc.addPage();
+  }
 
   // Title page.
   doc.font(SERIF).fontSize(26).text(pdfSafe(m.title), MARGIN, 200, {

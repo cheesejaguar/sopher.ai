@@ -18,7 +18,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import CharacterCount from "@tiptap/extension-character-count";
 import { Markdown } from "tiptap-markdown";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -52,6 +52,8 @@ import { mermaidCodeBlockView } from "./mermaid-code-block-view";
 import { ReviewPanel } from "./review-panel";
 import { SelectionToolbar, type ContentToolId } from "./selection-toolbar";
 import { StatusBar } from "./status-bar";
+import { HistoryPanel } from "./history-panel";
+import { FindReplace } from "./find-replace";
 import { SuggestionCard } from "./suggestion-card";
 import {
   getSuggestionItems,
@@ -193,6 +195,7 @@ export function EditorShell({
   const [busy, setBusy] = useState<Busy>(null);
   const [conflict, setConflict] = useState<{ currentVersion: number } | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
   const [, forceLayout] = useReducer((n: number) => n + 1, 0);
 
   const [paperEl, setPaperEl] = useState<HTMLDivElement | null>(null);
@@ -657,6 +660,7 @@ export function EditorShell({
   }, [pathname, router, zen]);
 
   // Keyboard: ⌘S save, ⌘⏎ accept active, ⌘⌫ reject active, Esc exits zen/card.
+  const openFind = useCallback(() => setFindOpen(true), []);
   const keysRef = useRef({
     zen,
     activeId,
@@ -664,6 +668,7 @@ export function EditorShell({
     acceptSuggestion,
     rejectSuggestion,
     dismissCard,
+    openFind,
   });
   useEffect(() => {
     keysRef.current = {
@@ -673,6 +678,7 @@ export function EditorShell({
       acceptSuggestion,
       rejectSuggestion,
       dismissCard,
+      openFind,
     };
   });
   useEffect(() => {
@@ -685,6 +691,11 @@ export function EditorShell({
       if (mod && event.key.toLowerCase() === "s") {
         event.preventDefault();
         void autosaveRef.current.flush();
+        return;
+      }
+      if (mod && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        keysRef.current.openFind();
         return;
       }
       if (mod && event.key === "Enter" && k.activeId) {
@@ -764,11 +775,12 @@ export function EditorShell({
 
           {/* Keyboard help, announced when focus enters the manuscript. */}
           <p id={shortcutsId} className="sr-only">
-            Rich text editor. Select a passage and press Tab to reach the AI editing tools. Press
-            Control or Command S to save. When a suggestion is selected, press Control or Command
-            Enter to accept it and Control or Command Backspace to reject it. Press Escape to close
-            a suggestion or leave zen mode. Every suggestion is also listed in the suggestions
-            panel.
+            Rich text editor. Select a passage and press Tab to reach the AI editing tools,
+            including Diagram this and Illustrate this under More tools. Press Control or Command S
+            to save, and Control or Command F to find and replace. When a suggestion is selected,
+            press Control or Command Enter to accept it and Control or Command Backspace to reject
+            it. Press Escape to close a suggestion, the find bar, or zen mode. Every suggestion is
+            also listed in the suggestions panel, and past versions are in the History dialog.
           </p>
 
           <EditorContent editor={editor} />
@@ -834,13 +846,39 @@ export function EditorShell({
       zen={zen}
       onToggleZen={toggleZen}
       onOpenReview={!zen && !isXl ? () => setReviewOpen(true) : undefined}
+      extras={
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            aria-label="Find and replace (⌘F)"
+            onClick={() => setFindOpen((prev) => !prev)}
+          >
+            <Search aria-hidden="true" className="size-3.5" />
+          </Button>
+          <HistoryPanel
+            chapterId={chapterId}
+            getCurrentContent={() => (editor ? serializeDoc(editor.state.doc) : "")}
+            flush={() => autosave.flush()}
+            onRestored={(content, version) => {
+              editor?.commands.setContent(content);
+              autosave.markSynced(version);
+            }}
+          />
+        </>
+      }
     />
   );
+
+  const findBar =
+    findOpen && editor ? <FindReplace editor={editor} onClose={() => setFindOpen(false)} /> : null;
 
   return (
     <>
       {zen ? (
         <div ref={zenRef} className="fixed inset-0 z-50 flex flex-col bg-background">
+          {findBar}
           <div className="min-h-0 flex-1 overflow-hidden">{canvas}</div>
           {statusBar}
         </div>
@@ -857,7 +895,12 @@ export function EditorShell({
                 />
               </ResizablePanel>
               <ResizableHandle />
-              <ResizablePanel minSize={360}>{canvas}</ResizablePanel>
+              <ResizablePanel minSize={360}>
+                <div className="flex h-full min-h-0 flex-col">
+                  {findBar}
+                  <div className="min-h-0 flex-1">{canvas}</div>
+                </div>
+              </ResizablePanel>
               {isXl ? (
                 <>
                   <ResizableHandle />

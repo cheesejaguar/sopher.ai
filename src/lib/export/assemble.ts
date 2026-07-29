@@ -28,6 +28,8 @@ export type AssembledManuscript = {
   totalWords: number;
   /** Cached diagram/image renders, keyed by source hash or image URL. */
   figures: FigureMap;
+  /** Generated cover image, when the author made one. */
+  coverUrl: string | null;
 };
 
 export type ManuscriptSourceChapter = {
@@ -43,6 +45,7 @@ export function buildManuscript(input: {
   genre?: string | null;
   /** Author byline; falls back to the house line when unset. */
   author?: string | null;
+  coverUrl?: string | null;
   chapters: ManuscriptSourceChapter[];
   figures?: FigureMap;
 }): AssembledManuscript {
@@ -66,6 +69,7 @@ export function buildManuscript(input: {
     chapters,
     totalWords: chapters.reduce((sum, c) => sum + c.wordCount, 0),
     figures: input.figures ?? {},
+    coverUrl: input.coverUrl ?? null,
   };
 }
 
@@ -288,12 +292,13 @@ export async function loadManuscript(
     )
     .orderBy(schema.chapters.chapterNumber);
 
-  const author = (row.frontMatter as { author?: string } | null)?.author;
+  const front = row.frontMatter as { author?: string; coverUrl?: string } | null;
   return buildManuscript({
     title: row.bookTitle,
     synopsis: row.synopsis,
     genre: row.genre,
-    author,
+    author: front?.author,
+    coverUrl: front?.coverUrl,
     chapters,
     figures: await loadFigures(row.projectId),
   });
