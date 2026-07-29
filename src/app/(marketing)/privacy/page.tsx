@@ -63,11 +63,20 @@ export default function PrivacyPage() {
 
       <h2>Cookies</h2>
       <p>
-        We use cookies for sign-in sessions (set by Clerk), your theme preference, and Google
-        Analytics measurement (the <code>_ga</code> family). There are no advertising cookies. You
-        can block analytics cookies in your browser or with Google&rsquo;s{" "}
+        We use cookies for sign-in sessions (set by Clerk), your theme preference, Google Analytics
+        measurement (the <code>_ga</code> family), and two first-party cookies of our own:{" "}
+        <code>sopher_aid</code>, a random identifier that lets us count a visit as one visit, and{" "}
+        <code>sopher_attr</code>, which records how you first arrived (a campaign tag or referring
+        site) so we know which channels are worth continuing. Neither contains personal information,
+        and the referring site is stored as a domain only, never a full address. There are no
+        advertising cookies. You can block analytics cookies in your browser or with Google&rsquo;s{" "}
         <a href="https://tools.google.com/dlpage/gaoptout">opt-out add-on</a> without affecting the
         product.
+      </p>
+      <p>
+        We also record which steps of the book wizard you reach, and when a book is started,
+        finished, or exported. This is product measurement — how far people get and where they get
+        stuck — and it is never joined to the contents of what you write.
       </p>
 
       <h2>Retention and deletion</h2>

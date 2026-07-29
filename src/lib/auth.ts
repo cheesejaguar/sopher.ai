@@ -1,7 +1,9 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import type { Acquisition } from "@/db/schema";
 import { clerkEnabled, devAdminAllowed, devAuthAllowed } from "@/lib/clerk";
+import { ATTRIBUTION_COOKIE, parseAttributionCookie } from "@/lib/analytics/attribution";
 import { grantCredits } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 
@@ -59,6 +61,21 @@ async function devFallbackUser(): Promise<{ userId: string }> {
 }
 
 /**
+ * Reads the first-touch attribution cookie set by the proxy on the landing
+ * request. Never throws: attribution is a nice-to-have, and a user who cannot
+ * be attributed must still be able to sign up.
+ */
+async function firstTouch(): Promise<Acquisition | null> {
+  try {
+    const { cookies } = await import("next/headers");
+    const raw = (await cookies()).get(ATTRIBUTION_COOKIE)?.value;
+    return parseAttributionCookie(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Resolves the signed-in Clerk user and lazily upserts the users row so the
  * Clerk webhook is reconciliation, not a critical path. Without Clerk keys the
  * shared dev identity is used only when explicitly allowed (development or
@@ -94,6 +111,10 @@ export async function requireUser(): Promise<{ userId: string }> {
         email: user?.primaryEmailAddress?.emailAddress ?? "",
         name: user?.fullName ?? null,
         imageUrl: user?.imageUrl ?? null,
+        // First touch, stamped exactly once. This branch runs only the first
+        // time we see a user, which is both the correct moment for first-touch
+        // attribution and the reason it costs nothing on every later request.
+        acquisition: await firstTouch(),
       })
       .onConflictDoNothing();
 

@@ -30,14 +30,19 @@ export async function getOverviewKpis() {
     db
       .select({
         total: sql<number>`count(*)::int`,
-        completed7d: sql<number>`count(*) filter (where ${schema.projects.status} = 'complete' and ${schema.projects.updatedAt} >= ${weekAgoSql})::int`,
+        // completed_at, not status='complete' + updated_at: the workflow moves a
+        // finished book to 'editing' (authors edit next), so the old filter
+        // counted almost nothing, and updated_at moved on every later edit.
+        completed7d: sql<number>`count(*) filter (where ${schema.projects.completedAt} >= ${weekAgoSql})::int`,
         words: sql<number>`coalesce((select sum(c.word_count) from chapters c), 0)::bigint`,
       })
       .from(schema.projects),
     db
       .select({
-        // Revenue = money actually collected (purchases at face value).
-        revenueCredits: sql<string>`coalesce(sum(${schema.creditLedger.amount}) filter (where ${schema.creditLedger.kind} = 'purchase'), 0)`,
+        // Revenue = dollars Stripe actually collected, net of refunds. Was
+        // summing purchase CREDITS, which overstated by the bonus on every
+        // tier above Starter ($60 buys 66 credits).
+        revenueUsd: sql<string>`coalesce(sum(${schema.creditLedger.usdPaid}) filter (where ${schema.creditLedger.kind} in ('purchase', 'refund')), 0)`,
         // Liability = what the ledger still owes users in work.
         liabilityCredits: sql<string>`coalesce(sum(${schema.creditLedger.amount}), 0)`,
         grantedCredits: sql<string>`coalesce(sum(${schema.creditLedger.amount}) filter (where ${schema.creditLedger.kind} in ('grant', 'adjustment')), 0)`,
@@ -64,7 +69,7 @@ export async function getOverviewKpis() {
     users: users[0],
     books: books[0],
     money: {
-      revenueUsd: Number(money[0].revenueCredits), // 1 purchase credit == $1 paid pre-bonus? bonus credits inflate; revenue tracked at credit face value
+      revenueUsd: Number(money[0].revenueUsd),
       liabilityCredits: Number(money[0].liabilityCredits),
       grantedCredits: Number(money[0].grantedCredits),
       cogsUsd: Number(cogs.usd),

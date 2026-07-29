@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { CreditPack } from "@/lib/billing/credits-shared";
+import { track } from "@/lib/analytics/track";
 
 /** Starts Stripe Checkout. Credits are granted by the webhook, never here. */
 export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo?: string }) {
@@ -14,6 +15,13 @@ export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo
   async function buy(packId: string) {
     setBusy(packId);
     setError(null);
+    // Fired before the request, not after: the success path is a full-page
+    // handoff to Stripe, so anything after window.location.assign may not run.
+    const pack = packs.find((p) => p.id === packId);
+    track("begin_checkout", {
+      packId,
+      ...(pack ? { usd: pack.usd, credits: pack.credits } : {}),
+    });
     try {
       const response = await fetch("/api/credits/checkout", {
         method: "POST",
