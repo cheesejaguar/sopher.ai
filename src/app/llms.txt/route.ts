@@ -1,6 +1,8 @@
 import { CREDIT_PACKS } from "@/lib/billing/credits-shared";
 import { FAQS, PIPELINE_STEPS } from "@/components/marketing/content";
 import { SITE_URL } from "@/components/seo/json-ld";
+import { GENRE_PAGES } from "@/lib/marketing/genre-pages";
+import { GUIDES } from "@/lib/marketing/guides";
 
 /**
  * /llms.txt — the convention answer engines and agents look for when they want
@@ -23,6 +25,14 @@ function body(): string {
   ).join("\n");
 
   const faqs = FAQS.map((f) => `### ${f.question}\n\n${f.answer}`).join("\n\n");
+
+  const genrePages = GENRE_PAGES.map(
+    (g) => `- [${g.name}](${SITE_URL}/genres/${g.slug}): ${g.description}`,
+  ).join("\n");
+
+  const guidePages = GUIDES.map(
+    (g) => `- [${g.title}](${SITE_URL}/guides/${g.slug}): ${g.standfirst}`,
+  ).join("\n");
 
   return `# sopher.ai
 
@@ -76,6 +86,14 @@ ${faqs}
 - [Terms](${SITE_URL}/terms): terms of service
 - [Privacy](${SITE_URL}/privacy): what is collected and who processes it
 - [Refunds](${SITE_URL}/refunds): refund policy
+
+### Genres
+
+${genrePages}
+
+### Guides
+
+${guidePages}
 
 ## Contact
 

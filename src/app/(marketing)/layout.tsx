@@ -28,6 +28,18 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
               How it works
             </Link>
             <Link
+              href="/genres"
+              className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline"
+            >
+              Genres
+            </Link>
+            <Link
+              href="/guides"
+              className="hidden text-sm text-muted-foreground transition-colors hover:text-foreground sm:inline"
+            >
+              Guides
+            </Link>
+            <Link
               href="/pricing"
               className={cn(
                 buttonVariants({ variant: "ghost", size: "sm" }),
@@ -76,6 +88,22 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                     className="text-muted-foreground transition-colors hover:text-foreground"
                   >
                     Pricing
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/genres"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Genres
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    href="/guides"
+                    className="text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    Guides
                   </Link>
                 </li>
                 <li>

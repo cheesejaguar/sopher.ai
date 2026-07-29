@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Feather } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { startBook } from "@/lib/actions/projects";
 import { track } from "@/lib/analytics/track";
+import type { GenreId } from "@/ai/knowledge/genres";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StepBrief } from "@/components/wizard/step-brief";
@@ -126,7 +127,7 @@ function draftHasContent(draft: WizardState): boolean {
   return draft.genre !== null || draft.brief.trim().length > 0 || draft.title.trim().length > 0;
 }
 
-export function NewBookWizard() {
+export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {}) {
   const [ui, dispatch] = React.useReducer(uiReducer, {
     wizard: initialWizardState,
     resumed: false,
@@ -195,15 +196,23 @@ export function NewBookWizard() {
   React.useEffect(() => {
     const draft = restoreDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY));
     if (draft && draftHasContent(draft)) {
+      // A saved draft wins over the link's genre — the work they already did
+      // beats a hint from the URL.
       dispatch({ type: "resume", state: draft });
     } else {
       const tier = window.localStorage.getItem(DEFAULT_TIER_KEY);
-      if (tier === "draft" || tier === "standard" || tier === "premium") {
-        dispatch({ type: "patch", patch: { tier } });
+      const patch: Partial<WizardState> = {};
+      if (tier === "draft" || tier === "standard" || tier === "premium") patch.tier = tier;
+      // Arriving from a genre landing page: skip the question they answered by
+      // clicking, and open on the brief step.
+      if (initialGenre) {
+        patch.genre = initialGenre;
+        patch.step = 1;
       }
+      if (Object.keys(patch).length > 0) dispatch({ type: "patch", patch });
     }
     hydrated.current = true;
-  }, []);
+  }, [initialGenre]);
 
   // Persist the draft, debounced, so a closed tab costs nothing.
   React.useEffect(() => {
