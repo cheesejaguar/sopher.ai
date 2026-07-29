@@ -93,3 +93,38 @@ test.describe("project management", () => {
     await page.keyboard.press("Escape");
   });
 });
+
+test.describe("admin dashboard", () => {
+  // dev-user is admin (bootstrapped by migration / dev fallback insert).
+  test("overview renders KPIs", async ({ page }, testInfo) => {
+    await page.goto("/admin");
+    const main = page.locator("#main-content");
+    await expect(main.getByRole("heading", { name: "Overview" })).toBeVisible({
+      timeout: 20_000,
+    });
+    for (const kpi of ["Users", "Revenue", "Credit liability", "Open flags"]) {
+      await expect(main.getByText(kpi, { exact: true })).toBeVisible();
+    }
+    await axeCheck(page);
+    await fullPageScreenshot(page, testInfo, "admin-overview");
+  });
+
+  test("users table lists accounts and links to detail", async ({ page }) => {
+    await page.goto("/admin/users");
+    const main = page.locator("#main-content");
+    await expect(main.getByRole("heading", { name: "Users" })).toBeVisible({ timeout: 20_000 });
+    const devUser = main.getByRole("link", { name: "dev@sopher.ai" });
+    await expect(devUser).toBeVisible();
+    await devUser.click();
+    await expect(page.getByRole("button", { name: "Adjust credits" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Suspend|Unsuspend/ })).toBeVisible();
+  });
+
+  test("flag queue renders its empty state", async ({ page }) => {
+    await page.goto("/admin/flags");
+    await expect(page.getByRole("heading", { name: "Moderation flags" })).toBeVisible({
+      timeout: 20_000,
+    });
+    await axeCheck(page);
+  });
+});
