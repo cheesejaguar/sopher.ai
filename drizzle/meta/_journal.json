@@ -71,6 +71,13 @@
       "when": 1785353375591,
       "tag": "0009_numerous_klaw",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785353376591,
+      "tag": "0010_backfill_completed_at",
+      "breakpoints": true
     }
   ]
 }

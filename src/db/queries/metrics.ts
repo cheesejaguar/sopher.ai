@@ -154,7 +154,14 @@ export async function getWeeklyEconomics() {
   return rows;
 }
 
-/** Where paying customers came from. The reason users.acquisition exists. */
+/**
+ * Where paying customers came from. The reason users.acquisition exists.
+ *
+ * Per-user CTE first, then aggregate. Correlating the revenue subquery against
+ * u.id directly in a GROUP BY channel select is invalid — Postgres rejects the
+ * ungrouped outer column — which is the kind of thing a typecheck cannot catch
+ * and only running it does.
+ */
 export async function getAcquisitionChannels() {
   await requireAdmin();
   const { rows } = await getDb().execute<{
@@ -163,21 +170,28 @@ export async function getAcquisitionChannels() {
     payers: number;
     revenue_usd: number;
   }>(sql`
+    with attributed as (
+      select
+        coalesce(
+          u.acquisition->>'source',
+          u.acquisition->>'referrerHost',
+          'direct'
+        ) as channel,
+        exists (
+          select 1 from credit_ledger l where l.user_id = u.id and l.kind = 'purchase'
+        ) as paid,
+        coalesce((select sum(l.usd_paid) from credit_ledger l
+          where l.user_id = u.id and l.kind in ('purchase', 'refund')), 0) as revenue
+      from users u
+      where u.role <> 'admin'
+    )
     select
-      coalesce(
-        u.acquisition->>'source',
-        u.acquisition->>'referrerHost',
-        'direct'
-      ) as channel,
+      channel,
       count(*)::int as users,
-      count(*) filter (where exists (
-        select 1 from credit_ledger l where l.user_id = u.id and l.kind = 'purchase'
-      ))::int as payers,
-      coalesce((select sum(l.usd_paid) from credit_ledger l
-        where l.user_id = u.id and l.kind in ('purchase', 'refund')), 0)::float8 as revenue_usd
-    from users u
-    where u.role <> 'admin'
-    group by 1
+      count(*) filter (where paid)::int as payers,
+      coalesce(sum(revenue), 0)::float8 as revenue_usd
+    from attributed
+    group by channel
     order by revenue_usd desc, users desc
     limit 20
   `);
