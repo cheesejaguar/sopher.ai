@@ -47,6 +47,11 @@ export default async function AdminBooks() {
                 >
                   {book.title}
                 </Link>
+                {book.brief ? (
+                  <p className="mt-0.5 max-w-md truncate text-xs text-muted-foreground">
+                    {book.brief}
+                  </p>
+                ) : null}
               </TableCell>
               <TableCell>
                 <Link
@@ -56,7 +61,10 @@ export default async function AdminBooks() {
                   {book.email}
                 </Link>
               </TableCell>
-              <TableCell className="text-muted-foreground">{book.genre ?? "—"}</TableCell>
+              <TableCell className="text-muted-foreground">
+                {book.genre ?? "—"}
+                {book.tier ? <span className="block text-xs capitalize">{book.tier}</span> : null}
+              </TableCell>
               <TableCell>
                 <Badge variant="outline">{book.status}</Badge>
               </TableCell>

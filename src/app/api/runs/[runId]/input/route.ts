@@ -58,6 +58,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     return Response.json({ resumed: true, balance });
   }
 
+  // Persist before resuming. The notes previously existed only inside Workflow
+  // DevKit's durable state — reachable by `workflow inspect`, invisible to SQL
+  // — so the one place an author says in their own words what the plan got
+  // wrong could not be read by anything, including the author's own history.
+  if (parsed.data.notes) {
+    await db
+      .update(schema.generationRuns)
+      .set({ approvalNotes: parsed.data.notes })
+      .where(eq(schema.generationRuns.id, runId));
+  }
+
   await resumeHook(`outline-approval:${runId}`, {
     approved: parsed.data.approved,
     notes: parsed.data.notes,

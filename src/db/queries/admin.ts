@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 import { requireAdmin } from "@/lib/auth";
@@ -222,6 +222,10 @@ export async function listAllBooks() {
       updatedAt: schema.projects.updatedAt,
       email: schema.users.email,
       userId: schema.users.id,
+      // The ask, not just the result — scanning the list for "what are people
+      // actually writing" should not require opening every book.
+      brief: sql<string | null>`left("projects"."brief", 180)`,
+      tier: sql<string | null>`"projects"."settings"->>'qualityTier'`,
       words: sql<number>`coalesce((select sum(c.word_count) from chapters c where c.book_id = "books"."id"), 0)::int`,
       chapters: sql<number>`(select count(*)::int from chapters c where c.book_id = "books"."id")`,
       openFlags: sql<number>`(select count(*)::int from moderation_flags f where f.project_id = "projects"."id" and f.status = 'open')`,
@@ -354,6 +358,20 @@ export async function getAdminBook(projectId: string) {
       email: schema.users.email,
       userId: schema.users.id,
       bookId: schema.books.id,
+      // Everything the author actually typed or chose. All of this was already
+      // in the database and none of it was ever shown — an admin could read a
+      // whole manuscript but not the one-line brief that asked for it.
+      brief: schema.projects.brief,
+      subgenre: schema.projects.subgenre,
+      protagonist: schema.projects.protagonist,
+      setting: schema.projects.setting,
+      styleGuide: schema.projects.styleGuide,
+      settings: schema.projects.settings,
+      targetChapters: schema.projects.targetChapters,
+      targetWordsPerChapter: schema.projects.targetWordsPerChapter,
+      concept: schema.books.concept,
+      createdAt: schema.projects.createdAt,
+      completedAt: schema.projects.completedAt,
     })
     .from(schema.projects)
     .innerJoin(schema.books, eq(schema.books.projectId, schema.projects.id))
@@ -362,7 +380,7 @@ export async function getAdminBook(projectId: string) {
     .limit(1);
   if (!row) return null;
 
-  const [chapters, flags] = await Promise.all([
+  const [chapters, flags, outlines, runs, instructions, toolRuns] = await Promise.all([
     db
       .select({
         id: schema.chapters.id,
@@ -388,7 +406,63 @@ export async function getAdminBook(projectId: string) {
       .where(eq(schema.moderationFlags.projectId, projectId))
       .orderBy(desc(schema.moderationFlags.createdAt))
       .limit(100),
+    // The outline the author saw and, where they edited it, the version they
+    // wrote themselves.
+    db
+      .select({
+        version: schema.outlines.version,
+        source: schema.outlines.source,
+        content: schema.outlines.content,
+        createdAt: schema.outlines.createdAt,
+      })
+      .from(schema.outlines)
+      .where(eq(schema.outlines.bookId, row.bookId))
+      .orderBy(schema.outlines.version)
+      .limit(20),
+    // Runs, for the tier as of each run and any outline revision notes.
+    db
+      .select({
+        id: schema.generationRuns.id,
+        kind: schema.generationRuns.kind,
+        status: schema.generationRuns.status,
+        config: schema.generationRuns.config,
+        approvalNotes: schema.generationRuns.approvalNotes,
+        createdAt: schema.generationRuns.createdAt,
+      })
+      .from(schema.generationRuns)
+      .where(eq(schema.generationRuns.projectId, projectId))
+      .orderBy(desc(schema.generationRuns.createdAt))
+      .limit(50),
+    // Per-edit instructions: what the author asked the editor to change, in
+    // their own words, chapter by chapter.
+    db
+      .select({
+        id: schema.suggestions.id,
+        chapterNumber: schema.chapters.chapterNumber,
+        passType: schema.suggestions.passType,
+        status: schema.suggestions.status,
+        instruction: schema.suggestions.instruction,
+        createdAt: schema.suggestions.createdAt,
+      })
+      .from(schema.suggestions)
+      .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
+      .where(and(eq(schema.chapters.bookId, row.bookId), isNotNull(schema.suggestions.instruction)))
+      .orderBy(desc(schema.suggestions.createdAt))
+      .limit(100),
+    // Content-tool invocations, whose input jsonb already held the selected
+    // text and the author's options.
+    db
+      .select({
+        id: schema.contentToolRuns.id,
+        toolId: schema.contentToolRuns.toolId,
+        input: schema.contentToolRuns.input,
+        createdAt: schema.contentToolRuns.createdAt,
+      })
+      .from(schema.contentToolRuns)
+      .where(eq(schema.contentToolRuns.projectId, projectId))
+      .orderBy(desc(schema.contentToolRuns.createdAt))
+      .limit(50),
   ]);
 
-  return { ...row, chapters, flags };
+  return { ...row, chapters, flags, outlines, runs, instructions, toolRuns };
 }

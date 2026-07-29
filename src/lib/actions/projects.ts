@@ -45,6 +45,12 @@ const startBookSchema = z.object({
   title: z.string().min(1).max(200),
   brief: z.string().min(20).max(20_000),
   genre: z.string().min(1).max(60),
+  // Structured copies of what composeBrief also folds into the brief text.
+  // Kept alongside rather than instead of, so the prose the agents receive is
+  // byte-identical to before.
+  subgenre: z.string().max(80).optional(),
+  protagonist: z.string().max(300).optional(),
+  setting: z.string().max(300).optional(),
   targetChapters: z.number().int().min(3).max(60),
   targetWordsPerChapter: z.number().int().min(800).max(8_000),
   settings: projectSettingsSchema.default({}),
@@ -133,6 +139,9 @@ export async function startBook(input: unknown): Promise<{ error: string } | voi
       title: data.title,
       brief: data.brief,
       genre: data.genre,
+      subgenre: data.subgenre ?? null,
+      protagonist: data.protagonist ?? null,
+      setting: data.setting ?? null,
       targetChapters: data.targetChapters,
       targetWordsPerChapter: data.targetWordsPerChapter,
       settings: data.settings,
