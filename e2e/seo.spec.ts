@@ -5,9 +5,27 @@
  * page missing from the sitemap, or JSON-LD that stops parsing costs traffic
  * for weeks before anyone notices, and nothing in the app breaks.
  */
-import { expect, test } from "./helpers";
+import { axeCheck, expect, test } from "./helpers";
 
-const PUBLIC_PAGES = ["/", "/pricing", "/terms", "/privacy", "/refunds"];
+const PUBLIC_PAGES = ["/", "/pricing", "/terms", "/privacy", "/refunds", "/genres", "/guides"];
+
+/** Kept in sync with GENRE_PAGES / GUIDES by the sitemap test below. */
+const GENRE_SLUGS = [
+  "romance",
+  "mystery",
+  "fantasy",
+  "thriller",
+  "literary-fiction",
+  "science-fiction",
+  "horror",
+];
+const GUIDE_SLUGS = [
+  "how-book-generation-works",
+  "choosing-a-quality-tier",
+  "point-of-view-and-tense",
+  "content-settings",
+  "what-the-editorial-pass-checks",
+];
 
 test.describe("sitemap and robots", () => {
   test("sitemap lists every public page with a lastModified", async ({ request }) => {
@@ -16,6 +34,20 @@ test.describe("sitemap and robots", () => {
       expect(xml, `sitemap missing ${path}`).toContain(`<loc>https://sopher.ai${path}</loc>`);
     }
     expect(xml).toContain("<lastmod>");
+  });
+
+  test("sitemap lists every genre and guide page", async ({ request }) => {
+    const xml = await (await request.get("/sitemap.xml")).text();
+    for (const slug of GENRE_SLUGS) {
+      expect(xml, `sitemap missing /genres/${slug}`).toContain(
+        `<loc>https://sopher.ai/genres/${slug}</loc>`,
+      );
+    }
+    for (const slug of GUIDE_SLUGS) {
+      expect(xml, `sitemap missing /guides/${slug}`).toContain(
+        `<loc>https://sopher.ai/guides/${slug}</loc>`,
+      );
+    }
   });
 
   test("robots names the AI crawlers and hides the private surfaces", async ({ request }) => {
@@ -98,6 +130,52 @@ test.describe("structured data", () => {
     expect(product).toBeTruthy();
     const prices = product.offers.map((offer: { price: string }) => offer.price);
     expect(prices).toEqual(["25.00", "60.00", "120.00", "300.00"]);
+  });
+
+  test("every genre page has a canonical, one h1, and FAQ structured data", async ({ page }) => {
+    for (const slug of GENRE_SLUGS) {
+      await page.goto(`/genres/${slug}`);
+      await expect(page.locator("h1")).toHaveCount(1);
+      await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+        "href",
+        `https://sopher.ai/genres/${slug}`,
+      );
+      const types = (
+        await page.locator('script[type="application/ld+json"]').allTextContents()
+      ).map((raw) => JSON.parse(raw)["@type"]);
+      expect(types, `/genres/${slug} missing FAQPage`).toContain("FAQPage");
+      expect(types, `/genres/${slug} missing BreadcrumbList`).toContain("BreadcrumbList");
+    }
+  });
+
+  test("every guide page has a canonical and one h1", async ({ page }) => {
+    for (const slug of GUIDE_SLUGS) {
+      await page.goto(`/guides/${slug}`);
+      await expect(page.locator("h1")).toHaveCount(1);
+      await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+        "href",
+        `https://sopher.ai/guides/${slug}`,
+      );
+    }
+  });
+
+  test("genre CTA pre-seeds the wizard", async ({ page }) => {
+    await page.goto("/genres/fantasy");
+    const cta = page.getByRole("link", { name: /start a fantasy book/i });
+    await expect(cta).toHaveAttribute("href", "/studio/new?genre=fantasy");
+  });
+
+  // The new pages are mostly dl/ol/ul-heavy prose, which is exactly where
+  // heading-order and contrast regressions hide.
+  test("a genre page and a guide page pass axe", async ({ page }) => {
+    await page.goto("/genres/fantasy");
+    await axeCheck(page);
+    await page.goto("/guides/how-book-generation-works");
+    await axeCheck(page);
+    await page.goto("/genres");
+    await axeCheck(page);
+    await page.goto("/guides");
+    await axeCheck(page);
   });
 
   test("the FAQ is on the homepage, not only on /pricing", async ({ page }) => {
