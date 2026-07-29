@@ -1,6 +1,10 @@
 import type Stripe from "stripe";
 
+import { eq } from "drizzle-orm";
+
+import { getDb, schema } from "@/db";
 import { grantCredits } from "@/lib/billing/credits";
+import { sendReceiptEmail } from "@/lib/email/send";
 import { getStripe, stripeConfigured } from "@/lib/payments/stripe";
 
 /**
@@ -64,6 +68,23 @@ export async function POST(req: Request) {
       description: `${packId} pack — ${credits} credits`,
       externalRef: session.id,
     });
+
+    // Receipt only on first fulfilment — a retried delivery must not re-mail.
+    if (granted) {
+      const [user] = await getDb()
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      if (user?.email) {
+        await sendReceiptEmail({
+          to: user.email,
+          packName: packId,
+          credits,
+          usd: (session.amount_total ?? 0) / 100,
+        });
+      }
+    }
 
     return Response.json({ received: true, granted });
   }

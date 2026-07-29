@@ -119,12 +119,22 @@ orphaned. Safe to delete; left in place to avoid an unnecessary cascade.
 
 ## 2. Operator steps for launch
 
-- **support@sopher.ai** is now linked from the site footer and legal pages.
-  Set up Cloudflare Email Routing (dash → sopher.ai → Email → Email Routing →
-  route `support@sopher.ai` → your inbox). ~5 minutes, free tier.
-- **Stripe is still a sandbox** (test mode). Before taking real money:
-  `vercel integration resource claim sopher-payments`, then set
-  `STRIPE_WEBHOOK_SECRET` for the live-mode webhook endpoint and redeploy.
+- ~~support@sopher.ai email routing~~ — DONE 2026-07-29 (Cloudflare Email Routing).
+- ~~Stripe sandbox claim~~ — DONE 2026-07-29. Keys are still `sk_test_` until the
+  Stripe account completes activation; when live keys arrive, recreate the
+  fulfilment webhook in live mode (one command, creates the endpoint via the
+  API and pipes the secret straight into the env, never displaying it):
+
+  ```bash
+  vercel env pull /tmp/sk.txt --environment=production --yes
+  export STRIPE_SECRET_KEY=$(grep '^STRIPE_SECRET_KEY=' /tmp/sk.txt | cut -d= -f2- | tr -d '"') && rm /tmp/sk.txt
+  node -e 'const S=require("stripe");const s=new S(process.env.STRIPE_SECRET_KEY);s.webhookEndpoints.create({url:"https://sopher.ai/api/webhooks/stripe",enabled_events:["checkout.session.completed","charge.refunded"],description:"sopher.ai credits fulfilment"}).then(e=>process.stdout.write(e.secret))'     | vercel env add STRIPE_WEBHOOK_SECRET production --force
+  ```
+
+- **Resend** was linked manually (outside the Marketplace), so its key does not
+  auto-sync: create an API key at resend.com (Sending access) and
+  `printf "%s" "re_..." | vercel env add RESEND_API_KEY production preview development`.
+  Every email path no-ops safely until the key exists.
 - The legal pages (/terms, /privacy, /refunds) are honest drafts written for
   this product, **not legal advice** — have them reviewed before serious volume.
 

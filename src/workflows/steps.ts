@@ -20,6 +20,7 @@ import { creditsForUsd, getBalance } from "@/lib/billing/credits";
 import { estimateBookCost } from "@/ai/estimate";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { listEntities } from "@/db/queries/entities";
+import { sendBookFinishedEmail, sendCreditsPausedEmail } from "@/lib/email/send";
 import { chapterNs, PROGRESS_NS, type GenerationConfig, type RunEvent } from "@/lib/run-events";
 import { isChapterComplete } from "./resume";
 import type { BookConcept, BookOutline, ChapterOutlinePlan } from "@/ai/schemas";
@@ -605,4 +606,62 @@ export async function finalizeStep(ref: RunRef): Promise<void> {
     .where(
       sql`${schema.chapters.bookId} = (select id from ${schema.books} where ${schema.books.projectId} = ${ref.projectId}) and ${schema.chapters.status} in ('drafted', 'edited')`,
     );
+
+  // Tell the author. Best-effort: a book that finished but could not say so
+  // is still a finished book, so email failures never fail the step.
+  try {
+    const [row] = await db
+      .select({
+        email: schema.users.email,
+        title: schema.books.title,
+        chapters: sql<number>`(select count(*)::int from ${schema.chapters} where ${schema.chapters.bookId} = ${schema.books.id})`,
+        words: sql<number>`(select coalesce(sum(${schema.chapters.wordCount}), 0)::int from ${schema.chapters} where ${schema.chapters.bookId} = ${schema.books.id})`,
+      })
+      .from(schema.books)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.books.projectId))
+      .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+      .where(eq(schema.projects.id, ref.projectId))
+      .limit(1);
+    if (row?.email) {
+      await sendBookFinishedEmail({
+        to: row.email,
+        bookTitle: row.title,
+        projectId: ref.projectId,
+        chapterCount: row.chapters,
+        wordCount: row.words,
+      });
+    }
+  } catch (error) {
+    console.warn("[email] book-finished notification failed:", error);
+  }
+}
+
+/** Emails the author that writing paused for credits. Best-effort, own step. */
+export async function notifyCreditsPausedStep(
+  ref: RunRef,
+  balance: number,
+  required: number,
+): Promise<void> {
+  "use step";
+  try {
+    const db = getDb();
+    const [row] = await db
+      .select({ email: schema.users.email, title: schema.books.title })
+      .from(schema.books)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.books.projectId))
+      .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+      .where(eq(schema.projects.id, ref.projectId))
+      .limit(1);
+    if (row?.email) {
+      await sendCreditsPausedEmail({
+        to: row.email,
+        bookTitle: row.title,
+        projectId: ref.projectId,
+        balance,
+        required,
+      });
+    }
+  } catch (error) {
+    console.warn("[email] credits-paused notification failed:", error);
+  }
 }

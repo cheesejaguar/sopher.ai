@@ -13,6 +13,7 @@ import {
   emitProgress,
   finalizeStep,
   markRunStatus,
+  notifyCreditsPausedStep,
   outlineStep,
   readQualityGate,
   writeChapterStep,
@@ -61,6 +62,7 @@ export async function generateBook(
         pct: 1,
         detail: `${preflight.balance.toFixed(0)} of ${preflight.required.toFixed(0)} credits needed to start`,
       });
+      await notifyCreditsPausedStep(ref, preflight.balance, preflight.required);
       const go = await topUpEvents.next();
       if (!go.value?.toppedUp) throw new FatalError("Run cancelled while waiting for credits");
       await markRunStatus(ref, "running");
@@ -133,6 +135,7 @@ export async function generateBook(
           pct: 15 + Math.round(55 * (done / total)),
           detail: `${credit.balance.toFixed(0)} of ${credit.required.toFixed(0)} credits needed to continue`,
         });
+        await notifyCreditsPausedStep(ref, credit.balance, credit.required);
         const resumed = await topUpEvents.next();
         if (!resumed.value?.toppedUp) {
           throw new FatalError("Run cancelled while waiting for credits");
