@@ -40,8 +40,12 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4.1)
-          # model: "claude-opus-4-1-20250805"
+          # Pin the model explicitly. Left unset, the action falls back to its
+          # own built-in default — which is claude-sonnet-4-20250514, now
+          # retired, so every run failed with:
+          #   API Error: 404 not_found_error "model: claude-sonnet-4-20250514"
+          # An unpinned model means the next retirement breaks CI the same way.
+          model: "claude-sonnet-5"
 
           # Optional: Customize the trigger phrase (default: @claude)
           # trigger_phrase: "/claude"
