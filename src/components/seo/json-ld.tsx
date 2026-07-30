@@ -15,6 +15,8 @@ import { FAQS, PIPELINE_STEPS } from "@/components/marketing/content";
  */
 
 export const SITE_URL = "https://sopher.ai";
+export const SOCIAL_IMAGE = `${SITE_URL}/opengraph-image`;
+export const SOCIAL_IMAGE_ALT = "sopher.ai — A sentence in. A finished book out.";
 
 /**
  * JSON-LD goes in a script tag, so it needs dangerouslySetInnerHTML. The input

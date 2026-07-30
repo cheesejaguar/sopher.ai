@@ -19,6 +19,23 @@ test.describe("studio dashboard", () => {
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, "studio-dashboard");
   });
+
+  test("command palette opens with a labeled cmdk surface", async ({ page }) => {
+    await page.goto("/studio");
+    await expect(page.getByRole("heading", { level: 1, name: "Your books" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Open command palette" }).first().click();
+
+    const dialog = page.getByRole("dialog", { name: "Go to" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole("combobox", { name: "Search destinations" })).toBeVisible();
+    await expect(dialog.getByRole("listbox")).toBeVisible();
+    await expect(dialog).toHaveAccessibleDescription("Jump anywhere");
+    await axeCheck(page);
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+  });
 });
 
 test.describe("studio usage", () => {

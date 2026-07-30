@@ -2,7 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { BreadcrumbJsonLd, FaqJsonLd, SITE_URL } from "@/components/seo/json-ld";
+import {
+  BreadcrumbJsonLd,
+  FaqJsonLd,
+  SITE_URL,
+  SOCIAL_IMAGE,
+  SOCIAL_IMAGE_ALT,
+} from "@/components/seo/json-ld";
 import { GUIDES, getGuide, type GuideBlock } from "@/lib/marketing/guides";
 
 export function generateStaticParams() {
@@ -26,6 +32,20 @@ export async function generateMetadata({
       description: guide.description,
       url: `${SITE_URL}/guides/${guide.slug}`,
       type: "article",
+      images: [
+        {
+          url: SOCIAL_IMAGE,
+          width: 1200,
+          height: 630,
+          alt: SOCIAL_IMAGE_ALT,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${guide.title} · sopher.ai`,
+      description: guide.description,
+      images: [{ url: SOCIAL_IMAGE, alt: SOCIAL_IMAGE_ALT }],
     },
   };
 }

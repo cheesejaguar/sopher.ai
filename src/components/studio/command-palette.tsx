@@ -60,7 +60,7 @@ function CommandPaletteInner() {
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen} title="Go to" description="Jump anywhere">
-      <CommandInput placeholder="Where to?" />
+      <CommandInput aria-label="Search destinations" placeholder="Where to?" />
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
         <CommandGroup heading="Studio">

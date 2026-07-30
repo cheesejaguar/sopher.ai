@@ -140,6 +140,18 @@ test.describe("structured data", () => {
         "href",
         `https://sopher.ai/genres/${slug}`,
       );
+      await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+        "content",
+        "https://sopher.ai/opengraph-image",
+      );
+      await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+        "content",
+        "summary_large_image",
+      );
+      await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute(
+        "content",
+        "https://sopher.ai/opengraph-image",
+      );
       const types = (
         await page.locator('script[type="application/ld+json"]').allTextContents()
       ).map((raw) => JSON.parse(raw)["@type"]);
@@ -155,6 +167,18 @@ test.describe("structured data", () => {
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
         "href",
         `https://sopher.ai/guides/${slug}`,
+      );
+      await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+        "content",
+        "https://sopher.ai/opengraph-image",
+      );
+      await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+        "content",
+        "summary_large_image",
+      );
+      await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute(
+        "content",
+        "https://sopher.ai/opengraph-image",
       );
     }
   });

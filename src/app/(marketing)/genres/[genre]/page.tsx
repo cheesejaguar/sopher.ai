@@ -3,7 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 
-import { BreadcrumbJsonLd, FaqJsonLd, SITE_URL } from "@/components/seo/json-ld";
+import {
+  BreadcrumbJsonLd,
+  FaqJsonLd,
+  SITE_URL,
+  SOCIAL_IMAGE,
+  SOCIAL_IMAGE_ALT,
+} from "@/components/seo/json-ld";
 import { buttonVariants } from "@/components/ui/button";
 import { GENRE_PAGES, getGenrePage } from "@/lib/marketing/genre-pages";
 import { cn } from "@/lib/utils";
@@ -28,6 +34,20 @@ export async function generateMetadata({
       title: `${page.heading} with AI · sopher.ai`,
       description: page.metaDescription,
       url: `${SITE_URL}/genres/${page.slug}`,
+      images: [
+        {
+          url: SOCIAL_IMAGE,
+          width: 1200,
+          height: 630,
+          alt: SOCIAL_IMAGE_ALT,
+        },
+      ],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${page.heading} with AI · sopher.ai`,
+      description: page.metaDescription,
+      images: [{ url: SOCIAL_IMAGE, alt: SOCIAL_IMAGE_ALT }],
     },
   };
 }
