@@ -12,6 +12,7 @@ module.exports = {
       ],
       numberOfRuns: 2,
       settings: {
+        chromeFlags: "--no-sandbox --disable-dev-shm-usage",
         formFactor: "mobile",
         screenEmulation: {
           mobile: true,
