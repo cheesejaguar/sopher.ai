@@ -123,12 +123,13 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                   </Link>
                 </li>
                 <li>
-                  <a
+                  <Link
                     href="/studio"
+                    prefetch={false}
                     className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
                   >
                     Studio
-                  </a>
+                  </Link>
                 </li>
               </ul>
             </div>
