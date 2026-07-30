@@ -179,7 +179,15 @@ describe("NewBookWizard", () => {
     expect(await screen.findByText("Your included story is carried forward.")).toBeVisible();
     expect(screen.getByText(/separate full-length production/i)).toBeVisible();
     // One responsive summary for desktop and one inside the mobile disclosure.
-    expect(screen.getAllByText("Current quote")).toHaveLength(2);
+    const quoteLabels = screen.getAllByText("Current quote");
+    expect(quoteLabels).toHaveLength(2);
+    for (const quoteLabel of quoteLabels) {
+      const summary = quoteLabel.closest("dl");
+      expect(summary).not.toBeNull();
+      for (const group of Array.from(summary!.children)) {
+        expect(Array.from(group.children, (child) => child.tagName)).toEqual(["DT", "DD"]);
+      }
+    }
     expect(screen.getByText("Step 01 / 04")).toBeVisible();
     expect(screen.getByText("Fantasy").closest("button")).toHaveAttribute("aria-pressed", "true");
 

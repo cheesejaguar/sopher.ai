@@ -168,34 +168,32 @@ function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuote
       ? quote
       : null;
   return (
-    <dl className="space-y-3 text-xs">
-      <div>
+    <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
+      <div className="col-span-2">
         <dt className="folio-label text-muted-foreground">Working title</dt>
         <dd className="mt-1 line-clamp-2 font-medium">{state.title.trim() || "Not named yet"}</dd>
       </div>
-      <div>
+      <div className="col-span-2">
         <dt className="folio-label text-muted-foreground">Shelf</dt>
         <dd className="mt-1 font-medium capitalize">{state.genre ?? "Not chosen"}</dd>
       </div>
-      <div>
+      <div className="col-span-2">
         <dt className="folio-label text-muted-foreground">Brief</dt>
         <dd className="mt-1 line-clamp-3 leading-relaxed text-muted-foreground">
           {brief || "Waiting for your story."}
         </dd>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <dt className="folio-label text-muted-foreground">Shape</dt>
-          <dd className="mt-1 font-mono tabular-nums">
-            {state.chapters} × {state.wordsPerChapter.toLocaleString("en-US")}
-          </dd>
-        </div>
-        <div>
-          <dt className="folio-label text-muted-foreground">Tier</dt>
-          <dd className="mt-1 font-medium capitalize">{state.tier}</dd>
-        </div>
+      <div>
+        <dt className="folio-label text-muted-foreground">Shape</dt>
+        <dd className="mt-1 font-mono tabular-nums">
+          {state.chapters} × {state.wordsPerChapter.toLocaleString("en-US")}
+        </dd>
       </div>
-      <div className="border-t border-border pt-3">
+      <div>
+        <dt className="folio-label text-muted-foreground">Tier</dt>
+        <dd className="mt-1 font-medium capitalize">{state.tier}</dd>
+      </div>
+      <div className="col-span-2 border-t border-border pt-3">
         <dt className="folio-label text-muted-foreground">Current quote</dt>
         <dd className="mt-1 font-mono font-semibold tabular-nums">
           {currentQuote

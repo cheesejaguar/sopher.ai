@@ -215,15 +215,19 @@ test.describe("stubbed new-book starts", () => {
           },
         ],
       });
+    const acceptedStart = await inspectStart(page, requestKey);
+    const acceptedProjectId = acceptedStart.projects[0]?.id;
+    expect(acceptedProjectId).toBeTruthy();
+    if (!acceptedProjectId) throw new Error("The included-story start did not persist a project");
 
     await page.goto("/studio/new");
     await expect(
       page.getByRole("heading", { name: "Your included story is already in Studio" }),
     ).toBeVisible();
-    await expect(page.getByRole("link", { name: "Explore full-book credits" })).toHaveAttribute(
-      "href",
-      "/studio/credits?return=%2Fstudio%2Fnew",
-    );
+    const fullBookSetup = `/studio/new?from=${acceptedProjectId}`;
+    await expect(
+      page.getByRole("link", { name: "Take this story to full length" }),
+    ).toHaveAttribute("href", `/studio/credits?return=${encodeURIComponent(fullBookSetup)}`);
     await axeCheck(page);
   });
 
@@ -352,7 +356,9 @@ test.describe("stubbed new-book starts", () => {
 
     await page.reload();
     await expect(page).toHaveURL(firstWritePath);
-    await expect(page.getByText("Production now")).toBeVisible();
+    await expect(
+      page.getByLabel("Book production status").getByText("Production now", { exact: true }),
+    ).toBeVisible();
     await axeCheck(page);
     await expect(inspectStart(page, requestKey)).resolves.toMatchObject({
       projectCount: 1,
@@ -406,8 +412,12 @@ test.describe("stubbed new-book starts", () => {
     });
 
     await page.getByRole("button", { name: "Try again" }).click();
-    await expect(page.getByText("Production now")).toBeVisible();
-    await expect(page.getByText(/0%/).first()).toBeVisible();
+    await expect(
+      page.getByLabel("Book production status").getByText("Production now", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByLabel("Book production status").getByLabel("0 percent complete"),
+    ).toBeVisible();
 
     await expect
       .poll(async () => inspectStart(page, requestKey))
