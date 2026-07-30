@@ -7,6 +7,8 @@
  * The explicit isolation guard in playwright.config.ts keeps every mutation
  * away from shared preview and development data.
  */
+import { execFileSync } from "node:child_process";
+
 import { expect, missingE2EFixture, test } from "./helpers";
 
 async function openFirstDraftedChapter(page: import("@playwright/test").Page) {
@@ -107,6 +109,19 @@ async function closeOpenSheet(page: import("@playwright/test").Page) {
 }
 
 test.describe.configure({ mode: "serial" });
+
+test.beforeAll(() => {
+  // Playwright retries a serial group from the beginning in a fresh worker.
+  // Seed inside that worker so the first failed attempt cannot leave resolved
+  // suggestions or edited prose behind for the retry. The seed command itself
+  // refuses to run unless the isolated-database sentinel and host allowlist
+  // both match.
+  execFileSync("pnpm", ["e2e:seed"], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: "inherit",
+  });
+});
 
 test("phone editing autosaves, reloads, detects conflict, and restores the fixture", async ({
   page,
