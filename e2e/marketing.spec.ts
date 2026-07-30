@@ -6,6 +6,7 @@ import { axeCheck, expect, fullPageScreenshot, test } from "./helpers";
 test.describe("landing page", () => {
   test("shows hero, nav, and pricing tiers", async ({ page }, testInfo) => {
     await page.goto("/");
+    await expect(page).toHaveTitle("sopher.ai — A sentence in. A finished book out.");
 
     // Hero headline.
     await expect(

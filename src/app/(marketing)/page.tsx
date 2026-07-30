@@ -11,7 +11,7 @@ import { FaqJsonLd, HowToJsonLd, ProductJsonLd } from "@/components/seo/json-ld"
 export const metadata: Metadata = {
   // Overrides the title template — the landing page should not read
   // "Home · sopher.ai".
-  title: "sopher.ai — A sentence in. A finished book out.",
+  title: { absolute: "sopher.ai — A sentence in. A finished book out." },
   description:
     "Turn one clear sentence into a complete, editable book. Sopher plans, drafts, edits, and continuity-checks the manuscript while you stay in control.",
   alternates: { canonical: "/" },
