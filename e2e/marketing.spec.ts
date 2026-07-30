@@ -6,13 +6,13 @@ import { axeCheck, expect, fullPageScreenshot, test } from "./helpers";
 test.describe("landing page", () => {
   test("shows hero, nav, and pricing tiers", async ({ page }, testInfo) => {
     await page.goto("/");
-    await expect(page).toHaveTitle("sopher.ai — A sentence in. A finished book out.");
+    await expect(page).toHaveTitle("sopher.ai — The book in your head, finally on the page.");
 
     // Hero headline.
     await expect(
       page.getByRole("heading", {
         level: 1,
-        name: "A sentence in. A finished book out.",
+        name: "The book in your head, finally on the page.",
       }),
     ).toBeVisible();
 
@@ -57,13 +57,13 @@ test.describe("landing page", () => {
   test("reduced motion exposes the complete production sequence", async ({ page }) => {
     await page.goto("/");
     const rail = page.getByRole("navigation", {
-      name: "Five-stage manuscript production rail",
+      name: "Five-stage story journey",
     });
     await expect(rail.getByRole("link", { name: /Continuity/ })).toHaveAttribute(
       "aria-current",
       "step",
     );
-    await expect(rail.getByRole("button", { name: /manuscript production rail/ })).toHaveCount(0);
+    await expect(rail.getByRole("button", { name: /story journey/ })).toHaveCount(0);
   });
 
   test.describe("with motion allowed", () => {
@@ -89,13 +89,11 @@ test.describe("landing page", () => {
     test("the manuscript rail can be paused and controlled by keyboard", async ({ page }) => {
       await page.goto("/");
       const rail = page.getByRole("navigation", {
-        name: "Five-stage manuscript production rail",
+        name: "Five-stage story journey",
       });
-      const pause = rail.getByRole("button", { name: "Pause manuscript production rail" });
+      const pause = rail.getByRole("button", { name: "Pause story journey" });
       await pause.click();
-      await expect(
-        rail.getByRole("button", { name: "Resume manuscript production rail" }),
-      ).toBeVisible();
+      await expect(rail.getByRole("button", { name: "Resume story journey" })).toBeVisible();
 
       const editorStage = rail.getByRole("link", { name: /Editor/ });
       await editorStage.focus();

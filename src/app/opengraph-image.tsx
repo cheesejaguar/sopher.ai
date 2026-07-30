@@ -9,7 +9,7 @@ import { PIPELINE_STEPS } from "@/components/marketing/content";
  * for pages that do get shared.
  */
 
-export const alt = "sopher.ai — A sentence in. A finished book out.";
+export const alt = "sopher.ai — The book in your head, finally on the page.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -25,6 +25,9 @@ export default function OpengraphImage() {
         display: "flex",
         position: "relative",
         backgroundColor: "#080910",
+        backgroundImage:
+          "linear-gradient(90deg, transparent 0, transparent 104px, rgba(198,72,91,.14) 104px, rgba(198,72,91,.14) 105px, transparent 105px), repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(101,220,246,.065) 27px, rgba(101,220,246,.065) 28px)",
+        backgroundSize: "100% 100%, 100% 28px",
         color: "#f2f1f6",
         padding: "68px",
       }}
@@ -60,9 +63,9 @@ export default function OpengraphImage() {
               letterSpacing: "-0.04em",
             }}
           >
-            <span>A sentence in.</span>
-            <span>A finished</span>
-            <span>book out.</span>
+            <span>The book in</span>
+            <span>your head, finally</span>
+            <span>on the page.</span>
           </div>
         </div>
       </div>

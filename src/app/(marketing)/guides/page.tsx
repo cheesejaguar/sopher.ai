@@ -16,7 +16,7 @@ export default function GuidesIndex() {
     <>
       <BreadcrumbJsonLd trail={[{ name: "Guides", path: "/guides" }]} />
 
-      <header className="instrument-canvas border-b border-black/10 dark:border-white/10">
+      <header className="story-notebook-canvas border-b border-black/10 dark:border-white/10">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-28">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Field manual / 05 guides</p>
@@ -36,17 +36,16 @@ export default function GuidesIndex() {
       <section aria-labelledby="guide-index-heading">
         <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-28">
           <div className="lg:col-span-4">
-            <h2 id="guide-index-heading" className="font-display text-2xl font-semibold">
-              Open the system
-            </h2>
-            <p className="mt-4 max-w-sm text-sm leading-6 text-muted-foreground">
-              Read in order for the full production path, or go directly to the decision in front of
-              you.
-            </p>
-            <div
-              aria-hidden="true"
-              className="mt-8 hidden h-28 w-20 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] lg:block"
-            />
+            <div className="border-l border-[color:var(--notebook-margin)] pl-5 lg:sticky lg:top-28">
+              <h2 id="guide-index-heading" className="font-display text-2xl font-semibold">
+                Find the guide you need
+              </h2>
+              <p className="mt-4 max-w-sm text-sm leading-6 text-muted-foreground">
+                Follow the full path from premise to polished manuscript, or jump directly to the
+                choice in front of you.
+              </p>
+              <p className="folio-label mt-7 text-muted-foreground">Five guides / one clear path</p>
+            </div>
           </div>
 
           <ol className="border-y border-black/10 dark:border-white/10 lg:col-span-8">

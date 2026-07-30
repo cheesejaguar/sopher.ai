@@ -52,6 +52,8 @@
   --instrument: oklch(0.94 0.01 275);
   --instrument-high: oklch(0.985 0.006 275);
   --spectral: oklch(0.52 0.22 284);
+  --notebook-rule: oklch(0.6 0.075 244);
+  --notebook-margin: oklch(0.58 0.11 18);
   --future-stage: #0d0d13;
   --future-stage-foreground: #f6f4fb;
   --future-stage-muted: #c5c2cc;
@@ -116,6 +118,8 @@
   --instrument: oklch(0.125 0.022 274);
   --instrument-high: oklch(0.18 0.028 274);
   --spectral: oklch(0.66 0.21 280);
+  --notebook-rule: oklch(0.68 0.08 244);
+  --notebook-margin: oklch(0.67 0.12 18);
 
   --chart-1: oklch(0.66 0.21 280);
   --chart-2: oklch(0.72 0.15 251);
@@ -379,6 +383,81 @@
   background-position: center;
 }
 
+.story-notebook-canvas {
+  background-color: var(--background);
+  background-image:
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      color-mix(in oklch, var(--notebook-rule) 16%, transparent) 27px,
+      color-mix(in oklch, var(--notebook-rule) 16%, transparent) 28px
+    ),
+    linear-gradient(
+      to right,
+      color-mix(in oklch, var(--notebook-margin) 22%, transparent),
+      color-mix(in oklch, var(--notebook-margin) 22%, transparent)
+    );
+  background-repeat: repeat, no-repeat;
+  background-size:
+    100% 28px,
+    1px 100%;
+  background-position:
+    0 0,
+    max(1rem, calc((100vw - 80rem) / 2 + 1rem)) 0;
+}
+
+.story-notebook-panel {
+  background-color: color-mix(in oklch, var(--instrument) 92%, var(--background));
+  background-image:
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      color-mix(in oklch, var(--notebook-rule) 11%, transparent) 27px,
+      color-mix(in oklch, var(--notebook-rule) 11%, transparent) 28px
+    ),
+    linear-gradient(
+      to right,
+      color-mix(in oklch, var(--notebook-margin) 16%, transparent),
+      color-mix(in oklch, var(--notebook-margin) 16%, transparent)
+    );
+  background-repeat: repeat, no-repeat;
+  background-size:
+    100% 28px,
+    1px 100%;
+  background-position:
+    0 0,
+    1rem 0;
+}
+
+.marketing-proof-depth-plane {
+  background-color: color-mix(in oklch, var(--instrument-high) 74%, transparent);
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      color-mix(in oklch, var(--notebook-rule) 24%, transparent) 27px,
+      color-mix(in oklch, var(--notebook-rule) 24%, transparent) 28px
+    ),
+    linear-gradient(
+      to right,
+      transparent 0,
+      transparent 4.25rem,
+      color-mix(in oklch, var(--notebook-margin) 30%, transparent) 4.25rem,
+      color-mix(in oklch, var(--notebook-margin) 30%, transparent) calc(4.25rem + 1px),
+      transparent calc(4.25rem + 1px)
+    );
+  box-shadow: 0 32px 80px -52px color-mix(in oklch, var(--ion) 70%, transparent);
+  transform: rotate(2deg);
+}
+
+.marketing-hero-stage {
+  view-timeline-name: --hero-notebook;
+  view-timeline-axis: block;
+}
+
 .hero-support-copy {
   /* Keep the mobile offer immediately paintable on every CI/OS font stack.
      Archivo still owns display and UI type without delaying the core promise. */
@@ -412,6 +491,73 @@
 
 .rail-page-scan {
   animation: rail-scan-y 1.65s ease-in-out both;
+}
+
+.journey-stage-enter {
+  animation: journey-stage-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes journey-stage-in {
+  from {
+    opacity: 0.45;
+    transform: translate3d(0, 8px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes notebook-depth-drift {
+  from {
+    transform: translate3d(0, -10px, 0) rotate(2deg);
+  }
+  to {
+    transform: translate3d(0, 10px, 0) rotate(2deg);
+  }
+}
+
+@keyframes page-signature-drift {
+  from {
+    transform: translate3d(0, 7px, 0) rotate(1deg);
+  }
+  to {
+    transform: translate3d(0, -7px, 0) rotate(-1deg);
+  }
+}
+
+@keyframes final-rule-draw {
+  from {
+    transform: scaleX(0.18);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/*
+  Scroll motion is progressive enhancement: readable content is present in its
+  final position by default, and only decorative notebook artifacts move.
+*/
+@supports (animation-timeline: view()) {
+  .marketing-proof-depth-plane {
+    animation: notebook-depth-drift linear both;
+    animation-timeline: --hero-notebook;
+    animation-range: cover 0% cover 100%;
+  }
+
+  .marketing-page-signature {
+    animation: page-signature-drift linear both;
+    animation-timeline: view(block);
+    animation-range: entry 0% exit 100%;
+  }
+
+  .marketing-final-rule {
+    transform-origin: left center;
+    animation: final-rule-draw linear both;
+    animation-timeline: view(block);
+    animation-range: entry 0% entry 90%;
+  }
 }
 
 .manuscript-sheet {
@@ -448,6 +594,14 @@
     animation: none;
     opacity: 1;
   }
+
+  .journey-stage-enter,
+  .marketing-proof-depth-plane,
+  .marketing-page-signature,
+  .marketing-final-rule {
+    animation: none !important;
+    transform: none !important;
+  }
 }
 
 /*
@@ -458,6 +612,15 @@
   rest of the design system degrades to system colors as intended.
 */
 @media (forced-colors: active) {
+  .story-notebook-canvas,
+  .story-notebook-panel {
+    background-image: none;
+  }
+
+  .marketing-proof-depth-plane {
+    display: none;
+  }
+
   /*
     Focus indicators across the design system are box-shadow rings (`ring-*`),
     which forced-colors strips, and most primitives clear the native ring with

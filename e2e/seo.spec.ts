@@ -74,7 +74,7 @@ test.describe("sitemap and robots", () => {
 
 test.describe("page metadata", () => {
   for (const path of PUBLIC_PAGES) {
-    test(`${path} has a canonical, a description, and exactly one h1`, async ({ page }) => {
+    test(`${path} has complete social metadata, a canonical, and one h1`, async ({ page }) => {
       await page.goto(path);
 
       const canonical = page.locator('link[rel="canonical"]');
@@ -88,6 +88,19 @@ test.describe("page metadata", () => {
       expect(description?.length ?? 0).toBeGreaterThan(50);
       // Google truncates around 160; over that is wasted, not harmful.
       expect(description!.length).toBeLessThanOrEqual(200);
+
+      await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+        "content",
+        /\/opengraph-image/,
+      );
+      await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+        "content",
+        "summary_large_image",
+      );
+      await expect(page.locator('meta[name="twitter:image"]')).toHaveAttribute(
+        "content",
+        /\/opengraph-image/,
+      );
 
       await expect(page.locator("h1")).toHaveCount(1);
     });

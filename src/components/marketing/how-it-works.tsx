@@ -10,18 +10,19 @@ export function HowItWorks() {
       <div className="mx-auto w-full max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
         <div className="grid gap-8 lg:grid-cols-12">
           <div className="lg:col-span-4">
-            <p className="folio-label text-primary">Production sequence / 01–05</p>
+            <p className="folio-label text-primary">Story journey / 01–05</p>
           </div>
           <div className="lg:col-span-8">
             <h2
               id="how-it-works-heading"
               className="max-w-3xl font-display text-4xl font-semibold leading-[1.02] tracking-[-0.04em] text-balance sm:text-5xl"
             >
-              Five agents. One pass of ink.
+              Five stages carry your idea into a book.
             </h2>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-pretty text-muted-foreground">
-              Your brief moves through a pipeline of specialists, the way a manuscript moves through
-              a publishing house — except the whole house works at once.
+              Your premise finds its world, its shape, and finally its voice through a coordinated
+              team of specialists. You can follow the work from the first outline to the final
+              continuity pass.
             </p>
           </div>
         </div>
@@ -50,7 +51,7 @@ export function HowItWorks() {
                 </p>
                 <span
                   aria-hidden="true"
-                  className="relative hidden h-16 w-12 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] sm:block"
+                  className="marketing-page-signature relative hidden h-16 w-12 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] sm:block"
                 >
                   <span className="absolute top-3 right-2 left-2 h-px bg-paper-muted/35" />
                   <span className="absolute top-5 right-4 left-2 h-px bg-paper-muted/25" />
@@ -67,7 +68,7 @@ export function HowItWorks() {
 
         <div className="mt-12 grid gap-8 border-l border-primary pl-5 lg:grid-cols-12 lg:pl-8">
           <h3 className="font-display text-2xl font-semibold tracking-[-0.025em] lg:col-span-4">
-            You stay in the loop.
+            You make the calls.
           </h3>
           <ul className="grid gap-px bg-black/10 dark:bg-white/10 sm:grid-cols-2 lg:col-span-8">
             {[

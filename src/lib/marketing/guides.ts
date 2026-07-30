@@ -106,7 +106,8 @@ const pipelineGuide: Guide = {
   title: "How book generation works",
   description:
     "Five agents, in order: concept, outline, chapters, editor, continuity. What each one does and where you can intervene.",
-  standfirst: "A brief goes in. Five stages later, an edited manuscript comes out.",
+  standfirst:
+    "Follow one idea as it becomes a concept, an outline, a draft, and finally a polished manuscript.",
   blocks: [
     {
       kind: "p",

@@ -12,11 +12,11 @@ Read: Genres, Guides, legal pages, and manuscript reading.
 
 ## Reader job and content
 
-Readers need strong wayfinding, legible long-form content, honest examples, and contextual next steps. Preserve canonical URLs, one H1, breadcrumbs, visible FAQ content, JSON-LD, sitemap coverage, legal meaning, and private-route boundaries.
+Readers need strong wayfinding, legible long-form content, honest examples, and contextual next steps that return to the story-first promise: “The book in your head, finally on the page.” Preserve canonical URLs, one H1, breadcrumbs, visible FAQ content, JSON-LD, sitemap coverage, legal meaning, and private-route boundaries.
 
 ## Direction and memorable moment
 
-The Future Proof recedes around the text. Telemetry bands, folio marks, sticky desktop contents, mobile contents disclosures, and restrained etched rules orient the reader without turning every passage into a card. Manuscripts use Source Serif 4 within a luminous measured proof surface; surrounding chrome remains Archivo.
+The Future Proof recedes around the text. The dark college-ruled notebook is an entry motif, not a repeated container: one page or folio may orient the reader, then calm dark surfaces, sticky desktop contents, mobile contents disclosures, and restrained rules carry the article. Manuscripts use Source Serif 4 within a luminous measured proof surface; surrounding chrome remains Archivo. Contextual actions connect the reader's decision back to the book they want to make, while verified product behavior remains the proof.
 
 ## Constraints
 

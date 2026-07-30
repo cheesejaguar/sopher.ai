@@ -77,8 +77,8 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
               <BrandMark />
             </p>
             <p className="mt-4 max-w-sm text-sm leading-6 text-muted-foreground">
-              A visible editorial production system that turns your brief into a complete, edited
-              manuscript.
+              Turn the story in your head into a complete, editable manuscript while every stage
+              stays visible.
             </p>
             <p className="mt-8 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
               © 2026 sopher.ai · Future proof 01

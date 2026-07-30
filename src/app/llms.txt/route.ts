@@ -37,7 +37,7 @@ function body(): string {
 
   return `# sopher.ai
 
-> Describe a book in a sentence and sopher.ai plans it, writes every chapter, and edits the whole manuscript. A brief becomes a finished, editable, exportable book.
+> The book in your head, finally on the page. Describe it in your own words and sopher.ai plans, drafts, and edits a complete manuscript you can shape and export.
 
 ## What it is
 

@@ -1,6 +1,6 @@
 ---
 name: sopher.ai — The Future Proof
-description: A visible editorial production system that turns a brief into a finished book.
+description: A dark, story-first writing world where an author's notebook page becomes a finished book.
 colors:
   deep-space: "oklch(0.105 0.017 274)"
   luminous-ink: "oklch(0.95 0.01 270)"
@@ -90,11 +90,11 @@ components:
 ---
 
 <!--
-THESIS: A plain-language brief visibly becomes a finished book inside a precision instrument; the system refuses ambient AI magic, centered SaaS heroes, and interchangeable card grids.
-OWN-WORLD: Near-black instrument surfaces, luminous manuscript whites, restrained ultraviolet and ion-blue spectral light, etched rules, numbered telemetry, edge tabs, and hovering page signatures.
-STORY: Everyday storytellers understand the five-stage workflow, see where they retain control, judge honest samples, and start a book.
-FIRST VIEWPORT: A 12-column optical proofing desk places the offer and primary action at left and a diagonal five-stage manuscript rail at right, ending in a finished spread.
-FORM: User-steered “Future Proof,” evolved from grounded direction 4 and selected from three dark compositions; optical-rail staging; seed 364040b9. Mobile becomes one vertical proof line rather than a compressed desktop grid.
+THESIS: “The book in your head, finally on the page.” A familiar dark college-ruled notebook visibly becomes a finished manuscript; the system refuses ambient AI magic, centered SaaS heroes, and interchangeable card grids.
+OWN-WORLD: Near-black writing surfaces, one luminous college-ruled notebook, restrained ultraviolet and ion-blue machine light, a quiet margin rule, precise folios, and stacked finished pages.
+STORY: Everyday storytellers first recognize their unwritten book, then see the five-stage system turn their direction into pages while preserving author control.
+FIRST VIEWPORT: One oversized notebook artifact dominates the composition. An author's plain-language brief enters the page, the page visibly transforms through the five stages, and the final state resolves as a finished manuscript spread; promise and action support the artifact rather than competing with it.
+FORM: User-steered “Future Proof,” evolved into a dark college-ruled notebook world. Structural grids stay invisible; notebook ruling belongs to public story-entry canvases and the transforming page, never the operational workspace. Mobile preserves the same single-artifact story rather than compressing a desktop dashboard.
 -->
 
 # Design System: sopher.ai — The Future Proof
@@ -103,17 +103,19 @@ FORM: User-steered “Future Proof,” evolved from grounded direction 4 and sel
 
 **Creative North Star: "The Future Proof"**
 
-sopher.ai feels like a world-class editorial instrument built for someone who has never used one before. It is dark-first, exact, and quietly futuristic rather than theatrical or intimidating. The system makes sequence visible: numbered telemetry, hovering page signatures, edge tabs, and fine proof marks show ideas moving from brief to finished manuscript.
+sopher.ai gives advanced writing technology the confidence of a world-class tool while placing it inside the most familiar place an amateur author begins: a notebook. It is dark-first, exact, and quietly futuristic rather than theatrical or intimidating. The story comes first—an unrealized book becoming visible—while the five-stage system supplies credible proof beneath it.
 
-Persuade surfaces use restrained spectral light and dimensional manuscript planes at page scale. Operate surfaces become calmer and denser while keeping the same instrument topology. Read surfaces recede around luminous text and use telemetry as quiet orientation rather than decoration.
+Persuade surfaces center one dominant dark college-ruled notebook that transforms from brief to outline to prose to finished manuscript. Restrained spectral light marks the machine's work without coloring every stage. Operate surfaces become calmer and denser while keeping the manuscript central. Read surfaces recede around luminous text and use folios as quiet orientation rather than decoration.
 
 **Key Characteristics:**
 
-- Sequence is visible and legible.
-- Light, etched rules, and precise offsets create depth without neon card chrome.
+- The author's book is the subject; the technology is the convincing mechanism.
+- One transforming notebook artifact carries the sequence from idea to finished pages.
+- College ruling and the margin rule identify public story-entry canvases and the page artifact, never operational product surfaces.
+- Light, fine rules, and precise page offsets create depth without neon card chrome.
 - Manuscript typography appears only where prose is genuinely being read.
 - Color fields own regions; accents are not sprinkled across generic neutral cards.
-- Motion shows editorial progress and never hides content.
+- Motion belongs to the notebook's transformation, shows editorial progress, and never hides content.
 
 ## Colors
 
@@ -126,7 +128,7 @@ The default palette is overwhelmingly near-black, graphite, and luminous neutral
 ### Secondary
 
 - **Ion Blue:** Live agent activity, streamed generation, and the moving edge of the production sequence. It is never a generic accent.
-- **Spectral Violet:** A rare ultraviolet-to-ion transition used only for the signature production line, selected manuscript edges, and primary focus moments.
+- **Spectral Violet:** A rare ultraviolet-to-ion transition used only for the signature story sequence, selected manuscript edges, and primary focus moments.
 
 ### Tertiary
 
@@ -138,7 +140,7 @@ The default palette is overwhelmingly near-black, graphite, and luminous neutral
 - **Instrument Graphite:** Raised work surfaces and navigation.
 - **Luminous Ink:** Primary text and high-energy manuscript highlights.
 - **Night Paper:** The manuscript surface; subtly warmer and lighter than the surrounding instrument.
-- **Etched Rule:** Borders, telemetry grids, disabled states, and data-table divisions.
+- **Etched Rule:** Borders, college ruling within the notebook artifact, disabled states, and data-table divisions.
 
 **The Spectral Restraint Rule.** Ultraviolet and ion blue appear only where work is active or direction is primary; most of every screen remains neutral.
 
@@ -167,7 +169,7 @@ The default palette is overwhelmingly near-black, graphite, and luminous neutral
 
 ## Layout
 
-The system uses a 12-column desktop grid, a compact tablet grid, and a single vertical proof line on phones. Major regions align to visible rules and bands. Marketing alternates dense production tables with quieter reading passages. Product surfaces privilege the active task, with navigation and inspectors occupying stable edges rather than floating card islands.
+The system uses a 12-column desktop structure, a compact tablet structure, and one continuous reading column on phones. The alignment grid is structural, not decorative. On Persuade surfaces, restrained college ruling may establish the story-entry canvas while a dominant notebook page owns the composition and the promise, controls, and proof align around it. Product surfaces privilege the active task, with navigation and inspectors occupying stable edges rather than floating card islands.
 
 Desktop Studio and Admin use a persistent rail. Project navigation groups Plan, Produce, Refine, and Publish. On phones, global navigation moves into an app bar and drawer; editor tools replace global bottom navigation. Horizontal scrolling is allowed only inside explicitly labeled data-table or timeline regions, never at page level.
 
@@ -175,7 +177,7 @@ Spacing follows a 4px base with 8, 12, 16, 24, 32, 48, 64, and 96px steps. Touch
 
 ## Elevation & Depth
 
-The Future Proof is layered like a precision optical instrument. Depth comes from stacked page planes, etched rules, controlled highlights, tonal graphite, and restrained occlusion. Broad bloom, neon outlines, and generic frosted-glass cards are prohibited. Light belongs to the manuscript edge or active process, not every container.
+The Future Proof is layered like a notebook becoming a book inside a precision writing instrument. Depth comes from the dominant page changing state, stacked manuscript planes, controlled highlights, tonal graphite, and restrained occlusion. Broad bloom, neon outlines, and generic frosted-glass cards are prohibited. Light belongs to the transforming page edge or active process, not every container.
 
 **The Flat-at-Rest Rule.** A resting container is separated by field, rule, or offset; shadow appears only when hierarchy or transient state requires it.
 
@@ -183,7 +185,7 @@ The Future Proof is layered like a precision optical instrument. Depth comes fro
 
 Primary surfaces are square or use small 4–8px corners. Large rounded rectangles do not substitute for composition. Status capsules may be fully rounded because their silhouette communicates a discrete label; buttons, navigation, input fields, and content containers do not become pills.
 
-Page signatures, clipped tabs, vertical telemetry bands, scanning lines, and offset rules are the recurring silhouettes. Icons remain functional and visually subordinate to labels.
+College-ruled sheets, a quiet margin rule, clipped tabs, page signatures, scanning lines, and offset finished pages are the recurring silhouettes. Icons remain functional and visually subordinate to labels.
 
 ## Components
 
@@ -199,9 +201,9 @@ Fields look like precision brief-entry bays: visible labels, etched rules, graph
 
 Navigation is positional. A current item receives a field or index bar plus semantic `aria-current`, not color alone. Mobile navigation is disclosed through labeled drawers and never hidden without replacement.
 
-### Manuscript Rail
+### Transforming Notebook
 
-The signature component is a diagonal optical rail that turns one brief into concept, outline, chapter draft, editorial proof, and continuity-checked manuscript. Each stage carries a real page artifact rather than an icon tile. A restrained scan line and luminous page edge show active work. It is keyboard-operable, pausable, fully visible under reduced motion, and stacks vertically on small screens.
+The signature component is one dark college-ruled notebook page that visibly changes from an author's plain-language direction into concept, outline, chapter draft, editorial proof, and a continuity-checked manuscript spread. The artifact remains spatially dominant while stage labels act as supporting evidence. A restrained scan line and luminous page edge show active work. The sequence is keyboard-operable, pausable, fully visible under reduced motion, and remains one coherent artifact on small screens.
 
 ### Manuscript Surface
 
@@ -212,7 +214,8 @@ Manuscript surfaces maintain a readable measure, book paragraph rhythm, accessib
 ### Do:
 
 - **Do** make the current stage, state, and next action obvious before adding expression.
-- **Do** use deep instrument fields, numbered telemetry, edge tabs, etched rules, luminous page planes, and precise offsets as the identity.
+- **Do** use deep writing fields, one dominant ruled notebook, restrained stage telemetry, luminous page planes, and precise offsets as the identity.
+- **Do** lead with the story-first promise, then use the five-stage system as proof.
 - **Do** preserve semantic HTML, server-rendered public content, and familiar control behavior.
 - **Do** adapt the same world into persuasive, operational, and reading densities.
 - **Do** keep authored sample content clearly labeled.
@@ -221,6 +224,8 @@ Manuscript surfaces maintain a readable measure, book paragraph rhythm, accessib
 
 - **Don't** use auroras, gradient text, generic glass cards, neon outlines on every surface, generic icon tiles, or stock AI imagery.
 - **Don't** use a centered headline-plus-two-buttons hero as the first viewport.
+- **Don't** use two-axis grid texture, or carry notebook ruling into operational product surfaces.
+- **Don't** give every stage an equally dominant visual container; the transforming notebook is the hero artifact.
 - **Don't** repeat the same rounded card grid for unrelated tasks.
 - **Don't** use decorative serif typography outside real prose.
 - **Don't** hide navigation on mobile without an accessible replacement.

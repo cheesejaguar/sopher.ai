@@ -3,7 +3,7 @@ import { ImageResponse } from "next/og";
 import { OgBrand } from "@/components/og-brand";
 import { PIPELINE_STEPS } from "@/components/marketing/content";
 
-export const alt = "sopher.ai — A sentence in. A finished book out.";
+export const alt = "sopher.ai — The book in your head, finally on the page.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -21,8 +21,8 @@ export default function OpengraphImage() {
         padding: "64px 72px",
         backgroundColor: "#09090d",
         backgroundImage:
-          "linear-gradient(rgba(255,255,255,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px)",
-        backgroundSize: "100% 80px, 80px 100%",
+          "linear-gradient(90deg, transparent 0, transparent 104px, rgba(198,72,91,.16) 104px, rgba(198,72,91,.16) 105px, transparent 105px), repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(101,220,246,.075) 27px, rgba(101,220,246,.075) 28px)",
+        backgroundSize: "100% 100%, 100% 28px",
         color: "#f4f2f8",
       }}
     >
@@ -50,15 +50,16 @@ export default function OpengraphImage() {
         <div
           style={{
             display: "flex",
-            maxWidth: 760,
-            fontSize: 82,
+            flexDirection: "column",
+            maxWidth: 770,
+            fontSize: 74,
             fontWeight: 700,
             lineHeight: 0.96,
             letterSpacing: "-0.04em",
           }}
         >
-          A sentence in.
-          <br />A finished book out.
+          <span style={{ display: "flex" }}>The book in your head,</span>
+          <span style={{ display: "flex" }}>finally on the page.</span>
         </div>
         <div
           style={{
@@ -67,6 +68,8 @@ export default function OpengraphImage() {
             height: 142,
             padding: 18,
             backgroundColor: "#fffdf7",
+            backgroundImage:
+              "repeating-linear-gradient(180deg, transparent 0, transparent 21px, rgba(63,112,148,.15) 21px, rgba(63,112,148,.15) 22px)",
             border: "1px solid #d9d2c7",
             boxShadow: "8px 8px 0 #e1dbd1, 16px 16px 0 #cfc8bf",
           }}

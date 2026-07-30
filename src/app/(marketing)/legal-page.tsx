@@ -14,7 +14,7 @@ export function LegalPage({
   children: ReactNode;
 }) {
   return (
-    <article className="instrument-canvas border-b border-black/10 dark:border-white/10">
+    <article className="story-notebook-canvas border-b border-black/10 dark:border-white/10">
       <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 py-16 lg:grid-cols-12 lg:px-8 lg:py-24">
         <header className="lg:col-span-4">
           <p className="folio-label text-primary">Legal record / published</p>

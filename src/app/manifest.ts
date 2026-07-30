@@ -7,10 +7,10 @@ import type { MetadataRoute } from "next";
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "sopher.ai — A sentence in. A finished book out.",
+    name: "sopher.ai — The book in your head, finally on the page.",
     short_name: "sopher.ai",
     description:
-      "Turn a sentence into a complete, editable book with a visible planning, drafting, and refinement workflow.",
+      "Turn the book in your head into a complete, editable manuscript with a visible planning, drafting, and refinement workflow.",
     start_url: "/studio",
     display: "standalone",
     background_color: "#080910",

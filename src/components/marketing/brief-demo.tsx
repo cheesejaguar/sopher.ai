@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Pause, Play } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useElementVisibility } from "@/hooks/use-element-visibility";
 import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 type Example = {
@@ -49,11 +50,15 @@ const CHARS_PER_TICK = 3;
 const HOLD_MS = 4200;
 export function BriefDemo() {
   const reduced = useReducedMotion();
+  const { ref: demoRef, isVisible } = useElementVisibility<HTMLDivElement>({
+    threshold: 0.01,
+  });
   const [index, setIndex] = useState(0);
   const [progress, setProgress] = useState({ id: EXAMPLES[0].id, chars: 0 });
   const [paused, setPaused] = useState(false);
   // Once the reader takes control, we stop advancing on our own for good.
   const [userDriven, setUserDriven] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
 
   const example = EXAMPLES[index];
   const typedChars =
@@ -63,11 +68,11 @@ export function BriefDemo() {
         ? progress.chars
         : 0;
   const complete = typedChars >= example.opening.length;
-  const autoAdvancing = !reduced && !paused && !userDriven;
+  const autoAdvancing = isVisible && !reduced && !paused && !userDriven;
 
   // Type the current opening out. Reduced motion skips straight to the full text.
   useEffect(() => {
-    if (reduced || paused || userDriven || complete) return;
+    if (!isVisible || reduced || paused || userDriven || complete) return;
     const interval = setInterval(() => {
       setProgress((prev) => {
         const base = prev.id === example.id ? prev.chars : 0;
@@ -76,7 +81,7 @@ export function BriefDemo() {
       });
     }, TYPE_TICK_MS);
     return () => clearInterval(interval);
-  }, [complete, example, paused, reduced, userDriven]);
+  }, [complete, example, isVisible, paused, reduced, userDriven]);
 
   // Hold the finished passage briefly, then move to the next brief.
   useEffect(() => {
@@ -88,13 +93,17 @@ export function BriefDemo() {
   const choose = useCallback((next: number) => {
     setUserDriven(true);
     setIndex(next);
+    setAnnouncement(`${EXAMPLES[next].kind} example selected: ${EXAMPLES[next].title}.`);
   }, []);
 
   return (
-    <div className="grid w-full gap-6 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
+    <div ref={demoRef} className="grid w-full gap-6 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
       <div className="min-w-0">
         <span className="sr-only" id="brief-demo-label">
           Example books, each written from a one-sentence brief
+        </span>
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {announcement}
         </span>
         <div
           className="grid grid-cols-3 gap-px bg-black/10 dark:bg-white/10 md:grid-cols-1"
@@ -139,7 +148,7 @@ export function BriefDemo() {
           </button>
         ) : null}
 
-        <div className="mt-6 text-left" aria-live="polite">
+        <div className="mt-6 text-left">
           <p className="font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
             The brief
           </p>

@@ -21,12 +21,12 @@ const sourceSerif = Source_Serif_4({
 
 /** Under the ~160 characters Google renders; the old one was 244 and got cut. */
 const DESCRIPTION =
-  "Turn a sentence into a complete, editable book. Sopher plans, drafts, and refines the manuscript while you stay in control.";
+  "Turn the book in your head into a complete, editable manuscript. Sopher plans, drafts, and refines it while you stay in control.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "sopher.ai — A sentence in. A finished book out.",
+    default: "sopher.ai — The book in your head, finally on the page.",
     template: "%s · sopher.ai",
   },
   description: DESCRIPTION,
@@ -52,12 +52,12 @@ export const metadata: Metadata = {
     type: "website",
     url: SITE_URL,
     locale: "en_US",
-    title: "sopher.ai — A sentence in. A finished book out.",
+    title: "sopher.ai — The book in your head, finally on the page.",
     description: DESCRIPTION,
   },
   twitter: {
     card: "summary_large_image",
-    title: "sopher.ai — A sentence in. A finished book out.",
+    title: "sopher.ai — The book in your head, finally on the page.",
     description: DESCRIPTION,
   },
   // Set GOOGLE_SITE_VERIFICATION once Search Console issues the token.
