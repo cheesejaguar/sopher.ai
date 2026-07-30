@@ -17,6 +17,17 @@ export type BookGenerationSnapshot = Pick<
 export type StartableProject = BookGenerationSnapshot &
   Pick<typeof schema.projects.$inferSelect, "id">;
 
+/**
+ * A wizard start may only reattach to the full-book run it is responsible for.
+ * Chapter regeneration and editorial passes share the project's active-run
+ * exclusion lock, but they are not valid destinations for the book-start UI.
+ */
+export function canReattachBookStart(
+  kind: typeof schema.generationRuns.$inferSelect.kind,
+): kind is "full_book" {
+  return kind === "full_book";
+}
+
 /** Builds the immutable run snapshot from persisted, server-authoritative data. */
 export function buildBookGenerationConfig(project: BookGenerationSnapshot): GenerationConfig {
   const trial = project.experience === "trial_short_story";

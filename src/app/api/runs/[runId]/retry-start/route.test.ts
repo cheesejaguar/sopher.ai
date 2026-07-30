@@ -43,13 +43,17 @@ vi.mock("@/lib/authoring-dispatch", () => ({
   markAuthoringRunDispatchReady: mocks.markAuthoringRunDispatchReady,
 }));
 
-vi.mock("@/lib/generation-runs", () => ({
-  claimUncertainAuthoringRun: mocks.claimUncertainAuthoringRun,
-  linkAuthoringRunWorkflow: mocks.linkAuthoringRunWorkflow,
-  markAuthoringRunAcceptanceUncertain: mocks.markAuthoringRunAcceptanceUncertain,
-  settleStubbedAuthoringRunHandoff: mocks.settleStubbedAuthoringRunHandoff,
-  terminalizeAuthoringRun: mocks.terminalizeAuthoringRun,
-}));
+vi.mock("@/lib/generation-runs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/generation-runs")>();
+  return {
+    ...actual,
+    claimUncertainAuthoringRun: mocks.claimUncertainAuthoringRun,
+    linkAuthoringRunWorkflow: mocks.linkAuthoringRunWorkflow,
+    markAuthoringRunAcceptanceUncertain: mocks.markAuthoringRunAcceptanceUncertain,
+    settleStubbedAuthoringRunHandoff: mocks.settleStubbedAuthoringRunHandoff,
+    terminalizeAuthoringRun: mocks.terminalizeAuthoringRun,
+  };
+});
 
 vi.mock("@/lib/e2e-workflow-stub", () => ({
   isE2EWorkflowStubEnabled: mocks.isE2EWorkflowStubEnabled,
@@ -176,6 +180,50 @@ describe("POST /api/runs/[runId]/retry-start", () => {
     });
     expect(mocks.rateLimit).not.toHaveBeenCalled();
     expect(mocks.claimUncertainAuthoringRun).not.toHaveBeenCalled();
+  });
+
+  it("does not label a normal fresh initial dispatch as uncertain", async () => {
+    mockSelectRows([
+      snapshot({
+        acceptanceUncertainAt: null,
+        acceptanceDispatchClaimedAt: new Date("2026-07-30T12:09:30.000Z"),
+      }),
+    ]);
+
+    const response = await request();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "This run does not have a retryable uncertain handoff",
+      handoffConfirmed: false,
+      confirmationPending: false,
+    });
+    expect(mocks.claimUncertainAuthoringRun).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("recovers the same run after an abandoned initial dispatch lease expires", async () => {
+    mockSelectRows([
+      snapshot({
+        acceptanceUncertainAt: null,
+        acceptanceDispatchClaimedAt: new Date("2026-07-30T12:07:59.000Z"),
+      }),
+    ]);
+
+    const response = await request();
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      runId,
+      handoffConfirmed: true,
+      confirmationPending: false,
+    });
+    expect(mocks.claimUncertainAuthoringRun).toHaveBeenCalledWith({
+      runId,
+      projectId,
+      userId: "user-1",
+    });
+    expect(mocks.start).toHaveBeenCalledOnce();
   });
 
   it("purchase-gates a legacy full-book retry before preparation or Workflow dispatch", async () => {

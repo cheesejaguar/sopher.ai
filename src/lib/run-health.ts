@@ -6,6 +6,7 @@ import type { QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import {
   ACTIVE_AUTHORING_RUN_STATUSES,
+  deriveAuthoringRunAcceptanceState,
   terminalizeAuthoringRun,
   transitionAuthoringRunState,
   type AuthoringRunStatus,
@@ -525,13 +526,12 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
   const authoringBegan =
     facts.authoringEventCount > 0 || facts.llmCallCount > 0 || facts.creditsUsed > 0;
   const noWorkStarted = !authoringBegan && facts.reservationCount === 0 && facts.meteredUsd === 0;
+  const acceptanceState = deriveAuthoringRunAcceptanceState({
+    acceptanceUncertainAt: currentRun.acceptanceUncertainAt,
+    acceptanceDispatchClaimedAt: currentRun.acceptanceDispatchClaimedAt,
+  });
   const acceptanceUncertain =
-    databaseStatus === "queued" &&
-    !currentRun.workflowRunId &&
-    Boolean(currentRun.acceptanceUncertainAt);
-  const dispatchClaimIsFresh =
-    currentRun.acceptanceDispatchClaimedAt &&
-    currentRun.acceptanceDispatchClaimedAt.getTime() > Date.now() - 2 * 60_000;
+    databaseStatus === "queued" && !currentRun.workflowRunId && acceptanceState.acceptanceUncertain;
   const acceptedAt = currentRun.createdAt;
   const terminalAt =
     latestDate(currentRun.completedAt, workflow.completedAt) ??
@@ -569,7 +569,7 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
     authoringBegan,
     noWorkStarted,
     acceptanceUncertain,
-    safeToRetry: acceptanceUncertain && !dispatchClaimIsFresh,
+    safeToRetry: acceptanceUncertain && acceptanceState.safeToRetry,
     completionArtifactsReady,
   };
 }

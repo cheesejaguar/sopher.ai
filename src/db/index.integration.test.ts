@@ -21,6 +21,7 @@ import {
   updateProjectTransaction,
 } from "@/lib/project-transaction-operations";
 import { deleteClerkUserTransaction } from "@/lib/account-deletion-transaction";
+import { beginMeteredCallIntent } from "@/lib/billing/meter";
 
 function isolatedDatabaseUrl(): string | null {
   const isolated = process.env.E2E_DATABASE_ISOLATED;
@@ -82,6 +83,18 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
     oldCoverAsset: randomUUID(),
     refreshProject: randomUUID(),
     refreshBook: randomUUID(),
+    failedRefreshProject: randomUUID(),
+    failedRefreshBook: randomUUID(),
+    failedRefreshRun: randomUUID(),
+    cancelledRefreshProject: randomUUID(),
+    cancelledRefreshBook: randomUUID(),
+    cancelledRefreshRun: randomUUID(),
+    authoredRefreshProject: randomUUID(),
+    authoredRefreshBook: randomUUID(),
+    authoredRefreshRun: randomUUID(),
+    completedRefreshProject: randomUUID(),
+    completedRefreshBook: randomUUID(),
+    completedRefreshRun: randomUUID(),
     deleteProject: randomUUID(),
     deleteAsset: randomUUID(),
     runProject: randomUUID(),
@@ -95,6 +108,45 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
   async function userExists(id: string): Promise<boolean> {
     const rows = await observer`select id from users where id = ${id}`;
     return Array.isArray(rows) && rows.length === 1;
+  }
+
+  async function createMeteringFixture(label: string) {
+    const userId = `e2e-metering-${label}-${suffix}`;
+    const projectId = randomUUID();
+    const runId = randomUUID();
+    await observer`
+      insert into users (id, email)
+      values (${userId}, ${`${userId}@example.test`})
+    `;
+    await observer`
+      insert into projects (
+        id, user_id, title, brief, genre, experience,
+        target_chapters, target_words_per_chapter, settings
+      )
+      values (
+        ${projectId}, ${userId}, 'Metering fixture', 'An isolated metering fixture',
+        'fantasy', 'trial_short_story', 3, 1000, '{}'::jsonb
+      )
+    `;
+    await observer`
+      insert into generation_runs (
+        id, project_id, user_id, request_key, kind, status, config
+      )
+      values (
+        ${runId}, ${projectId}, ${userId}, ${randomUUID()},
+        'full_book', 'running', '{"targetChapters":3}'::jsonb
+      )
+    `;
+    await observer`
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      values (
+        ${userId}, 10, 'grant', 'Included story fixture',
+        ${projectId}, ${runId}, ${`metering-grant:${label}:${suffix}`}
+      )
+    `;
+    return { userId, projectId, runId };
   }
 
   beforeAll(async () => {
@@ -123,6 +175,26 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
           'mystery', 'full_book', 3, 1000, '{}'::jsonb
         ),
         (
+          ${ids.failedRefreshProject}, ${ids.pathUser}, 'Failed start title',
+          'Failed start brief', 'mystery', 'full_book', 3, 1000,
+          '{"qualityTier":"draft"}'::jsonb
+        ),
+        (
+          ${ids.cancelledRefreshProject}, ${ids.pathUser}, 'Cancelled start title',
+          'Cancelled start brief', 'fantasy', 'full_book', 4, 1100,
+          '{"qualityTier":"draft"}'::jsonb
+        ),
+        (
+          ${ids.authoredRefreshProject}, ${ids.pathUser}, 'Authored title',
+          'Authored brief', 'thriller', 'full_book', 5, 1200,
+          '{"qualityTier":"standard"}'::jsonb
+        ),
+        (
+          ${ids.completedRefreshProject}, ${ids.pathUser}, 'Completed title',
+          'Completed brief', 'romance', 'full_book', 6, 1300,
+          '{"qualityTier":"premium"}'::jsonb
+        ),
+        (
           ${ids.deleteProject}, ${ids.pathUser}, 'Delete fixture', 'A delete fixture brief',
           'thriller', 'full_book', 3, 1000, '{}'::jsonb
         ),
@@ -142,7 +214,46 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
           coverUrl: "https://blob.test/old-cover.png",
           author: "Fixture Author",
         })}::jsonb),
-        (${ids.refreshBook}, ${ids.refreshProject}, 'Before refresh', '{}'::jsonb)
+        (${ids.refreshBook}, ${ids.refreshProject}, 'Before refresh', '{}'::jsonb),
+        (${ids.failedRefreshBook}, ${ids.failedRefreshProject}, 'Failed start title', '{}'::jsonb),
+        (
+          ${ids.cancelledRefreshBook}, ${ids.cancelledRefreshProject},
+          'Cancelled start title', '{}'::jsonb
+        ),
+        (${ids.authoredRefreshBook}, ${ids.authoredRefreshProject}, 'Authored title', '{}'::jsonb),
+        (
+          ${ids.completedRefreshBook}, ${ids.completedRefreshProject},
+          'Completed title', '{}'::jsonb
+        )
+    `;
+    await observer`
+      insert into generation_runs (id, project_id, user_id, kind, status, config)
+      values
+        (
+          ${ids.failedRefreshRun}, ${ids.failedRefreshProject}, ${ids.pathUser},
+          'full_book', 'failed', '{}'::jsonb
+        ),
+        (
+          ${ids.cancelledRefreshRun}, ${ids.cancelledRefreshProject}, ${ids.pathUser},
+          'full_book', 'cancelled', '{}'::jsonb
+        ),
+        (
+          ${ids.authoredRefreshRun}, ${ids.authoredRefreshProject}, ${ids.pathUser},
+          'full_book', 'failed', '{}'::jsonb
+        ),
+        (
+          ${ids.completedRefreshRun}, ${ids.completedRefreshProject}, ${ids.pathUser},
+          'full_book', 'completed', '{}'::jsonb
+        )
+    `;
+    await observer`
+      insert into generation_events (run_id, seq, type, payload)
+      values
+        (${ids.failedRefreshRun}, 1, 'stage', '{"type":"stage","stage":"queued","pct":0}'::jsonb),
+        (
+          ${ids.authoredRefreshRun}, 1, 'stage',
+          '{"type":"stage","stage":"concept","pct":5}'::jsonb
+        )
     `;
     await observer`
       insert into chapters (
@@ -261,6 +372,124 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
     await expect(userExists(ids.recovered)).resolves.toBe(true);
   });
 
+  it("allows the exact included-story cap boundary and blocks the next fraction", async () => {
+    const fixture = await createMeteringFixture("cap");
+    try {
+      await observer`
+        insert into credit_ledger (
+          user_id, amount, kind, description, project_id, run_id, external_ref
+        )
+        values (
+          ${fixture.userId}, -6, 'usage', 'Prior included-story work',
+          ${fixture.projectId}, ${fixture.runId}, ${`metering-usage:cap:${suffix}`}
+        )
+      `;
+
+      const boundary = await beginMeteredCallIntent({
+        ...fixture,
+        intentRef: `metering-intent:generation:${fixture.runId}:boundary:attempt:one`,
+        intentPrefix: `metering-intent:generation:${fixture.runId}:boundary:attempt:`,
+        usagePrefix: `llm:generation:${fixture.runId}:boundary:`,
+        maxCredits: 4,
+        description: "Exact trial-cap boundary",
+      });
+      expect(boundary.status).toBe("started");
+
+      const over = await beginMeteredCallIntent({
+        ...fixture,
+        intentRef: `metering-intent:generation:${fixture.runId}:over:attempt:one`,
+        intentPrefix: `metering-intent:generation:${fixture.runId}:over:attempt:`,
+        usagePrefix: `llm:generation:${fixture.runId}:over:`,
+        maxCredits: 0.0001,
+        description: "One fraction over the trial cap",
+      });
+      expect(over.status).toBe("trial_cap");
+    } finally {
+      await observer`delete from users where id = ${fixture.userId}`;
+    }
+  });
+
+  it("serializes a repeated intent and persists one claim under a concurrent race", async () => {
+    const fixture = await createMeteringFixture("intent-race");
+    const intentRef = `metering-intent:generation:${fixture.runId}:same:attempt:one`;
+    try {
+      const start = () =>
+        beginMeteredCallIntent({
+          ...fixture,
+          intentRef,
+          intentPrefix: `metering-intent:generation:${fixture.runId}:same:attempt:`,
+          usagePrefix: `llm:generation:${fixture.runId}:same:`,
+          maxCredits: 2,
+          description: "Concurrent idempotent intent",
+        });
+      const results = await Promise.all([start(), start()]);
+      expect(results.map((result) => result.status).sort()).toEqual(["pending", "started"]);
+
+      const facts = firstRow<{ intents: number; claims: number }>(
+        await observer`
+          select
+            count(*) filter (where external_ref = ${intentRef})::int as intents,
+            count(*) filter (
+              where external_ref = ${`metering-claim:${intentRef}`}
+            )::int as claims
+          from credit_ledger
+          where user_id = ${fixture.userId}
+        `,
+      );
+      expect(facts).toMatchObject({ intents: 1, claims: 1 });
+    } finally {
+      await observer`delete from users where id = ${fixture.userId}`;
+    }
+  });
+
+  it("serializes sibling claims and never over-transfers a partially consumed parent hold", async () => {
+    const fixture = await createMeteringFixture("parent-race");
+    const parentRef = `generation-reservation:${fixture.runId}:wave-1`;
+    try {
+      await observer`
+        insert into credit_ledger (
+          user_id, amount, kind, description, project_id, run_id, external_ref
+        )
+        values (
+          ${fixture.userId}, -4, 'adjustment', 'Parent phase reservation',
+          ${fixture.projectId}, ${fixture.runId}, ${parentRef}
+        )
+      `;
+      const startSibling = (sibling: string) => {
+        const intentRef = `metering-intent:generation:${fixture.runId}:${sibling}:attempt:one`;
+        return beginMeteredCallIntent({
+          ...fixture,
+          intentRef,
+          intentPrefix: `metering-intent:generation:${fixture.runId}:${sibling}:attempt:`,
+          usagePrefix: `llm:generation:${fixture.runId}:${sibling}:`,
+          parentReservationRef: parentRef,
+          maxCredits: 3,
+          description: `Concurrent sibling ${sibling}`,
+        });
+      };
+      const results = await Promise.all([startSibling("left"), startSibling("right")]);
+      expect(results.map((result) => result.status)).toEqual(["started", "started"]);
+
+      const facts = firstRow<{ transferred: string; claimed: string }>(
+        await observer`
+          select
+            coalesce(sum(amount) filter (
+              where external_ref like ${`reservation-claim-release:${parentRef}:%`}
+            ), 0)::text as transferred,
+            coalesce(-sum(amount) filter (
+              where external_ref like 'metering-claim:%'
+            ), 0)::text as claimed
+          from credit_ledger
+          where user_id = ${fixture.userId}
+        `,
+      );
+      expect(Number(facts?.transferred)).toBe(4);
+      expect(Number(facts?.claimed)).toBe(6);
+    } finally {
+      await observer`delete from users where id = ${fixture.userId}`;
+    }
+  });
+
   it("executes the project refresh and settings transactions against real constraints", async () => {
     const refreshed = await withDbTransaction(async (tx) => {
       const [project] = await tx
@@ -331,6 +560,147 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
         quality_tier: "premium",
       },
     ]);
+  });
+
+  it("refreshes stale wizard identity and shape after zero-work failed or cancelled starts", async () => {
+    const cases = [
+      {
+        projectId: ids.failedRefreshProject,
+        title: "Failed start corrected",
+        brief: "The author corrected the failed setup before trying again.",
+        chapters: 8,
+        words: 1800,
+      },
+      {
+        projectId: ids.cancelledRefreshProject,
+        title: "Cancelled start corrected",
+        brief: "The author revised the cancelled setup before trying again.",
+        chapters: 9,
+        words: 1900,
+      },
+    ];
+
+    for (const fixture of cases) {
+      const refreshed = await withDbTransaction(async (tx) => {
+        const [project] = await tx
+          .select()
+          .from(schema.projects)
+          .where(sql`${schema.projects.id} = ${fixture.projectId}`)
+          .limit(1);
+        if (!project) throw new Error("Terminal refresh fixture disappeared");
+        return refreshProjectBeforeFirstRunTransaction(tx, {
+          project,
+          userId: ids.pathUser,
+          values: {
+            title: fixture.title,
+            brief: fixture.brief,
+            targetChapters: fixture.chapters,
+            targetWordsPerChapter: fixture.words,
+            settings: { qualityTier: "premium", requireOutlineApproval: true },
+          },
+        });
+      });
+
+      expect(refreshed).toMatchObject({
+        title: fixture.title,
+        brief: fixture.brief,
+        targetChapters: fixture.chapters,
+        targetWordsPerChapter: fixture.words,
+        settings: { qualityTier: "premium", requireOutlineApproval: true },
+      });
+    }
+
+    const rows = await observer`
+      select p.id, p.title as project_title, p.brief, b.title as book_title,
+             p.target_chapters, p.target_words_per_chapter,
+             p.settings->>'qualityTier' as quality_tier
+      from projects p
+      join books b on b.project_id = p.id
+      where p.id in (${ids.failedRefreshProject}, ${ids.cancelledRefreshProject})
+    `;
+    expect(rows).toHaveLength(2);
+    for (const fixture of cases) {
+      expect(rows).toContainEqual(
+        expect.objectContaining({
+          id: fixture.projectId,
+          project_title: fixture.title,
+          brief: fixture.brief,
+          book_title: fixture.title,
+          target_chapters: fixture.chapters,
+          target_words_per_chapter: fixture.words,
+          quality_tier: "premium",
+        }),
+      );
+    }
+  });
+
+  it("keeps wizard inputs immutable after authoring begins or a run completes", async () => {
+    const cases = [
+      {
+        projectId: ids.authoredRefreshProject,
+        originalTitle: "Authored title",
+        originalBrief: "Authored brief",
+        chapters: 5,
+        words: 1200,
+      },
+      {
+        projectId: ids.completedRefreshProject,
+        originalTitle: "Completed title",
+        originalBrief: "Completed brief",
+        chapters: 6,
+        words: 1300,
+      },
+    ];
+
+    for (const fixture of cases) {
+      const result = await withDbTransaction(async (tx) => {
+        const [project] = await tx
+          .select()
+          .from(schema.projects)
+          .where(sql`${schema.projects.id} = ${fixture.projectId}`)
+          .limit(1);
+        if (!project) throw new Error("Immutable refresh fixture disappeared");
+        return refreshProjectBeforeFirstRunTransaction(tx, {
+          project,
+          userId: ids.pathUser,
+          values: {
+            title: "Must not replace frozen title",
+            brief: "Must not replace frozen brief",
+            targetChapters: 20,
+            targetWordsPerChapter: 4000,
+            settings: { qualityTier: "draft" },
+          },
+        });
+      });
+
+      expect(result).toMatchObject({
+        title: fixture.originalTitle,
+        brief: fixture.originalBrief,
+        targetChapters: fixture.chapters,
+        targetWordsPerChapter: fixture.words,
+      });
+    }
+
+    const rows = await observer`
+      select p.id, p.title as project_title, p.brief, b.title as book_title,
+             p.target_chapters, p.target_words_per_chapter
+      from projects p
+      join books b on b.project_id = p.id
+      where p.id in (${ids.authoredRefreshProject}, ${ids.completedRefreshProject})
+    `;
+    expect(rows).toHaveLength(2);
+    for (const fixture of cases) {
+      expect(rows).toContainEqual(
+        expect.objectContaining({
+          id: fixture.projectId,
+          project_title: fixture.originalTitle,
+          brief: fixture.originalBrief,
+          book_title: fixture.originalTitle,
+          target_chapters: fixture.chapters,
+          target_words_per_chapter: fixture.words,
+        }),
+      );
+    }
   });
 
   it("persists every asset-producing transaction and replays durable deliveries", async () => {

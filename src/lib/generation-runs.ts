@@ -5,6 +5,44 @@ import { releaseRunCreditReservations } from "@/lib/billing/credits";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 
 export const ACTIVE_AUTHORING_RUN_STATUSES = ["queued", "running", "awaiting_input"] as const;
+export const AUTHORING_DISPATCH_CLAIM_TTL_MS = 2 * 60_000;
+
+/**
+ * Cross-cutting lock order invariant: acquire the project-authoring advisory
+ * lock first, then the user-wallet advisory lock. Run insertion, transition,
+ * terminalization, and billing settlement must never acquire these in reverse
+ * order or concurrent authoring and metering can deadlock.
+ */
+
+/**
+ * Keeps the normal initial-dispatch lease distinct from an actually ambiguous
+ * Workflow response. A fresh lease means the original caller is still allowed
+ * to finish; an expired unlinked lease means that caller disappeared and the
+ * same durable run may be reclaimed without creating a duplicate.
+ */
+export function deriveAuthoringRunAcceptanceState(
+  input: {
+    acceptanceUncertainAt: Date | null;
+    acceptanceDispatchClaimedAt: Date | null;
+  },
+  now = new Date(),
+): {
+  acceptanceUncertain: boolean;
+  dispatchClaimIsFresh: boolean;
+  safeToRetry: boolean;
+} {
+  const dispatchClaimIsFresh = Boolean(
+    input.acceptanceDispatchClaimedAt &&
+    input.acceptanceDispatchClaimedAt.getTime() > now.getTime() - AUTHORING_DISPATCH_CLAIM_TTL_MS,
+  );
+  const dispatchClaimIsStale = Boolean(input.acceptanceDispatchClaimedAt && !dispatchClaimIsFresh);
+  const acceptanceUncertain = Boolean(input.acceptanceUncertainAt) || dispatchClaimIsStale;
+  return {
+    acceptanceUncertain,
+    dispatchClaimIsFresh,
+    safeToRetry: acceptanceUncertain && !dispatchClaimIsFresh,
+  };
+}
 
 /**
  * Authoring runs own manuscript, outline, and canon mutations until they stop.
@@ -144,6 +182,10 @@ export async function insertQueuedAuthoringRun(input: {
 }> {
   const client = getSqlClient();
   const configJson = JSON.stringify(input.config);
+  // `xmax = 0` below distinguishes INSERT from the idempotent no-op UPDATE.
+  // The table is intentionally non-partitioned and has no BEFORE UPDATE trigger;
+  // a migration changing either property must replace this detection and its
+  // concurrent insertion regression coverage at the same time.
   const [, , inserted] = await client.transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
@@ -209,7 +251,7 @@ export async function insertQueuedAuthoringRun(input: {
         ${input.kind},
         'queued',
         ${configJson}::jsonb,
-        now(),
+        null,
         now()
       where not exists (
         select 1
@@ -511,9 +553,10 @@ export type ClaimedUncertainAuthoringRun = {
 
 /**
  * Claims one same-run Workflow redispatch under the same project lock used by
- * generation creation. The durable marker remains; a short-lived claim keeps
- * concurrent clicks from dispatching twice and becomes retryable if a process
- * dies before it can release or self-link.
+ * generation creation. An explicit ambiguity marker remains durable, while an
+ * expired initial-dispatch lease is promoted to that marker. The renewed
+ * short-lived claim keeps concurrent clicks from dispatching twice and becomes
+ * retryable if a process dies before it can release or self-link.
  */
 export async function claimUncertainAuthoringRun(input: {
   runId: string;
@@ -526,10 +569,16 @@ export async function claimUncertainAuthoringRun(input: {
         hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
       )`,
     );
-    const staleBefore = new Date(Date.now() - 2 * 60_000);
+    const claimedAt = new Date();
+    const staleBefore = new Date(claimedAt.getTime() - AUTHORING_DISPATCH_CLAIM_TTL_MS);
     const [run] = await tx
       .update(schema.generationRuns)
-      .set({ acceptanceDispatchClaimedAt: new Date() })
+      .set({
+        // Promote an expired initial-dispatch lease to explicit ambiguity so
+        // another lost response remains recoverable after this claim expires.
+        acceptanceUncertainAt: claimedAt,
+        acceptanceDispatchClaimedAt: claimedAt,
+      })
       .where(
         and(
           eq(schema.generationRuns.id, input.runId),
@@ -537,7 +586,10 @@ export async function claimUncertainAuthoringRun(input: {
           eq(schema.generationRuns.userId, input.userId),
           eq(schema.generationRuns.status, "queued"),
           isNull(schema.generationRuns.workflowRunId),
-          isNotNull(schema.generationRuns.acceptanceUncertainAt),
+          or(
+            isNotNull(schema.generationRuns.acceptanceUncertainAt),
+            lte(schema.generationRuns.acceptanceDispatchClaimedAt, staleBefore),
+          ),
           sql`${schema.generationRuns.config}->>'dispatchReady' = 'true'`,
           or(
             isNull(schema.generationRuns.acceptanceDispatchClaimedAt),

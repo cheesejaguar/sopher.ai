@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBookGenerationConfig,
   buildChapterRegenerationConfig,
+  canReattachBookStart,
   type StartableProject,
 } from "./book-start";
 
@@ -22,6 +23,14 @@ function project(overrides: Partial<StartableProject> = {}): StartableProject {
 }
 
 describe("book start snapshot", () => {
+  it("reattaches only to a full-book run, never a chapter or editorial run", () => {
+    expect(canReattachBookStart("full_book")).toBe(true);
+    expect(canReattachBookStart("chapter")).toBe(false);
+    expect(canReattachBookStart("edit_pass")).toBe(false);
+    expect(canReattachBookStart("continuity")).toBe(false);
+    expect(canReattachBookStart("export")).toBe(false);
+  });
+
   it("freezes the included story shape and author-owned title", () => {
     expect(
       buildBookGenerationConfig(

@@ -158,6 +158,15 @@ export async function beginMeteredCallIntent(input: {
     ? `reservation-claim-release:${input.parentReservationRef}:${input.intentRef}`
     : null;
   const client = getSqlClient();
+  /**
+   * This is one wallet-locked statement by design: replay gates come first;
+   * project entitlement, trial spend, parent capacity, and wallet balance form
+   * one authorization snapshot; then the child claim, parent transfer, durable
+   * intent, and optional project lease are inserted in dependency order. A
+   * provider call therefore cannot observe a partial authorization. Real-Neon
+   * tests cover the exact trial cap, a concurrent same-intent replay, and
+   * sibling claims competing for a partially consumed parent reservation.
+   */
   const transactionResults = await client.transaction((tx) => [
     ...(optionalLeaseRef
       ? [

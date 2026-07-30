@@ -9,7 +9,9 @@ import {
 } from "@/lib/authoring-dispatch";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import {
+  AUTHORING_DISPATCH_CLAIM_TTL_MS,
   claimUncertainAuthoringRun,
+  deriveAuthoringRunAcceptanceState,
   linkAuthoringRunWorkflow,
   markAuthoringRunAcceptanceUncertain,
   settleStubbedAuthoringRunHandoff,
@@ -70,9 +72,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     .limit(1);
   if (!snapshot) return Response.json({ error: "Run not found" }, { status: 404 });
 
-  const claimIsFresh =
-    snapshot.acceptanceDispatchClaimedAt &&
-    snapshot.acceptanceDispatchClaimedAt.getTime() > Date.now() - 2 * 60_000;
+  const acceptanceState = deriveAuthoringRunAcceptanceState({
+    acceptanceUncertainAt: snapshot.acceptanceUncertainAt,
+    acceptanceDispatchClaimedAt: snapshot.acceptanceDispatchClaimedAt,
+  });
   if (snapshot.workflowRunId) {
     return Response.json(
       {
@@ -101,7 +104,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
       { status: 409 },
     );
   }
-  if (snapshot.status !== "queued" || !snapshot.acceptanceUncertainAt) {
+  if (snapshot.status !== "queued" || !acceptanceState.acceptanceUncertain) {
     return Response.json(
       {
         error: "This run does not have a retryable uncertain handoff",
@@ -121,11 +124,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
   });
   if (spendDenied) return spendDenied;
 
-  if (claimIsFresh) {
+  if (acceptanceState.dispatchClaimIsFresh) {
     const retryAfter = Math.max(
       1,
       Math.ceil(
-        (snapshot.acceptanceDispatchClaimedAt!.getTime() + 2 * 60_000 - Date.now()) / 1_000,
+        (snapshot.acceptanceDispatchClaimedAt!.getTime() +
+          AUTHORING_DISPATCH_CLAIM_TTL_MS -
+          Date.now()) /
+          1_000,
       ),
     );
     return Response.json(
@@ -243,13 +249,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
         { status: 409 },
       );
     }
+    const currentAcceptanceState = deriveAuthoringRunAcceptanceState({
+      acceptanceUncertainAt: current?.acceptanceUncertainAt ?? null,
+      acceptanceDispatchClaimedAt: current?.acceptanceDispatchClaimedAt ?? null,
+    });
     return Response.json(
       {
         runId,
         status: current?.status ?? "queued",
         reattached: true,
         handoffConfirmed: false,
-        confirmationPending: Boolean(current?.acceptanceUncertainAt),
+        confirmationPending: currentAcceptanceState.acceptanceUncertain,
         safeToRetry: false,
       },
       { status: 202 },

@@ -8,6 +8,54 @@ import type { UpdateProjectInput } from "@/lib/validation/project";
 
 type ProjectRow = typeof schema.projects.$inferSelect;
 
+/**
+ * The wizard may refresh a creation-key project after an infrastructure-only
+ * start failure, but it must never rewrite the identity or production shape
+ * observed by real authoring work.
+ *
+ * A queued-only event is still pre-authoring. Any non-terminal run, successful
+ * run, authoring event, provider call, spend, or reservation freezes the
+ * project. Keeping this as a statement predicate makes the decision atomic
+ * with the UPDATE while the shared project-authoring lock is held.
+ */
+export function wizardInputsRemainMutableSql(projectId: string) {
+  return sql<boolean>`not exists (
+    select 1
+    from ${schema.generationRuns}
+    where ${schema.generationRuns.projectId} = ${projectId}
+      and (
+        ${schema.generationRuns.status} not in ('failed', 'cancelled')
+        or exists (
+          select 1
+          from ${schema.generationEvents}
+          where ${schema.generationEvents.runId} = ${schema.generationRuns.id}
+            and (
+              ${schema.generationEvents.type} in ('agent', 'chapter', 'review')
+              or (
+                ${schema.generationEvents.type} = 'stage'
+                and ${schema.generationEvents.payload}->>'stage' <> 'queued'
+              )
+            )
+        )
+        or exists (
+          select 1
+          from ${schema.llmCalls}
+          where ${schema.llmCalls.runId} = ${schema.generationRuns.id}
+        )
+        or exists (
+          select 1
+          from ${schema.creditLedger}
+          where ${schema.creditLedger.runId} = ${schema.generationRuns.id}
+            and (
+              ${schema.creditLedger.kind} = 'usage'
+              or coalesce(${schema.creditLedger.externalRef}, '')
+                ~ '^(generation-reservation:|interactive-reservation:)'
+            )
+        )
+      )
+  )`;
+}
+
 export async function refreshProjectBeforeFirstRunTransaction(
   tx: DbTransaction,
   input: {
@@ -17,12 +65,6 @@ export async function refreshProjectBeforeFirstRunTransaction(
   },
 ): Promise<ProjectRow> {
   await lockProjectAuthoring(tx, input.project.id);
-  const [run] = await tx
-    .select({ id: schema.generationRuns.id })
-    .from(schema.generationRuns)
-    .where(eq(schema.generationRuns.projectId, input.project.id))
-    .limit(1);
-  if (run) return input.project;
 
   const [updated] = await tx
     .update(schema.projects)
@@ -31,10 +73,7 @@ export async function refreshProjectBeforeFirstRunTransaction(
       and(
         eq(schema.projects.id, input.project.id),
         eq(schema.projects.userId, input.userId),
-        sql`not exists (
-          select 1 from ${schema.generationRuns}
-          where ${schema.generationRuns.projectId} = ${input.project.id}
-        )`,
+        wizardInputsRemainMutableSql(input.project.id),
       ),
     )
     .returning();

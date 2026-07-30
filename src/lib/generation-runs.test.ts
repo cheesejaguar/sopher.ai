@@ -28,6 +28,7 @@ vi.mock("@/lib/billing/credits", async (importOriginal) => {
 
 import {
   claimUncertainAuthoringRun,
+  deriveAuthoringRunAcceptanceState,
   insertQueuedAuthoringRun,
   linkAuthoringRunWorkflow,
   markAuthoringRunAcceptanceUncertain,
@@ -112,13 +113,16 @@ describe("insertQueuedAuthoringRun", () => {
       expect(queries[1].strings.join("?")).toContain("assets");
       expect(queries[1].strings.join("?")).toContain("content_tool_runs");
       expect(queries[1].strings.join("?")).toContain("suggestions");
-      expect(queries[2].strings.join("?")).toContain("insert into generation_runs");
-      expect(queries[2].strings.join("?")).toContain("on conflict (project_id, request_key)");
-      expect(queries[2].strings.join("?")).toContain("acceptance_uncertain_at");
-      expect(queries[2].strings.join("?")).toContain("acceptance_dispatch_claimed_at");
-      expect(queries[2].strings.join("?")).toContain("optional_intent");
-      expect(queries[2].strings.join("?")).toContain("optional-operation-lease:");
-      expect(queries[2].strings.join("?")).toContain("intent-settled:");
+      const insertSql = queries[2].strings.join("?");
+      expect(insertSql).toContain("insert into generation_runs");
+      expect(insertSql).toContain("on conflict (project_id, request_key)");
+      expect(insertSql).toContain("acceptance_uncertain_at");
+      expect(insertSql).toContain("acceptance_dispatch_claimed_at");
+      expect(insertSql).toMatch(/\?::jsonb,\s+null,\s+now\(\)/);
+      expect(insertSql).not.toMatch(/\?::jsonb,\s+now\(\),\s+now\(\)/);
+      expect(insertSql).toContain("optional_intent");
+      expect(insertSql).toContain("optional-operation-lease:");
+      expect(insertSql).toContain("intent-settled:");
       expect(queries[2].values).toContain("33333333-3333-4333-8333-333333333333");
       return [
         [],
@@ -331,6 +335,53 @@ describe("Workflow dispatch ownership", () => {
     });
   });
 
+  it("distinguishes a normal initial dispatch from an ambiguous response", () => {
+    const now = new Date("2026-07-30T12:10:00.000Z");
+
+    expect(
+      deriveAuthoringRunAcceptanceState(
+        {
+          acceptanceUncertainAt: null,
+          acceptanceDispatchClaimedAt: new Date("2026-07-30T12:09:30.000Z"),
+        },
+        now,
+      ),
+    ).toEqual({
+      acceptanceUncertain: false,
+      dispatchClaimIsFresh: true,
+      safeToRetry: false,
+    });
+    expect(
+      deriveAuthoringRunAcceptanceState(
+        {
+          acceptanceUncertainAt: new Date("2026-07-30T12:09:30.000Z"),
+          acceptanceDispatchClaimedAt: null,
+        },
+        now,
+      ),
+    ).toEqual({
+      acceptanceUncertain: true,
+      dispatchClaimIsFresh: false,
+      safeToRetry: true,
+    });
+  });
+
+  it("makes an abandoned initial dispatch lease retryable after it expires", () => {
+    expect(
+      deriveAuthoringRunAcceptanceState(
+        {
+          acceptanceUncertainAt: null,
+          acceptanceDispatchClaimedAt: new Date("2026-07-30T12:07:59.000Z"),
+        },
+        new Date("2026-07-30T12:10:00.000Z"),
+      ),
+    ).toEqual({
+      acceptanceUncertain: true,
+      dispatchClaimIsFresh: false,
+      safeToRetry: true,
+    });
+  });
+
   it("reports a lost linkage CAS instead of overwriting another Workflow owner", async () => {
     mockUpdateReturning([]);
 
@@ -378,6 +429,7 @@ describe("Workflow dispatch ownership", () => {
     });
     expect(execute).toHaveBeenCalledOnce();
     expect(set).toHaveBeenCalledWith({
+      acceptanceUncertainAt: expect.any(Date),
       acceptanceDispatchClaimedAt: expect.any(Date),
     });
   });

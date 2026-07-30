@@ -12,7 +12,11 @@ import { isActionRateLimited, LIMITS } from "@/lib/security/rate-limit";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
 import { isActiveRunConflict } from "@/lib/run-conflict";
-import { buildBookGenerationConfig, type StartableProject } from "@/lib/book-start";
+import {
+  buildBookGenerationConfig,
+  canReattachBookStart,
+  type StartableProject,
+} from "@/lib/book-start";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 import { prepareFullBookRunDispatch } from "@/lib/authoring-dispatch";
 import {
@@ -311,7 +315,10 @@ async function startGenerationRun(
   if (replay) return replay;
 
   const [activeRun] = await db
-    .select({ id: schema.generationRuns.id })
+    .select({
+      id: schema.generationRuns.id,
+      kind: schema.generationRuns.kind,
+    })
     .from(schema.generationRuns)
     .where(
       and(
@@ -321,6 +328,13 @@ async function startGenerationRun(
     )
     .limit(1);
   if (activeRun) {
+    if (!canReattachBookStart(activeRun.kind)) {
+      return {
+        status: "rate_limited",
+        message:
+          "Another writing task is still running for this project. Let it finish before starting the book.",
+      };
+    }
     return {
       status: "reattached",
       projectId: project.id,
@@ -360,7 +374,10 @@ async function startGenerationRun(
     // The partial unique index is the race-proof backstop behind the pre-check above.
     if (!isActiveRunConflict(error)) throw error;
     const [raced] = await db
-      .select({ id: schema.generationRuns.id })
+      .select({
+        id: schema.generationRuns.id,
+        kind: schema.generationRuns.kind,
+      })
       .from(schema.generationRuns)
       .where(
         and(
@@ -370,6 +387,13 @@ async function startGenerationRun(
       )
       .limit(1);
     if (!raced) throw error;
+    if (!canReattachBookStart(raced.kind)) {
+      return {
+        status: "rate_limited",
+        message:
+          "Another writing task is still running for this project. Let it finish before starting the book.",
+      };
+    }
     return {
       status: "reattached",
       projectId: project.id,
