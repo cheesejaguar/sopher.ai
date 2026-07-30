@@ -50,11 +50,11 @@ export function HowItWorks() {
                 </p>
                 <span
                   aria-hidden="true"
-                  className="relative hidden h-16 w-12 border border-[#ddd7cc] bg-[#fffdf7] shadow-[5px_5px_0_#e8e2d8] sm:block"
+                  className="relative hidden h-16 w-12 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] sm:block"
                 >
-                  <span className="absolute top-3 right-2 left-2 h-px bg-[#5e5762]/35" />
-                  <span className="absolute top-5 right-4 left-2 h-px bg-[#5e5762]/25" />
-                  <span className="absolute top-8 right-2 left-2 h-px bg-[#5e5762]/25" />
+                  <span className="absolute top-3 right-2 left-2 h-px bg-paper-muted/35" />
+                  <span className="absolute top-5 right-4 left-2 h-px bg-paper-muted/25" />
+                  <span className="absolute top-8 right-2 left-2 h-px bg-paper-muted/25" />
                   <span
                     className="absolute right-2 bottom-3 left-2 h-px bg-primary/60"
                     style={{ opacity: (index + 1) / STEPS.length }}
@@ -78,7 +78,7 @@ export function HowItWorks() {
             ].map((control, index) => (
               <li
                 key={control}
-                className="grid min-h-20 grid-cols-[2rem_1fr] items-start bg-[#f5f6f9] p-4 text-sm leading-6 dark:bg-[#09090d]"
+                className="grid min-h-20 grid-cols-[2rem_1fr] items-start bg-background p-4 text-sm leading-6"
               >
                 <span className="font-mono text-[0.6875rem] text-muted-foreground">
                   C{index + 1}

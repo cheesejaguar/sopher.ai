@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { ForbiddenError, requireAdmin, UnauthorizedError } from "@/lib/auth";
+import { ClerkRouteProvider } from "@/components/auth/clerk-route-provider";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProductShell } from "@/components/studio/product-shell";
 
@@ -47,18 +48,20 @@ async function GuardedShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <ProductShell variant="admin">
-      <Suspense
-        fallback={
-          <div role="status" aria-label="Loading admin workspace" className="space-y-4">
-            <span className="sr-only">Loading admin workspace</span>
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-64 w-full" />
-          </div>
-        }
-      >
-        {children}
-      </Suspense>
-    </ProductShell>
+    <ClerkRouteProvider>
+      <ProductShell variant="admin">
+        <Suspense
+          fallback={
+            <div role="status" aria-label="Loading admin workspace" className="space-y-4">
+              <span className="sr-only">Loading admin workspace</span>
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-64 w-full" />
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      </ProductShell>
+    </ClerkRouteProvider>
   );
 }

@@ -13,14 +13,14 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
   const vercelAnalyticsEnabled = process.env.VERCEL === "1";
 
   return (
-    <div className="flex min-h-dvh flex-col bg-[#f5f6f9] text-[#161720] [--font-serif:Georgia] [font-family:var(--font-archivo),Arial,sans-serif] dark:bg-[#09090d] dark:text-[#f5f4fb]">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground [--font-serif:Georgia] [font-family:var(--font-archivo),Arial,sans-serif]">
       <PublicAnalytics gaId={gaId} vercelEnabled={vercelAnalyticsEnabled} />
       {/* The skip link lives once, in the root layout; this layout supplies its
           target below so it resolves without JavaScript. */}
-      <header className="sticky top-0 z-40 border-b border-black/10 bg-[#f5f6f9]/95 backdrop-blur-xl dark:border-white/10 dark:bg-[#09090d]/92">
+      <header className="sticky top-0 z-40 border-b border-black/10 bg-background/95 backdrop-blur-xl dark:border-white/10">
         <nav
           aria-label="Main"
-          className="mx-auto flex h-16 w-full max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8"
+          className="mx-auto flex h-16 w-full max-w-7xl items-center gap-2 px-4 min-[360px]:gap-4 sm:px-6 lg:px-8"
         >
           <Link href="/" aria-label="sopher.ai" className="group flex min-h-11 items-center">
             <BrandMark showWordmark={false} className="sm:hidden" />
@@ -52,12 +52,13 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
               Pricing
             </Link>
           </div>
-          <a
+          <Link
             href="/studio"
+            prefetch={false}
             className={cn(buttonVariants(), "ml-auto min-h-11 rounded-sm px-4 md:ml-3")}
           >
             Start your book
-          </a>
+          </Link>
           <div className="[&_[data-slot=button]]:size-11 [&_[data-slot=button]]:rounded-sm">
             <PublicThemeToggle />
           </div>

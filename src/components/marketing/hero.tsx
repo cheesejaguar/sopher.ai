@@ -14,18 +14,20 @@ export function Hero() {
             A sentence in. <span className="mt-2 block text-foreground">A finished book out.</span>
           </h1>
           <p className="hero-support-copy mt-8 max-w-xl text-base leading-7 text-pretty text-muted-foreground sm:text-lg sm:leading-8">
-            A bedtime story where your dog is the superhero. A mystery set on your street. The
-            memoir nobody in your family ever wrote down. Describe it in a sentence or two — a team
-            of AI agents plans it, writes every chapter, and edits the whole manuscript while you
-            watch.
+            Describe the book you want in a sentence or two. Sopher&apos;s AI team plans it, writes
+            every chapter, and edits the complete manuscript while you watch.
+          </p>
+          <p className="folio-label mt-4 text-muted-foreground">
+            Bedtime story / street mystery / family memoir
           </p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <a
+            <Link
               href="/studio"
+              prefetch={false}
               className={cn(buttonVariants({ size: "lg" }), "min-h-11 rounded-sm px-6 text-base")}
             >
               Write your book
-            </a>
+            </Link>
             <Link
               href="#how-it-works"
               className={cn(
@@ -54,7 +56,7 @@ export function Hero() {
         </div>
       </div>
 
-      <div className="border-t border-black/10 bg-[#eeeff4]/85 dark:border-white/10 dark:bg-[#0d0d13]/92">
+      <div className="border-t border-black/10 bg-instrument/85 dark:border-white/10">
         <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-24">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Proof 01 / live manuscript</p>

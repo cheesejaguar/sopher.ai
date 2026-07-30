@@ -95,7 +95,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install chromium --with-deps
       - name: Expose Playwright Chromium to Lighthouse
-        run: echo "CHROME_PATH=$(node -e 'process.stdout.write(require(\"playwright\").chromium.executablePath())')" >> "$GITHUB_ENV"
+        run: node -e 'console.log(`CHROME_PATH=${require("@playwright/test").chromium.executablePath()}`)' >> "$GITHUB_ENV"
       - name: Build the production application
         run: pnpm build
         env:
@@ -108,4 +108,5 @@ jobs:
         with:
           name: lighthouse-reports
           path: .lighthouseci
+          include-hidden-files: true
           retention-days: 14

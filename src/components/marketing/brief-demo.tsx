@@ -108,7 +108,7 @@ export function BriefDemo() {
               onClick={() => choose(i)}
               aria-pressed={i === index}
               className={cn(
-                "grid min-h-11 min-w-0 grid-cols-[auto_1fr] items-center gap-2 bg-[#eeeff4] px-2.5 py-2 text-left text-xs font-medium transition-colors aria-[pressed=true]:underline aria-[pressed=true]:underline-offset-4 dark:bg-[#111118] md:px-3",
+                "grid min-h-11 min-w-0 grid-cols-[auto_1fr] items-center gap-2 bg-instrument px-2.5 py-2 text-left text-xs font-medium transition-colors aria-[pressed=true]:underline aria-[pressed=true]:underline-offset-4 md:px-3",
                 i === index
                   ? "border-l border-primary text-foreground"
                   : "border-l border-transparent text-muted-foreground hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.045]",

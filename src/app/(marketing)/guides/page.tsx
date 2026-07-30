@@ -45,7 +45,7 @@ export default function GuidesIndex() {
             </p>
             <div
               aria-hidden="true"
-              className="mt-8 hidden h-28 w-20 border border-[#ddd7cc] bg-[#fffdf7] shadow-[5px_5px_0_#e8e2d8,10px_10px_0_#dcd6cc] lg:block"
+              className="mt-8 hidden h-28 w-20 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] lg:block"
             />
           </div>
 

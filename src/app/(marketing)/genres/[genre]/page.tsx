@@ -241,7 +241,7 @@ export default async function GenrePage({ params }: { params: Promise<{ genre: s
                 {page.subgenres.map((subgenre, index) => (
                   <li
                     key={subgenre}
-                    className="grid min-h-12 grid-cols-[2rem_1fr] items-center bg-[#f5f6f9] px-3 text-sm text-muted-foreground dark:bg-[#09090d]"
+                    className="grid min-h-12 grid-cols-[2rem_1fr] items-center bg-background px-3 text-sm text-muted-foreground"
                   >
                     <span className="font-mono text-[0.6875rem] text-primary">
                       {String(index + 1).padStart(2, "0")}

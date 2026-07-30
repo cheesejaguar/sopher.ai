@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@clerk/ui/themes/shadcn.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -49,9 +48,16 @@
   --paper-foreground: oklch(0.19 0.018 78);
   --paper-muted: oklch(0.43 0.022 82);
   --paper-edge: oklch(0.82 0.02 84);
+  --paper-link: oklch(0.42 0.2 289);
   --instrument: oklch(0.94 0.01 275);
   --instrument-high: oklch(0.985 0.006 275);
   --spectral: oklch(0.52 0.22 284);
+  --future-stage: #0d0d13;
+  --future-stage-foreground: #f6f4fb;
+  --future-stage-muted: #c5c2cc;
+  --future-stage-accent: #b8adff;
+  --future-stage-action: #6243d7;
+  --future-stage-action-hover: #5233bd;
 
   --chart-1: oklch(0.48 0.24 289);
   --chart-2: oklch(0.52 0.18 250);
@@ -159,9 +165,16 @@
   --color-paper-foreground: var(--paper-foreground);
   --color-paper-muted: var(--paper-muted);
   --color-paper-edge: var(--paper-edge);
+  --color-paper-link: var(--paper-link);
   --color-instrument: var(--instrument);
   --color-instrument-high: var(--instrument-high);
   --color-spectral: var(--spectral);
+  --color-future-stage: var(--future-stage);
+  --color-future-stage-foreground: var(--future-stage-foreground);
+  --color-future-stage-muted: var(--future-stage-muted);
+  --color-future-stage-accent: var(--future-stage-accent);
+  --color-future-stage-action: var(--future-stage-action);
+  --color-future-stage-action-hover: var(--future-stage-action-hover);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -367,9 +380,9 @@
 }
 
 .hero-support-copy {
-  /* Keep the largest mobile text paint on the metric-matched local fallback.
+  /* Keep the mobile offer immediately paintable on every CI/OS font stack.
      Archivo still owns display and UI type without delaying the core promise. */
-  font-family: "Archivo Fallback", Arial, sans-serif;
+  font-family: system-ui, sans-serif;
 }
 
 .instrument-surface {

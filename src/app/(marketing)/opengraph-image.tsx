@@ -8,6 +8,8 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 export default function OpengraphImage() {
+  // ImageResponse/Satori has no access to the page's CSS custom properties.
+  // Keep this server-rendered asset palette synchronized with DESIGN.md.
   return new ImageResponse(
     <div
       style={{

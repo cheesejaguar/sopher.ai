@@ -1,11 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Archivo, Source_Serif_4 } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
-import { shadcn } from "@clerk/ui/themes";
 import { ThemeProvider } from "@/components/theme-provider";
 import { SkipLink } from "@/components/ui/skip-link";
-import { clerkEnabled } from "@/lib/clerk";
 import { SITE_URL, SiteJsonLd } from "@/components/seo/json-ld";
 import "./globals.css";
 
@@ -21,34 +18,6 @@ const sourceSerif = Source_Serif_4({
   weight: ["400", "600"],
   preload: false,
 });
-
-const clerkAppearance = {
-  theme: shadcn,
-  variables: {
-    colorPrimary: "var(--primary)",
-    colorPrimaryForeground: "var(--primary-foreground)",
-    colorDanger: "var(--destructive)",
-    colorSuccess: "var(--success)",
-    colorWarning: "var(--ember)",
-    colorNeutral: "var(--foreground)",
-    colorForeground: "var(--foreground)",
-    colorMuted: "var(--muted)",
-    colorMutedForeground: "var(--muted-foreground)",
-    colorBackground: "var(--card)",
-    colorInput: "var(--background)",
-    colorInputForeground: "var(--foreground)",
-    colorRing: "var(--ring)",
-    colorBorder: "var(--border)",
-    colorShadow: "var(--background)",
-    colorModalBackdrop: "var(--background)",
-    fontFamily: "var(--font-archivo), Arial, sans-serif",
-    fontFamilyButtons: "var(--font-archivo), Arial, sans-serif",
-    fontFamilyMono:
-      'ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace',
-    fontSize: "0.875rem",
-    borderRadius: "0.25rem",
-  },
-} as const;
 
 /** Under the ~160 characters Google renders; the old one was 244 and got cut. */
 const DESCRIPTION =
@@ -142,11 +111,7 @@ export default function RootLayout({
         <SiteJsonLd />
         <SkipLink />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-          {clerkEnabled ? (
-            <ClerkProvider appearance={clerkAppearance}>{route}</ClerkProvider>
-          ) : (
-            route
-          )}
+          {route}
         </ThemeProvider>
       </body>
     </html>

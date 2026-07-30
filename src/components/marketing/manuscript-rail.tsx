@@ -39,8 +39,10 @@ function PageLines({ index }: { index: number }) {
       <span className="flex flex-col gap-1 px-2 py-2">
         {LINE_WIDTHS[index].map((width, line) => (
           <span key={`${width}-${line}`} className="grid grid-cols-[0.4rem_1fr] items-center gap-1">
-            <span className="font-mono text-[0.35rem] leading-none text-[#6d6770]">{line + 1}</span>
-            <span className={cn("h-px bg-[#6d6770]/55", width)} />
+            <span className="font-mono text-[0.35rem] leading-none text-paper-muted">
+              {line + 1}
+            </span>
+            <span className={cn("h-px bg-paper-muted/55", width)} />
           </span>
         ))}
       </span>
@@ -49,11 +51,15 @@ function PageLines({ index }: { index: number }) {
 
   return (
     <span className="flex flex-col gap-1 px-2 py-2.5">
-      {index === 0 ? <span className="mb-0.5 h-1 w-3 bg-[#6047d7]" /> : null}
+      {index === 0 ? <span className="mb-0.5 h-1 w-3 bg-primary" /> : null}
       {LINE_WIDTHS[index].map((width, line) => (
         <span
           key={`${width}-${line}`}
-          className={cn("h-px bg-[#6d6770]/55", width, index === 3 && line === 1 && "bg-[#b54552]")}
+          className={cn(
+            "h-px bg-paper-muted/55",
+            width,
+            index === 3 && line === 1 && "bg-destructive",
+          )}
         />
       ))}
     </span>
@@ -84,16 +90,16 @@ function PageArtifact({ index, active }: { index: number; active: boolean }) {
     >
       {index > 0 ? (
         <>
-          <span className="absolute inset-0 translate-x-1 translate-y-1 border border-[#cfc8bd] bg-[#e8e2d8]" />
+          <span className="absolute inset-0 translate-x-1 translate-y-1 border border-paper-edge bg-paper-edge/60" />
           {index > 1 ? (
-            <span className="absolute inset-0 translate-x-2 translate-y-2 border border-[#bbb4aa] bg-[#d9d2c8]" />
+            <span className="absolute inset-0 translate-x-2 translate-y-2 border border-paper-edge bg-paper-edge/80" />
           ) : null}
         </>
       ) : null}
       <span
         className={cn(
-          "absolute inset-0 overflow-hidden border border-[#d7d0c5] bg-[#f8f5ec] text-[#28232a]",
-          isSpread && "grid grid-cols-2 divide-x divide-[#ddd6cc]",
+          "absolute inset-0 overflow-hidden border border-paper-edge bg-paper text-paper-foreground",
+          isSpread && "grid grid-cols-2 divide-x divide-paper-edge",
           active &&
             "shadow-[0_0_0_1px_color-mix(in_oklch,var(--ion)_72%,transparent),0_12px_28px_-18px_color-mix(in_oklch,var(--ion)_65%,transparent)]",
         )}

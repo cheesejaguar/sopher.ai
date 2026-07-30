@@ -34,7 +34,7 @@ export function MobileMainMenu() {
           <span className="h-px w-4 bg-current" />
         </span>
       </summary>
-      <div className="absolute top-[calc(100%+0.65rem)] right-0 w-64 border border-black/10 bg-[#f5f6f9] p-2 shadow-2xl dark:border-white/12 dark:bg-[#121218]">
+      <div className="absolute top-[calc(100%+0.65rem)] right-0 w-64 border border-border bg-card p-2 shadow-2xl">
         {ITEMS.map(([label, href], index) => (
           <Link
             key={href}

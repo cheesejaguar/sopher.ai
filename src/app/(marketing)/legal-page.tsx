@@ -32,10 +32,10 @@ export function LegalPage({
 
         <div className="manuscript-sheet px-6 py-10 sm:px-10 sm:py-12 lg:col-span-8 lg:px-14 lg:py-16">
           <span aria-hidden="true" className="absolute top-0 right-8 h-6 w-24 bg-primary/75" />
-          <div className="prose-legal mx-auto max-w-[72ch] space-y-6 font-serif text-[1rem] leading-7 text-[#57505a] [&_a]:text-[#4d34bd] [&_a]:underline-offset-4 hover:[&_a]:underline [&_code]:font-mono [&_code]:text-[0.86em] [&_h2]:mt-12 [&_h2]:font-sans [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-[-0.025em] [&_h2]:text-[#211d24] [&_li]:text-[#57505a] [&_p]:text-[#57505a] [&_strong]:font-semibold [&_strong]:text-[#211d24] [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5">
+          <div className="prose-legal mx-auto max-w-[72ch] space-y-6 font-serif text-[1rem] leading-7 text-paper-muted [&_a]:text-paper-link [&_a]:underline-offset-4 hover:[&_a]:underline [&_code]:font-mono [&_code]:text-[0.86em] [&_h2]:mt-12 [&_h2]:font-sans [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-[-0.025em] [&_h2]:text-paper-foreground [&_li]:text-paper-muted [&_p]:text-paper-muted [&_strong]:font-semibold [&_strong]:text-paper-foreground [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5">
             {children}
           </div>
-          <p className="mt-12 flex items-center justify-between border-t border-[#ddd7cc] pt-4 font-mono text-[0.6875rem] tracking-[0.08em] text-[#554f58] uppercase">
+          <p className="mt-12 flex items-center justify-between border-t border-paper-edge pt-4 font-mono text-[0.6875rem] tracking-[0.08em] text-paper-muted uppercase">
             <span>sopher.ai / legal</span>
             <span>01</span>
           </p>

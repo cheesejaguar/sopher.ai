@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 
 import StudioLoading from "./loading";
+import { ClerkRouteProvider } from "@/components/auth/clerk-route-provider";
 import { ProductShell } from "@/components/studio/product-shell";
 import { getBalance } from "@/lib/billing/credits";
 import { requireUser } from "@/lib/auth";
@@ -20,8 +21,10 @@ export default async function StudioLayout({ children }: { children: React.React
   const credits = await getBalance(userId);
 
   return (
-    <ProductShell credits={credits}>
-      <Suspense fallback={<StudioLoading />}>{children}</Suspense>
-    </ProductShell>
+    <ClerkRouteProvider>
+      <ProductShell credits={credits}>
+        <Suspense fallback={<StudioLoading />}>{children}</Suspense>
+      </ProductShell>
+    </ClerkRouteProvider>
   );
 }

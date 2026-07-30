@@ -14,6 +14,9 @@ export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
 export default function OpengraphImage() {
+  // ImageResponse/Satori renders outside the document cascade, so this asset
+  // cannot resolve the semantic CSS variables used by the application. These
+  // literals are the static equivalents of the Future Proof tokens.
   return new ImageResponse(
     <div
       style={{
