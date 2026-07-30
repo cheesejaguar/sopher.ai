@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getSqlClient: vi.fn(),
@@ -69,6 +72,17 @@ const debit = {
     "metering-claim:metering-intent:generation:run-1:chapter:1:writer:writer.draft:attempt:one",
 };
 
+function expectNoReservedAuthorizationCte(sqlText: string) {
+  expect(sqlText).not.toMatch(/\bauthorization\s+as(?:\s+materialized)?\s*\(/i);
+}
+
+describe("PostgreSQL CTE identifiers", () => {
+  it("never uses the reserved keyword authorization as a CTE name", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/lib/billing/meter.ts"), "utf8");
+    expectNoReservedAuthorizationCte(source);
+  });
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSqlClient.mockReturnValue({ transaction: mocks.transaction });
@@ -107,6 +121,8 @@ describe("recordLlmCallsAndDebit", () => {
     expect(queryText).toContain("usage_insert");
     expect(queryText).toContain("usage_conflict");
     expect(queryText).toContain("existing_settlement");
+    expect(queryText).toContain("authorized_settlement as materialized");
+    expectNoReservedAuthorizationCte(queryText);
     expect(queryText).toContain("numeric(12, 4)");
     expect(queryText).toContain("debited_credits");
     expect(queryText).toContain("release_insert");
@@ -240,6 +256,8 @@ describe("metered intent authorization", () => {
     expect(reconciliationQueries[0].strings.join("?")).toContain("pg_advisory_xact_lock");
     expect(reconciliationQueries[0].strings.join("?")).toContain("interval '1 hour'");
     const settlementSql = reconciliationQueries[1].strings.join("?");
+    expect(settlementSql).toContain("authorized_reconciliation as materialized");
+    expectNoReservedAuthorizationCte(settlementSql);
     expect(settlementSql).toContain("claim.project_id is not distinct from intent.project_id");
     expect(settlementSql).toContain("delivery_refund");
     expect(settlementSql).toContain("compensated_parent_restore");
@@ -324,6 +342,8 @@ describe("metered intent authorization", () => {
     expect(queries).toHaveLength(2);
     expect(queries[0].strings.join("?")).toContain("pg_advisory_xact_lock");
     const authorizationSql = queries[1].strings.join("?");
+    expect(authorizationSql).toContain("authorized_start as materialized");
+    expectNoReservedAuthorizationCte(authorizationSql);
     expect(authorizationSql).toContain("claim_insert");
     expect(authorizationSql).toContain("parent_claim");
     expect(authorizationSql).toContain("intent_insert");

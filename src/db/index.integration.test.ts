@@ -978,7 +978,7 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
       )
       values (
         ${ids.uncertainRun}, ${ids.runProject}, ${ids.pathUser}, ${randomUUID()},
-        'chapter', 'queued', '{"chapterId":"fixture"}'::jsonb, now()
+        'chapter', 'queued', '{"chapterId":"fixture","dispatchReady":true}'::jsonb, now()
       )
     `;
     const claimed = await claimUncertainAuthoringRun({

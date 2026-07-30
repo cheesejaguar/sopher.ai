@@ -305,7 +305,7 @@ export async function beginMeteredCallIntent(input: {
       from credit_ledger
       where user_id = ${input.userId}
     ),
-    authorization as materialized (
+    authorized_start as materialized (
       select
         wallet.balance,
         coalesce((select remaining from parent), 0) as parent_remaining,
@@ -368,7 +368,7 @@ export async function beginMeteredCallIntent(input: {
         ${input.projectId ?? null},
         ${input.runId ?? null},
         ${reservationRef}
-      from authorization
+      from authorized_start
       on conflict (external_ref) do nothing
       returning id
     ),
@@ -378,13 +378,13 @@ export async function beginMeteredCallIntent(input: {
       )
       select
         ${input.userId},
-        least(${String(maxCredits)}::numeric, authorization.parent_remaining),
+        least(${String(maxCredits)}::numeric, authorized_start.parent_remaining),
         'adjustment',
         'Transfer phase capacity to provider-call claim',
         ${input.projectId ?? null},
         ${input.runId ?? null},
         ${claimReleaseRef}
-      from authorization, claim_insert
+      from authorized_start, claim_insert
       where ${claimReleaseRef}::text is not null
       on conflict (external_ref) do nothing
       returning id
@@ -401,7 +401,7 @@ export async function beginMeteredCallIntent(input: {
         ${input.projectId ?? null},
         ${input.runId ?? null},
         ${input.intentRef}
-      from authorization, claim_insert
+      from authorized_start, claim_insert
       where
         ${claimReleaseRef}::text is null
         or exists (select 1 from parent_claim)
@@ -444,7 +444,7 @@ export async function beginMeteredCallIntent(input: {
       end as status,
       wallet.balance::text as balance,
       coalesce(
-        (select additional_required::text from authorization),
+        (select additional_required::text from authorized_start),
         ${String(maxCredits)}
       ) as required
     from wallet
@@ -1041,7 +1041,7 @@ export async function reconcileMeteredCallAsCharged(input: {
         select coalesce(sum(-cast(amount as numeric(12, 4))), 0) as credits
         from usage_values
       ),
-      authorization as materialized (
+      authorized_reconciliation as materialized (
         select target.*
         from target
         where not exists (
@@ -1068,16 +1068,16 @@ export async function reconcileMeteredCallAsCharged(input: {
           external_ref, metered_usd
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           usage_values.amount,
           usage_values.kind,
           usage_values.description,
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           usage_values.external_ref,
           usage_values.metered_usd
         from usage_values
-        cross join authorization
+        cross join authorized_reconciliation
         on conflict (external_ref) do nothing
         returning id, amount
       ),
@@ -1088,9 +1088,9 @@ export async function reconcileMeteredCallAsCharged(input: {
           usd, latency_ms
         )
         select
-          authorization.user_id,
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.user_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           call_values.agent_role,
           call_values.operation,
           call_values.model,
@@ -1101,7 +1101,7 @@ export async function reconcileMeteredCallAsCharged(input: {
           call_values.usd,
           call_values.latency_ms
         from call_values
-        cross join authorization
+        cross join authorized_reconciliation
         where (select count(*) from usage_insert) = ${costed.length}
         returning id
       ),
@@ -1110,14 +1110,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
-          authorization.authorized,
+          authorized_reconciliation.user_id,
+          authorized_reconciliation.authorized,
           'adjustment',
           'Release reconciled provider-call claim',
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           ${releaseRef}
-        from authorization
+        from authorized_reconciliation
         where (select count(*) from usage_insert) = ${costed.length}
           and (select count(*) from call_insert) = ${costed.length}
         on conflict (external_ref) do nothing
@@ -1128,14 +1128,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           0,
           'adjustment',
           'Provider result settled by administrator',
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           ${settledIntentRef}
-        from authorization, release_insert
+        from authorized_reconciliation, release_insert
         on conflict (external_ref) do nothing
         returning id
       ),
@@ -1144,14 +1144,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           (select sum(-amount) from usage_insert),
           'adjustment',
           ${refundDescription},
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           ${deliveryRefundRef}
-        from authorization, settled_intent
+        from authorized_reconciliation, settled_intent
         where exists (select 1 from usage_insert)
         on conflict (external_ref) do nothing
         returning id
@@ -1185,14 +1185,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           -parent_transfer.amount,
           'adjustment',
           'Restore open phase capacity after reconciled delivery refund',
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           parent_transfer.external_ref || ':delivery-restore'
-        from authorization, parent_transfer, delivery_refund
+        from authorized_reconciliation, parent_transfer, delivery_refund
         on conflict (external_ref) do nothing
         returning id
       )
@@ -1209,7 +1209,7 @@ export async function reconcileMeteredCallAsCharged(input: {
           )
         ) as recorded,
         coalesce(
-          (select authorized::text from authorization),
+          (select authorized::text from authorized_reconciliation),
           (select authorized::text from target),
           '0'
         ) as authorized,
@@ -1553,7 +1553,7 @@ export async function recordLlmCallsAndDebit(
         )
       limit 1
     ),
-    authorization as materialized (
+    authorized_settlement as materialized (
       select claim.authorized
       from claim
       where exists (
@@ -1585,7 +1585,7 @@ export async function recordLlmCallsAndDebit(
       )
       select usage_values.*
       from usage_values
-      cross join authorization
+      cross join authorized_settlement
       where not exists (select 1 from existing_usage)
       on conflict (external_ref) do nothing
       returning id, amount
@@ -1598,7 +1598,7 @@ export async function recordLlmCallsAndDebit(
       )
       select call_values.*
       from call_values
-      cross join authorization
+      cross join authorized_settlement
       where (select count(*) from usage_insert) = ${records.length}
       returning id
     ),
@@ -1608,13 +1608,13 @@ export async function recordLlmCallsAndDebit(
       )
       select
         ${userId},
-        authorization.authorized,
+        authorized_settlement.authorized,
         'adjustment',
         'Release settled provider-call claim',
         ${records[0].projectId ?? null},
         ${records[0].runId ?? null},
         ${releaseRef}
-      from authorization
+      from authorized_settlement
       where (select count(*) from usage_insert) = ${records.length}
         and (select count(*) from call_insert) = ${records.length}
       on conflict (external_ref) do nothing
