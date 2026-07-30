@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: No sync-duplicate files
         run: |
           if git ls-files | grep -E ' [0-9]+\.' ; then
@@ -58,7 +58,7 @@ jobs:
       E2E_DATABASE_HOST: ep-bitter-mode-awgyoll1-pooler.c-12.us-east-1.aws.neon.tech
       E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
