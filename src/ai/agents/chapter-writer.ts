@@ -1,8 +1,13 @@
 import { generateText, isStepCount, Output, streamText } from "ai";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import {
+  assertMeteredInputWithinBudget,
+  meteredInputGuard,
+  meteredMaxOutputTokens,
+} from "@/ai/metering-limits";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { WRITER_SYSTEM_PROMPT } from "@/ai/prompts/writer";
 import {
@@ -40,6 +45,18 @@ export type ChapterResult = {
   wordCount: number;
   qualityScore: number;
   critique: Critique | null;
+};
+
+export type ChapterWriterCheckpoint = {
+  scenePlan?: ScenePlan;
+  draft?: string;
+  critique?: Critique;
+  result?: ChapterResult;
+};
+
+export type ChapterWriterCheckpointOptions = {
+  checkpoint?: ChapterWriterCheckpoint;
+  onCheckpoint?: (checkpoint: ChapterWriterCheckpoint) => void | Promise<void>;
 };
 
 // Book-static system prompt — byte-identical across every writer call in a run,
@@ -119,47 +136,91 @@ function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
-export async function writeChapter(ctx: ChapterWriterCtx): Promise<ChapterResult> {
+export async function writeChapter(
+  ctx: ChapterWriterCtx,
+  options: ChapterWriterCheckpointOptions = {},
+): Promise<ChapterResult> {
   const models = MODELS[ctx.tier];
   const system = writerSystem(ctx);
+  let checkpoint = options.checkpoint ?? {};
+  const save = async (next: ChapterWriterCheckpoint) => {
+    checkpoint = next;
+    await options.onCheckpoint?.(checkpoint);
+  };
 
-  const plan = await metered(
-    ctx.meter,
-    { role: "writer", operation: "writer.plan", model: models.planner },
-    () =>
-      generateText({
-        model: models.planner,
-        instructions: system,
-        prompt: planPrompt(ctx),
-        output: Output.object({ schema: scenePlanSchema }),
-        providerOptions: gatewayOptions(ctx.meter, "writer"),
-      }),
-  );
+  if (checkpoint.result) return checkpoint.result;
 
-  const draftResult = await metered(
-    ctx.meter,
-    { role: "writer", operation: "writer.draft", model: models.prose },
-    async () => {
-      const stream = streamText({
+  let plan = checkpoint.scenePlan;
+  if (!plan) {
+    const result = await metered(
+      ctx.meter,
+      { role: "writer", operation: "writer.plan", model: models.planner },
+      () =>
+        generateText({
+          model: models.planner,
+          instructions: system,
+          prompt: planPrompt(ctx),
+          maxOutputTokens: meteredMaxOutputTokens("writer.plan"),
+          prepareStep: meteredInputGuard("writer.plan"),
+          output: Output.object({ schema: scenePlanSchema }),
+          providerOptions: gatewayOptions(ctx.meter, "writer"),
+        }),
+    );
+    plan = result.output;
+    await save({ ...checkpoint, scenePlan: plan });
+  }
+
+  let draft = checkpoint.draft;
+  if (!draft) {
+    const draftOutputTokens = meteredMaxOutputTokens(
+      "writer.draft",
+      Math.round(ctx.targetWords * 1.5),
+    );
+    const draftResult = await metered(
+      ctx.meter,
+      {
+        role: "writer",
+        operation: "writer.draft",
         model: models.prose,
-        instructions: anthropicCachedSystem(system),
-        prompt: draftPrompt(ctx, plan.output),
-        tools: buildToolset("writer", ctx.tools),
-        stopWhen: isStepCount(8),
-        prepareStep: ({ stepNumber }) => (stepNumber >= 6 ? { activeTools: [] } : {}),
-        maxOutputTokens: Math.min(32_000, Math.round(ctx.targetWords * 2.7)),
-        providerOptions: gatewayOptions(ctx.meter, "writer", { withFallbacks: true }),
-      });
-      let text = "";
-      for await (const delta of stream.textStream) {
-        text += delta;
-        await ctx.onProseDelta?.(delta);
-      }
-      const usage = await stream.usage;
-      return { text, usage };
-    },
-  );
-  const draft = draftResult.text.trim();
+        maxOutputTokens: draftOutputTokens,
+      },
+      async () => {
+        const stream = streamText({
+          model: models.prose,
+          instructions: anthropicCachedSystem(system),
+          prompt: draftPrompt(ctx, plan),
+          tools: buildToolset("writer", ctx.tools),
+          stopWhen: isStepCount(3),
+          prepareStep: (options) => {
+            assertMeteredInputWithinBudget(
+              "writer.draft",
+              {
+                instructions: options.instructions,
+                messages: options.messages,
+              },
+              options.stepNumber,
+            );
+            return options.stepNumber >= 2 ? { activeTools: [] } : {};
+          },
+          maxOutputTokens: draftOutputTokens,
+          providerOptions: gatewayOptions(ctx.meter, "writer", { withFallbacks: true }),
+        });
+        let text = "";
+        for await (const delta of stream.textStream) {
+          text += delta;
+          await ctx.onProseDelta?.(delta);
+        }
+        const [usage, response, steps] = await Promise.all([
+          stream.usage,
+          stream.response,
+          stream.steps,
+        ]);
+        return { text, usage, response, steps };
+      },
+    );
+    draft = draftResult.text.trim();
+    await save({ ...checkpoint, draft });
+  }
 
   const metrics = analyzeQuality(draft);
   const metricsNote = JSON.stringify({
@@ -173,35 +234,44 @@ export async function writeChapter(ctx: ChapterWriterCtx): Promise<ChapterResult
   });
 
   if (ctx.tier === "draft") {
-    return {
+    const result = {
       content: draft,
       wordCount: countWords(draft),
       qualityScore: 0.75,
       critique: null,
     };
+    await save({ ...checkpoint, result });
+    return result;
   }
 
-  const critique = await metered(
-    ctx.meter,
-    { role: "writer", operation: "writer.critique", model: models.critic },
-    () =>
-      generateText({
-        model: models.critic,
-        instructions: anthropicCachedSystem(system),
-        prompt: critiquePrompt(ctx, draft, metricsNote),
-        output: Output.object({ schema: critiqueSchema }),
-        providerOptions: gatewayOptions(ctx.meter, "writer"),
-      }),
-  );
-
-  const verdict = critique.output;
+  let verdict = checkpoint.critique;
+  if (!verdict) {
+    const critique = await metered(
+      ctx.meter,
+      { role: "writer", operation: "writer.critique", model: models.critic },
+      () =>
+        generateText({
+          model: models.critic,
+          instructions: anthropicCachedSystem(system),
+          prompt: critiquePrompt(ctx, draft, metricsNote),
+          maxOutputTokens: meteredMaxOutputTokens("writer.critique"),
+          prepareStep: meteredInputGuard("writer.critique"),
+          output: Output.object({ schema: critiqueSchema }),
+          providerOptions: gatewayOptions(ctx.meter, "writer"),
+        }),
+    );
+    verdict = critique.output;
+    await save({ ...checkpoint, critique: verdict });
+  }
   if (verdict.verdict === "pass" || !verdict.issues.some((i) => i.severity === "major")) {
-    return {
+    const result = {
       content: draft,
       wordCount: countWords(draft),
       qualityScore: verdict.score,
       critique: verdict,
     };
+    await save({ ...checkpoint, result });
+    return result;
   }
 
   const revision = await metered(
@@ -212,6 +282,8 @@ export async function writeChapter(ctx: ChapterWriterCtx): Promise<ChapterResult
         model: models.prose,
         instructions: anthropicCachedSystem(system),
         prompt: revisePrompt(draft, verdict),
+        maxOutputTokens: meteredMaxOutputTokens("writer.revise"),
+        prepareStep: meteredInputGuard("writer.revise"),
         output: Output.object({ schema: revisionSchema }),
         providerOptions: gatewayOptions(ctx.meter, "writer", { withFallbacks: true }),
       }),
@@ -220,19 +292,22 @@ export async function writeChapter(ctx: ChapterWriterCtx): Promise<ChapterResult
   const revised = applyReplacements(draft, revision.output.replacements);
   // Only credit the revision bump when at least one replacement actually landed.
   const qualityScore = revised === draft ? verdict.score : Math.min(1, verdict.score + 0.1);
-  return {
+  const result = {
     content: revised,
     wordCount: countWords(revised),
     qualityScore,
     critique: verdict,
   };
+  await save({ ...checkpoint, result });
+  return result;
 }
 
 /** Persists the finished chapter and bumps status; returns the chapter row id. */
 export async function persistChapter(
   ctx: ChapterWriterCtx,
   result: ChapterResult,
-): Promise<string> {
+  expectedVersion: number,
+): Promise<string | undefined> {
   const db = getDb();
   const [row] = await db
     .update(schema.chapters)
@@ -241,14 +316,16 @@ export async function persistChapter(
       wordCount: result.wordCount,
       qualityScore: result.qualityScore.toFixed(3),
       status: "drafted",
+      version: sql`${schema.chapters.version} + 1`,
       updatedAt: new Date(),
     })
     .where(
       and(
         eq(schema.chapters.bookId, ctx.tools.bookId),
         eq(schema.chapters.chapterNumber, ctx.chapterNumber),
+        eq(schema.chapters.version, expectedVersion),
       ),
     )
     .returning({ id: schema.chapters.id });
-  return row.id;
+  return row?.id;
 }

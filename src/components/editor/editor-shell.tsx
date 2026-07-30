@@ -19,6 +19,7 @@ import CharacterCount from "@tiptap/extension-character-count";
 import { Markdown } from "tiptap-markdown";
 import { Search } from "lucide-react";
 import { toast } from "sonner";
+import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
 
 import {
   AlertDialog,
@@ -52,6 +53,7 @@ import type {
 import { markdownSelection } from "@/lib/editor/markdown-offsets";
 
 import { ChapterSidebar } from "./chapter-sidebar";
+import { editorContainsContentToolOutput } from "./content-tool-delivery";
 import { ImageNode } from "./image-node";
 import { mermaidCodeBlockView } from "./mermaid-code-block-view";
 import { ReviewPanel } from "./review-panel";
@@ -147,15 +149,27 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-async function postJson<T>(url: string, body: unknown): Promise<{ status: number; data: T }> {
+async function postJson<T>(
+  url: string,
+  body: unknown,
+  paid = false,
+): Promise<{ status: number; data: T; acknowledge: () => void }> {
   try {
-    const res = await fetch(url, {
+    const serializedBody = JSON.stringify(body);
+    const init = {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+      body: serializedBody,
+    };
+    const res = paid ? await idempotentPaidFetch(url, init) : await fetch(url, init);
     const data = (await res.json().catch(() => ({}))) as T;
-    return { status: res.status, data };
+    return {
+      status: res.status,
+      data,
+      acknowledge: () => {
+        if (paid) acknowledgePaidResponse(res);
+      },
+    };
   } catch {
     // Mutation handlers already map non-success statuses to a visible toast or
     // partial-success message. Returning a synthetic offline status keeps a
@@ -164,6 +178,7 @@ async function postJson<T>(url: string, body: unknown): Promise<{ status: number
     return {
       status: 0,
       data: { error: "Network unavailable. Check your connection and try again." } as T,
+      acknowledge: () => undefined,
     };
   }
 }
@@ -357,10 +372,9 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
-        const { status, data } = await postJson<SelectionEditResponse & { error?: unknown }>(
-          `/api/chapters/${chapterId}/edits`,
-          { selection, instruction },
-        );
+        const { status, data, acknowledge } = await postJson<
+          SelectionEditResponse & { error?: unknown }
+        >(`/api/chapters/${chapterId}/edits`, { selection, instruction }, true);
         if (status === 201 && data.suggestion) {
           setSuggestions((prev) => [...prev, data.suggestion]);
           setActiveId(data.suggestion.id);
@@ -368,6 +382,7 @@ export function EditorShell({
           // focus to the result instead of dropping it on the body.
           focusCardRef.current = data.suggestion.id;
           setAnnouncement("A suggestion is ready below the passage.");
+          acknowledge();
         } else if (status === 402) {
           const message = String(data.error ?? "Monthly budget reached.");
           toast.error(message);
@@ -414,10 +429,9 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
-        const { status, data } = await postJson<ContentToolResponse & { error?: unknown }>(
-          `/api/content-tools/${toolId}`,
-          { chapterId, text: selection.text },
-        );
+        const { status, data, acknowledge } = await postJson<
+          ContentToolResponse & { error?: unknown }
+        >(`/api/content-tools/${toolId}`, { chapterId, text: selection.text }, true);
         if (status !== 200 || !data.output) {
           const message =
             status === 402
@@ -427,38 +441,61 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
-        const insertPos = ed.state.selection.$to.after(1);
-        if (data.output.kind === "mermaid") {
-          ed.chain()
-            .focus()
-            .insertContentAt(insertPos, {
-              type: "codeBlock",
-              attrs: { language: "mermaid" },
-              content: [{ type: "text", text: data.output.source }],
-            })
-            .run();
-          toast.success("Diagram added below the passage.");
-        } else {
-          const { url, alt } = data.output;
-          ed.chain()
-            .focus()
-            .insertContentAt(insertPos, [
-              { type: "paragraph", content: [{ type: "image", attrs: { src: url, alt } }] },
-              {
-                type: "paragraph",
-                content: alt
-                  ? [{ type: "text", marks: [{ type: "italic" }], text: alt }]
-                  : undefined,
-              },
-            ])
-            .run();
-          toast.success("Illustration added below the passage.");
+        const alreadyInserted =
+          data.replayed === true && editorContainsContentToolOutput(ed.state.doc, data.output);
+        let inserted = alreadyInserted;
+        if (!alreadyInserted) {
+          const insertPos = ed.state.selection.$to.after(1);
+          if (data.output.kind === "mermaid") {
+            inserted = ed
+              .chain()
+              .focus()
+              .insertContentAt(insertPos, {
+                type: "codeBlock",
+                attrs: { language: "mermaid" },
+                content: [{ type: "text", text: data.output.source }],
+              })
+              .run();
+          } else {
+            const { url, alt } = data.output;
+            inserted = ed
+              .chain()
+              .focus()
+              .insertContentAt(insertPos, [
+                { type: "paragraph", content: [{ type: "image", attrs: { src: url, alt } }] },
+                {
+                  type: "paragraph",
+                  content: alt
+                    ? [{ type: "text", marks: [{ type: "italic" }], text: alt }]
+                    : undefined,
+                },
+              ])
+              .run();
+          }
         }
-        setAnnouncement(
-          data.output.kind === "mermaid"
+        if (!inserted) {
+          const message = "The result is ready, but it could not be inserted. Try again.";
+          toast.error(message);
+          setAnnouncement(message);
+          return;
+        }
+        if (!(await autosaveRef.current.flush())) {
+          const message =
+            "The result was inserted locally but could not be saved. Resolve the save conflict before leaving this chapter.";
+          toast.warning(message);
+          setAnnouncement(message);
+          return;
+        }
+        const successMessage = alreadyInserted
+          ? data.output.kind === "mermaid"
+            ? "Diagram was already added."
+            : "Illustration was already added."
+          : data.output.kind === "mermaid"
             ? "Diagram added below the passage."
-            : "Illustration added below the passage.",
-        );
+            : "Illustration added below the passage.";
+        toast.success(successMessage);
+        setAnnouncement(successMessage);
+        acknowledge();
       } finally {
         setBusy(null);
       }
@@ -657,9 +694,10 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
-        const { status, data } = await postJson<ReviewResponse & { error?: unknown }>(
+        const { status, data, acknowledge } = await postJson<ReviewResponse & { error?: unknown }>(
           `/api/chapters/${chapterId}/review`,
           { instruction },
+          true,
         );
         if (status !== 200 || !data.suggestions) {
           const message =
@@ -689,6 +727,7 @@ export function EditorShell({
         if (data.suggestions.length === 0) {
           toast.success("The editor read the chapter and had nothing to flag.");
         }
+        acknowledge();
       } finally {
         setBusy(null);
       }

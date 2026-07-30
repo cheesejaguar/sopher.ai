@@ -37,7 +37,14 @@ export async function listProjectsWithStats(userId: string, opts?: { archived?: 
     db
       .select({
         projectId: schema.books.projectId,
-        chapterCount: sql<number>`count(${schema.chapters.id})::int`,
+        chapterCount: sql<number>`count(${schema.chapters.id}) filter (
+          where not (
+            ${schema.chapters.status} = 'planned'
+            and ${schema.chapters.wordCount} = 0
+            and ${schema.chapters.title} is null
+            and ${schema.chapters.summary} is null
+          )
+        )::int`,
         chaptersDone: sql<number>`count(${schema.chapters.id}) filter (where ${schema.chapters.status} in ('drafted', 'edited', 'final'))::int`,
         wordCount: sql<number>`coalesce(sum(${schema.chapters.wordCount}), 0)::int`,
       })

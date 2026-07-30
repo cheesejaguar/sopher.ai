@@ -3,7 +3,12 @@ import { eq, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { getActiveRun, getChapterList, getLatestRun, getProjectWithBook } from "@/db/queries/books";
+import {
+  getActiveFullBookRun,
+  getChapterList,
+  getLatestFullBookRun,
+  getProjectWithBook,
+} from "@/db/queries/books";
 import { estimateBookCost } from "@/ai/estimate";
 import type { QualityTier } from "@/ai/models";
 import type { GenerationConfig } from "@/lib/run-events";
@@ -17,13 +22,22 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
   if (!data) notFound();
   const { project, book } = data;
 
-  const run = (await getActiveRun(projectId)) ?? (await getLatestRun(projectId));
+  const run = (await getActiveFullBookRun(projectId)) ?? (await getLatestFullBookRun(projectId));
   const runConfig = (run?.config ?? {}) as Partial<GenerationConfig>;
 
-  const tier: QualityTier = runConfig.tier ?? project.settings.qualityTier ?? "standard";
-  const requireOutlineApproval =
-    runConfig.requireOutlineApproval ?? project.settings.requireOutlineApproval ?? false;
-  const estimate = estimateBookCost(tier, project.targetChapters, project.targetWordsPerChapter);
+  // Launch settings always come from the project as it exists now. A historical
+  // run keeps its own frozen display shape, but must never override a restart.
+  const launchTier: QualityTier = project.settings.qualityTier ?? "standard";
+  const launchRequireOutlineApproval = project.settings.requireOutlineApproval ?? false;
+  const launchEstimate = estimateBookCost(
+    launchTier,
+    project.targetChapters,
+    project.targetWordsPerChapter,
+  );
+  const runTier: QualityTier = runConfig.tier ?? launchTier;
+  const runTargetChapters = runConfig.targetChapters ?? project.targetChapters;
+  const runTargetWordsPerChapter = runConfig.targetWordsPerChapter ?? project.targetWordsPerChapter;
+  const runEstimate = estimateBookCost(runTier, runTargetChapters, runTargetWordsPerChapter);
 
   const chapters = book ? await getChapterList(book.id) : [];
   const titles: Record<number, string | null> = {};
@@ -34,7 +48,7 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
   let snapshot: RunSnapshot | null = null;
   if (run) {
     const db = getDb();
-    const [events, [spend]] = await Promise.all([
+    const [events, [spend], [usageDebits]] = await Promise.all([
       db
         .select({ payload: schema.generationEvents.payload })
         .from(schema.generationEvents)
@@ -44,17 +58,26 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
         .select({ total: sql<string>`coalesce(sum(${schema.llmCalls.usd}), 0)` })
         .from(schema.llmCalls)
         .where(eq(schema.llmCalls.runId, run.id)),
+      db
+        .select({ total: sql<string>`coalesce(-sum(${schema.creditLedger.amount}), 0)` })
+        .from(schema.creditLedger)
+        .where(
+          sql`${schema.creditLedger.runId} = ${run.id} and ${schema.creditLedger.kind} = 'usage'`,
+        ),
     ]);
     snapshot = {
       run: { id: run.id, status: run.status as RunStatus, error: run.error, kind: run.kind },
       events: events.map((event) => event.payload),
-      chapters: chapters.map((chapter) => ({
-        number: chapter.chapterNumber,
-        status: chapter.status,
-        wordCount: chapter.wordCount || undefined,
-        qualityScore: chapter.qualityScore !== null ? Number(chapter.qualityScore) : undefined,
-      })),
+      chapters: chapters
+        .filter((chapter) => chapter.chapterNumber <= runTargetChapters)
+        .map((chapter) => ({
+          number: chapter.chapterNumber,
+          status: chapter.status,
+          wordCount: chapter.wordCount || undefined,
+          qualityScore: chapter.qualityScore !== null ? Number(chapter.qualityScore) : undefined,
+        })),
       totalUsd: Number(spend?.total ?? 0),
+      totalCredits: Number(usageDebits?.total ?? 0),
     };
   }
 
@@ -72,12 +95,21 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
       <WriteExperience
         projectId={project.id}
         projectTitle={project.title}
-        tier={tier}
-        requireOutlineApproval={requireOutlineApproval}
+        tier={launchTier}
+        requireOutlineApproval={launchRequireOutlineApproval}
         targetChapters={project.targetChapters}
         targetWordsPerChapter={project.targetWordsPerChapter}
-        estimateUsd={estimate.totalUsd}
-        estimatedMinutes={estimate.estimatedMinutes}
+        estimateUsd={launchEstimate.totalUsd}
+        initialRunShape={
+          run
+            ? {
+                tier: runTier,
+                chapters: runTargetChapters,
+                wordsPerChapter: runTargetWordsPerChapter,
+                estimateUsd: runEstimate.totalUsd,
+              }
+            : undefined
+        }
         initialSnapshot={snapshot}
         titles={titles}
       />

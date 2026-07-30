@@ -2,18 +2,21 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { reviewChapter } from "@/ai/agents/editor";
-import { type QualityTier } from "@/ai/models";
+import { meteredCallAuthorizationUsd, refundMeteredDelivery, type MeterCtx } from "@/ai/metering";
+import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
+import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
 import { resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 
 export const maxDuration = 300;
 
 const bodySchema = z.object({ instruction: z.string().max(2_000).optional() });
+const MAX_REVIEW_CHARS = 80_000;
 
 /**
  * Whole-chapter editorial review: one structured call returning anchored
@@ -40,14 +43,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  // Paid path: the balance pre-check above is a read, so concurrent callers all
-  // pass it. This is what bounds how far past the floor they can get.
+  // Bound repeated paid-work requests before atomic provider authorization.
   const limited = await rateLimit(LIMITS.llmEdit, req, userId);
   if (limited.limited) return limited.response;
 
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {
     return Response.json({ error: "Chapter not found" }, { status: 404 });
+  }
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = requireIdempotencyKey(req);
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
@@ -65,6 +76,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   if (!chapter.content.trim()) {
     return Response.json({ error: "Chapter has no content to review" }, { status: 400 });
   }
+  if (chapter.content.length > MAX_REVIEW_CHARS) {
+    return Response.json(
+      { error: "This chapter is too long for one review. Split it before requesting suggestions." },
+      { status: 413 },
+    );
+  }
 
   const db = getDb();
   const [project] = await db
@@ -74,11 +91,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     .limit(1);
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
 
-  const meter = { userId, projectId: ownership.projectId };
+  const meter: MeterCtx = {
+    userId,
+    projectId: ownership.projectId,
+    authorizationUsd: 0.1,
+    idempotencyKey: `chapter:${chapterId}:${idempotencyKey}`,
+  };
   let reviewed;
   try {
-    // Pre-gate before the metered call; a full-chapter review runs ~$0.05.
-    await assertCreditsForUsd(userId, 0.1);
+    await assertCreditsForUsd(
+      userId,
+      meteredCallAuthorizationUsd(meter, {
+        role: "editor",
+        operation: "editor.review",
+        model: MODELS[tier].editor,
+      }),
+    );
     reviewed = await reviewChapter({
       meter,
       tools: {
@@ -128,8 +156,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     });
   }
 
-  const rows =
-    values.length > 0 ? await db.insert(schema.suggestions).values(values).returning() : [];
+  if (reviewed.suggestions.length > 0 && values.length === 0) {
+    await refundMeteredDelivery(meter, "Chapter review returned unusable anchors — refunded");
+    return Response.json(
+      { error: "The review could not be anchored to the current chapter. Please try again." },
+      { status: 502 },
+    );
+  }
+
+  let rows: Array<typeof schema.suggestions.$inferSelect>;
+  try {
+    rows = values.length > 0 ? await db.insert(schema.suggestions).values(values).returning() : [];
+  } catch {
+    await refundMeteredDelivery(meter, "Chapter review could not be saved — refunded");
+    return Response.json({ error: "Could not save review suggestions" }, { status: 503 });
+  }
 
   // Order by anchor position so the panel reads top-to-bottom.
   rows.sort((a, b) => a.anchor.start - b.anchor.start);

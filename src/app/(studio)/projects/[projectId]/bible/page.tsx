@@ -88,7 +88,7 @@ export default async function BiblePage({ params }: { params: Promise<{ projectI
               className={cn(
                 "grid min-w-0 gap-4",
                 group.length > 1 && "sm:grid-cols-2",
-                group.length > 2 && "2xl:grid-cols-3",
+                group.length > 2 && kind !== "character" && "2xl:grid-cols-3",
               )}
             >
               {group.map((entity) => (

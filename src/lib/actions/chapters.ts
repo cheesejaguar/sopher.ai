@@ -1,34 +1,20 @@
 "use server";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { revalidatePath } from "next/cache";
 
-import { getDb, schema } from "@/db";
+import { getDb, getSqlClient, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser } from "@/lib/auth";
 import { countWords } from "@/lib/editor/anchors";
-
-/**
- * Structural edits renumber chapters, and an in-flight run addresses chapters
- * by number — reordering under it would desynchronize the workflow's targets.
- * Rename is exempt (titles are cosmetic to the pipeline).
- */
-async function assertNoActiveRun(projectId: string): Promise<void> {
-  const db = getDb();
-  const [active] = await db
-    .select({ id: schema.generationRuns.id })
-    .from(schema.generationRuns)
-    .where(
-      and(
-        eq(schema.generationRuns.projectId, projectId),
-        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
-      ),
-    )
-    .limit(1);
-  if (active) throw new Error("Finish or stop the current run before restructuring chapters");
-}
+import { generationResetMetadata, isGenerationResetSource } from "@/lib/generation-archive";
+import {
+  assertNoActiveAuthoringRun,
+  hasActiveAuthoringRun,
+  noActiveAuthoringRunSql,
+} from "@/lib/generation-runs";
 
 export type SaveChapterResult =
   | { ok: true; version: number; wordCount: number }
@@ -76,6 +62,13 @@ export async function saveChapter(
     .limit(1);
   if (!current) return { ok: false, error: "not_found" };
 
+  // A generation run owns chapter writes while active. Reuse the existing
+  // conflict result so open editor tabs enter their normal reload/merge path;
+  // even "Keep mine" must not overwrite prose the workflow is producing.
+  if (await hasActiveAuthoringRun(ownership.projectId)) {
+    return { ok: false, error: "conflict", currentVersion: current.version };
+  }
+
   if (!opts?.force && current.version !== baseVersion) {
     return { ok: false, error: "conflict", currentVersion: current.version };
   }
@@ -87,7 +80,13 @@ export async function saveChapter(
   const [updated] = await db
     .update(schema.chapters)
     .set({ content, wordCount, version: newVersion, updatedAt: new Date() })
-    .where(and(eq(schema.chapters.id, chapterId), eq(schema.chapters.version, fromVersion)))
+    .where(
+      and(
+        eq(schema.chapters.id, chapterId),
+        eq(schema.chapters.version, fromVersion),
+        noActiveAuthoringRunSql(ownership.projectId),
+      ),
+    )
     .returning({ version: schema.chapters.version });
 
   if (!updated) {
@@ -121,12 +120,22 @@ export async function renameChapter(chapterId: string, title: string): Promise<v
 
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+  await assertNoActiveAuthoringRun(
+    ownership.projectId,
+    "Finish or stop the current run before renaming chapters",
+  );
 
-  await getDb()
+  const [renamed] = await getDb()
     .update(schema.chapters)
     // Empty title reverts to the default "Chapter N" rendering.
-    .set({ title: trimmed || null, updatedAt: new Date() })
-    .where(eq(schema.chapters.id, chapterId));
+    .set({
+      title: trimmed || null,
+      version: sql`${schema.chapters.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(schema.chapters.id, chapterId), noActiveAuthoringRunSql(ownership.projectId)))
+    .returning({ id: schema.chapters.id });
+  if (!renamed) throw new Error("Finish or stop the current run before renaming chapters");
   revalidatePath(`/projects/${ownership.projectId}`);
 }
 
@@ -136,28 +145,60 @@ export async function deleteChapter(chapterId: string): Promise<void> {
 
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
-  await assertNoActiveRun(ownership.projectId);
+  await assertNoActiveAuthoringRun(ownership.projectId);
 
-  const db = getDb();
-  const [chapter] = await db
-    .select({ bookId: schema.chapters.bookId, number: schema.chapters.chapterNumber })
-    .from(schema.chapters)
-    .where(eq(schema.chapters.id, chapterId))
-    .limit(1);
-  if (!chapter) throw new Error("Chapter not found");
-
-  await db.delete(schema.chapters).where(eq(schema.chapters.id, chapterId));
-  // Close the numbering gap. Two-phase renumber: the unique (bookId, number)
-  // index would reject in-place decrements meeting their predecessor, so pass
-  // one parks the tail at an offset no real chapter uses.
-  await db.execute(sql`
-    update chapters set chapter_number = chapter_number + 100000
-    where book_id = ${chapter.bookId} and chapter_number > ${chapter.number}
-  `);
-  await db.execute(sql`
-    update chapters set chapter_number = chapter_number - 100001
-    where book_id = ${chapter.bookId} and chapter_number > 100000
-  `);
+  const [, allowed] = await getSqlClient().transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
+    )`,
+    tx`
+      select not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      ) as allowed
+    `,
+    // Close the numbering gap. The two parking updates and delete share this
+    // transaction, so a failure cannot strand numbers at 100000.
+    tx`
+      update chapters
+      set chapter_number = chapter_number + 100000
+      where book_id = ${ownership.bookId}
+        and chapter_number > (select chapter_number from chapters where id = ${chapterId})
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      delete from chapters
+      where id = ${chapterId}
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number - 100001
+      where book_id = ${ownership.bookId}
+        and chapter_number > 100000
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+  ]);
+  if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
+    throw new Error("Finish or stop the current run before changing the manuscript");
+  }
   revalidatePath(`/projects/${ownership.projectId}`);
 }
 
@@ -175,24 +216,59 @@ export async function addChapter(
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
     .limit(1);
   if (!book) throw new Error("Book not found");
-  await assertNoActiveRun(projectId);
+  await assertNoActiveAuthoringRun(projectId);
 
   const insertAt = Math.max(0, Math.trunc(afterNumber)) + 1;
-  // Same two-phase shift, upward this time, to open the slot.
-  await db.execute(sql`
-    update chapters set chapter_number = chapter_number + 100000
-    where book_id = ${book.id} and chapter_number >= ${insertAt}
-  `);
-  await db.execute(sql`
-    update chapters set chapter_number = chapter_number - 99999
-    where book_id = ${book.id} and chapter_number > 100000
-  `);
-  await db.insert(schema.chapters).values({
-    bookId: book.id,
-    chapterNumber: insertAt,
-    status: "drafted",
-    content: "",
-  });
+  const [, allowed] = await getSqlClient().transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
+    )`,
+    tx`
+      select not exists (
+        select 1 from generation_runs
+        where project_id = ${projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      ) as allowed
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number + 100000
+      where book_id = ${book.id}
+        and chapter_number >= ${insertAt}
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number - 99999
+      where book_id = ${book.id}
+        and chapter_number > 100000
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      insert into chapters (book_id, chapter_number, status, content)
+      select ${book.id}, ${insertAt}, 'drafted', ''
+      where not exists (
+        select 1 from generation_runs
+        where project_id = ${projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      )
+    `,
+  ]);
+  if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
+    throw new Error("Finish or stop the current run before changing the manuscript");
+  }
   revalidatePath(`/projects/${projectId}`);
   return { chapterNumber: insertAt };
 }
@@ -204,39 +280,68 @@ export async function moveChapter(chapterId: string, direction: "up" | "down"): 
 
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
-  await assertNoActiveRun(ownership.projectId);
+  await assertNoActiveAuthoringRun(ownership.projectId);
 
-  const db = getDb();
-  const [chapter] = await db
-    .select({ bookId: schema.chapters.bookId, number: schema.chapters.chapterNumber })
-    .from(schema.chapters)
-    .where(eq(schema.chapters.id, chapterId))
-    .limit(1);
-  if (!chapter) throw new Error("Chapter not found");
-
-  const targetNumber = direction === "up" ? chapter.number - 1 : chapter.number + 1;
-  const [neighbour] = await db
-    .select({ id: schema.chapters.id })
-    .from(schema.chapters)
-    .where(
-      and(
-        eq(schema.chapters.bookId, chapter.bookId),
-        eq(schema.chapters.chapterNumber, targetNumber),
-      ),
-    )
-    .limit(1);
-  if (!neighbour) return; // already at the edge
-
-  // Three-step swap through a parking number the unique index never sees twice.
-  await db.execute(sql`
-    update chapters set chapter_number = 100000 where id = ${chapterId}
-  `);
-  await db.execute(sql`
-    update chapters set chapter_number = ${chapter.number} where id = ${neighbour.id}
-  `);
-  await db.execute(sql`
-    update chapters set chapter_number = ${targetNumber} where id = ${chapterId}
-  `);
+  const delta = direction === "up" ? -1 : 1;
+  const [, allowed] = await getSqlClient().transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
+    )`,
+    tx`
+      select not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      ) as allowed
+    `,
+    tx`
+      update chapters as target
+      set chapter_number = -target.chapter_number
+      where target.id = ${chapterId}
+        and exists (
+          select 1 from chapters as neighbour
+          where neighbour.book_id = target.book_id
+            and neighbour.chapter_number = target.chapter_number + ${delta}
+        )
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      update chapters as neighbour
+      set chapter_number = -target.chapter_number
+      from chapters as target
+      where target.id = ${chapterId}
+        and target.chapter_number < 0
+        and neighbour.book_id = target.book_id
+        and neighbour.chapter_number = -target.chapter_number + ${delta}
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      update chapters
+      set chapter_number = -chapter_number + ${delta}
+      where id = ${chapterId}
+        and chapter_number < 0
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+  ]);
+  if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
+    throw new Error("Finish or stop the current run before changing the manuscript");
+  }
   revalidatePath(`/projects/${ownership.projectId}`);
 }
 
@@ -247,7 +352,7 @@ export async function listChapterRevisions(chapterId: string) {
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
 
-  return getDb()
+  const revisions = await getDb()
     .select({
       id: schema.chapterRevisions.id,
       content: schema.chapterRevisions.content,
@@ -258,6 +363,10 @@ export async function listChapterRevisions(chapterId: string) {
     .where(eq(schema.chapterRevisions.chapterId, chapterId))
     .orderBy(sql`${schema.chapterRevisions.createdAt} desc`)
     .limit(30);
+  return revisions.map((revision) => ({
+    ...revision,
+    source: isGenerationResetSource(revision.source) ? "generation-reset" : revision.source,
+  }));
 }
 
 /**
@@ -273,6 +382,18 @@ export async function restoreChapterRevision(
   if (!z.uuid().safeParse(revisionId).success) return { ok: false, error: "not_found" };
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) return { ok: false, error: "not_found" };
+  if (await hasActiveAuthoringRun(ownership.projectId)) {
+    const [current] = await getDb()
+      .select({ version: schema.chapters.version })
+      .from(schema.chapters)
+      .where(eq(schema.chapters.id, chapterId))
+      .limit(1);
+    return {
+      ok: false,
+      error: "conflict",
+      currentVersion: current?.version ?? 0,
+    };
+  }
 
   const db = getDb();
   const [revision] = await db
@@ -299,4 +420,97 @@ export async function restoreChapterRevision(
     .insert(schema.chapterRevisions)
     .values({ chapterId, content: current.content, source: "pre-restore" });
   return saveChapter(chapterId, revision.content, current.version, { force: true });
+}
+
+export type RestoreArchivedChapterResult =
+  | { ok: true; chapterNumber: number; version: number }
+  | { ok: false; error: "not_found" | "not_archived" | "active_run" | "conflict" };
+
+/**
+ * Returns a soft-retired chapter to the manuscript from the selected
+ * generation-reset snapshot. The archive row stays intact, while the chapter
+ * becomes drafted (and therefore visible/editable) only after the guarded
+ * update succeeds.
+ */
+export async function restoreArchivedChapter(
+  chapterId: string,
+  revisionId: string,
+): Promise<RestoreArchivedChapterResult> {
+  const { userId } = await requireUser();
+  if (!z.uuid().safeParse(chapterId).success || !z.uuid().safeParse(revisionId).success) {
+    return { ok: false, error: "not_found" };
+  }
+
+  const ownership = await getChapterOwnership(chapterId);
+  if (!ownership || ownership.userId !== userId) return { ok: false, error: "not_found" };
+  if (await hasActiveAuthoringRun(ownership.projectId)) {
+    return { ok: false, error: "active_run" };
+  }
+
+  const db = getDb();
+  const [[chapter], [revision]] = await Promise.all([
+    db
+      .select({
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+        content: schema.chapters.content,
+        wordCount: schema.chapters.wordCount,
+        status: schema.chapters.status,
+        version: schema.chapters.version,
+      })
+      .from(schema.chapters)
+      .where(eq(schema.chapters.id, chapterId))
+      .limit(1),
+    db
+      .select({
+        content: schema.chapterRevisions.content,
+        source: schema.chapterRevisions.source,
+      })
+      .from(schema.chapterRevisions)
+      .where(
+        and(
+          eq(schema.chapterRevisions.id, revisionId),
+          eq(schema.chapterRevisions.chapterId, chapterId),
+          sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
+        ),
+      )
+      .limit(1),
+  ]);
+
+  if (!chapter || !revision) return { ok: false, error: "not_found" };
+  if (chapter.status !== "planned" || chapter.wordCount !== 0 || chapter.content.length > 0) {
+    return { ok: false, error: "not_archived" };
+  }
+
+  const metadata = generationResetMetadata(revision.source ?? "generation-reset");
+  const [restored] = await db
+    .update(schema.chapters)
+    .set({
+      content: revision.content,
+      wordCount: countWords(revision.content),
+      title: metadata?.title ?? chapter.title,
+      summary: metadata?.summary ?? chapter.summary,
+      status: metadata?.status ?? "drafted",
+      version: sql`${schema.chapters.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(schema.chapters.id, chapterId),
+        eq(schema.chapters.version, chapter.version),
+        eq(schema.chapters.status, "planned"),
+        eq(schema.chapters.wordCount, 0),
+        eq(schema.chapters.content, ""),
+        noActiveAuthoringRunSql(ownership.projectId),
+      ),
+    )
+    .returning({
+      chapterNumber: schema.chapters.chapterNumber,
+      version: schema.chapters.version,
+    });
+
+  if (!restored) return { ok: false, error: "conflict" };
+  revalidatePath(`/projects/${ownership.projectId}`);
+  return { ok: true, chapterNumber: restored.chapterNumber, version: restored.version };
 }

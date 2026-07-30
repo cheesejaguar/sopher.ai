@@ -22,8 +22,9 @@ export default async function ProjectSettingsPage({
       <header>
         <h2 className="font-display text-xl font-semibold tracking-tight">Project settings</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Shape, voice, and content boundaries. Changes apply to future generation runs — existing
-          chapters stay as written.
+          Shape, voice, and content boundaries. Saving here never changes existing prose. A future
+          full-book run will ask before replacing the manuscript and keep the earlier chapters in
+          revision history.
         </p>
       </header>
       <ProjectSettingsForm

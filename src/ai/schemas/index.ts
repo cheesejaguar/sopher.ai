@@ -140,6 +140,11 @@ export const chapterSummarySchema = z.object({
         from: z.string(),
         to: z.string(),
         type: z.string(),
+        description: z
+          .string()
+          .max(300)
+          .optional()
+          .describe("What the relationship means in the story"),
       }),
     )
     .max(10)

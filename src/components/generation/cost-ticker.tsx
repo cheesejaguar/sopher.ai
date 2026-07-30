@@ -9,8 +9,16 @@ import { creditsForUsd } from "@/lib/billing/credits-shared";
  * Live metered spend for this run. Ember is reserved for cost — the numbers
  * only turn warm when the run exceeds its estimate.
  */
-export function CostTicker({ totalUsd, estimateUsd }: { totalUsd: number; estimateUsd: number }) {
-  const over = totalUsd > estimateUsd;
+export function CostTicker({
+  totalCredits,
+  totalUsd,
+  estimateUsd,
+}: {
+  totalCredits: number;
+  totalUsd: number;
+  estimateUsd: number;
+}) {
+  const over = totalCredits > creditsForUsd(estimateUsd);
 
   return (
     <section aria-label="Run spend" className="instrument-surface rounded-sm px-4 py-4">
@@ -19,7 +27,7 @@ export function CostTicker({ totalUsd, estimateUsd }: { totalUsd: number; estima
         <h3 className="folio-label text-muted-foreground">Spend this run</h3>
       </div>
       <CostDisplay
-        credits={creditsForUsd(totalUsd)}
+        credits={totalCredits}
         usd={totalUsd}
         label="Credits used"
         valueClassName={over ? "text-ember" : undefined}

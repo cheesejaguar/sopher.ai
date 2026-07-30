@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { chapterSummarySchema, type ChapterSummary } from "@/ai/schemas";
 import { applyEntityDeltas } from "@/db/queries/entities";
 import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
@@ -16,14 +17,17 @@ import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
  * per-chapter request of its own — the marginal cost is a few hundred output
  * tokens.
  */
-export async function summarizeChapter(input: {
+export type ChapterSummaryInput = {
   meter: MeterCtx;
   bookId: string;
   chapterNumber: number;
   chapterTitle: string | null;
   content: string;
   tier: QualityTier;
-}): Promise<ChapterSummary> {
+};
+
+/** The single metered extraction call, separated from its idempotent DB tail. */
+export async function generateChapterSummary(input: ChapterSummaryInput): Promise<ChapterSummary> {
   const model = MODELS[input.tier].summarizer;
   const result = await metered(
     input.meter,
@@ -36,16 +40,28 @@ export async function summarizeChapter(input: {
         prompt: [
           `Summarize chapter ${input.chapterNumber} ("${input.chapterTitle ?? "untitled"}") in at most 200 words, covering plot events, character developments, and any objects/promises/injuries that matter later.`,
           `Then list new canonical facts per entity this chapter established — not only characters but also locations (what a place contains), objects (who holds it, what it does), organizations and named events. Record only durable facts a later chapter must honor: appearance, heritage, possessions, wounds, secrets, commitments, contents, ownership.`,
-          `Also list any relationships the chapter established between named entities (family ties especially — they govern surnames).`,
+          `Also list any relationships the chapter established between named entities (family ties especially — they govern surnames), with a brief description of what each relationship means in the story.`,
           MODERATION_PROMPT,
           `## Chapter text\n${input.content}`,
         ].join("\n\n"),
+        maxOutputTokens: meteredMaxOutputTokens("summarizer.chapter"),
+        prepareStep: meteredInputGuard("summarizer.chapter"),
         output: Output.object({ schema: chapterSummarySchema }),
         providerOptions: gatewayOptions(input.meter, "summarizer"),
       }),
   );
 
-  const summary = result.output;
+  return result.output;
+}
+
+/**
+ * Applies a previously generated summary. Keeping this separate means a retry
+ * after any DB-side tail failure reuses the paid structured result.
+ */
+export async function persistChapterSummary(
+  input: ChapterSummaryInput,
+  summary: ChapterSummary,
+): Promise<void> {
   const db = getDb();
   await db
     .update(schema.chapters)
@@ -79,6 +95,10 @@ export async function summarizeChapter(input: {
       });
     }
   }
+}
 
+export async function summarizeChapter(input: ChapterSummaryInput): Promise<ChapterSummary> {
+  const summary = await generateChapterSummary(input);
+  await persistChapterSummary(input, summary);
   return summary;
 }

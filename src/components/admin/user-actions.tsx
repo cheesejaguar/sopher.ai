@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldOff, ShieldCheck, Wallet } from "lucide-react";
 
@@ -35,7 +35,11 @@ export function UserActions({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function adjust(formData: FormData) {
+  function adjust(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+
+    const formData = new FormData(event.currentTarget);
     setError(null);
     const credits = Number(formData.get("credits"));
     const reason = String(formData.get("reason") ?? "").trim();
@@ -51,6 +55,7 @@ export function UserActions({
   }
 
   function toggleSuspension() {
+    if (pending || (isSelf && !suspended)) return;
     setError(null);
     startTransition(async () => {
       try {
@@ -64,7 +69,12 @@ export function UserActions({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Dialog open={adjustOpen} onOpenChange={setAdjustOpen}>
+      <Dialog
+        open={adjustOpen}
+        onOpenChange={(nextOpen) => {
+          if (!pending) setAdjustOpen(nextOpen);
+        }}
+      >
         <DialogTrigger render={<Button variant="outline" size="sm" />}>
           <Wallet aria-hidden="true" className="size-3.5" />
           Adjust credits
@@ -77,7 +87,7 @@ export function UserActions({
               id in the reference.
             </DialogDescription>
           </DialogHeader>
-          <form action={adjust} className="space-y-4">
+          <form onSubmit={adjust} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="adj-credits">Credits</Label>
               <Input
@@ -100,10 +110,17 @@ export function UserActions({
               </p>
             ) : null}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAdjustOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                aria-disabled={pending}
+                onClick={() => {
+                  if (!pending) setAdjustOpen(false);
+                }}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" aria-busy={pending || undefined} aria-disabled={pending}>
                 {pending ? "Applying…" : "Apply"}
               </Button>
             </DialogFooter>
@@ -115,7 +132,9 @@ export function UserActions({
         variant={suspended ? "outline" : "destructive"}
         size="sm"
         onClick={toggleSuspension}
-        disabled={pending || (isSelf && !suspended)}
+        disabled={isSelf && !suspended}
+        aria-busy={pending || undefined}
+        aria-disabled={pending || (isSelf && !suspended)}
         title={isSelf && !suspended ? "You cannot suspend your own account" : undefined}
       >
         {suspended ? (

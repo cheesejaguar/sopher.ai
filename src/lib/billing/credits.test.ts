@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { CREDIT_MARKUP, CREDIT_PACKS, creditsForUsd, getPack } from "./credits-shared";
+import {
+  canonicalizeCreditRequirement,
+  CREDIT_MARKUP,
+  CREDIT_PACKS,
+  creditsForUsd,
+  getPack,
+} from "./credits-shared";
 
 /**
  * The pricing model is calibrated against two production books that measured
@@ -82,6 +88,18 @@ describe("creditsForUsd", () => {
     const meteredUsd = 10;
     const retail = creditsForUsd(meteredUsd);
     expect((retail - meteredUsd) / retail).toBeGreaterThan(0.6);
+  });
+});
+
+describe("canonicalizeCreditRequirement", () => {
+  it("returns positive zero for zero or negative requirements", () => {
+    expect(Object.is(canonicalizeCreditRequirement(0), -0)).toBe(false);
+    expect(canonicalizeCreditRequirement(-1)).toBe(0);
+  });
+
+  it("removes binary noise without rounding a real fifth decimal down", () => {
+    expect(canonicalizeCreditRequirement(1.2000000000000002)).toBe(1.2);
+    expect(canonicalizeCreditRequirement(1.20001)).toBe(1.2001);
   });
 });
 

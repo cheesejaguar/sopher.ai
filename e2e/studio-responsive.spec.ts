@@ -62,6 +62,21 @@ for (const viewport of PRODUCT_VIEWPORTS) {
         ready: () => page.getByText("The brief, as written", { exact: true }),
       },
       {
+        name: "story bible",
+        route: `${base}/bible`,
+        ready: () => page.getByRole("heading", { name: "Story bible" }),
+      },
+      {
+        name: "write",
+        route: `${base}/write`,
+        ready: () => page.getByRole("heading", { name: "Write" }),
+      },
+      {
+        name: "editor recovery",
+        route: `${base}/editor`,
+        ready: () => page.getByRole("heading", { name: "Editorial workbench" }),
+      },
+      {
         name: "manuscript",
         route: `${base}/manuscript`,
         ready: () => page.getByRole("region", { name: "Manuscript chapters" }),
@@ -111,6 +126,16 @@ for (const viewport of [
     await expect(page.locator('[contenteditable="true"]').first()).toBeVisible({
       timeout: 20_000,
     });
+    await expect(
+      page.getByRole("complementary", { name: "Chapter overview" }),
+      "the project shell must yield chapter navigation to the editor",
+    ).toHaveCount(0);
+    if (viewport.label === "desktop") {
+      await expect(
+        page.getByRole("navigation", { name: "Chapters" }),
+        "the wide editor should expose exactly one chapter navigator",
+      ).toHaveCount(1);
+    }
     await expectNoPageOverflow(page, `${viewport.label} editor`);
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, `editor-${viewport.label}`);
@@ -126,7 +151,8 @@ test("mobile project lifecycle navigation collapses after selection", async ({ p
   await lifecycle.getByText("Project navigation", { exact: true }).click();
   await lifecycle.getByRole("link", { name: "Outline" }).click();
   await expect(page).toHaveURL(new RegExp(`${base}/outline$`));
-  await expect(lifecycle.getByText("Plan / Outline", { exact: true })).toBeVisible();
+  await expect(lifecycle.getByText("You are here: Plan / Outline", { exact: true })).toBeVisible();
+  await expect(lifecycle.getByText(/^Production now:/)).toBeVisible();
   await expect(lifecycle.getByRole("link", { name: "Brief" })).not.toBeVisible();
 });
 

@@ -4,10 +4,11 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth";
-import { getActiveRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
+import { getActiveFullBookRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
 import { bookOutlineSchema, type BookOutline } from "@/ai/schemas";
 import { OutlineApprovalBar } from "@/components/generation/outline-approval-bar";
 import { OutlineEditor } from "@/components/studio/outline-editor";
+import type { GenerationConfig } from "@/lib/run-events";
 
 function words(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
@@ -33,11 +34,24 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
 
   const [outlineRow, activeRun] = await Promise.all([
     book ? getLatestOutline(book.id) : Promise.resolve(null),
-    getActiveRun(projectId),
+    getActiveFullBookRun(projectId),
   ]);
-  const parsed = outlineRow ? bookOutlineSchema.safeParse(outlineRow.content) : null;
-  const outline = parsed?.success ? parsed.data : null;
-  const awaitingApproval = activeRun?.status === "awaiting_input";
+  const runConfig = activeRun?.config as Partial<GenerationConfig> | undefined;
+  const stagedParsed = runConfig?.stagedOutline
+    ? bookOutlineSchema.safeParse(runConfig.stagedOutline)
+    : null;
+  const showingStagedOutline =
+    stagedParsed?.success === true && runConfig?.manuscriptPrepared !== true;
+  const persistedParsed = outlineRow ? bookOutlineSchema.safeParse(outlineRow.content) : null;
+  const outline = showingStagedOutline
+    ? stagedParsed.data
+    : persistedParsed?.success
+      ? persistedParsed.data
+      : null;
+  const awaitingApproval =
+    showingStagedOutline &&
+    runConfig?.requireOutlineApproval === true &&
+    activeRun?.status === "awaiting_input";
 
   if (!outline) {
     return (
@@ -69,11 +83,12 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
         <h2 className="font-display text-xl font-semibold tracking-tight">Outline</h2>
         <div className="flex items-center gap-3">
           <p className="font-mono text-xs text-muted-foreground tabular-nums">
-            v{outlineRow?.version ?? 1}
-            {outlineRow?.source === "user" ? " (edited)" : ""} · {outline.chapters.length} chapters
-            · ~{words(plannedWords)} words planned
+            {showingStagedOutline
+              ? "Run preview"
+              : `v${outlineRow?.version ?? 1}${outlineRow?.source === "user" ? " (edited)" : ""}`}{" "}
+            · {outline.chapters.length} chapters · ~{words(plannedWords)} words planned
           </p>
-          {!awaitingApproval ? <OutlineEditor projectId={projectId} outline={outline} /> : null}
+          {!showingStagedOutline ? <OutlineEditor projectId={projectId} outline={outline} /> : null}
         </div>
       </header>
 

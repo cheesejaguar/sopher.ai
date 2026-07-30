@@ -1,13 +1,25 @@
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { ContentToolError, getContentTool } from "@/ai/content-tools/registry";
-import { type QualityTier } from "@/ai/models";
+import { refundMeteredDeliveries, type MeterCtx } from "@/ai/metering";
+import { meteredOperationCeilingUsd } from "@/ai/metering-limits";
+import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
-import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
+import {
+  creditsForUsd,
+  InsufficientCreditsError,
+  releaseCreditReservation,
+  reserveCredits,
+} from "@/lib/billing/credits";
+import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
+import {
+  compensateUnreferencedBlobUpload,
+  scheduleUnreferencedBlobCleanup,
+} from "@/lib/blob/orphan-cleanup";
 
 export const maxDuration = 120;
 
@@ -16,6 +28,24 @@ const bodySchema = z.object({
   text: z.string().min(1).max(8_000),
   options: z.record(z.string(), z.unknown()).optional(),
 });
+
+class ContentToolDeliveryError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ContentToolDeliveryError";
+  }
+}
+
+class AmbiguousContentToolDeliveryError extends AggregateError {
+  constructor(errors: Error[], message: string) {
+    super(errors, message);
+    this.name = "AmbiguousContentToolDeliveryError";
+  }
+}
+
+function asError(value: unknown): Error {
+  return value instanceof Error ? value : new Error(String(value));
+}
 
 export async function POST(req: Request, ctx: { params: Promise<{ toolId: string }> }) {
   let userId: string;
@@ -37,8 +67,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     throw error;
   }
 
-  // Paid path: the balance pre-check above is a read, so concurrent callers all
-  // pass it. This is what bounds how far past the floor they can get.
+  // Bound repeated paid-work requests before atomic provider authorization.
   const limited = await rateLimit(LIMITS.llmTool, req, userId);
   if (limited.limited) return limited.response;
 
@@ -51,6 +80,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     return Response.json({ error: parsed.error.flatten() }, { status: 400 });
   }
   const { chapterId, text, options } = parsed.data;
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = requireIdempotencyKey(req);
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
 
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) {
@@ -63,40 +101,251 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     .from(schema.projects)
     .where(eq(schema.projects.id, ownership.projectId))
     .limit(1);
+
+  const [replayed] = await db
+    .select({ output: schema.contentToolRuns.output })
+    .from(schema.contentToolRuns)
+    .where(
+      and(
+        eq(schema.contentToolRuns.userId, userId),
+        eq(schema.contentToolRuns.projectId, ownership.projectId),
+        eq(schema.contentToolRuns.chapterId, chapterId),
+        eq(schema.contentToolRuns.toolId, tool.id),
+        sql`${schema.contentToolRuns.input}->>'operationKey' = ${idempotencyKey}`,
+      ),
+    )
+    .limit(1);
+  if (replayed) return Response.json({ output: replayed.output, replayed: true });
+
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
+  const models = MODELS[tier];
+  const requiredUsd =
+    tool.id === "illustration"
+      ? meteredOperationCeilingUsd({
+          model: models.lineEdit,
+          operation: "tool.image.prompt",
+        }) +
+        meteredOperationCeilingUsd({
+          model: models.image,
+          operation: "tool.image.generate",
+        })
+      : meteredOperationCeilingUsd({
+          model: models.lineEdit,
+          operation: "tool.mermaid",
+        });
+  const meter: MeterCtx = {
+    userId,
+    projectId: ownership.projectId,
+    settlements: [],
+    idempotencyKey: `project:${ownership.projectId}:chapter:${chapterId}:tool:${toolId}:${idempotencyKey}`,
+  };
+  const reservationRef = `interactive-reservation:${crypto.randomUUID()}`;
+  let reservationHeld = false;
 
   try {
-    await assertCreditsForUsd(userId, tool.estUsd);
-    const output = await tool.run(
+    const authorization = await reserveCredits({
+      userId,
+      credits: creditsForUsd(requiredUsd),
+      externalRef: reservationRef,
+      description: `Reserve credits for ${tool.label}`,
+      projectId: ownership.projectId,
+    });
+    if (authorization.status === "insufficient") {
+      throw new InsufficientCreditsError(authorization.balance, authorization.credits);
+    }
+    reservationHeld = true;
+    meter.reservationRef = reservationRef;
+
+    const rawOutput = await tool.run(
       {
-        meter: { userId, projectId: ownership.projectId },
+        meter,
         tier,
         projectId: ownership.projectId,
         chapterId,
       },
       { text, options },
     );
+    const output =
+      rawOutput.kind === "image"
+        ? { kind: rawOutput.kind, url: rawOutput.url, alt: rawOutput.alt }
+        : rawOutput;
 
-    // Audit row. `usd` records the tool's estimate — per-call ground truth
-    // lives in llm_calls via metered().
-    await db.insert(schema.contentToolRuns).values({
-      userId,
-      projectId: ownership.projectId,
-      chapterId,
-      toolId: tool.id,
-      input: { text, options: options ?? {} },
-      output,
-      usd: tool.estUsd.toFixed(6),
-    });
+    if (rawOutput.kind === "image") {
+      try {
+        // Schedule this before persistence. If COMMIT acknowledgement is lost,
+        // the delayed workflow keeps the referenced object; if the transaction
+        // rolls back, it removes the orphan without relying on this request.
+        await scheduleUnreferencedBlobCleanup({
+          projectId: ownership.projectId,
+          pathnames: [rawOutput.asset.blobPathname],
+        });
+      } catch (scheduleError) {
+        try {
+          await compensateUnreferencedBlobUpload({
+            projectId: ownership.projectId,
+            pathnames: [rawOutput.asset.blobPathname],
+          });
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [asError(scheduleError), asError(cleanupError)],
+            "Illustration cleanup could not be made durable",
+          );
+        }
+        throw new ContentToolDeliveryError("Could not store the generated illustration");
+      }
+    }
 
-    return Response.json({ output });
+    let deliveredOutput = output;
+    let replayedDelivery = false;
+    try {
+      const delivery = await db.transaction(async (tx) => {
+        // Project deletion and every asset-producing path take this same lock.
+        // The transaction is therefore either fully visible to deletion or
+        // finishes after deletion and rolls back on the foreign key.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(
+            hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
+          )`,
+        );
+
+        // Concurrent replays can pass the request-level lookup together. Once
+        // serialized by the project lock, reuse the first durable delivery.
+        const [alreadyDelivered] = await tx
+          .select({ output: schema.contentToolRuns.output })
+          .from(schema.contentToolRuns)
+          .where(
+            and(
+              eq(schema.contentToolRuns.userId, userId),
+              eq(schema.contentToolRuns.projectId, ownership.projectId),
+              eq(schema.contentToolRuns.chapterId, chapterId),
+              eq(schema.contentToolRuns.toolId, tool.id),
+              sql`${schema.contentToolRuns.input}->>'operationKey' = ${idempotencyKey}`,
+            ),
+          )
+          .limit(1);
+        if (alreadyDelivered) {
+          return { output: alreadyDelivered.output as typeof output, replayed: true };
+        }
+
+        if (rawOutput.kind === "image") {
+          await tx.insert(schema.assets).values({
+            projectId: ownership.projectId,
+            chapterId,
+            kind: "illustration",
+            blobUrl: rawOutput.url,
+            blobPathname: rawOutput.asset.blobPathname,
+            contentType: rawOutput.asset.contentType,
+            sizeBytes: rawOutput.asset.sizeBytes,
+            meta: {
+              prompt: rawOutput.asset.prompt,
+              operationKey: idempotencyKey,
+            },
+          });
+        }
+        await tx.insert(schema.contentToolRuns).values({
+          userId,
+          projectId: ownership.projectId,
+          chapterId,
+          toolId: tool.id,
+          input: { text, options: options ?? {}, operationKey: idempotencyKey },
+          output,
+          usd: (meter.settlements ?? [])
+            .reduce((total, settlement) => total + settlement.meteredUsd, 0)
+            .toFixed(6),
+        });
+        return { output, replayed: false };
+      });
+      deliveredOutput = delivery.output;
+      replayedDelivery = delivery.replayed;
+    } catch (persistenceError) {
+      // A thrown transaction can still mean COMMIT succeeded and only its
+      // acknowledgement was lost. Verify the exact operation and, for an
+      // illustration, its exact uploaded asset before deciding to refund.
+      let storedRun: { output: unknown } | undefined;
+      let storedAsset: { id: string } | undefined;
+      try {
+        [[storedRun], [storedAsset]] = await Promise.all([
+          db
+            .select({ output: schema.contentToolRuns.output })
+            .from(schema.contentToolRuns)
+            .where(
+              and(
+                eq(schema.contentToolRuns.userId, userId),
+                eq(schema.contentToolRuns.projectId, ownership.projectId),
+                eq(schema.contentToolRuns.chapterId, chapterId),
+                eq(schema.contentToolRuns.toolId, tool.id),
+                sql`${schema.contentToolRuns.input}->>'operationKey' = ${idempotencyKey}`,
+              ),
+            )
+            .limit(1),
+          rawOutput.kind === "image"
+            ? db
+                .select({ id: schema.assets.id })
+                .from(schema.assets)
+                .where(
+                  and(
+                    eq(schema.assets.projectId, ownership.projectId),
+                    eq(schema.assets.blobPathname, rawOutput.asset.blobPathname),
+                  ),
+                )
+                .limit(1)
+            : Promise.resolve([]),
+        ]);
+      } catch (verificationError) {
+        throw new AmbiguousContentToolDeliveryError(
+          [asError(persistenceError), asError(verificationError)],
+          "Content-tool persistence failed and could not be verified",
+        );
+      }
+
+      const exactCommit =
+        Boolean(storedRun) && (rawOutput.kind !== "image" || Boolean(storedAsset));
+      if (exactCommit) {
+        deliveredOutput = storedRun!.output as typeof output;
+      } else if (storedRun || storedAsset) {
+        // Partial evidence is not proof of rollback. Keep the debit and the
+        // idempotency key so a retry can resolve the durable outcome.
+        throw new AmbiguousContentToolDeliveryError(
+          [asError(persistenceError)],
+          "Content-tool persistence outcome is ambiguous",
+        );
+      } else {
+        throw new ContentToolDeliveryError("Could not save the generated result");
+      }
+    }
+
+    return Response.json({ output: deliveredOutput, replayed: replayedDelivery });
   } catch (error) {
+    if (
+      !(error instanceof AmbiguousContentToolDeliveryError) &&
+      (meter.settlements?.length ?? 0) > 0
+    ) {
+      await refundMeteredDeliveries(meter, `${tool.label} could not be delivered — refunded`);
+    }
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: error.message }, { status: 402 });
     }
     if (error instanceof ContentToolError) {
       return Response.json({ error: error.message }, { status: 422 });
     }
+    if (error instanceof ContentToolDeliveryError) {
+      return Response.json({ error: error.message }, { status: 503 });
+    }
     throw error;
+  } finally {
+    if (reservationHeld) {
+      try {
+        await releaseCreditReservation({
+          userId,
+          externalRef: reservationRef,
+          projectId: ownership.projectId,
+        });
+      } catch (releaseError) {
+        console.error("Could not release content-tool reservation", {
+          reservationRef,
+          releaseError,
+        });
+      }
+    }
   }
 }

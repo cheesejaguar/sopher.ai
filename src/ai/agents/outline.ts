@@ -4,9 +4,15 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import type { ToolCtx } from "@/ai/tools";
 import { buildOutlineUserPrompt, OUTLINE_SYSTEM_PROMPT } from "@/ai/prompts/outline";
-import { bookOutlineSchema, type BookConcept, type BookOutline } from "@/ai/schemas";
+import {
+  bookOutlineSchema,
+  chapterOutlineSchema,
+  type BookConcept,
+  type BookOutline,
+} from "@/ai/schemas";
 import {
   getPlotTemplate,
   getTemplateSummary,
@@ -28,6 +34,8 @@ export type OutlineInput = {
   plotStructure?: string;
   /** Author feedback on a rejected outline; the regenerated outline must address it. */
   revisionNotes?: string;
+  /** Frozen POV, tense, tone, and content-boundary contract. */
+  contentGuidelines?: string;
 };
 
 // Internal to this agent: the cheap structure-plan call's output shape.
@@ -47,7 +55,60 @@ const structurePlanSchema = z.object({
     .min(2)
     .max(8),
 });
-type StructurePlan = z.infer<typeof structurePlanSchema>;
+export type StructurePlan = z.infer<typeof structurePlanSchema>;
+
+export type OutlineGenerationCheckpoint = {
+  plan?: StructurePlan;
+  draft?: BookOutline;
+};
+
+export type OutlineCheckpointOptions = {
+  checkpoint?: OutlineGenerationCheckpoint;
+  onCheckpoint?: (checkpoint: OutlineGenerationCheckpoint) => void | Promise<void>;
+  onFinal?: (outline: BookOutline) => void | Promise<void>;
+};
+
+function targetWordRange(targetWordsPerChapter: number): { min: number; max: number } {
+  return {
+    min: Math.ceil(targetWordsPerChapter * 0.8),
+    max: Math.floor(targetWordsPerChapter * 1.2),
+  };
+}
+
+/**
+ * The canonical outline schema describes every persisted outline. A production
+ * run narrows it further to the exact chapter count and word budget the author
+ * approved, without weakening or mutating that shared schema.
+ */
+export function outlineSchemaForRun(chapterCount: number, targetWordsPerChapter: number) {
+  const { min, max } = targetWordRange(targetWordsPerChapter);
+  const runChapterSchema = chapterOutlineSchema.extend({
+    targetWords: z.number().int().min(min).max(max),
+  });
+
+  return bookOutlineSchema
+    .extend({
+      chapters: z.array(runChapterSchema).superRefine((chapters, ctx) => {
+        if (chapters.length !== chapterCount) {
+          ctx.addIssue({
+            code: "custom",
+            message: `Outline must contain exactly ${chapterCount} chapters`,
+          });
+        }
+      }),
+    })
+    .superRefine((outline, ctx) => {
+      outline.chapters.forEach((chapter, index) => {
+        if (chapter.number !== index + 1) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["chapters", index, "number"],
+            message: `Chapter numbers must run from 1 through ${chapterCount} without gaps`,
+          });
+        }
+      });
+    });
+}
 
 function conceptText(concept: BookConcept): string {
   return [
@@ -91,6 +152,9 @@ function structurePlanPrompt(input: OutlineInput): string {
     input.revisionNotes
       ? `## Revision notes from the author\n${input.revisionNotes}\nAccount for these when choosing the structure and act boundaries.`
       : "",
+    input.contentGuidelines
+      ? `## Authoring constraints\n${input.contentGuidelines}\nThe structure must make these constraints feasible.`
+      : "",
     genreNotes ? genreNotes.trim() : "",
     requested
       ? [
@@ -132,6 +196,9 @@ function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: st
     input.revisionNotes
       ? `## Revision notes (must address)\nThe author rejected a previous outline with this feedback:\n${input.revisionNotes}`
       : "",
+    input.contentGuidelines
+      ? `## Authoring constraints (must hold in every chapter)\n${input.contentGuidelines}`
+      : "",
     [
       `## Hard requirements`,
       `- Exactly ${input.chapterCount} chapters, numbered 1 through ${input.chapterCount}.`,
@@ -145,16 +212,10 @@ function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: st
     .join("\n\n");
 }
 
-/**
- * Cheap deterministic checks that gate the LLM self-check: chapter count,
- * sequential numbering, contiguous act coverage, and (when a known template
- * is in play) climax placement near its expected beat position.
- */
-function codeCheckIssues(
+function productionShapeIssues(
   outline: BookOutline,
   chapterCount: number,
-  acts: StructurePlan["acts"],
-  template: PlotTemplate | undefined,
+  targetWordsPerChapter: number,
 ): string[] {
   const issues: string[] = [];
   if (outline.chapters.length !== chapterCount) {
@@ -165,6 +226,31 @@ function codeCheckIssues(
   if (!outline.chapters.every((c, i) => c.number === i + 1)) {
     issues.push(`Chapter numbers must run 1..${chapterCount} in order, no gaps or duplicates.`);
   }
+  const { min: minimumWords, max: maximumWords } = targetWordRange(targetWordsPerChapter);
+  const chaptersOutsideWordRange = outline.chapters
+    .filter((chapter) => chapter.targetWords < minimumWords || chapter.targetWords > maximumWords)
+    .map((chapter) => chapter.number);
+  if (chaptersOutsideWordRange.length > 0) {
+    issues.push(
+      `Chapter targetWords must stay between ${minimumWords} and ${maximumWords}; fix chapters ${chaptersOutsideWordRange.join(", ")}.`,
+    );
+  }
+  return issues;
+}
+
+/**
+ * Cheap deterministic checks that gate the LLM self-check: production shape,
+ * contiguous act coverage, and (when a known template is in play) climax
+ * placement near its expected beat position.
+ */
+function codeCheckIssues(
+  outline: BookOutline,
+  chapterCount: number,
+  targetWordsPerChapter: number,
+  acts: StructurePlan["acts"],
+  template: PlotTemplate | undefined,
+): string[] {
+  const issues = productionShapeIssues(outline, chapterCount, targetWordsPerChapter);
   const sorted = [...acts].sort((a, b) => a.startChapter - b.startChapter);
   let cursor = 1;
   let contiguous = sorted.length > 0;
@@ -202,8 +288,10 @@ function codeCheckIssues(
 function selfCheckPrompt(
   outline: BookOutline,
   chapterCount: number,
+  targetWordsPerChapter: number,
   template: PlotTemplate | undefined,
   issues: string[],
+  contentGuidelines?: string,
 ): string {
   const summary = template ? getTemplateSummary(template.structureType) : undefined;
   const beatsSection = summary
@@ -218,9 +306,13 @@ function selfCheckPrompt(
     issues.length > 0
       ? `## Detected problems (must all be fixed)\n${issues.map((i) => `- ${i}`).join("\n")}`
       : "",
+    contentGuidelines
+      ? `## Frozen authoring contract (must remain true after repairs)\n${contentGuidelines}`
+      : "",
     [
       `## Verify`,
       `- Exactly ${chapterCount} chapters numbered 1..${chapterCount}.`,
+      `- Every chapter's targetWords is within 20% of ${targetWordsPerChapter}.`,
       `- Each beat lands in the chapter nearest its percentage of ${chapterCount} chapters, with a matching emotionalArc.`,
       `- Hook chaining: chapter N's closingHook must set up chapter N+1's openingHook; rewrite any hooks that do not chain.`,
     ].join("\n"),
@@ -230,78 +322,117 @@ function selfCheckPrompt(
     .join("\n\n");
 }
 
-function normalizeOutline(
-  outline: BookOutline,
-  structureId: string,
-  chapterCount: number,
-): BookOutline {
-  // Clamp to the configured chapter count so an over-long outline cannot
-  // draft (and bill) more chapters than the author budgeted for.
+function normalizeOutline(outline: BookOutline, structureId: string): BookOutline {
   return {
     ...outline,
     plotStructure: getPlotTemplate(structureId) ? structureId : outline.plotStructure,
-    chapters: outline.chapters.slice(0, chapterCount).map((c, i) => ({ ...c, number: i + 1 })),
   };
 }
 
-export async function generateOutline(input: OutlineInput): Promise<BookOutline> {
+export async function generateOutline(
+  input: OutlineInput,
+  options: OutlineCheckpointOptions = {},
+): Promise<BookOutline> {
   const model = MODELS[input.tier].outline;
   // Byte-identical across all outline calls in a run — call 1 writes the
   // Anthropic cache prefix, calls 2 and 3 read it.
   const system = anthropicCachedSystem(OUTLINE_SYSTEM_PROMPT);
 
-  const planResult = await metered(
-    input.meter,
-    { role: "outliner", operation: "outliner.plan", model },
-    () =>
-      generateText({
-        model,
-        instructions: system,
-        prompt: structurePlanPrompt(input),
-        output: Output.object({ schema: structurePlanSchema }),
-        providerOptions: gatewayOptions(input.meter, "outliner"),
-      }),
-  );
-  const plan = planResult.output;
+  let checkpoint = options.checkpoint ?? {};
+  const save = async (next: OutlineGenerationCheckpoint) => {
+    checkpoint = next;
+    await options.onCheckpoint?.(checkpoint);
+  };
+  let plan = checkpoint.plan;
+  if (!plan) {
+    const planResult = await metered(
+      input.meter,
+      { role: "outliner", operation: "outliner.plan", model },
+      () =>
+        generateText({
+          model,
+          instructions: system,
+          prompt: structurePlanPrompt(input),
+          maxOutputTokens: meteredMaxOutputTokens("outliner.plan"),
+          prepareStep: meteredInputGuard("outliner.plan"),
+          output: Output.object({ schema: structurePlanSchema }),
+          providerOptions: gatewayOptions(input.meter, "outliner"),
+        }),
+    );
+    plan = planResult.output;
+    await save({ ...checkpoint, plan });
+  }
   const structureId = resolveStructureId(plan.plotStructure, input.plotStructure);
   const template = getPlotTemplate(structureId);
 
-  const outlineResult = await metered(
-    input.meter,
-    { role: "outliner", operation: "outliner.outline", model },
-    () =>
-      generateText({
-        model,
-        instructions: system,
-        prompt: outlinePrompt(input, plan, structureId),
-        output: Output.object({ schema: bookOutlineSchema }),
-        providerOptions: gatewayOptions(input.meter, "outliner"),
-      }),
-  );
-  let outline = outlineResult.output;
+  let outline = checkpoint.draft;
+  if (!outline) {
+    const outlineResult = await metered(
+      input.meter,
+      { role: "outliner", operation: "outliner.outline", model },
+      () =>
+        generateText({
+          model,
+          instructions: system,
+          prompt: outlinePrompt(input, plan, structureId),
+          maxOutputTokens: meteredMaxOutputTokens("outliner.outline"),
+          prepareStep: meteredInputGuard("outliner.outline"),
+          output: Output.object({ schema: bookOutlineSchema }),
+          providerOptions: gatewayOptions(input.meter, "outliner"),
+        }),
+    );
+    outline = outlineResult.output;
+    await save({ ...checkpoint, draft: outline });
+  }
+  if (!outline) throw new Error("Outline generation produced no draft");
+  const outlineBeforeCheck = outline;
 
-  if (input.tier !== "draft") {
-    const issues = codeCheckIssues(outline, input.chapterCount, plan.acts, template);
-    // Cheap code checks first; the LLM pass only runs when the checks found
-    // something it needs to fix.
-    if (issues.length > 0) {
-      const checked = await metered(
-        input.meter,
-        { role: "outliner", operation: "outliner.selfCheck", model },
-        () =>
-          generateText({
-            model,
-            instructions: system,
-            prompt: selfCheckPrompt(outline, input.chapterCount, template, issues),
-            output: Output.object({ schema: bookOutlineSchema }),
-            providerOptions: gatewayOptions(input.meter, "outliner"),
-          }),
-      );
-      outline = checked.output;
-    }
+  const runSchema = outlineSchemaForRun(input.chapterCount, input.targetWordsPerChapter);
+  const issues =
+    input.tier === "draft"
+      ? productionShapeIssues(outlineBeforeCheck, input.chapterCount, input.targetWordsPerChapter)
+      : codeCheckIssues(
+          outlineBeforeCheck,
+          input.chapterCount,
+          input.targetWordsPerChapter,
+          plan.acts,
+          template,
+        );
+
+  // Production-shape errors are repaired at every tier. Draft skips the
+  // optional story-structure review, but it may never skip the author's count
+  // or word budget.
+  if (issues.length > 0) {
+    const checked = await metered(
+      input.meter,
+      { role: "outliner", operation: "outliner.selfCheck", model },
+      () =>
+        generateText({
+          model,
+          instructions: system,
+          prompt: selfCheckPrompt(
+            outlineBeforeCheck,
+            input.chapterCount,
+            input.targetWordsPerChapter,
+            template,
+            issues,
+            input.contentGuidelines,
+          ),
+          maxOutputTokens: meteredMaxOutputTokens("outliner.selfCheck"),
+          prepareStep: meteredInputGuard("outliner.selfCheck"),
+          output: Output.object({ schema: runSchema }),
+          providerOptions: gatewayOptions(input.meter, "outliner"),
+        }),
+    );
+    outline = checked.output;
   }
 
-  return normalizeOutline(outline, structureId, input.chapterCount);
+  // Never trust a repair merely because the model returned an object. This
+  // explicit boundary also protects tests/mocks and future provider changes
+  // that may bypass Output.object's schema enforcement.
+  const final = normalizeOutline(runSchema.parse(outline), structureId);
+  await options.onFinal?.(final);
+  return final;
 }
 
 /**

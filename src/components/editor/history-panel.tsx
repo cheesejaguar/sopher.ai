@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/sheet";
 import { listChapterRevisions, restoreChapterRevision } from "@/lib/actions/chapters";
 import { wordDiff } from "@/lib/editor/word-diff";
+import { isGenerationResetSource } from "@/lib/generation-archive";
 import { cn } from "@/lib/utils";
 
 import { useMediaQuery } from "./use-media-query";
@@ -34,10 +35,16 @@ type Revision = {
 const SOURCE_LABELS: Record<string, string> = {
   user: "Manual save",
   regenerate: "Before regeneration",
+  "generation-reset": "Before a new book run",
   "pre-restore": "Before a restore",
   suggestion: "Suggestion applied",
   workflow: "Generated",
 };
+
+export function revisionSourceLabel(source: string): string {
+  if (isGenerationResetSource(source)) return SOURCE_LABELS["generation-reset"];
+  return SOURCE_LABELS[source] ?? source;
+}
 
 function timestamp(value: Date): string {
   return new Intl.DateTimeFormat("en-US", {
@@ -174,9 +181,7 @@ export function HistoryPanel({
                       : "hover:bg-accent/60",
                   )}
                 >
-                  <span className="block font-medium">
-                    {SOURCE_LABELS[revision.source] ?? revision.source}
-                  </span>
+                  <span className="block font-medium">{revisionSourceLabel(revision.source)}</span>
                   <span className="block font-mono text-[11px] text-muted-foreground">
                     {timestamp(revision.createdAt)}
                   </span>

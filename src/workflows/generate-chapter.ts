@@ -1,6 +1,13 @@
 import { FatalError } from "workflow";
 import type { GenerationConfig } from "@/lib/run-events";
-import { emitCost, emitProgress, markRunStatus, resetChapterStep, writeChapterStep } from "./steps";
+import {
+  emitCost,
+  emitProgress,
+  markRunStatus,
+  releaseCreditsStep,
+  resetChapterStep,
+  writeChapterStep,
+} from "./steps";
 
 /**
  * Regenerates a single chapter in place. The old prose is snapshotted to the
@@ -14,6 +21,7 @@ export async function generateChapter(
   userId: string,
   chapterNumber: number,
   config: GenerationConfig,
+  reservationRef: string,
 ) {
   "use workflow";
   const ref = { dbRunId, projectId, userId };
@@ -28,7 +36,7 @@ export async function generateChapter(
     });
 
     await resetChapterStep(ref, chapterNumber);
-    const result = await writeChapterStep(ref, config, chapterNumber);
+    const result = await writeChapterStep(ref, config, chapterNumber, reservationRef);
     await emitCost(ref);
 
     await markRunStatus(ref, "completed");
@@ -44,5 +52,7 @@ export async function generateChapter(
     await markRunStatus(ref, "failed", message);
     await emitProgress(ref, { type: "error", message, fatal: true });
     throw error instanceof FatalError ? error : new FatalError(message);
+  } finally {
+    await releaseCreditsStep(ref, reservationRef);
   }
 }

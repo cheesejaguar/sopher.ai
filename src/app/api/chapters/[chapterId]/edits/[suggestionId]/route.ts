@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
@@ -6,6 +6,7 @@ import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { countWords, resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
+import { hasActiveAuthoringRun, noActiveAuthoringRunSql } from "@/lib/generation-runs";
 
 export const maxDuration = 30;
 
@@ -72,6 +73,12 @@ export async function POST(
   }
 
   // Accept.
+  if (await hasActiveAuthoringRun(ownership.projectId)) {
+    return Response.json(
+      { error: "Finish or stop the current run before applying suggestions" },
+      { status: 409 },
+    );
+  }
   const chapter = await getChapterById(chapterId);
   if (!chapter) return Response.json({ error: "Not found" }, { status: 404 });
 
@@ -112,29 +119,82 @@ export async function POST(
   const newVersion = chapter.version + 1;
   const wordCount = countWords(newContent);
 
-  // Optimistic-concurrency splice: only lands if nobody else wrote meanwhile.
-  const [updatedChapter] = await db
-    .update(schema.chapters)
-    .set({ content: newContent, wordCount, version: newVersion, updatedAt: new Date() })
-    .where(and(eq(schema.chapters.id, chapterId), eq(schema.chapters.version, chapter.version)))
-    .returning({ version: schema.chapters.version });
-  if (!updatedChapter) {
+  // One atomic acceptance: lock the still-pending suggestion, apply the
+  // guarded chapter CAS, archive the new version, and mark the suggestion
+  // applied. A crash cannot leave applied prose behind a pending suggestion.
+  const { rows: accepted } = await db.execute<{ version: number; suggestion_id: string }>(sql`
+    with candidate as materialized (
+      select ${schema.suggestions.id}
+      from ${schema.suggestions}
+      where ${schema.suggestions.id} = ${suggestionId}
+        and ${schema.suggestions.chapterId} = ${chapterId}
+        and ${schema.suggestions.status} = 'pending'
+      for update
+    ),
+    updated_chapter as (
+      update ${schema.chapters}
+      set
+        content = ${newContent},
+        word_count = ${wordCount},
+        version = ${newVersion},
+        updated_at = ${new Date()}
+      where ${schema.chapters.id} = ${chapterId}
+        and ${schema.chapters.version} = ${chapter.version}
+        and exists (select 1 from candidate)
+        and ${noActiveAuthoringRunSql(ownership.projectId)}
+      returning ${schema.chapters.version}
+    ),
+    revision as (
+      insert into ${schema.chapterRevisions} (chapter_id, content, source)
+      select ${chapterId}, ${newContent}, 'user'
+      from updated_chapter
+      returning ${schema.chapterRevisions.id}
+    ),
+    applied_suggestion as (
+      update ${schema.suggestions}
+      set status = 'applied'
+      where ${schema.suggestions.id} in (select id from candidate)
+        and exists (select 1 from updated_chapter)
+      returning ${schema.suggestions.id}
+    )
+    select
+      updated_chapter.version,
+      applied_suggestion.id as suggestion_id
+    from updated_chapter
+    cross join revision
+    cross join applied_suggestion
+  `);
+  if (!accepted[0]) {
+    // The guarded CTE can lose either the chapter-version race or the
+    // production-run race. Recheck both so the author gets the real recovery
+    // instruction instead of every conflict looking like an edit collision.
+    if (await hasActiveAuthoringRun(ownership.projectId)) {
+      return Response.json(
+        { error: "Finish or stop the current run before applying suggestions" },
+        { status: 409 },
+      );
+    }
+    const currentChapter = await getChapterById(chapterId);
     return Response.json(
-      { error: "The chapter changed while applying — try again", currentVersion: newVersion },
+      {
+        error: "The chapter changed while applying — try again",
+        currentVersion: currentChapter?.version ?? chapter.version,
+      },
       { status: 409 },
     );
   }
 
-  await db.insert(schema.chapterRevisions).values({
-    chapterId,
-    content: newContent,
-    source: "user",
-  });
   const [applied] = await db
-    .update(schema.suggestions)
-    .set({ status: "applied" })
-    .where(eq(schema.suggestions.id, suggestionId))
-    .returning();
+    .select()
+    .from(schema.suggestions)
+    .where(eq(schema.suggestions.id, accepted[0].suggestion_id))
+    .limit(1);
+  if (!applied) {
+    return Response.json(
+      { error: "Suggestion applied but could not be reloaded" },
+      { status: 500 },
+    );
+  }
 
   const pending = await db
     .select()

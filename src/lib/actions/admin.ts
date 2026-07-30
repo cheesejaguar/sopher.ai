@@ -1,12 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { grantCredits } from "@/lib/billing/credits";
+import {
+  reconcileMeteredCallAsCharged,
+  reconcileMeteredCallAsUncharged,
+} from "@/lib/billing/meter";
+import { scheduleRunReservationCleanup, terminalizeAuthoringRun } from "@/lib/generation-runs";
 
 /**
  * Admin actions. Every mutation is (a) behind requireAdmin, (b) auditable —
@@ -73,6 +78,7 @@ export async function adminCancelRun(runId: string): Promise<void> {
       id: schema.generationRuns.id,
       status: schema.generationRuns.status,
       projectId: schema.generationRuns.projectId,
+      userId: schema.generationRuns.userId,
       workflowRunId: schema.generationRuns.workflowRunId,
     })
     .from(schema.generationRuns)
@@ -91,18 +97,84 @@ export async function adminCancelRun(runId: string): Promise<void> {
     }
   }
 
-  await db
-    .update(schema.generationRuns)
-    .set({ status: "cancelled", completedAt: new Date() })
-    .where(
-      and(
-        eq(schema.generationRuns.id, runId),
-        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
-      ),
-    );
-  await db
-    .update(schema.projects)
-    .set({ status: "draft", updatedAt: new Date() })
-    .where(and(eq(schema.projects.id, run.projectId), eq(schema.projects.status, "generating")));
+  await terminalizeAuthoringRun({
+    runId,
+    projectId: run.projectId,
+    userId: run.userId,
+    status: "cancelled",
+    error: "Cancelled by administrator",
+  });
+  await scheduleRunReservationCleanup({ userId: run.userId, runId });
+  revalidatePath("/admin/runs");
+}
+
+const reconcileIntentSchema = z.object({
+  intentRef: z.string().startsWith("metering-intent:").max(1_000),
+  confirmation: z.literal("verified_no_gateway_charge"),
+  note: z.string().min(10).max(500),
+});
+
+/**
+ * Releases an unresolved provider-call claim only after an administrator has
+ * checked the Gateway generation record and explicitly attested it was not
+ * charged. There is intentionally no generic "clear" action for ambiguity.
+ */
+export async function adminReconcileUnchargedMeteringIntent(input: unknown): Promise<void> {
+  const { userId: adminId } = await requireAdmin();
+  const data = reconcileIntentSchema.parse(input);
+  const released = await reconcileMeteredCallAsUncharged({
+    intentRef: data.intentRef,
+    adminId,
+    note: data.note,
+  });
+  if (!released) {
+    throw new Error("The intent is already resolved or no longer eligible for release");
+  }
+  revalidatePath("/admin/runs");
+}
+
+const chargedReconciliationSchema = z.object({
+  intentRef: z.string().startsWith("metering-intent:").max(1_000),
+  confirmation: z.literal("verified_gateway_charge"),
+  note: z.string().min(10).max(500),
+  calls: z
+    .array(
+      z.object({
+        model: z.string().min(3).max(200),
+        inputTokens: z.number().int().min(0).max(2_000_000),
+        outputTokens: z.number().int().min(0).max(200_000),
+        cachedInputTokens: z.number().int().min(0).max(2_000_000).default(0),
+        cacheWriteTokens: z.number().int().min(0).max(2_000_000).default(0),
+        reasoningTokens: z.number().int().min(0).max(200_000).default(0),
+        imageCount: z.number().int().min(0).max(10).default(0),
+      }),
+    )
+    .min(1)
+    .max(5)
+    .refine(
+      (calls) =>
+        calls.some(
+          (call) =>
+            call.inputTokens > 0 ||
+            call.outputTokens > 0 ||
+            call.cachedInputTokens > 0 ||
+            call.cacheWriteTokens > 0 ||
+            call.reasoningTokens > 0 ||
+            call.imageCount > 0,
+        ),
+      { message: "A charged reconciliation requires positive billable usage" },
+    ),
+});
+
+/** Settles an aged pending claim from usage verified in the Gateway dashboard. */
+export async function adminReconcileChargedMeteringIntent(input: unknown): Promise<void> {
+  const { userId: adminId } = await requireAdmin();
+  const data = chargedReconciliationSchema.parse(input);
+  await reconcileMeteredCallAsCharged({
+    intentRef: data.intentRef,
+    adminId,
+    note: data.note,
+    calls: data.calls,
+  });
   revalidatePath("/admin/runs");
 }

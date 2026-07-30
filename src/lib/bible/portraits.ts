@@ -45,15 +45,34 @@ export function portraitPrompt(input: {
   const parts: string[] = [];
 
   if (input.kind === "character") {
-    parts.push(`Character portrait, head and shoulders, of ${input.name}.`);
+    parts.push(
+      `Three-quarter literary character study of ${input.name}, showing face, posture, build, clothing, and recurring accessories.`,
+    );
     const appearance = attr("appearance");
     const heritage = attr("heritage");
     const age = attr("age");
     const occupation = attr("occupation");
-    if (appearance) parts.push(appearance);
-    if (heritage) parts.push(`Heritage: ${heritage}.`);
-    if (age) parts.push(`Age: ${age}.`);
-    if (occupation) parts.push(`Dressed as befits a ${occupation}.`);
+    const visualCanon = [
+      ["Apparent age", age],
+      ["Build and movement", attr("build")],
+      ["Face", attr("face")],
+      ["Hair", attr("hair")],
+      ["Eyes", attr("eyes")],
+      ["Complexion", attr("complexion")],
+      ["Wardrobe and accessories", attr("wardrobe")],
+      ["Posture", attr("posture")],
+    ]
+      .filter((entry): entry is [string, string] => Boolean(entry[1]))
+      .map(([label, value]) => `${label}: ${value}.`);
+    const distinguishingFeatures = list("distinguishingFeatures").slice(0, 8);
+
+    if (appearance) parts.push(`Overall appearance: ${appearance}.`);
+    if (visualCanon.length) parts.push(`Visual canon: ${visualCanon.join(" ")}`);
+    if (distinguishingFeatures.length) {
+      parts.push(`Distinguishing features: ${distinguishingFeatures.join(", ")}.`);
+    }
+    if (heritage) parts.push(`Cultural context: ${heritage}.`);
+    if (occupation) parts.push(`Occupation context: ${occupation}.`);
   } else if (input.kind === "location") {
     parts.push(`Establishing view of ${input.name}.`);
     const description = attr("description");

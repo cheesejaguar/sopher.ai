@@ -4,6 +4,7 @@ import Link from "next/link";
 import { BrandMark } from "@/components/brand-mark";
 import { MobileMainMenu } from "@/components/marketing/mobile-main-menu";
 import { PublicAnalytics } from "@/components/marketing/public-analytics";
+import { PublicNavLink } from "@/components/marketing/public-nav-link";
 import { PublicThemeToggle } from "@/components/marketing/public-theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -22,35 +23,46 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
           aria-label="Main"
           className="mx-auto flex h-16 w-full max-w-7xl items-center gap-2 px-4 min-[360px]:gap-4 sm:px-6 lg:px-8"
         >
-          <Link href="/" aria-label="sopher.ai" className="group flex min-h-11 items-center">
+          <PublicNavLink
+            href="/"
+            aria-label="sopher.ai"
+            currentClassName="border-primary"
+            className="group flex min-h-11 items-center border-b border-transparent"
+          >
             <BrandMark showWordmark={false} className="sm:hidden" />
             <BrandMark className="hidden sm:inline-flex" />
-          </Link>
+          </PublicNavLink>
           <div className="ml-auto hidden items-center gap-1 md:flex">
-            <Link
+            <PublicNavLink
               href="/#how-it-works"
+              match="none"
               className="inline-flex min-h-11 items-center border-b border-transparent px-3 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
             >
               How it works
-            </Link>
-            <Link
+            </PublicNavLink>
+            <PublicNavLink
               href="/genres"
+              match="section"
+              currentClassName="border-primary text-foreground"
               className="inline-flex min-h-11 items-center border-b border-transparent px-3 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
             >
               Genres
-            </Link>
-            <Link
+            </PublicNavLink>
+            <PublicNavLink
               href="/guides"
+              match="section"
+              currentClassName="border-primary text-foreground"
               className="inline-flex min-h-11 items-center border-b border-transparent px-3 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
             >
               Guides
-            </Link>
-            <Link
+            </PublicNavLink>
+            <PublicNavLink
               href="/pricing"
+              currentClassName="border-primary text-foreground"
               className="inline-flex min-h-11 items-center border-b border-transparent px-3 text-sm text-muted-foreground transition-colors hover:border-primary/50 hover:text-foreground"
             >
               Pricing
-            </Link>
+            </PublicNavLink>
           </div>
           <Link
             href="/studio"

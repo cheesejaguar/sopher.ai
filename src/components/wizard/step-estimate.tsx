@@ -43,7 +43,6 @@ type EstimateMap = Partial<Record<QualityTier, QuotedEstimate>>;
 
 export type WizardQuoteSummary = {
   credits: number;
-  estimatedMinutes: number;
 };
 
 export function StepEstimate({
@@ -114,17 +113,11 @@ export function StepEstimate({
   // and never per keystroke (the quote itself is debounced).
   const announcement =
     selected && !loading
-      ? `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}, about ${
-          selected.estimatedMinutes
-        } minutes.`
+      ? `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}, about ${selected.estimatedMinutes} minutes.`
       : "";
 
   React.useEffect(() => {
-    onQuote?.(
-      selected && !loading
-        ? { credits: selected.credits, estimatedMinutes: selected.estimatedMinutes }
-        : null,
-    );
+    onQuote?.(selected && !loading ? { credits: selected.credits } : null);
   }, [loading, onQuote, selected]);
 
   return (
@@ -157,13 +150,9 @@ export function StepEstimate({
         {TIERS.map((tier) => {
           const estimate = estimates[tier];
           const active = state.tier === tier;
-          // The price and duration are part of the choice, so they belong in the
-          // option's name rather than only in adjacent text.
           const optionLabel =
             estimate && !loading
-              ? `${TIER_LABELS[tier].name} — ${formatCredits(estimate.credits)}, about ${
-                  estimate.estimatedMinutes
-                } minutes`
+              ? `${TIER_LABELS[tier].name} — ${formatCredits(estimate.credits)}`
               : `${TIER_LABELS[tier].name} — estimate still loading`;
           return (
             <label
@@ -183,13 +172,7 @@ export function StepEstimate({
               <span className="text-xs text-ai">{modelMix(tier)}</span>
               <span className="mt-auto pt-1.5 font-mono text-sm tabular-nums">
                 {estimate && !loading ? (
-                  <>
-                    {formatCredits(estimate.credits)}
-                    <span className="text-muted-foreground">
-                      {" "}
-                      · ~{estimate.estimatedMinutes} min
-                    </span>
-                  </>
+                  formatCredits(estimate.credits)
                 ) : (
                   <Skeleton className="h-4 w-24" />
                 )}
@@ -201,9 +184,16 @@ export function StepEstimate({
 
       {/* The receipt — itemized, honest, mono */}
       <div className="manuscript-sheet p-5 sm:p-6">
-        <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
-          Estimate — {TIER_LABELS[state.tier].name}
-        </p>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+          <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
+            Estimate — {TIER_LABELS[state.tier].name}
+          </p>
+          {selected && !loading ? (
+            <p className="font-mono text-xs text-paper-muted">
+              Estimated production time: ~{selected.estimatedMinutes} min
+            </p>
+          ) : null}
+        </div>
         <div className="mt-4 font-mono text-sm text-paper-foreground" aria-busy={loading}>
           {selected && !loading ? (
             <>
@@ -230,8 +220,7 @@ export function StepEstimate({
               </div>
               <p className="mt-3 text-xs text-paper-muted">
                 ±30% — credits are only debited for what actually runs, and writing pauses (not
-                fails) if your balance runs out. Roughly {selected.estimatedMinutes} minutes start
-                to finish.
+                fails) if your balance runs out.
               </p>
             </>
           ) : (

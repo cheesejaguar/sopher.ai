@@ -7,7 +7,9 @@ import {
   attrsSchemaFor,
   parseAttrs,
   ENTITY_KINDS,
+  bibleEntitySchema,
 } from "@/ai/schemas/entities";
+import { chapterSummarySchema } from "@/ai/schemas";
 
 describe("per-kind attribute schemas", () => {
   it("gives every kind a schema", () => {
@@ -44,10 +46,56 @@ describe("per-kind attribute schemas", () => {
   });
 
   it("drops malformed attrs rather than throwing mid-generation", () => {
-    const parsed = parseAttrs("object", { capabilities: "not-an-array" }) as {
+    const parsed = parseAttrs("object", {
+      description: "a bone-handled field knife",
+      capabilities: "not-an-array",
+    }) as {
+      description?: string;
       capabilities?: string[];
     };
+    expect(parsed.description).toBe("a bone-handled field knife");
     expect(Array.isArray(parsed.capabilities)).toBe(true);
+  });
+
+  it("requires a complete main-character profile in the pre-draft bible", () => {
+    const profile = {
+      kind: "character",
+      name: "Mara Venn",
+      aliases: [],
+      attrs: {
+        role: "protagonist",
+        background: "Raised among tidal surveyors after her mother disappeared.",
+        occupation: "harbor cartographer",
+        appearance: "Weathered and compact, with a steady surveying gaze.",
+        build: "Short, wiry, and sure-footed",
+        face: "Angular face with a cleft chin",
+        hair: "Black curls cut at the jaw",
+        eyes: "Grey-green, narrow-set",
+        complexion: "Warm brown with wind-reddened cheeks",
+        distinguishingFeatures: ["rope scar across her right palm"],
+        wardrobe: "Waxed indigo coat, brass compass, salt-stained boots",
+        posture: "Weight pitched forward as if walking into wind",
+        heritage: "Coastal Averrin",
+        age: "31",
+        speech: "Spare, exact sentences with old harbor idioms",
+        personality: ["observant", "stubborn"],
+        mannerisms: ["checks the horizon before answering"],
+        goals: ["find the lost channel"],
+        fears: ["becoming as absent as her mother"],
+        secrets: ["she altered her final survey"],
+        arc: "Learns to trust testimony as much as measurements.",
+        nameRationale: "Her family name follows the eastern harbor line.",
+        facts: [],
+      },
+    };
+
+    expect(bibleEntitySchema.safeParse(profile).success).toBe(true);
+    expect(
+      bibleEntitySchema.safeParse({
+        ...profile,
+        attrs: { ...profile.attrs, appearance: undefined },
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -106,6 +154,26 @@ describe("KIND_TO_ISSUE_CATEGORY", () => {
     for (const kind of ENTITY_KINDS) {
       expect(allowed.has(KIND_TO_ISSUE_CATEGORY[kind])).toBe(true);
     }
+  });
+});
+
+describe("relationship context", () => {
+  it("keeps a generated relationship description for persistence and display", () => {
+    const result = chapterSummarySchema.parse({
+      summary: "Mara entrusts Ilyan with the compass.",
+      newFacts: [],
+      relationships: [
+        {
+          from: "Mara Venn",
+          to: "Ilyan Venn",
+          type: "sibling",
+          description: "Estranged siblings rebuilding trust through their shared search.",
+        },
+      ],
+      moderation: { flagged: false },
+    });
+
+    expect(result.relationships[0]?.description).toContain("rebuilding trust");
   });
 });
 

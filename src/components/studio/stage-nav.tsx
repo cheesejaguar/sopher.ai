@@ -7,6 +7,12 @@ import { Suspense, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import {
+  describeProductionProgress,
+  lifecyclePhaseForProduction,
+  type ProjectProgressSnapshot,
+} from "@/lib/project-progress";
+import { useProjectProgress } from "@/components/studio/project-progress";
 
 const lifecycle = [
   {
@@ -51,13 +57,23 @@ function getStageState(projectId: string, pathname: string | undefined, stage: S
       : pathname === href
         ? ("page" as const)
         : pathname.startsWith(`${href}/`)
-          ? ("true" as const)
+          ? ("page" as const)
           : undefined;
 
   return { href, current, active: current !== undefined };
 }
 
-function DesktopStageTabs({ projectId, pathname }: { projectId: string; pathname?: string }) {
+function DesktopStageTabs({
+  projectId,
+  pathname,
+  progress,
+}: {
+  projectId: string;
+  pathname?: string;
+  progress: ProjectProgressSnapshot;
+}) {
+  const productionPhase = lifecyclePhaseForProduction(progress.stage, progress.pausedStage);
+
   function stageLink(stage: Stage) {
     const { href, current, active } = getStageState(projectId, pathname, stage);
 
@@ -73,6 +89,7 @@ function DesktopStageTabs({ projectId, pathname }: { projectId: string; pathname
             : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
         )}
       >
+        {active ? <span className="sr-only">You are here: </span> : null}
         <span
           aria-hidden="true"
           className={cn("absolute inset-x-2 bottom-0 h-px bg-transparent", active && "bg-primary")}
@@ -87,9 +104,18 @@ function DesktopStageTabs({ projectId, pathname }: { projectId: string; pathname
       {lifecycle.map((group, index) => (
         <div
           key={group.label}
-          className="flex items-center gap-1 border-r border-border pr-3 last:border-r-0"
+          className={cn(
+            "flex items-center gap-1 border-r border-border pr-3 last:border-r-0",
+            progress.runId && productionPhase === group.label && "text-ai",
+          )}
         >
           <span className="mr-1 flex items-center gap-1.5 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
+            {progress.runId && productionPhase === group.label ? (
+              <span
+                aria-hidden="true"
+                className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
+              />
+            ) : null}
             <span className="text-primary">{String(index + 1).padStart(2, "0")}</span>
             {group.label}
           </span>
@@ -106,7 +132,15 @@ function DesktopStageTabs({ projectId, pathname }: { projectId: string; pathname
   );
 }
 
-function MobileStageMenu({ projectId, pathname }: { projectId: string; pathname?: string }) {
+function MobileStageMenu({
+  projectId,
+  pathname,
+  progress,
+}: {
+  projectId: string;
+  pathname?: string;
+  progress: ProjectProgressSnapshot;
+}) {
   const [openOnPathname, setOpenOnPathname] = useState<string | null>(null);
   const menuPathname = pathname ?? "";
   const open = openOnPathname === menuPathname;
@@ -136,7 +170,7 @@ function MobileStageMenu({ projectId, pathname }: { projectId: string; pathname?
         {stage.label}
         {active ? (
           <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
-            Current
+            You are here
           </span>
         ) : null}
       </Link>
@@ -153,7 +187,12 @@ function MobileStageMenu({ projectId, pathname }: { projectId: string; pathname?
         <span className="min-w-0">
           <span className="folio-label block text-muted-foreground">Project navigation</span>
           <span className="mt-1 block truncate text-sm font-semibold">
-            {activeStage ? `${activeStage.group} / ${activeStage.label}` : "Choose a stage"}
+            {activeStage
+              ? `You are here: ${activeStage.group} / ${activeStage.label}`
+              : "Choose a stage"}
+          </span>
+          <span className="mt-1 block truncate text-xs text-ai">
+            Production now: {progress.runId ? describeProductionProgress(progress) : "Not started"}
           </span>
         </span>
         <ChevronDown
@@ -180,19 +219,28 @@ function MobileStageMenu({ projectId, pathname }: { projectId: string; pathname?
   );
 }
 
-function StageNavigationWithPathname({ projectId }: { projectId: string }) {
+function StageNavigationWithPathname({
+  projectId,
+  progress,
+}: {
+  projectId: string;
+  progress: ProjectProgressSnapshot;
+}) {
   const pathname = usePathname();
   return (
     <>
-      <MobileStageMenu projectId={projectId} pathname={pathname} />
+      <MobileStageMenu projectId={projectId} pathname={pathname} progress={progress} />
       <div className="hidden px-2 py-2 lg:block">
-        <DesktopStageTabs projectId={projectId} pathname={pathname} />
+        <DesktopStageTabs projectId={projectId} pathname={pathname} progress={progress} />
       </div>
     </>
   );
 }
 
 export function StageNav({ projectId }: { projectId: string }) {
+  const { progress } = useProjectProgress();
+  const productionPhase = lifecyclePhaseForProduction(progress.stage, progress.pausedStage);
+
   return (
     <nav aria-label="Project lifecycle" className="min-w-0 border-y border-border bg-card/35">
       <Suspense
@@ -202,13 +250,27 @@ export function StageNav({ projectId }: { projectId: string }) {
               <span className="folio-label text-muted-foreground">Project navigation</span>
             </div>
             <div className="hidden px-2 py-2 lg:block">
-              <DesktopStageTabs projectId={projectId} />
+              <DesktopStageTabs projectId={projectId} progress={progress} />
             </div>
           </>
         }
       >
-        <StageNavigationWithPathname projectId={projectId} />
+        <StageNavigationWithPathname projectId={projectId} progress={progress} />
       </Suspense>
+      <div
+        aria-label="Book production status"
+        className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-4 py-2 text-xs"
+      >
+        <span className="folio-label text-muted-foreground">Production now</span>
+        <span className="font-medium text-foreground">
+          {progress.runId ? describeProductionProgress(progress) : "Not started"}
+        </span>
+        {progress.runId ? (
+          <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
+            {productionPhase}
+          </span>
+        ) : null}
+      </div>
     </nav>
   );
 }

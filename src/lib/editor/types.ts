@@ -68,7 +68,11 @@ export type ReviewResponse = { suggestions: SuggestionDTO[]; skipped: number };
 export type ContentToolOutputDTO =
   { kind: "mermaid"; source: string } | { kind: "image"; url: string; alt: string };
 
-export type ContentToolResponse = { output: ContentToolOutputDTO };
+export type ContentToolResponse = {
+  output: ContentToolOutputDTO;
+  /** True when the server reused an earlier delivery for the same paid operation key. */
+  replayed?: boolean;
+};
 
 /** Chapter row subset used by the editor sidebar / picker. */
 export type ChapterNavItem = {

@@ -37,5 +37,15 @@ export function creditsForUsd(usd: number): number {
   return usd * CREDIT_MARKUP;
 }
 
+/**
+ * Canonical four-decimal requirement for the numeric(12,4) wallet ledger.
+ * The epsilon removes binary round-trip noise (for example 1.2000000000000002)
+ * without ever rounding a real fifth-decimal requirement down.
+ */
+export function canonicalizeCreditRequirement(credits: number): number {
+  if (credits <= 0) return 0;
+  return Math.ceil(Math.max(0, credits) * 10_000 - 1e-9) / 10_000;
+}
+
 /** New-user welcome grant, in credits. Enough to watch a real book begin. */
 export const SIGNUP_GRANT_CREDITS = 10;
