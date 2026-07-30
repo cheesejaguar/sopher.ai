@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type FormEvent } from "react";
 import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,11 @@ export function BookIdentityDialog({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  function submit(formData: FormData) {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+
+    const formData = new FormData(event.currentTarget);
     setError(null);
     startTransition(async () => {
       try {
@@ -55,7 +59,12 @@ export function BookIdentityDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!pending) setOpen(nextOpen);
+      }}
+    >
       <DialogTrigger
         render={<Button variant="ghost" size="sm" aria-label="Edit title, synopsis, and author" />}
       >
@@ -69,7 +78,7 @@ export function BookIdentityDialog({
             The title, synopsis, and author byline used on the title page and in every export.
           </DialogDescription>
         </DialogHeader>
-        <form action={submit} className="space-y-4">
+        <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="book-title">Title</Label>
             <Input id="book-title" name="title" defaultValue={title} required maxLength={300} />
@@ -101,10 +110,17 @@ export function BookIdentityDialog({
             </p>
           ) : null}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              aria-disabled={pending}
+              onClick={() => {
+                if (!pending) setOpen(false);
+              }}
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={pending}>
+            <Button type="submit" aria-busy={pending || undefined} aria-disabled={pending}>
               {pending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>

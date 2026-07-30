@@ -154,7 +154,7 @@ export function ResponsiveInspector({
     <aside
       aria-label={title}
       className={cn(
-        "instrument-surface min-w-0 space-y-4 rounded-sm p-4 xl:border-0 xl:bg-transparent xl:p-0",
+        "instrument-surface min-w-0 space-y-4 rounded-sm p-4 xl:rounded-none xl:border-y-0 xl:border-r-0 xl:border-l xl:bg-transparent xl:py-0 xl:pr-0 xl:pl-5",
         className,
       )}
     >

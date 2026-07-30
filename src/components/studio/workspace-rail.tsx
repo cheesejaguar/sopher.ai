@@ -5,7 +5,7 @@ import { Suspense } from "react";
 
 import { FolioRail, type FolioRailChapter } from "@/components/studio/folio-rail";
 
-function RailWithPathname({
+function WorkspaceRailWithPathname({
   projectId,
   chapters,
 }: {
@@ -14,16 +14,27 @@ function RailWithPathname({
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const surfaceOwnsChapterNavigation = /\/(?:editor|write|manuscript)(?:\/|$)/.test(pathname);
+
+  if (surfaceOwnsChapterNavigation) return null;
+
   const match = pathname.match(/\/editor\/(\d+)(?:\/|$)/);
   const activeChapter = match ? Number(match[1]) : undefined;
 
   return (
-    <FolioRail
-      chapters={chapters}
-      activeChapter={activeChapter}
-      orientation="vertical"
-      onSelect={(n) => router.push(`/projects/${projectId}/editor/${n}`)}
-    />
+    <aside aria-label="Chapter overview" className="hidden shrink-0 xl:block">
+      <div className="sticky top-20 flex flex-col items-start gap-3">
+        <span className="font-mono text-[10px] tracking-widest text-muted-foreground uppercase">
+          Folio
+        </span>
+        <FolioRail
+          chapters={chapters}
+          activeChapter={activeChapter}
+          orientation="vertical"
+          onSelect={(n) => router.push(`/projects/${projectId}/editor/${n}`)}
+        />
+      </div>
+    </aside>
   );
 }
 
@@ -39,13 +50,8 @@ export function WorkspaceRail({
   chapters: FolioRailChapter[];
 }) {
   return (
-    <div className="sticky top-20 flex flex-col items-start gap-3">
-      <span className="font-mono text-[10px] tracking-widest text-muted-foreground uppercase">
-        Folio
-      </span>
-      <Suspense fallback={<FolioRail chapters={chapters} orientation="vertical" />}>
-        <RailWithPathname projectId={projectId} chapters={chapters} />
-      </Suspense>
-    </div>
+    <Suspense fallback={null}>
+      <WorkspaceRailWithPathname projectId={projectId} chapters={chapters} />
+    </Suspense>
   );
 }

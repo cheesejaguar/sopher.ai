@@ -45,6 +45,50 @@ test("mobile homepage exposes its core offer and passes axe", async ({ page }, t
   await fullPageScreenshot(page, testInfo, "home-390");
 });
 
+test("mobile homepage keeps the transforming notebook in the first viewport", async ({ page }) => {
+  for (const viewport of [
+    { width: 320, height: 686 },
+    { width: 375, height: 812 },
+  ] as const) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await page.evaluate(() => document.fonts.ready);
+
+    const hero = page.locator(".marketing-hero-stage");
+    const primaryAction = hero.getByRole("link", { name: "Start your book" });
+    const artifact = hero.locator(".journey-artifact");
+    await expect(primaryAction).toBeVisible();
+    await expect(artifact).toBeVisible();
+
+    const [actionBox, artifactBox] = await Promise.all([
+      primaryAction.boundingBox(),
+      artifact.boundingBox(),
+    ]);
+    expect(actionBox, `primary action missing at ${viewport.width}px`).not.toBeNull();
+    expect(artifactBox, `notebook artifact missing at ${viewport.width}px`).not.toBeNull();
+
+    expect(
+      actionBox!.y + actionBox!.height,
+      `primary action falls below the first viewport at ${viewport.width}px`,
+    ).toBeLessThanOrEqual(viewport.height);
+
+    const visibleArtifactHeight = Math.max(
+      0,
+      Math.min(artifactBox!.y + artifactBox!.height, viewport.height) - Math.max(artifactBox!.y, 0),
+    );
+    expect(
+      visibleArtifactHeight,
+      `notebook artifact has no meaningful first-viewport presence at ${viewport.width}px`,
+    ).toBeGreaterThanOrEqual(80);
+
+    const dimensions = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+  }
+});
+
 test("mobile main menu closes after client-side navigation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -52,7 +96,7 @@ test("mobile main menu closes after client-side navigation", async ({ page }) =>
   const menu = page.locator("header details");
   await menu.locator("summary").click();
   await expect(menu).toHaveAttribute("open", "");
-  await page.getByRole("link", { name: "Pricing", exact: true }).click();
+  await menu.getByRole("link", { name: "Pricing", exact: true }).click();
 
   await expect(page).toHaveURL(/\/pricing$/);
   await expect(menu).not.toHaveAttribute("open", "");

@@ -2,6 +2,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import type { ToolCtx } from "@/ai/tools";
 import { buildEditUserPrompt, EDITOR_SYSTEM_PROMPT } from "@/ai/prompts/editor";
 import { editSuggestionListSchema, type EditSuggestionList } from "@/ai/schemas";
@@ -138,6 +139,8 @@ export async function editChapter(input: EditChapterInput): Promise<EditChapterR
         model,
         instructions: anthropicCachedSystem(EDITOR_SYSTEM_PROMPT),
         prompt: editPrompt(input, metricsNote),
+        maxOutputTokens: meteredMaxOutputTokens("editor.edit"),
+        prepareStep: meteredInputGuard("editor.edit"),
         output: Output.object({ schema: editReplacementsSchema }),
         providerOptions: gatewayOptions(input.meter, "editor"),
       }),
@@ -192,6 +195,8 @@ export async function reviewChapter(input: ReviewChapterInput): Promise<EditSugg
         model,
         instructions: anthropicCachedSystem(EDITOR_SYSTEM_PROMPT),
         prompt: reviewPrompt(input, metricsNote),
+        maxOutputTokens: meteredMaxOutputTokens("editor.review"),
+        prepareStep: meteredInputGuard("editor.review"),
         output: Output.object({ schema: editSuggestionListSchema }),
         providerOptions: gatewayOptions(input.meter, "editor"),
       }),

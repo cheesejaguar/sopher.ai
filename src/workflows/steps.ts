@@ -1,31 +1,79 @@
-import { FatalError, RetryableError, getWritable } from "workflow";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import { FatalError, RetryableError, getStepMetadata, getWritable } from "workflow";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
 import { getDb, schema } from "@/db";
 import { generateConcept, persistConcept } from "@/ai/agents/concept";
-import { generateOutline, persistOutline } from "@/ai/agents/outline";
+import {
+  generateOutline,
+  persistOutline,
+  type OutlineGenerationCheckpoint,
+} from "@/ai/agents/outline";
 import { writeChapter, persistChapter } from "@/ai/agents/chapter-writer";
-import { summarizeChapter } from "@/ai/agents/summarizer";
+import { generateChapterSummary, persistChapterSummary } from "@/ai/agents/summarizer";
 import { buildEntityBible } from "@/ai/agents/entity-bible";
 import { editChapter } from "@/ai/agents/editor";
 import {
   aggregateContinuityOutcomes,
+  continuityPhaseKeys,
   persistContinuityIssues,
   runContinuityPhase,
   type ContinuityOutcome,
   type ContinuityReport,
 } from "@/ai/agents/continuity";
 import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
-import { creditsForUsd, getBalance } from "@/lib/billing/credits";
-import { estimateBookCost } from "@/ai/estimate";
+import {
+  canonicalizeCreditRequirement,
+  creditsForUsd,
+  getBalance,
+  releaseCreditReservation,
+  reserveCredits,
+} from "@/lib/billing/credits";
 import { getOrCreateBook } from "@/db/queries/projects";
-import { listEntities } from "@/db/queries/entities";
+import { listEntities, seedEntities } from "@/db/queries/entities";
 import { sendBookFinishedEmail, sendCreditsPausedEmail } from "@/lib/email/send";
-import { chapterNs, PROGRESS_NS, type GenerationConfig, type RunEvent } from "@/lib/run-events";
-import { isChapterComplete } from "./resume";
-import type { BookConcept, BookOutline, ChapterOutlinePlan } from "@/ai/schemas";
+import {
+  chapterNs,
+  generationBillingScope,
+  nextGenerationPreparationAction,
+  PROGRESS_NS,
+  resumableRunId,
+  severResumeBillingLineage,
+  stagedArtifactsMatch,
+  type GenerationConfig,
+  type RunEvent,
+} from "@/lib/run-events";
+import { generationResetSource, shouldArchiveGenerationReset } from "@/lib/generation-archive";
+import {
+  chapterTopologyFingerprint,
+  cachedEditOutputAlreadyApplied,
+  manuscriptDigest,
+  outlineStateFingerprint,
+  type ManuscriptStateRow,
+} from "@/lib/manuscript-state";
+import {
+  chapterWaveRequiredUsd,
+  continuityPhaseRequiredUsd,
+  editorialWaveRequiredUsd,
+  entityBibleRequiredUsd,
+  freshOpeningRequiredUsd,
+  outlineRevisionRequiredUsd,
+  resumeOpeningRequiredUsd,
+  type ResumeChapterMeteredWork,
+} from "./opening-credit-plan";
+import { isChapterComplete, isChapterProductionComplete, planFreshRunChapter } from "./resume";
+import { runCostEvent } from "./run-cost";
+import {
+  bookOutlineSchema,
+  conceptSchema,
+  type BookConcept,
+  type BookOutline,
+  type ChapterOutlinePlan,
+} from "@/ai/schemas";
 import type { MeterCtx } from "@/ai/metering";
 import type { ToolCtx } from "@/ai/tools";
+import { buildFrozenAuthoringContract } from "@/ai/authoring-guidelines";
+import { transitionAuthoringRunState } from "@/lib/generation-runs";
 
 type RunRef = {
   dbRunId: string;
@@ -61,11 +109,21 @@ export async function emitProgress(ref: RunRef, event: RunEvent) {
 export async function emitCost(ref: RunRef) {
   "use step";
   const db = getDb();
-  const [row] = await db
-    .select({ total: sql<string>`coalesce(sum(${schema.llmCalls.usd}), 0)` })
-    .from(schema.llmCalls)
-    .where(eq(schema.llmCalls.runId, ref.dbRunId));
-  const event: RunEvent = { type: "cost", totalUsd: Number(row?.total ?? 0) };
+  const [[provider], [ledger]] = await Promise.all([
+    db
+      .select({ total: sql<string>`coalesce(sum(${schema.llmCalls.usd}), 0)` })
+      .from(schema.llmCalls)
+      .where(eq(schema.llmCalls.runId, ref.dbRunId)),
+    db
+      .select({
+        total: sql<string>`coalesce(-sum(${schema.creditLedger.amount}), 0)`,
+      })
+      .from(schema.creditLedger)
+      .where(
+        and(eq(schema.creditLedger.runId, ref.dbRunId), eq(schema.creditLedger.kind, "usage")),
+      ),
+  ]);
+  const event = runCostEvent(Number(provider?.total ?? 0), Number(ledger?.total ?? 0));
   await writeEvent(PROGRESS_NS, event);
 }
 
@@ -103,101 +161,975 @@ async function loadRunContext(ref: RunRef) {
   return { project, book, meter };
 }
 
+async function meteredScope(
+  meter: MeterCtx,
+  ref: RunRef,
+  _config: GenerationConfig,
+  scope: string,
+  reservationRef?: string,
+): Promise<MeterCtx> {
+  // The workflow argument is immutable, while preparation may deliberately
+  // sever a stale resume lineage after human revision. Read the durable
+  // effective config so every subsequent paid artifact uses the new root.
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  return {
+    ...meter,
+    billingScope: generationBillingScope(stored, ref.dbRunId, scope),
+    reservationRef: reservationRef ?? meter.reservationRef,
+  };
+}
+
+function contentDigest(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+async function loadManuscriptState(bookId: string): Promise<ManuscriptStateRow[]> {
+  return getDb()
+    .select({
+      id: schema.chapters.id,
+      chapterNumber: schema.chapters.chapterNumber,
+      title: schema.chapters.title,
+      summary: schema.chapters.summary,
+      content: schema.chapters.content,
+      status: schema.chapters.status,
+      wordCount: schema.chapters.wordCount,
+    })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.bookId, bookId));
+}
+
+async function loadManuscriptDigest(bookId: string): Promise<string> {
+  return manuscriptDigest(await loadManuscriptState(bookId));
+}
+
+async function loadStoredGenerationConfig(runId: string): Promise<GenerationConfig> {
+  const [run] = await getDb()
+    .select({ config: schema.generationRuns.config })
+    .from(schema.generationRuns)
+    .where(eq(schema.generationRuns.id, runId))
+    .limit(1);
+  if (!run) throw new FatalError("Generation run not found");
+  return run.config as GenerationConfig;
+}
+
+async function updateStoredGenerationConfig(
+  ref: RunRef,
+  update: (current: GenerationConfig) => GenerationConfig,
+): Promise<GenerationConfig> {
+  const db = getDb();
+  // Chapter waves checkpoint concurrently. Optimistic compare-and-swap keeps
+  // both updates instead of letting the last read/modify/write silently erase
+  // its sibling's durable proof.
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const current = await loadStoredGenerationConfig(ref.dbRunId);
+    const next = update(current);
+    const [stored] = await db
+      .update(schema.generationRuns)
+      .set({ config: next })
+      .where(
+        and(
+          eq(schema.generationRuns.id, ref.dbRunId),
+          eq(schema.generationRuns.projectId, ref.projectId),
+          eq(schema.generationRuns.config, current),
+        ),
+      )
+      .returning({ config: schema.generationRuns.config });
+    if (stored) return stored.config as GenerationConfig;
+  }
+  throw new RetryableError("Generation state changed too many times while checkpointing", {
+    retryAfter: "1s",
+  });
+}
+
+async function loadPreparedResumeSource(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<GenerationConfig | null> {
+  if (!config.resumeFromRunId) return null;
+  const [source] = await getDb()
+    .select({
+      id: schema.generationRuns.id,
+      status: schema.generationRuns.status,
+      config: schema.generationRuns.config,
+    })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.id, config.resumeFromRunId),
+        eq(schema.generationRuns.projectId, ref.projectId),
+        eq(schema.generationRuns.kind, "full_book"),
+      ),
+    )
+    .limit(1);
+  if (!source) return null;
+  const sourceConfig = source.config as Partial<GenerationConfig>;
+  return sourceConfig.stagedConcept &&
+    sourceConfig.stagedOutline &&
+    resumableRunId(config, {
+      id: source.id,
+      status: source.status,
+      config: sourceConfig,
+    }) === source.id
+    ? (sourceConfig as GenerationConfig)
+    : null;
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+async function ensureConceptPersisted(bookId: string, concept: BookConcept): Promise<void> {
+  const db = getDb();
+  const [book] = await db
+    .select({
+      title: schema.books.title,
+      synopsis: schema.books.synopsis,
+      concept: schema.books.concept,
+    })
+    .from(schema.books)
+    .where(eq(schema.books.id, bookId))
+    .limit(1);
+  // The moderation verdict is run bookkeeping and persistConcept deliberately
+  // strips it from the author-owned book JSON.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- compare the persisted shape
+  const { moderation, ...persistableConcept } = concept;
+  const alreadyPersisted =
+    book?.title === concept.title &&
+    book.synopsis === concept.synopsis &&
+    stableJson(book.concept) === stableJson(persistableConcept);
+
+  if (!alreadyPersisted) {
+    await persistConcept(bookId, concept);
+    return;
+  }
+
+  // persistConcept may have committed the book update immediately before a
+  // transient failure seeding entities. Complete that idempotent tail here.
+  await seedEntities(
+    bookId,
+    concept.characters.map((character) => ({
+      kind: "character" as const,
+      name: character.name,
+      attrs: {
+        role: character.role,
+        background: character.description,
+        arc: character.arc,
+        facts: [character.description, `Arc: ${character.arc}`],
+      },
+    })),
+  );
+}
+
+async function ensureOutlineChapterRows(bookId: string, outline: BookOutline): Promise<void> {
+  if (outline.chapters.length === 0) return;
+  await getDb()
+    .insert(schema.chapters)
+    .values(
+      outline.chapters.map((chapter) => ({
+        bookId,
+        chapterNumber: chapter.number,
+        title: chapter.title,
+        summary: chapter.summary,
+        status: "planned" as const,
+      })),
+    )
+    .onConflictDoUpdate({
+      target: [schema.chapters.bookId, schema.chapters.chapterNumber],
+      set: {
+        title: sql`excluded.title`,
+        summary: sql`excluded.summary`,
+        updatedAt: new Date(),
+      },
+    });
+}
+
+async function ensureOutlinePersisted(bookId: string, outline: BookOutline): Promise<void> {
+  const db = getDb();
+  const [latest] = await db
+    .select({ content: schema.outlines.content })
+    .from(schema.outlines)
+    .where(eq(schema.outlines.bookId, bookId))
+    .orderBy(sql`${schema.outlines.version} desc`)
+    .limit(1);
+  if (latest && stableJson(latest.content) === stableJson(outline)) {
+    // Covers a retry after the outline version committed but before its
+    // chapter upsert completed.
+    await ensureOutlineChapterRows(bookId, outline);
+    return;
+  }
+  await persistOutline(bookId, outline);
+}
+
+async function loadOutlineFingerprint(bookId: string): Promise<string> {
+  const [latest] = await getDb()
+    .select({
+      id: schema.outlines.id,
+      version: schema.outlines.version,
+      source: schema.outlines.source,
+      content: schema.outlines.content,
+    })
+    .from(schema.outlines)
+    .where(eq(schema.outlines.bookId, bookId))
+    .orderBy(sql`${schema.outlines.version} desc`)
+    .limit(1);
+  return outlineStateFingerprint(latest);
+}
+
 export async function markRunStatus(
   ref: RunRef,
   status: "running" | "awaiting_input" | "completed" | "failed" | "cancelled",
   error?: string,
 ) {
   "use step";
-  const db = getDb();
-  await db
-    .update(schema.generationRuns)
-    .set({
-      status,
-      error: error ?? null,
-      ...(status === "running" ? { startedAt: new Date() } : {}),
-      ...(status === "completed" || status === "failed" || status === "cancelled"
-        ? { completedAt: new Date() }
-        : {}),
-    })
-    .where(eq(schema.generationRuns.id, ref.dbRunId));
-  const projectStatus =
-    status === "completed" ? "editing" : status === "running" ? "generating" : undefined;
-  if (projectStatus) {
-    await db
-      .update(schema.projects)
-      .set({ status: projectStatus, updatedAt: new Date() })
-      .where(eq(schema.projects.id, ref.projectId));
+  const result = await transitionAuthoringRunState({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    status,
+    error,
+  });
+  if (result.status !== status) {
+    if (status === "failed" || status === "cancelled") return;
+    throw new FatalError("Generation run is no longer active");
   }
 }
 
 /**
- * Reports the wallet against the cost of the NEXT stretch of work — one wave of
- * chapters — not the whole remaining book. That is deliberate: the welcome
- * grant should let an author watch a real book begin (concept, outline, bible,
- * the first chapters) and pause at a natural seam, rather than being refused at
- * the door for not affording the ending.
- *
- * Returns rather than throws: the orchestrator suspends on a top-up hook when
- * the balance runs short, so every chapter already drafted is kept.
+ * Opening wallet gate. Fresh runs keep the established estimate exactly.
+ * Compatible prepared retries inspect source provenance before asking for
+ * money, so reused concept/outline/Bible/chapters/tail work costs zero here.
  */
-export async function creditCheckStep(
+export async function openingCreditCheckStep(
   ref: RunRef,
   config: GenerationConfig,
-  chaptersToCover: number,
-  opts?: { includeBookOverhead?: boolean },
 ): Promise<{ balance: number; required: number; sufficient: boolean }> {
   "use step";
-  const db = getDb();
-  const [project] = await db
-    .select({
-      words: schema.projects.targetWordsPerChapter,
-      chapters: schema.projects.targetChapters,
-    })
-    .from(schema.projects)
-    .where(eq(schema.projects.id, ref.projectId))
-    .limit(1);
-  if (!project) throw new FatalError("Project not found");
+  const source = await loadPreparedResumeSource(ref, config);
+  let requiredUsd: number;
 
-  const count = Math.min(Math.max(chaptersToCover, 1), project.chapters);
-  // Only the per-chapter stages: estimateBookCost totals book-level overhead
-  // (concept, outline, continuity) too, which for a mid-book wave check would
-  // demand credits for work that already ran or runs once at the end.
-  const estimate = estimateBookCost(config.tier, count, project.words);
-  const perChapterStages = new Set([
-    "Chapter drafting",
-    "Critique + revisions",
-    "Editorial pass",
-    "Summaries + character bible",
-  ]);
-  // Pre-flight also charges for the book-level stages (concept, outline,
-  // bible, continuity) that run before/after the chapters; mid-book wave
-  // checks must not, since that work already ran or runs once at the end.
-  const requiredUsd = estimate.stages
-    .filter((stage) => opts?.includeBookOverhead || perChapterStages.has(stage.stage))
-    .reduce((acc, stage) => acc + stage.usd, 0);
-  const required = creditsForUsd(requiredUsd);
+  if (!source) {
+    requiredUsd = freshOpeningRequiredUsd(config);
+  } else {
+    const { book } = await loadRunContext(ref);
+    const rows = await getDb()
+      .select({
+        id: schema.chapters.id,
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+        status: schema.chapters.status,
+        content: schema.chapters.content,
+        wordCount: schema.chapters.wordCount,
+        qualityScore: schema.chapters.qualityScore,
+      })
+      .from(schema.chapters)
+      .where(eq(schema.chapters.bookId, book.id));
+    const currentManuscriptDigest = manuscriptDigest(rows);
+    const byNumber = new Map(rows.map((row) => [row.chapterNumber, row]));
+    const meteredChapters: ResumeChapterMeteredWork[] = [];
+    const reportCheckpoint = source.completion?.continuityReport;
+    const report =
+      reportCheckpoint?.manuscriptDigest === currentManuscriptDigest
+        ? reportCheckpoint.report
+        : undefined;
+    const revisionTargets =
+      report && config.tier !== "draft" && report.score < 0.7
+        ? new Set(report.worstChapters.slice(0, 3))
+        : new Set<number>();
+
+    for (const outlineChapter of source.stagedOutline?.chapters ?? []) {
+      const chapterNumber = outlineChapter.number;
+      const key = String(chapterNumber);
+      const chapter = byNumber.get(chapterNumber);
+      const digest = chapter ? contentDigest(chapter.content) : null;
+      const writerWork = source.work?.chapters?.[key];
+      const revisionCheckpoint = source.completion?.revisionChapters?.[key];
+      const editedCheckpoint = source.completion?.editedChapters?.[key];
+      const downstreamCheckpoint =
+        revisionCheckpoint?.contentDigest === digest
+          ? revisionCheckpoint
+          : editedCheckpoint?.contentDigest === digest
+            ? editedCheckpoint
+            : undefined;
+      const proseComplete = isChapterComplete(chapter);
+
+      let writer: ResumeChapterMeteredWork["writer"] = "none";
+      if (!proseComplete && !writerWork?.result) {
+        if (writerWork?.draft) {
+          if (config.tier !== "draft") {
+            const critique = writerWork.critique;
+            writer =
+              critique &&
+              (critique.verdict === "pass" ||
+                !critique.issues.some((issue) => issue.severity === "major"))
+                ? "none"
+                : "critique";
+          }
+        } else {
+          writer = "full";
+        }
+      }
+
+      const effectiveContent =
+        chapter?.content ||
+        writerWork?.result?.content ||
+        (config.tier === "draft" ? writerWork?.draft : undefined);
+      const effectiveDigest = effectiveContent ? contentDigest(effectiveContent) : null;
+      const summaryMeteredComplete =
+        source.completion?.chapterSummaries?.[key]?.contentDigest === effectiveDigest ||
+        source.work?.chapters?.[key]?.summary?.contentDigest === effectiveDigest ||
+        downstreamCheckpoint?.contentDigest === effectiveDigest;
+      const summary = !summaryMeteredComplete;
+
+      let editorial: ResumeChapterMeteredWork["editorial"] = "none";
+      if (config.tier !== "draft" && !downstreamCheckpoint) {
+        const cachedEdit = source.work?.edits?.[`editorial:${chapterNumber}`];
+        const cachedEditMatches = digest !== null && cachedEdit?.baseContentDigest === digest;
+        if (!cachedEditMatches) {
+          if (!proseComplete) {
+            editorial = config.tier === "premium" ? "full" : "expected";
+          } else if (
+            config.tier === "premium" ||
+            (chapter?.qualityScore !== null &&
+              chapter?.qualityScore !== undefined &&
+              Number(chapter.qualityScore) < 0.7)
+          ) {
+            editorial = "full";
+          }
+        }
+      }
+
+      let revision = false;
+      if (revisionTargets.has(chapterNumber)) {
+        const cachedRevision = source.work?.edits?.[`revision:${chapterNumber}`];
+        revision =
+          !(
+            revisionCheckpoint?.contentDigest === digest &&
+            revisionCheckpoint.reviewManuscriptDigest === currentManuscriptDigest
+          ) && !(digest !== null && cachedRevision?.baseContentDigest === digest);
+      }
+
+      if (writer !== "none" || summary || editorial !== "none" || revision) {
+        meteredChapters.push({ chapterNumber, writer, summary, editorial, revision });
+      }
+    }
+
+    const phaseKeys = continuityPhaseKeys(config.tier);
+    const continuityPhasesRemaining = report
+      ? 0
+      : phaseKeys.filter(
+          (phaseKey) =>
+            source.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest !==
+            currentManuscriptDigest,
+        ).length;
+    requiredUsd = resumeOpeningRequiredUsd(config, {
+      entityBible: !source.completion?.entityBible,
+      chapters: meteredChapters,
+      continuityPhasesRemaining,
+      continuityPhasesTotal: phaseKeys.length,
+    });
+  }
+
+  const required = canonicalizeCreditRequirement(creditsForUsd(requiredUsd));
   const balance = await getBalance(ref.userId);
-  return { balance, required, sufficient: balance >= required };
+  return { balance, required, sufficient: required <= 0 || balance >= required };
 }
 
-export async function conceptStep(ref: RunRef, config: GenerationConfig): Promise<BookConcept> {
+type CreditCheck = { balance: number; required: number; sufficient: boolean };
+
+export type CreditAuthorization = CreditCheck & { reservationRef?: string };
+
+export async function reserveCreditsStep(
+  ref: RunRef,
+  required: number,
+  reservationKey: string,
+): Promise<CreditAuthorization> {
   "use step";
-  const { project, book, meter } = await loadRunContext(ref);
-  // Resume: a retry run reuses the concept a prior run already persisted.
-  if (book.concept && typeof book.concept === "object" && Object.keys(book.concept).length > 0) {
-    return book.concept as BookConcept;
+  if (required <= 0) {
+    return {
+      balance: await getBalance(ref.userId),
+      required: 0,
+      sufficient: true,
+    };
   }
+  const externalRef = `generation-reservation:${ref.dbRunId}:${reservationKey}`;
+  const result = await reserveCredits({
+    userId: ref.userId,
+    credits: required,
+    externalRef,
+    description: `Reserve credits for ${reservationKey}`,
+    projectId: ref.projectId,
+    runId: ref.dbRunId,
+  });
+  return {
+    balance: result.balance,
+    required,
+    sufficient: result.status !== "insufficient",
+    ...(result.status !== "insufficient" ? { reservationRef: externalRef } : {}),
+  };
+}
+
+export async function releaseCreditsStep(
+  ref: RunRef,
+  reservationRef: string | undefined,
+): Promise<void> {
+  "use step";
+  if (!reservationRef) return;
+  await releaseCreditReservation({
+    userId: ref.userId,
+    externalRef: reservationRef,
+    projectId: ref.projectId,
+    runId: ref.dbRunId,
+  });
+}
+
+/**
+ * A human-rejected resumed outline is new paid work owned by this run.
+ *
+ * This checkpoint must happen before the revision authorization and provider
+ * call. Waiting until manuscript preparation would let the revision reuse the
+ * source run's billing keys when the author supplied identical notes twice.
+ */
+export async function severResumeBillingLineageStep(ref: RunRef): Promise<void> {
+  "use step";
+  await updateStoredGenerationConfig(ref, (current) =>
+    severResumeBillingLineage(current, ref.dbRunId),
+  );
+}
+
+async function checkWalletForUsd(ref: RunRef, requiredUsd: number): Promise<CreditCheck> {
+  const required = canonicalizeCreditRequirement(creditsForUsd(requiredUsd));
+  const balance = await getBalance(ref.userId);
+  // A fully checkpointed retry has no new metered work. It must be allowed to
+  // finish DB-only bookkeeping even if an earlier wave left the wallet below 0.
+  return { balance, required, sufficient: required <= 0 || balance >= required };
+}
+
+type ChapterCostRow = {
+  chapterNumber: number;
+  status: "planned" | "drafting" | "drafted" | "edited" | "final";
+  content: string;
+  wordCount: number;
+  qualityScore: string | null;
+};
+
+function pendingWriterWork(
+  config: GenerationConfig,
+  stored: GenerationConfig,
+  rows: ChapterCostRow[],
+  chapterNumbers: number[],
+): ResumeChapterMeteredWork[] {
+  const byNumber = new Map(rows.map((row) => [row.chapterNumber, row]));
+  return chapterNumbers.flatMap((chapterNumber) => {
+    const key = String(chapterNumber);
+    const chapter = byNumber.get(chapterNumber);
+    const digest = chapter ? contentDigest(chapter.content) : null;
+    const writerWork = stored.work?.chapters?.[key];
+    const downstream = [
+      stored.completion?.revisionChapters?.[key],
+      stored.completion?.editedChapters?.[key],
+    ].find((checkpoint) => checkpoint?.contentDigest === digest);
+    const proseComplete = isChapterComplete(chapter);
+
+    let writer: ResumeChapterMeteredWork["writer"] = "none";
+    if (!proseComplete && !writerWork?.result) {
+      if (!writerWork?.draft) {
+        writer = "full";
+      } else if (config.tier !== "draft") {
+        const critique = writerWork.critique;
+        writer =
+          critique &&
+          (critique.verdict === "pass" ||
+            !critique.issues.some((issue) => issue.severity === "major"))
+            ? "none"
+            : "critique";
+      }
+    }
+
+    const effectiveContent =
+      chapter?.content ||
+      writerWork?.result?.content ||
+      (config.tier === "draft" ? writerWork?.draft : undefined);
+    const effectiveDigest = effectiveContent ? contentDigest(effectiveContent) : null;
+    const summary =
+      writer !== "none" ||
+      (effectiveDigest !== null &&
+        stored.completion?.chapterSummaries?.[key]?.contentDigest !== effectiveDigest &&
+        stored.work?.chapters?.[key]?.summary?.contentDigest !== effectiveDigest &&
+        downstream?.contentDigest !== effectiveDigest);
+
+    return writer !== "none" || summary
+      ? [{ chapterNumber, writer, summary, editorial: "none", revision: false }]
+      : [];
+  });
+}
+
+async function loadChapterCostContext(ref: RunRef, chapterNumbers: number[]) {
+  const { book } = await loadRunContext(ref);
+  const [stored, rows] = await Promise.all([
+    loadStoredGenerationConfig(ref.dbRunId),
+    chapterNumbers.length === 0
+      ? Promise.resolve([])
+      : getDb()
+          .select({
+            chapterNumber: schema.chapters.chapterNumber,
+            status: schema.chapters.status,
+            content: schema.chapters.content,
+            wordCount: schema.chapters.wordCount,
+            qualityScore: schema.chapters.qualityScore,
+          })
+          .from(schema.chapters)
+          .where(
+            and(
+              eq(schema.chapters.bookId, book.id),
+              inArray(schema.chapters.chapterNumber, chapterNumbers),
+            ),
+          ),
+  ]);
+  return { book, stored, rows };
+}
+
+/** Exact pending writer/summary artifacts for one wave; no deferred editing. */
+export async function chapterWaveCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  chapterNumbers: number[],
+): Promise<CreditCheck> {
+  "use step";
+  const { stored, rows } = await loadChapterCostContext(ref, chapterNumbers);
+  return checkWalletForUsd(
+    ref,
+    chapterWaveRequiredUsd(config, pendingWriterWork(config, stored, rows, chapterNumbers)),
+  );
+}
+
+/** Just-in-time editorial/revision gate; cached or already-applied output costs zero. */
+export async function editorialWaveCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  chapterNumbers: number[],
+  mode: "editorial" | "revision",
+): Promise<CreditCheck> {
+  "use step";
+  const { stored, rows } = await loadChapterCostContext(ref, chapterNumbers);
+  const byNumber = new Map(rows.map((row) => [row.chapterNumber, row]));
+  const reviewDigest = stored.completion?.continuityReport?.manuscriptDigest;
+  const work = chapterNumbers.flatMap((chapterNumber): ResumeChapterMeteredWork[] => {
+    const chapter = byNumber.get(chapterNumber);
+    if (!chapter?.content) return [];
+    const digest = contentDigest(chapter.content);
+    const key = String(chapterNumber);
+    const completion =
+      mode === "revision"
+        ? stored.completion?.revisionChapters?.[key]
+        : stored.completion?.editedChapters?.[key];
+    const downstream =
+      mode === "editorial" ? stored.completion?.revisionChapters?.[key] : undefined;
+    const completed =
+      completion?.contentDigest === digest &&
+      (mode !== "revision" ||
+        (reviewDigest !== undefined && completion.reviewManuscriptDigest === reviewDigest));
+    if (completed || downstream?.contentDigest === digest) return [];
+
+    const cached = stored.work?.edits?.[`${mode}:${chapterNumber}`];
+    if (
+      cached &&
+      (cached.baseContentDigest === digest ||
+        cachedEditOutputAlreadyApplied(chapter.content, cached))
+    ) {
+      return [];
+    }
+    return [
+      {
+        chapterNumber,
+        writer: "none",
+        summary: false,
+        editorial: mode === "editorial" ? "full" : "none",
+        revision: mode === "revision",
+      },
+    ];
+  });
+  return checkWalletForUsd(ref, editorialWaveRequiredUsd(config, work, mode));
+}
+
+export async function entityBibleCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<CreditCheck> {
+  "use step";
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  const source = await loadPreparedResumeSource(ref, config);
+  const inheritedBibleComplete =
+    source && stagedArtifactsMatch(stored, source) && source.completion?.entityBible !== undefined;
+  return checkWalletForUsd(
+    ref,
+    stored.completion?.entityBible || inheritedBibleComplete ? 0 : entityBibleRequiredUsd(config),
+  );
+}
+
+export async function continuityCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  phaseKey: ReviewPhaseKey,
+): Promise<CreditCheck> {
+  "use step";
+  const { book } = await loadRunContext(ref);
+  const [stored, currentDigest] = await Promise.all([
+    loadStoredGenerationConfig(ref.dbRunId),
+    loadManuscriptDigest(book.id),
+  ]);
+  const complete =
+    stored.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest === currentDigest;
+  return checkWalletForUsd(ref, complete ? 0 : continuityPhaseRequiredUsd(config));
+}
+
+export async function outlineRevisionCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  revisionNotes: string,
+): Promise<CreditCheck> {
+  "use step";
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  const complete =
+    stored.work?.outline?.revisionNotes === revisionNotes &&
+    stored.work.outline.final !== undefined;
+  return checkWalletForUsd(ref, complete ? 0 : outlineRevisionRequiredUsd(config));
+}
+
+async function resetManuscriptForPreparation(
+  ref: RunRef,
+  config: GenerationConfig,
+  bookId: string,
+): Promise<{ archived: number; reset: number }> {
+  const db = getDb();
+  const chapters = await db
+    .select({
+      id: schema.chapters.id,
+      chapterNumber: schema.chapters.chapterNumber,
+      title: schema.chapters.title,
+      summary: schema.chapters.summary,
+      content: schema.chapters.content,
+      wordCount: schema.chapters.wordCount,
+      qualityScore: schema.chapters.qualityScore,
+      status: schema.chapters.status,
+      version: schema.chapters.version,
+    })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.bookId, bookId));
+
+  let archived = 0;
+  let reset = 0;
+  for (const chapter of chapters) {
+    const shouldSoftRetire = chapter.chapterNumber > config.targetChapters;
+    const needsSoftRetire =
+      shouldSoftRetire && (chapter.title !== null || chapter.summary !== null);
+    const hasRecoverableState = chapter.content.length > 0 || needsSoftRetire;
+    let contentAlreadyArchived = false;
+    if (hasRecoverableState) {
+      const [existingArchive] = await db
+        .select({ id: schema.chapterRevisions.id })
+        .from(schema.chapterRevisions)
+        .where(
+          and(
+            eq(schema.chapterRevisions.chapterId, chapter.id),
+            eq(schema.chapterRevisions.runId, ref.dbRunId),
+            sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
+            eq(schema.chapterRevisions.content, chapter.content),
+          ),
+        )
+        .limit(1);
+      contentAlreadyArchived = Boolean(existingArchive);
+    }
+    const plan = planFreshRunChapter(chapter, contentAlreadyArchived);
+    if (!plan.reset && !needsSoftRetire) continue;
+
+    if (shouldArchiveGenerationReset(chapter, shouldSoftRetire, contentAlreadyArchived)) {
+      await db.insert(schema.chapterRevisions).values({
+        chapterId: chapter.id,
+        content: chapter.content,
+        source: generationResetSource({
+          title: chapter.title,
+          summary: chapter.summary,
+          status: chapter.status,
+        }),
+        runId: ref.dbRunId,
+      });
+      archived += 1;
+    }
+
+    const [updated] = await db
+      .update(schema.chapters)
+      .set({
+        content: "",
+        wordCount: 0,
+        qualityScore: null,
+        status: "planned",
+        ...(shouldSoftRetire ? { title: null, summary: null } : {}),
+        version: sql`${schema.chapters.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)))
+      .returning({ id: schema.chapters.id });
+    if (!updated) {
+      throw new RetryableError("A chapter changed while the new run was preparing it", {
+        retryAfter: "1s",
+      });
+    }
+    reset += 1;
+  }
+
+  return { archived, reset };
+}
+
+/**
+ * Retires the prior story bible before a fresh concept is persisted.
+ *
+ * The snapshot lives on the generation run, so an operator can recover the
+ * exact old canon, portraits, and relationship graph. Snapshot, delete, and
+ * checkpoint are deliberately separate idempotent actions: a retry after any
+ * boundary finishes the remaining tail without ever mixing old/new canon.
+ */
+async function resetEntityCanonForPreparation(ref: RunRef, bookId: string): Promise<void> {
+  const db = getDb();
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+
+  if (!stored.retiredEntityCanon) {
+    const [entities, relationships] = await Promise.all([
+      db
+        .select({
+          id: schema.entities.id,
+          kind: schema.entities.kind,
+          name: schema.entities.name,
+          aliases: schema.entities.aliases,
+          attrs: schema.entities.attrs,
+          portraitAssetId: schema.entities.portraitAssetId,
+          firstAppearanceChapter: schema.entities.firstAppearanceChapter,
+          lastUpdatedChapter: schema.entities.lastUpdatedChapter,
+        })
+        .from(schema.entities)
+        .where(eq(schema.entities.bookId, bookId)),
+      db
+        .select({
+          id: schema.entityRelationships.id,
+          fromEntityId: schema.entityRelationships.fromEntityId,
+          toEntityId: schema.entityRelationships.toEntityId,
+          type: schema.entityRelationships.type,
+          description: schema.entityRelationships.description,
+          establishedChapter: schema.entityRelationships.establishedChapter,
+        })
+        .from(schema.entityRelationships)
+        .where(eq(schema.entityRelationships.bookId, bookId)),
+    ]);
+    await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      retiredEntityCanon: current.retiredEntityCanon ?? {
+        entities,
+        relationships,
+      },
+    }));
+  }
+
+  await db.delete(schema.entityRelationships).where(eq(schema.entityRelationships.bookId, bookId));
+  await db.delete(schema.entities).where(eq(schema.entities.bookId, bookId));
+}
+
+/**
+ * Commits a run's staged plan at the single durable manuscript boundary.
+ *
+ * Each checkpoint follows its side effect, and each side effect is itself
+ * idempotent. Retrying after any partial failure therefore continues from the
+ * first unfinished action without duplicating archives or outline versions.
+ */
+export async function prepareBookRunStep(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<{ mode: "resume" | "fresh"; archived: number; reset: number }> {
+  "use step";
+  const { book } = await loadRunContext(ref);
+  let archived = 0;
+  let reset = 0;
+
+  const sourceConfig = await loadPreparedResumeSource(ref, config);
+  const currentConfig = await loadStoredGenerationConfig(ref.dbRunId);
+  if (sourceConfig && stagedArtifactsMatch(currentConfig, sourceConfig)) {
+    await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      stagedConcept: current.stagedConcept,
+      stagedOutline: current.stagedOutline,
+      preparation: {
+        manuscriptReset: true,
+        entityCanonReset: true,
+        conceptPersisted: true,
+        outlinePersisted: true,
+      },
+      work: {
+        ...sourceConfig.work,
+        ...current.work,
+        chapters: {
+          ...sourceConfig.work?.chapters,
+          ...current.work?.chapters,
+        },
+        edits: {
+          ...sourceConfig.work?.edits,
+          ...current.work?.edits,
+        },
+      },
+      completion: {
+        ...sourceConfig.completion,
+        ...current.completion,
+        chapterSummaries: {
+          ...sourceConfig.completion?.chapterSummaries,
+          ...current.completion?.chapterSummaries,
+        },
+        editedChapters: {
+          ...sourceConfig.completion?.editedChapters,
+          ...current.completion?.editedChapters,
+        },
+        revisionChapters: {
+          ...sourceConfig.completion?.revisionChapters,
+          ...current.completion?.revisionChapters,
+        },
+        continuityOutcomes: {
+          ...sourceConfig.completion?.continuityOutcomes,
+          ...current.completion?.continuityOutcomes,
+        },
+        inheritedFromRunId: sourceConfig.completion?.inheritedFromRunId ?? config.resumeFromRunId,
+      },
+      manuscriptPrepared: true,
+    }));
+    return { mode: "resume", archived, reset };
+  }
+  if (sourceConfig && currentConfig.resumeFromRunId) {
+    // Human revision makes this run a new source of truth. Clearing the old
+    // resume pointer prevents a later retry from jumping back to the rejected
+    // source outline instead of this run's newly approved plan.
+    await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      billingLineageRunId: ref.dbRunId,
+      resumeFromRunId: undefined,
+      preparation: undefined,
+      retiredEntityCanon: undefined,
+      work: {
+        ...(current.work?.conceptExpanded ? { conceptExpanded: current.work.conceptExpanded } : {}),
+        ...(current.work?.outline ? { outline: current.work.outline } : {}),
+      },
+      completion: undefined,
+      manuscriptPrepared: undefined,
+    }));
+  }
+
+  while (true) {
+    const stored = await loadStoredGenerationConfig(ref.dbRunId);
+    switch (nextGenerationPreparationAction(stored)) {
+      case "reset_manuscript": {
+        const result = await resetManuscriptForPreparation(ref, config, book.id);
+        archived += result.archived;
+        reset += result.reset;
+        await updateStoredGenerationConfig(ref, (current) => ({
+          ...current,
+          preparation: { ...current.preparation, manuscriptReset: true },
+        }));
+        break;
+      }
+      case "reset_entity_canon":
+        await resetEntityCanonForPreparation(ref, book.id);
+        await updateStoredGenerationConfig(ref, (current) => ({
+          ...current,
+          preparation: { ...current.preparation, entityCanonReset: true },
+        }));
+        break;
+      case "persist_concept": {
+        const stagedConcept = conceptSchema.parse(stored.stagedConcept);
+        await ensureConceptPersisted(book.id, stagedConcept);
+        await updateStoredGenerationConfig(ref, (current) => ({
+          ...current,
+          preparation: { ...current.preparation, conceptPersisted: true },
+        }));
+        break;
+      }
+      case "persist_outline": {
+        const stagedOutline = bookOutlineSchema.parse(stored.stagedOutline);
+        await ensureOutlinePersisted(book.id, stagedOutline);
+        await updateStoredGenerationConfig(ref, (current) => ({
+          ...current,
+          preparation: { ...current.preparation, outlinePersisted: true },
+        }));
+        break;
+      }
+      case "mark_prepared": {
+        const topology = chapterTopologyFingerprint(await loadManuscriptState(book.id));
+        const outlineFingerprint = await loadOutlineFingerprint(book.id);
+        await updateStoredGenerationConfig(ref, (current) => ({
+          ...current,
+          manuscriptPrepared: true,
+          chapterTopologyFingerprint: topology,
+          liveOutlineFingerprint: outlineFingerprint,
+        }));
+        return { mode: "fresh", archived, reset };
+      }
+      case "complete":
+        return {
+          mode: config.resumeFromRunId ? "resume" : "fresh",
+          archived,
+          reset,
+        };
+    }
+  }
+}
+
+export async function conceptStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  reservationRef?: string,
+): Promise<BookConcept> {
+  "use step";
+  const { book, meter } = await loadRunContext(ref);
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  if (stored.stagedConcept) {
+    return conceptSchema.parse(stored.stagedConcept);
+  }
+  const source = await loadPreparedResumeSource(ref, config);
+  if (source?.stagedConcept) {
+    const stagedConcept = conceptSchema.parse(source.stagedConcept);
+    await updateStoredGenerationConfig(ref, (current) => ({ ...current, stagedConcept }));
+    return stagedConcept;
+  }
+
   const tools: ToolCtx = { userId: ref.userId, projectId: ref.projectId, bookId: book.id };
+  const contentGuidelines = buildFrozenAuthoringContract(config.inputSnapshot);
   try {
-    const concept = await generateConcept({
-      meter,
-      tools,
-      tier: config.tier,
-      brief: project.brief ?? "",
-      genre: project.genre ?? undefined,
-    });
-    await persistConcept(book.id, concept);
+    const concept = await generateConcept(
+      {
+        meter: await meteredScope(meter, ref, config, "concept", reservationRef),
+        tools,
+        tier: config.tier,
+        brief: config.inputSnapshot.brief,
+        genre: config.inputSnapshot.genre ?? undefined,
+        contentGuidelines,
+      },
+      {
+        expanded: stored.work?.conceptExpanded,
+        onExpanded: async (expanded) => {
+          await updateStoredGenerationConfig(ref, (current) => ({
+            ...current,
+            work: { ...current.work, conceptExpanded: expanded },
+          }));
+        },
+        onRefined: async (refined) => {
+          await updateStoredGenerationConfig(ref, (current) => ({
+            ...current,
+            stagedConcept: refined,
+          }));
+        },
+      },
+    );
     return concept;
   } catch (error) {
     toWorkflowError(error);
@@ -209,35 +1141,88 @@ export async function outlineStep(
   config: GenerationConfig,
   concept: BookConcept,
   revisionNotes?: string,
+  reservationRef?: string,
 ): Promise<BookOutline> {
   "use step";
-  const { project, book, meter } = await loadRunContext(ref);
-  // Resume: without in-run revision notes, a retry reuses the persisted
-  // outline instead of regenerating it and clobbering chapter summaries.
+  const { book, meter } = await loadRunContext(ref);
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  const requestedRevisionKey = revisionNotes ?? null;
+  if (stored.work?.outline?.revisionNotes === requestedRevisionKey && stored.work.outline.final) {
+    return bookOutlineSchema.parse(stored.work.outline.final);
+  }
   if (revisionNotes === undefined) {
-    const db = getDb();
-    const [existing] = await db
-      .select({ content: schema.outlines.content })
-      .from(schema.outlines)
-      .where(eq(schema.outlines.bookId, book.id))
-      .orderBy(sql`${schema.outlines.version} desc`)
-      .limit(1);
-    if (existing) return existing.content as BookOutline;
+    if (stored.stagedOutline) {
+      return bookOutlineSchema.parse(stored.stagedOutline);
+    }
+    const source = await loadPreparedResumeSource(ref, config);
+    if (source?.stagedOutline) {
+      const stagedOutline = bookOutlineSchema.parse(source.stagedOutline);
+      await updateStoredGenerationConfig(ref, (current) => ({ ...current, stagedOutline }));
+      return stagedOutline;
+    }
   }
   const tools: ToolCtx = { userId: ref.userId, projectId: ref.projectId, bookId: book.id };
+  const contentGuidelines = buildFrozenAuthoringContract(config.inputSnapshot);
   try {
-    const outline = await generateOutline({
-      meter,
-      tools,
-      tier: config.tier,
-      concept,
-      brief: project.brief ?? undefined,
-      genre: project.genre ?? undefined,
-      chapterCount: project.targetChapters,
-      targetWordsPerChapter: project.targetWordsPerChapter,
-      revisionNotes,
-    });
-    await persistOutline(book.id, outline);
+    const revisionKey = revisionNotes ?? null;
+    const priorWork =
+      stored.work?.outline?.revisionNotes === revisionKey ? stored.work.outline : undefined;
+    const checkpoint: OutlineGenerationCheckpoint | undefined = priorWork
+      ? {
+          plan: priorWork.plan as OutlineGenerationCheckpoint["plan"],
+          draft: priorWork.draft,
+        }
+      : undefined;
+    const outline = await generateOutline(
+      {
+        meter: await meteredScope(
+          meter,
+          ref,
+          config,
+          `outline:${contentDigest(revisionNotes ?? "initial").slice(0, 16)}`,
+          reservationRef,
+        ),
+        tools,
+        tier: config.tier,
+        concept,
+        brief: config.inputSnapshot.brief || undefined,
+        genre: config.inputSnapshot.genre ?? undefined,
+        chapterCount: config.targetChapters,
+        targetWordsPerChapter: config.targetWordsPerChapter,
+        revisionNotes,
+        contentGuidelines,
+      },
+      {
+        checkpoint,
+        onCheckpoint: async (next) => {
+          await updateStoredGenerationConfig(ref, (current) => ({
+            ...current,
+            work: {
+              ...current.work,
+              outline: {
+                revisionNotes: revisionKey,
+                plan: next.plan,
+                draft: next.draft,
+              },
+            },
+          }));
+        },
+        onFinal: async (final) => {
+          await updateStoredGenerationConfig(ref, (current) => ({
+            ...current,
+            stagedOutline: final,
+            work: {
+              ...current.work,
+              outline: {
+                ...current.work?.outline,
+                revisionNotes: revisionKey,
+                final,
+              },
+            },
+          }));
+        },
+      },
+    );
     return outline;
   } catch (error) {
     toWorkflowError(error);
@@ -254,20 +1239,37 @@ export async function entityBibleStep(
   config: GenerationConfig,
   concept: BookConcept,
   outline: BookOutline,
+  reservationRef?: string,
 ): Promise<{ entityCount: number; relationshipCount: number }> {
   "use step";
-  const { project, book, meter } = await loadRunContext(ref);
+  const { book, meter } = await loadRunContext(ref);
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  if (stored.completion?.entityBible) {
+    return {
+      entityCount: stored.completion.entityBible.entityCount,
+      relationshipCount: stored.completion.entityBible.relationshipCount,
+    };
+  }
   try {
     const existing = await listEntities(book.id);
-    return await buildEntityBible({
-      meter,
+    const result = await buildEntityBible({
+      meter: await meteredScope(meter, ref, config, "entity-bible", reservationRef),
       bookId: book.id,
       tier: config.tier,
       concept,
       outline,
-      genre: project.genre ?? undefined,
+      genre: config.inputSnapshot.genre ?? undefined,
+      authoringContract: buildFrozenAuthoringContract(config.inputSnapshot),
       existingNames: existing.map((e) => e.name),
     });
+    await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      completion: {
+        ...current.completion,
+        entityBible: { sourceRunId: ref.dbRunId, ...result },
+      },
+    }));
+    return result;
   } catch (error) {
     toWorkflowError(error);
   }
@@ -283,7 +1285,11 @@ export async function resetChapterStep(ref: RunRef, chapterNumber: number): Prom
   const { book } = await loadRunContext(ref);
   const db = getDb();
   const [chapter] = await db
-    .select({ id: schema.chapters.id, content: schema.chapters.content })
+    .select({
+      id: schema.chapters.id,
+      content: schema.chapters.content,
+      version: schema.chapters.version,
+    })
     .from(schema.chapters)
     .where(
       and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
@@ -292,11 +1298,28 @@ export async function resetChapterStep(ref: RunRef, chapterNumber: number): Prom
   if (!chapter) return;
 
   if (chapter.content.trim().length > 0) {
-    await db
-      .insert(schema.chapterRevisions)
-      .values({ chapterId: chapter.id, content: chapter.content, source: "regenerate" });
+    const [archive] = await db
+      .select({ id: schema.chapterRevisions.id })
+      .from(schema.chapterRevisions)
+      .where(
+        and(
+          eq(schema.chapterRevisions.chapterId, chapter.id),
+          eq(schema.chapterRevisions.runId, ref.dbRunId),
+          eq(schema.chapterRevisions.source, "regenerate"),
+          eq(schema.chapterRevisions.content, chapter.content),
+        ),
+      )
+      .limit(1);
+    if (!archive) {
+      await db.insert(schema.chapterRevisions).values({
+        chapterId: chapter.id,
+        content: chapter.content,
+        source: "regenerate",
+        runId: ref.dbRunId,
+      });
+    }
   }
-  await db
+  const [updated] = await db
     .update(schema.chapters)
     .set({
       content: "",
@@ -310,27 +1333,155 @@ export async function resetChapterStep(ref: RunRef, chapterNumber: number): Prom
       version: sql`${schema.chapters.version} + 1`,
       updatedAt: new Date(),
     })
-    .where(eq(schema.chapters.id, chapter.id));
+    .where(and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)))
+    .returning({ id: schema.chapters.id });
+  if (!updated) {
+    throw new RetryableError("Chapter changed while regeneration was preparing it", {
+      retryAfter: "1s",
+    });
+  }
+}
+
+async function ensureChapterPostWrite(
+  ref: RunRef,
+  config: GenerationConfig,
+  input: {
+    meter: MeterCtx;
+    bookId: string;
+    chapterNumber: number;
+    chapterTitle: string | null;
+    content: string;
+  },
+): Promise<void> {
+  const key = String(input.chapterNumber);
+  const digest = contentDigest(input.content);
+  let stored = await loadStoredGenerationConfig(ref.dbRunId);
+  if (stored.completion?.chapterSummaries?.[key]?.contentDigest === digest) {
+    return;
+  }
+
+  const summaryInput = {
+    meter: await meteredScope(
+      input.meter,
+      ref,
+      config,
+      `chapter:${input.chapterNumber}:summary:${digest.slice(0, 16)}`,
+    ),
+    bookId: input.bookId,
+    chapterNumber: input.chapterNumber,
+    chapterTitle: input.chapterTitle,
+    content: input.content,
+    tier: config.tier,
+  };
+  let summaryCheckpoint = stored.work?.chapters?.[key]?.summary;
+  if (!summaryCheckpoint || summaryCheckpoint.contentDigest !== digest) {
+    const summary = await generateChapterSummary(summaryInput);
+    summaryCheckpoint = { contentDigest: digest, result: summary };
+    stored = await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      work: {
+        ...current.work,
+        chapters: {
+          ...current.work?.chapters,
+          [key]: {
+            ...current.work?.chapters?.[key],
+            summary: summaryCheckpoint,
+          },
+        },
+      },
+    }));
+    summaryCheckpoint = stored.work?.chapters?.[key]?.summary ?? summaryCheckpoint;
+  }
+
+  await persistChapterSummary(summaryInput, summaryCheckpoint.result);
+  await updateStoredGenerationConfig(ref, (current) => ({
+    ...current,
+    completion: {
+      ...current.completion,
+      chapterSummaries: {
+        ...current.completion?.chapterSummaries,
+        [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+      },
+    },
+  }));
+}
+
+export function resolvedChapterTargetWords(
+  config: Pick<GenerationConfig, "chapterRegeneration" | "targetWordsPerChapter">,
+  outlineTargetWords: number | undefined,
+): number {
+  return config.chapterRegeneration
+    ? config.targetWordsPerChapter
+    : (outlineTargetWords ?? config.targetWordsPerChapter);
+}
+
+/**
+ * Returns only chapters that still need a metered writer or post-write upkeep.
+ * The workflow uses this exact list for the next-wave credit requirement.
+ */
+export async function chapterNumbersNeedingWorkStep(
+  ref: RunRef,
+  chapterNumbers: number[],
+): Promise<number[]> {
+  "use step";
+  if (chapterNumbers.length === 0) return [];
+  const { book } = await loadRunContext(ref);
+  const [rows, stored] = await Promise.all([
+    getDb()
+      .select({
+        chapterNumber: schema.chapters.chapterNumber,
+        status: schema.chapters.status,
+        content: schema.chapters.content,
+        wordCount: schema.chapters.wordCount,
+        qualityScore: schema.chapters.qualityScore,
+      })
+      .from(schema.chapters)
+      .where(
+        and(
+          eq(schema.chapters.bookId, book.id),
+          inArray(schema.chapters.chapterNumber, chapterNumbers),
+        ),
+      ),
+    loadStoredGenerationConfig(ref.dbRunId),
+  ]);
+  const byNumber = new Map(rows.map((row) => [row.chapterNumber, row]));
+  return chapterNumbers.filter((chapterNumber) => {
+    const chapter = byNumber.get(chapterNumber);
+    const digest = chapter ? contentDigest(chapter.content) : null;
+    const key = String(chapterNumber);
+    const downstream =
+      stored.completion?.revisionChapters?.[key] ?? stored.completion?.editedChapters?.[key];
+    return !isChapterProductionComplete(
+      chapter,
+      stored.completion?.chapterSummaries?.[key],
+      digest,
+      downstream,
+    );
+  });
 }
 
 export async function writeChapterStep(
   ref: RunRef,
   config: GenerationConfig,
   chapterNumber: number,
+  reservationRef?: string,
 ): Promise<{ chapterNumber: number; wordCount: number; qualityScore: number }> {
   "use step";
-  const { project, book, meter } = await loadRunContext(ref);
+  const { book, meter } = await loadRunContext(ref);
   const db = getDb();
+  const { attempt } = getStepMetadata();
 
   // Resume: a retry run reuses chapters a prior run already finished.
   const [existing] = await db
     .select({
+      id: schema.chapters.id,
       status: schema.chapters.status,
       title: schema.chapters.title,
       content: schema.chapters.content,
       summary: schema.chapters.summary,
       wordCount: schema.chapters.wordCount,
       qualityScore: schema.chapters.qualityScore,
+      version: schema.chapters.version,
     })
     .from(schema.chapters)
     .where(
@@ -338,21 +1489,18 @@ export async function writeChapterStep(
     )
     .limit(1);
   if (isChapterComplete(existing)) {
-    // Backfill: a retry after persistChapter succeeded but summarizeChapter
-    // failed must still write the summary and character-bible facts.
-    if (existing.summary == null) {
-      try {
-        await summarizeChapter({
-          meter,
-          bookId: book.id,
-          chapterNumber,
-          chapterTitle: existing.title,
-          content: existing.content,
-          tier: config.tier,
-        });
-      } catch (error) {
-        toWorkflowError(error);
-      }
+    // An outline summary is not proof that canon/moderation upkeep ran. The
+    // digest-bound checkpoint is the only completion signal.
+    try {
+      await ensureChapterPostWrite(ref, config, {
+        meter: { ...meter, reservationRef },
+        bookId: book.id,
+        chapterNumber,
+        chapterTitle: existing.title,
+        content: existing.content,
+      });
+    } catch (error) {
+      toWorkflowError(error);
     }
     await writeEvent(PROGRESS_NS, {
       type: "chapter",
@@ -367,6 +1515,7 @@ export async function writeChapterStep(
       qualityScore: existing.qualityScore ? Number(existing.qualityScore) : 0.75,
     };
   }
+  if (!existing) throw new FatalError(`Chapter ${chapterNumber} was not prepared`);
 
   const [outlineRow] = await db
     .select()
@@ -393,7 +1542,7 @@ export async function writeChapterStep(
       emotionalArc: "transition",
       openingHook: "Pick up where the previous chapter's summary leaves off.",
       closingHook: "Hand off cleanly to the next chapter's summary.",
-      targetWords: project.targetWordsPerChapter,
+      targetWords: config.targetWordsPerChapter,
     };
   }
 
@@ -413,54 +1562,104 @@ export async function writeChapterStep(
     )
     .orderBy(schema.chapters.chapterNumber);
 
-  await db
+  const [claimed] = await db
     .update(schema.chapters)
-    .set({ status: "drafting", updatedAt: new Date() })
-    .where(
-      and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
-    );
+    .set({
+      status: "drafting",
+      version: sql`${schema.chapters.version} + 1`,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(schema.chapters.id, existing.id), eq(schema.chapters.version, existing.version)))
+    .returning({ version: schema.chapters.version });
+  if (!claimed) {
+    throw new RetryableError("Chapter changed while generation was claiming it", {
+      retryAfter: "1s",
+    });
+  }
   await writeEvent(PROGRESS_NS, { type: "chapter", chapterNumber, status: "drafting" });
 
   const proseWriter = getWritable<string>({ namespace: chapterNs(chapterNumber) }).getWriter();
   try {
-    const settings = project.settings ?? {};
-    const result = await writeChapter({
+    const checkpointKey = String(chapterNumber);
+    const checkpoint = (await loadStoredGenerationConfig(ref.dbRunId)).work?.chapters?.[
+      checkpointKey
+    ];
+    const scopedMeter = await meteredScope(
       meter,
-      tools: {
-        userId: ref.userId,
-        projectId: ref.projectId,
-        bookId: book.id,
+      ref,
+      config,
+      `chapter:${chapterNumber}:writer`,
+      reservationRef,
+    );
+    const result = await writeChapter(
+      {
+        meter: scopedMeter,
+        tools: {
+          userId: ref.userId,
+          projectId: ref.projectId,
+          bookId: book.id,
+          chapterNumber,
+        },
+        tier: config.tier,
         chapterNumber,
+        totalChapters: config.targetChapters,
+        chapterOutline,
+        prevSummaries: prevSummaries.slice(-4),
+        genre: config.inputSnapshot.genre ?? undefined,
+        styleGuide: config.inputSnapshot.styleGuide ?? undefined,
+        voiceProfile: config.inputSnapshot.voiceProfile ?? undefined,
+        contentGuidelines: buildFrozenAuthoringContract(config.inputSnapshot),
+        plotStructure: outline.plotStructure,
+        targetWords: resolvedChapterTargetWords(config, chapterOutline.targetWords),
+        // Retrying a failed stream must not append the same prefix to the
+        // durable UI namespace twice. Later attempts finish silently, then the
+        // chapter status event replaces the partial view with persisted prose.
+        onProseDelta:
+          attempt === 1
+            ? async (delta) => {
+                await proseWriter.write(delta);
+              }
+            : undefined,
       },
-      tier: config.tier,
-      chapterNumber,
-      totalChapters: project.targetChapters,
-      chapterOutline,
-      prevSummaries: prevSummaries.slice(-4),
-      genre: project.genre ?? undefined,
-      styleGuide: project.styleGuide ?? undefined,
-      voiceProfile: settings.voiceProfile,
-      plotStructure: outline.plotStructure,
-      targetWords: chapterOutline.targetWords ?? project.targetWordsPerChapter,
-      onProseDelta: async (delta) => {
-        await proseWriter.write(delta);
+      {
+        checkpoint,
+        onCheckpoint: async (next) => {
+          await updateStoredGenerationConfig(ref, (current) => ({
+            ...current,
+            work: {
+              ...current.work,
+              chapters: {
+                ...current.work?.chapters,
+                [checkpointKey]: {
+                  ...current.work?.chapters?.[checkpointKey],
+                  ...next,
+                },
+              },
+            },
+          }));
+        },
       },
-    });
+    );
 
-    await persistChapter(
+    const persistedId = await persistChapter(
       {
         tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id, chapterNumber },
         chapterNumber,
       } as Parameters<typeof persistChapter>[0],
       result,
+      claimed.version,
     );
-    await summarizeChapter({
-      meter,
+    if (!persistedId) {
+      throw new RetryableError("Chapter changed while generated prose was applying", {
+        retryAfter: "1s",
+      });
+    }
+    await ensureChapterPostWrite(ref, config, {
+      meter: scopedMeter,
       bookId: book.id,
       chapterNumber,
       chapterTitle: chapterOutline.title,
       content: result.content,
-      tier: config.tier,
     });
 
     await writeEvent(PROGRESS_NS, {
@@ -487,9 +1686,10 @@ export async function editChapterStep(
   config: GenerationConfig,
   chapterNumber: number,
   issueNotes?: string,
+  reservationRef?: string,
 ): Promise<{ chapterNumber: number; changed: boolean }> {
   "use step";
-  const { project, book, meter } = await loadRunContext(ref);
+  const { book, meter } = await loadRunContext(ref);
   const db = getDb();
   const [chapter] = await db
     .select()
@@ -500,24 +1700,90 @@ export async function editChapterStep(
     .limit(1);
   if (!chapter || !chapter.content) return { chapterNumber, changed: false };
 
-  try {
-    const edited = await editChapter({
-      meter,
-      tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id, chapterNumber },
-      tier: config.tier,
+  const mode = issueNotes ? "revision" : "editorial";
+  const key = `${mode}:${chapterNumber}`;
+  const beforeDigest = contentDigest(chapter.content);
+  let stored = await loadStoredGenerationConfig(ref.dbRunId);
+  const reviewManuscriptDigest =
+    mode === "revision" ? stored.completion?.continuityReport?.manuscriptDigest : undefined;
+  const completed =
+    mode === "revision"
+      ? stored.completion?.revisionChapters?.[String(chapterNumber)]
+      : stored.completion?.editedChapters?.[String(chapterNumber)];
+  const downstreamRevision =
+    mode === "editorial" ? stored.completion?.revisionChapters?.[String(chapterNumber)] : undefined;
+  const completedMatches =
+    completed?.contentDigest === beforeDigest &&
+    (mode !== "revision" ||
+      (reviewManuscriptDigest !== undefined &&
+        completed.reviewManuscriptDigest === reviewManuscriptDigest));
+  if (completedMatches || downstreamRevision?.contentDigest === beforeDigest) {
+    return {
       chapterNumber,
-      content: chapter.content,
-      revisionNotes: issueNotes,
-      styleGuide: project.styleGuide ?? undefined,
-    });
-    if (edited.changed) {
-      await db.insert(schema.chapterRevisions).values({
-        chapterId: chapter.id,
+      changed: completed?.changed ?? downstreamRevision?.changed ?? false,
+    };
+  }
+
+  try {
+    let edited = stored.work?.edits?.[key];
+    const cachedOutputAlreadyApplied = cachedEditOutputAlreadyApplied(chapter.content, edited);
+    if (!cachedOutputAlreadyApplied && (!edited || edited.baseContentDigest !== beforeDigest)) {
+      const result = await editChapter({
+        meter: await meteredScope(
+          meter,
+          ref,
+          config,
+          `chapter:${chapterNumber}:${mode}:${beforeDigest.slice(0, 16)}${
+            reviewManuscriptDigest ? `:${reviewManuscriptDigest.slice(0, 16)}` : ""
+          }`,
+          reservationRef,
+        ),
+        tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id, chapterNumber },
+        tier: config.tier,
+        chapterNumber,
         content: chapter.content,
-        source: "writer",
-        runId: ref.dbRunId,
+        revisionNotes: issueNotes,
+        styleGuide: buildFrozenAuthoringContract(config.inputSnapshot),
       });
-      await db
+      const editResult = { baseContentDigest: beforeDigest, ...result };
+      edited = editResult;
+      stored = await updateStoredGenerationConfig(ref, (current) => ({
+        ...current,
+        work: {
+          ...current.work,
+          edits: { ...current.work?.edits, [key]: editResult },
+        },
+      }));
+      edited = stored.work?.edits?.[key] ?? edited;
+    }
+    if (!edited) {
+      throw new RetryableError("Editorial output was not checkpointed", { retryAfter: "1s" });
+    }
+
+    let finalContent = chapter.content;
+    if (edited.changed && !cachedOutputAlreadyApplied) {
+      const revisionSource = mode === "revision" ? "continuity-revision" : "writer";
+      const [archive] = await db
+        .select({ id: schema.chapterRevisions.id })
+        .from(schema.chapterRevisions)
+        .where(
+          and(
+            eq(schema.chapterRevisions.chapterId, chapter.id),
+            eq(schema.chapterRevisions.runId, ref.dbRunId),
+            eq(schema.chapterRevisions.source, revisionSource),
+            eq(schema.chapterRevisions.content, chapter.content),
+          ),
+        )
+        .limit(1);
+      if (!archive) {
+        await db.insert(schema.chapterRevisions).values({
+          chapterId: chapter.id,
+          content: chapter.content,
+          source: revisionSource,
+          runId: ref.dbRunId,
+        });
+      }
+      const [updated] = await db
         .update(schema.chapters)
         .set({
           content: edited.content,
@@ -526,8 +1792,50 @@ export async function editChapterStep(
           version: chapter.version + 1,
           updatedAt: new Date(),
         })
-        .where(eq(schema.chapters.id, chapter.id));
+        .where(
+          and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)),
+        )
+        .returning({ content: schema.chapters.content });
+      if (!updated) {
+        const [current] = await db
+          .select({ content: schema.chapters.content })
+          .from(schema.chapters)
+          .where(eq(schema.chapters.id, chapter.id))
+          .limit(1);
+        if (current?.content !== edited.content) {
+          throw new RetryableError("Chapter changed while its editorial pass was applying", {
+            retryAfter: "1s",
+          });
+        }
+      }
+      finalContent = edited.content;
     }
+
+    const checkpoint = {
+      sourceRunId: ref.dbRunId,
+      contentDigest: contentDigest(finalContent),
+      changed: edited.changed,
+      ...(mode === "revision" && reviewManuscriptDigest ? { reviewManuscriptDigest } : {}),
+    };
+    await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      completion: {
+        ...current.completion,
+        ...(mode === "revision"
+          ? {
+              revisionChapters: {
+                ...current.completion?.revisionChapters,
+                [String(chapterNumber)]: checkpoint,
+              },
+            }
+          : {
+              editedChapters: {
+                ...current.completion?.editedChapters,
+                [String(chapterNumber)]: checkpoint,
+              },
+            }),
+      },
+    }));
     await writeEvent(PROGRESS_NS, {
       type: "chapter",
       chapterNumber,
@@ -563,18 +1871,49 @@ export async function continuityPhaseStep(
   ref: RunRef,
   config: GenerationConfig,
   phaseKey: ReviewPhaseKey,
+  reservationRef?: string,
 ): Promise<ContinuityOutcome> {
   "use step";
   const { book, meter } = await loadRunContext(ref);
+  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  const checkpoint = stored.completion?.continuityOutcomes?.[phaseKey];
+  if (checkpoint?.manuscriptDigest === currentManuscriptDigest) return checkpoint.outcome;
   try {
-    return await runContinuityPhase(
+    const outcome = await runContinuityPhase(
       {
-        meter,
+        meter: await meteredScope(
+          meter,
+          ref,
+          config,
+          `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
+          reservationRef,
+        ),
         tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id },
         tier: config.tier,
       },
       phaseKey,
     );
+    if ((await loadManuscriptDigest(book.id)) !== currentManuscriptDigest) {
+      throw new RetryableError("Manuscript changed during continuity review", {
+        retryAfter: "1s",
+      });
+    }
+    await updateStoredGenerationConfig(ref, (current) => ({
+      ...current,
+      completion: {
+        ...current.completion,
+        continuityOutcomes: {
+          ...current.completion?.continuityOutcomes,
+          [phaseKey]: {
+            sourceRunId: ref.dbRunId,
+            manuscriptDigest: currentManuscriptDigest,
+            outcome,
+          },
+        },
+      },
+    }));
+    return outcome;
   } catch (error) {
     toWorkflowError(error);
   }
@@ -586,8 +1925,42 @@ export async function continuityFinalizeStep(
 ): Promise<ContinuityReport> {
   "use step";
   const { book } = await loadRunContext(ref);
+  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  const checkpoint = stored.completion?.continuityReport;
+  if (checkpoint?.manuscriptDigest === currentManuscriptDigest) {
+    await writeEvent(PROGRESS_NS, {
+      type: "review",
+      score: checkpoint.report.score,
+      recommendation: checkpoint.report.recommendation,
+      issueCount: checkpoint.report.issues.length,
+    });
+    return checkpoint.report;
+  }
+  if (
+    outcomes.some(
+      (outcome) =>
+        stored.completion?.continuityOutcomes?.[outcome.key]?.manuscriptDigest !==
+        currentManuscriptDigest,
+    )
+  ) {
+    throw new RetryableError("Continuity phases do not match the current manuscript", {
+      retryAfter: "1s",
+    });
+  }
   const report = aggregateContinuityOutcomes(outcomes);
   await persistContinuityIssues(book.id, ref.dbRunId, report.issues);
+  await updateStoredGenerationConfig(ref, (current) => ({
+    ...current,
+    completion: {
+      ...current.completion,
+      continuityReport: {
+        sourceRunId: ref.dbRunId,
+        manuscriptDigest: currentManuscriptDigest,
+        report,
+      },
+    },
+  }));
   await writeEvent(PROGRESS_NS, {
     type: "review",
     score: report.score,
@@ -599,6 +1972,10 @@ export async function continuityFinalizeStep(
 
 export async function finalizeStep(ref: RunRef): Promise<void> {
   "use step";
+  const { book } = await loadRunContext(ref);
+  const beforeFinalizeDigest = await loadManuscriptDigest(book.id);
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  if (stored.completion?.finalized?.manuscriptDigest === beforeFinalizeDigest) return;
   const db = getDb();
   await db
     .update(schema.chapters)
@@ -606,6 +1983,7 @@ export async function finalizeStep(ref: RunRef): Promise<void> {
     .where(
       sql`${schema.chapters.bookId} = (select id from ${schema.books} where ${schema.books.projectId} = ${ref.projectId}) and ${schema.chapters.status} in ('drafted', 'edited')`,
     );
+  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
 
   // The moment a book is actually finished. Only ever set once — a re-run of a
   // finished book must not restart the clock, and time-to-first-book is
@@ -619,6 +1997,14 @@ export async function finalizeStep(ref: RunRef): Promise<void> {
     .set({ completedAt: new Date() })
     .where(and(eq(schema.projects.id, ref.projectId), isNull(schema.projects.completedAt)));
 
+  await updateStoredGenerationConfig(ref, (current) => ({
+    ...current,
+    completion: {
+      ...current.completion,
+      finalized: { sourceRunId: ref.dbRunId, manuscriptDigest: currentManuscriptDigest },
+    },
+  }));
+
   // Tell the author. Best-effort: a book that finished but could not say so
   // is still a finished book, so email failures never fail the step.
   try {
@@ -626,7 +2012,17 @@ export async function finalizeStep(ref: RunRef): Promise<void> {
       .select({
         email: schema.users.email,
         title: schema.books.title,
-        chapters: sql<number>`(select count(*)::int from ${schema.chapters} where ${schema.chapters.bookId} = ${schema.books.id})`,
+        chapters: sql<number>`(
+          select count(*)::int
+          from ${schema.chapters}
+          where ${schema.chapters.bookId} = ${schema.books.id}
+            and not (
+              ${schema.chapters.status} = 'planned'
+              and ${schema.chapters.wordCount} = 0
+              and ${schema.chapters.title} is null
+              and ${schema.chapters.summary} is null
+            )
+        )`,
         words: sql<number>`(select coalesce(sum(${schema.chapters.wordCount}), 0)::int from ${schema.chapters} where ${schema.chapters.bookId} = ${schema.books.id})`,
       })
       .from(schema.books)

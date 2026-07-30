@@ -24,7 +24,18 @@ export type ContentToolInput = {
 };
 
 export type ContentToolOutput =
-  { kind: "mermaid"; source: string } | { kind: "image"; url: string; alt: string };
+  | { kind: "mermaid"; source: string }
+  | {
+      kind: "image";
+      url: string;
+      alt: string;
+      asset: {
+        blobPathname: string;
+        contentType: string;
+        sizeBytes: number;
+        prompt: string;
+      };
+    };
 
 export type ContentTool = {
   id: string;

@@ -1,10 +1,15 @@
 import { put } from "@vercel/blob";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { resolveBlobUploads } from "@/lib/blob/lifecycle";
+import {
+  compensateUnreferencedBlobUpload,
+  scheduleUnreferencedBlobCleanup,
+} from "@/lib/blob/orphan-cleanup";
 import { diagramSourceHash } from "@/lib/export/figures";
 import { sanitizeSvg } from "@/lib/security/svg";
 
@@ -58,7 +63,7 @@ export async function POST(req: Request) {
 
   // Already cached for this project — nothing to do.
   const existing = await db
-    .select({ id: schema.assets.id })
+    .select({ contentType: schema.assets.contentType })
     .from(schema.assets)
     .where(
       and(
@@ -67,8 +72,11 @@ export async function POST(req: Request) {
         sql`${schema.assets.meta}->>'sourceHash' = ${sourceHash}`,
       ),
     )
-    .limit(1);
-  if (existing.length > 0) {
+    .limit(2);
+  if (
+    existing.some((asset) => asset.contentType === "image/svg+xml") &&
+    existing.some((asset) => asset.contentType === "image/png")
+  ) {
     return Response.json({ cached: true, sourceHash });
   }
 
@@ -86,43 +94,114 @@ export async function POST(req: Request) {
   }
 
   const meta = { sourceHash, alt: alt || "Diagram" };
-  const base = `diagrams/${ownership.projectId}/${sourceHash}`;
+  // A per-request token keeps one failed concurrent cache attempt from
+  // deleting another request's successful deterministic pathname.
+  const base = `diagrams/${ownership.projectId}/${sourceHash}-${crypto.randomUUID()}`;
 
-  const [svgBlob, pngBlob] = await Promise.all([
-    put(`${base}.svg`, safeSvg, {
-      access: "public",
-      contentType: "image/svg+xml",
-      addRandomSuffix: false,
-    }),
-    put(`${base}.png`, png, {
-      access: "public",
-      contentType: "image/png",
-      addRandomSuffix: false,
-    }),
-  ]);
+  const [svgBlob, pngBlob] = await resolveBlobUploads(
+    [
+      put(`${base}.svg`, safeSvg, {
+        access: "public",
+        contentType: "image/svg+xml",
+        addRandomSuffix: false,
+      }),
+      put(`${base}.png`, png, {
+        access: "public",
+        contentType: "image/png",
+        addRandomSuffix: false,
+      }),
+    ],
+    "diagram",
+    (pathnames) => compensateUnreferencedBlobUpload({ projectId: ownership.projectId, pathnames }),
+  );
 
-  await db.insert(schema.assets).values([
-    {
+  try {
+    // Schedule before persistence. A delayed workflow keeps referenced files
+    // and durably retries deletion if this request never commits asset rows.
+    await scheduleUnreferencedBlobCleanup({
       projectId: ownership.projectId,
-      chapterId,
-      kind: "diagram" as const,
-      blobUrl: svgBlob.url,
-      blobPathname: svgBlob.pathname,
-      contentType: "image/svg+xml",
-      sizeBytes: Buffer.byteLength(safeSvg),
-      meta,
-    },
-    {
-      projectId: ownership.projectId,
-      chapterId,
-      kind: "diagram" as const,
-      blobUrl: pngBlob.url,
-      blobPathname: pngBlob.pathname,
-      contentType: "image/png",
-      sizeBytes: png.length,
-      meta,
-    },
-  ]);
+      pathnames: [svgBlob.pathname, pngBlob.pathname],
+    });
+  } catch (error) {
+    try {
+      await compensateUnreferencedBlobUpload({
+        projectId: ownership.projectId,
+        pathnames: [svgBlob.pathname, pngBlob.pathname],
+      });
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [
+          error instanceof Error ? error : new Error(String(error)),
+          cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+        ],
+        "Diagram cleanup could not be made durable",
+      );
+    }
+    throw error;
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(
+          hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
+        )`,
+      );
+      await tx.insert(schema.assets).values([
+        {
+          projectId: ownership.projectId,
+          chapterId,
+          kind: "diagram" as const,
+          blobUrl: svgBlob.url,
+          blobPathname: svgBlob.pathname,
+          contentType: "image/svg+xml",
+          sizeBytes: Buffer.byteLength(safeSvg),
+          meta,
+        },
+        {
+          projectId: ownership.projectId,
+          chapterId,
+          kind: "diagram" as const,
+          blobUrl: pngBlob.url,
+          blobPathname: pngBlob.pathname,
+          contentType: "image/png",
+          sizeBytes: png.length,
+          meta,
+        },
+      ]);
+    });
+  } catch (error) {
+    // A rejected COMMIT acknowledgement is ambiguous. Verify the exact rows;
+    // deleting first could break a successfully committed diagram.
+    let committed;
+    try {
+      committed = await db
+        .select({ pathname: schema.assets.blobPathname })
+        .from(schema.assets)
+        .where(
+          and(
+            eq(schema.assets.projectId, ownership.projectId),
+            inArray(schema.assets.blobPathname, [svgBlob.pathname, pngBlob.pathname]),
+          ),
+        );
+    } catch (verificationError) {
+      throw new AggregateError(
+        [
+          error instanceof Error ? error : new Error(String(error)),
+          verificationError instanceof Error
+            ? verificationError
+            : new Error(String(verificationError)),
+        ],
+        "Diagram persistence failed and could not be verified",
+      );
+    }
+    const committedPathnames = new Set(committed.map((asset) => asset.pathname));
+    if (committedPathnames.has(svgBlob.pathname) && committedPathnames.has(pngBlob.pathname)) {
+      return Response.json({ cached: false, sourceHash });
+    }
+    // The pre-scheduled workflow owns cleanup of every unreferenced pathname.
+    throw error;
+  }
 
   return Response.json({ cached: false, sourceHash });
 }

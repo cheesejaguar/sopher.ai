@@ -5,9 +5,9 @@ import { CircleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { FolioRail } from "@/components/studio/folio-rail";
-import { useRunStream, type RunSnapshot } from "@/hooks/use-run-stream";
+import { useRunStream, type RunSnapshot, type RunStreamState } from "@/hooks/use-run-stream";
 import { StageTimeline } from "@/components/generation/stage-timeline";
+import { BookAssembly } from "@/components/generation/book-assembly";
 import { LiveDraftPane } from "@/components/generation/live-draft-pane";
 import { AgentFeed } from "@/components/generation/agent-feed";
 import { CostTicker } from "@/components/generation/cost-ticker";
@@ -35,6 +35,8 @@ function announcementFor(stage: Stage, draftedCount: number, plannedTotal: numbe
       return "Writing the outline.";
     case "awaiting_approval":
       return "Paused. The outline is ready for your approval.";
+    case "bible":
+      return "Building the story bible for every chapter.";
     case "chapters":
       return `Drafting chapters: ${draftedCount} of ${plannedTotal} done.`;
     case "awaiting_credits":
@@ -71,9 +73,11 @@ export function RunViewer({
   tier,
   estimateUsd,
   plannedChapters,
+  targetWordsPerChapter,
   onRestart,
   restartPending,
   restartError,
+  onProgress,
 }: {
   runId: string;
   /** Restart affordances re-run the FULL BOOK — hide them for scoped runs. */
@@ -85,11 +89,18 @@ export function RunViewer({
   tier: QualityTier;
   estimateUsd: number;
   plannedChapters: number;
+  targetWordsPerChapter: number;
   onRestart: () => void;
   restartPending: boolean;
   restartError: string | null;
+  onProgress?: (progress: RunProgressSnapshot) => void;
 }) {
   const { state, subscribeChapterProse, markCancelled } = useRunStream(runId, snapshot);
+  const terminal =
+    state.stage === "done" || state.stage === "failed" || state.stage === "cancelled";
+  const runSurfaceRef = React.useRef<HTMLDivElement | null>(null);
+  const focusWasInsideRef = React.useRef(false);
+  const previousTerminalRef = React.useRef(terminal);
 
   const railChapters = React.useMemo(
     () =>
@@ -104,6 +115,36 @@ export function RunViewer({
   ).length;
   const plannedTotal = Math.max(railChapters.length, plannedChapters);
   const announcement = announcementFor(state.stage, draftedCount, plannedTotal);
+
+  React.useLayoutEffect(() => {
+    if (!previousTerminalRef.current && terminal && focusWasInsideRef.current) {
+      runSurfaceRef.current?.focus({ preventScroll: true });
+    }
+    previousTerminalRef.current = terminal;
+  }, [terminal]);
+
+  React.useEffect(() => {
+    onProgress?.(
+      projectProgressForRun(
+        {
+          stage: state.stage,
+          pct: state.pct,
+          detail: state.detail,
+          pausedStage: state.pausedStage,
+        },
+        draftedCount,
+        plannedTotal,
+      ),
+    );
+  }, [
+    draftedCount,
+    onProgress,
+    plannedTotal,
+    state.detail,
+    state.pausedStage,
+    state.pct,
+    state.stage,
+  ]);
 
   let content: React.ReactNode;
 
@@ -120,6 +161,8 @@ export function RunViewer({
             : undefined
         }
         onWriteAgain={runKind === "full_book" ? onRestart : undefined}
+        writeAgainPending={restartPending}
+        writeAgainError={restartError}
       />
     );
   } else if (state.stage === "failed") {
@@ -142,7 +185,7 @@ export function RunViewer({
       <EndCard
         status="empty"
         title="You stopped this run."
-        body="Everything drafted before the stop is saved. A new run starts fresh from the brief."
+        body="Everything drafted before the stop is saved. Start again with the same production settings to keep that work; changed settings rebuild the book and preserve replaced prose in History."
         actionLabel={runKind === "full_book" ? "Start a new run" : undefined}
         onAction={runKind === "full_book" ? onRestart : undefined}
         pending={restartPending}
@@ -156,6 +199,7 @@ export function RunViewer({
           stage={state.stage}
           pct={state.pct}
           detail={state.detail}
+          pausedStage={state.pausedStage}
           tier={tier}
           draftingCount={draftingCount}
           plannedTotal={plannedTotal}
@@ -179,9 +223,13 @@ export function RunViewer({
 
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
           <div className="min-w-0 space-y-4">
-            {railChapters.length > 0 ? (
-              <FolioRail chapters={railChapters} orientation="horizontal" className="flex-wrap" />
-            ) : null}
+            <BookAssembly
+              chapters={state.chapters}
+              titles={titles}
+              plannedTotal={plannedTotal}
+              targetWordsPerChapter={targetWordsPerChapter}
+              stage={state.stage}
+            />
             <LiveDraftPane
               chapters={state.chapters}
               titles={titles}
@@ -194,7 +242,11 @@ export function RunViewer({
             title="Production inspector"
             description="Live credit use, agent notes, and run controls."
           >
-            <CostTicker totalUsd={state.totalUsd} estimateUsd={estimateUsd} />
+            <CostTicker
+              totalCredits={state.totalCredits}
+              totalUsd={state.totalUsd}
+              estimateUsd={estimateUsd}
+            />
             <AgentFeed items={state.agentFeed} connection={state.connection} />
             <RunControls
               projectId={projectId}
@@ -210,13 +262,66 @@ export function RunViewer({
   // The live region is mounted in every branch, so it exists before its text
   // ever changes: silent on first paint, one polite sentence per milestone.
   return (
-    <>
+    <div
+      ref={runSurfaceRef}
+      tabIndex={terminal ? -1 : undefined}
+      role={terminal ? "region" : undefined}
+      aria-label={
+        terminal
+          ? state.stage === "done"
+            ? "Book generation complete"
+            : state.stage === "failed"
+              ? "Book generation failed"
+              : "Book generation stopped"
+          : undefined
+      }
+      onFocusCapture={() => {
+        focusWasInsideRef.current = true;
+      }}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && !event.currentTarget.contains(next)) {
+          focusWasInsideRef.current = false;
+        } else if (next === null) {
+          queueMicrotask(() => {
+            const active = document.activeElement;
+            if (active && !runSurfaceRef.current?.contains(active)) {
+              focusWasInsideRef.current = false;
+            }
+          });
+        }
+      }}
+    >
       <p role="status" aria-live="polite" className="sr-only">
         {announcement}
       </p>
       {content}
-    </>
+    </div>
   );
+}
+
+export type RunProgressSnapshot = {
+  stage: Stage;
+  pct: number;
+  detail?: string;
+  pausedStage?: RunStreamState["pausedStage"];
+  draftedCount: number;
+  totalChapters: number;
+};
+
+export function projectProgressForRun(
+  state: Pick<RunStreamState, "stage" | "pct" | "detail" | "pausedStage">,
+  draftedCount: number,
+  totalChapters: number,
+): RunProgressSnapshot {
+  return {
+    stage: state.stage,
+    pct: state.pct,
+    detail: state.detail,
+    pausedStage: state.pausedStage,
+    draftedCount,
+    totalChapters,
+  };
 }
 
 function EndCard({
@@ -245,8 +350,14 @@ function EndCard({
       action={
         actionLabel && onAction ? (
           <div className="space-y-3">
-            <Button onClick={onAction} disabled={pending}>
-              {pending ? <Spinner /> : null}
+            <Button
+              onClick={() => {
+                if (!pending) onAction();
+              }}
+              aria-busy={pending || undefined}
+              aria-disabled={pending}
+            >
+              {pending ? <Spinner aria-hidden="true" /> : null}
               {actionLabel}
             </Button>
             {error ? (

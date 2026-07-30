@@ -173,9 +173,6 @@ function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuote
         <dd className="mt-1 font-mono font-semibold tabular-nums">
           {quote ? `${quote.credits.toFixed(1)} credits` : "Pending step 4"}
         </dd>
-        {quote ? (
-          <dd className="mt-1 text-muted-foreground">About {quote.estimatedMinutes} minutes</dd>
-        ) : null}
       </div>
     </dl>
   );

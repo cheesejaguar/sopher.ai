@@ -238,11 +238,14 @@
     border-color: var(--color-border);
   }
 
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     background: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans), system-ui, sans-serif;
-    min-width: 320px;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -489,6 +492,49 @@
   }
 }
 
+@keyframes production-page-assemble {
+  0%,
+  18% {
+    opacity: 0.35;
+    transform: translate3d(1.5rem, -0.75rem, 0) rotate(1.5deg);
+  }
+  48%,
+  100% {
+    opacity: 1;
+    transform: translate3d(1rem, 0.75rem, 0) rotate(0deg);
+  }
+}
+
+@keyframes production-review-scan {
+  0% {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+  15%,
+  82% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(7.5rem);
+  }
+}
+
+.production-book-page {
+  border-radius: var(--radius-sm);
+}
+
+.production-book-page-active {
+  animation: production-page-assemble 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.production-review-beam {
+  top: 0;
+  background: linear-gradient(90deg, transparent, var(--ai), transparent);
+  box-shadow: 0 0.4rem 1.2rem color-mix(in oklch, var(--ai) 45%, transparent);
+  animation: production-review-scan 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
 /*
   Scroll motion is progressive enhancement: readable content is present in its
   final position by default, and only decorative notebook artifacts move.
@@ -539,8 +585,10 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 
@@ -552,7 +600,9 @@
   .journey-stage-enter,
   .marketing-proof-depth-plane,
   .marketing-page-signature,
-  .marketing-final-rule {
+  .marketing-final-rule,
+  .production-book-page-active,
+  .production-review-beam {
     animation: none !important;
     transform: none !important;
   }

@@ -3,7 +3,14 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { anthropicCachedSystem } from "@/ai/cache";
-import { gatewayOptions, metered } from "@/ai/metering";
+import {
+  gatewayOptions,
+  metered,
+  meteredCallAuthorizationUsd,
+  refundMeteredDelivery,
+  type MeterCtx,
+} from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { EDITOR_SYSTEM_PROMPT } from "@/ai/prompts/editor";
 import { selectionEditSchema } from "@/ai/schemas";
@@ -12,6 +19,7 @@ import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
+import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
 import { contextWindow } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 
@@ -75,14 +83,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  // Paid path: the balance pre-check above is a read, so concurrent callers all
-  // pass it. This is what bounds how far past the floor they can get.
+  // Bound repeated paid-work requests before atomic provider authorization.
   const limited = await rateLimit(LIMITS.llmEdit, req, userId);
   if (limited.limited) return limited.response;
 
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {
     return Response.json({ error: "Chapter not found" }, { status: 404 });
+  }
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = requireIdempotencyKey(req);
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => null));
@@ -117,24 +133,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   const model =
     selection.text.length < LINE_EDIT_MAX_CHARS ? MODELS[tier].lineEdit : MODELS[tier].editor;
   const { before, after } = contextWindow(chapter.content, selection.start, selection.end);
-  const meter = { userId, projectId: ownership.projectId };
+  const meter: MeterCtx = {
+    userId,
+    projectId: ownership.projectId,
+    authorizationUsd: 0.05,
+    idempotencyKey: `chapter:${chapterId}:${idempotencyKey}`,
+  };
+  const callInfo = { role: "editor", operation: "editor.selection", model };
 
   let output: z.infer<typeof selectionEditSchema>;
   try {
-    // Pre-gate: a selection edit meters ~$0.01-0.05; refuse before the call
-    // rather than letting metered() spend into the floor.
-    await assertCreditsForUsd(userId, 0.05);
-    const result = await metered(
-      meter,
-      { role: "editor", operation: "editor.selection", model },
-      () =>
-        generateText({
-          model,
-          instructions: anthropicCachedSystem(EDITOR_SYSTEM_PROMPT),
-          prompt: selectionPrompt({ instruction, before, selected: selection.text, after }),
-          output: Output.object({ schema: selectionEditSchema }),
-          providerOptions: gatewayOptions(meter, "editor"),
-        }),
+    await assertCreditsForUsd(userId, meteredCallAuthorizationUsd(meter, callInfo));
+    const result = await metered(meter, callInfo, () =>
+      generateText({
+        model,
+        instructions: anthropicCachedSystem(EDITOR_SYSTEM_PROMPT),
+        prompt: selectionPrompt({ instruction, before, selected: selection.text, after }),
+        maxOutputTokens: meteredMaxOutputTokens("editor.selection"),
+        prepareStep: meteredInputGuard("editor.selection"),
+        output: Output.object({ schema: selectionEditSchema }),
+        providerOptions: gatewayOptions(meter, "editor"),
+      }),
     );
     output = result.output;
   } catch (error) {
@@ -157,28 +176,38 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     occurrence += 1;
   }
 
-  const [row] = await db
-    .insert(schema.suggestions)
-    .values({
-      chapterId,
-      chapterVersion: chapter.version,
-      passType: "selection",
-      suggestionType: "selection",
-      severity: "info",
-      anchor: {
-        start: selection.start,
-        end: selection.end,
-        originalText: selection.text,
-        occurrence,
-      },
-      suggestedText: output.replacement,
-      explanation: output.rationale,
-      // The author's own words. Went into the prompt and was then dropped, so
-      // the record held the answer with no trace of the question.
-      instruction,
-      status: "pending",
-    })
-    .returning();
+  let row: typeof schema.suggestions.$inferSelect | undefined;
+  try {
+    [row] = await db
+      .insert(schema.suggestions)
+      .values({
+        chapterId,
+        chapterVersion: chapter.version,
+        passType: "selection",
+        suggestionType: "selection",
+        severity: "info",
+        anchor: {
+          start: selection.start,
+          end: selection.end,
+          originalText: selection.text,
+          occurrence,
+        },
+        suggestedText: output.replacement,
+        explanation: output.rationale,
+        // The author's own words. Went into the prompt and was then dropped, so
+        // the record held the answer with no trace of the question.
+        instruction,
+        status: "pending",
+      })
+      .returning();
+  } catch {
+    await refundMeteredDelivery(meter, "Selection edit could not be saved — refunded");
+    return Response.json({ error: "Could not save the suggestion" }, { status: 503 });
+  }
+  if (!row) {
+    await refundMeteredDelivery(meter, "Selection edit could not be saved — refunded");
+    return Response.json({ error: "Could not save the suggestion" }, { status: 503 });
+  }
 
   return Response.json({ suggestion: toSuggestionDTO(row) }, { status: 201 });
 }

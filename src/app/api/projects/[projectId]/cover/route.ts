@@ -1,19 +1,27 @@
 import { put } from "@vercel/blob";
 import { generateText } from "ai";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
-import { gatewayOptions, metered } from "@/ai/metering";
+import {
+  gatewayOptions,
+  metered,
+  meteredCallAuthorizationUsd,
+  refundMeteredDelivery,
+  type MeterCtx,
+} from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
-import {
-  assertCreditsForUsd,
-  creditsForUsd,
-  grantCredits,
-  InsufficientCreditsError,
-} from "@/lib/billing/credits";
+import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { MODEL_PRICING } from "@/lib/billing/pricing";
+import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
+import { scheduleReplacedAssetCleanup } from "@/lib/blob-cleanup";
+import {
+  compensateUnreferencedBlobUpload,
+  scheduleUnreferencedBlobCleanup,
+} from "@/lib/blob/orphan-cleanup";
 
 /**
  * Generates a book cover from the book's own identity — title, synopsis,
@@ -58,18 +66,25 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     throw error;
   }
 
-  // Paid path: the balance pre-check above is a read, so concurrent callers all
-  // pass it. This is what bounds how far past the floor they can get.
+  // Bound repeated paid-work requests before atomic provider authorization.
   const limited = await rateLimit(LIMITS.imageGen, req, userId);
   if (limited.limited) return limited.response;
   const { projectId } = await ctx.params;
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = requireIdempotencyKey(req);
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
   const db = getDb();
   const [row] = await db
     .select({
       bookId: schema.books.id,
       title: schema.books.title,
       synopsis: schema.books.synopsis,
-      frontMatter: schema.books.frontMatter,
       genre: schema.projects.genre,
       settings: schema.projects.settings,
     })
@@ -79,8 +94,41 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     .limit(1);
   if (!row) return Response.json({ error: "Book not found" }, { status: 404 });
 
+  const [replayed] = await db
+    .select({ url: schema.assets.blobUrl })
+    .from(schema.assets)
+    .where(
+      and(
+        eq(schema.assets.projectId, projectId),
+        eq(schema.assets.kind, "cover"),
+        sql`${schema.assets.meta}->>'operationKey' = ${idempotencyKey}`,
+      ),
+    )
+    .limit(1);
+  if (replayed) return Response.json({ url: replayed.url });
+
+  const tier: QualityTier = row.settings.qualityTier ?? "standard";
+  const model = MODELS[tier].image;
+  const meter: MeterCtx = {
+    userId,
+    projectId,
+    authorizationUsd: COVER_USD,
+    idempotencyKey: `project:${projectId}:${idempotencyKey}`,
+  };
+  const callInfo = { role: "content-tool", operation: "cover.generate", model };
+  const authorizationUsd = meteredCallAuthorizationUsd(meter, callInfo);
+  let result: Awaited<ReturnType<typeof generateText>>;
   try {
-    await assertCreditsForUsd(userId, COVER_USD);
+    await assertCreditsForUsd(userId, authorizationUsd);
+    result = await metered(meter, callInfo, () =>
+      generateText({
+        model,
+        prompt: coverPrompt(row),
+        maxOutputTokens: meteredMaxOutputTokens("cover.generate"),
+        prepareStep: meteredInputGuard("cover.generate"),
+        providerOptions: gatewayOptions(meter, "content-tool"),
+      }),
+    );
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: "Not enough credits" }, { status: 402 });
@@ -88,32 +136,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     throw error;
   }
 
-  const tier: QualityTier = row.settings.qualityTier ?? "standard";
-  const model = MODELS[tier].image;
-  const meter = { userId, projectId };
-
-  const result = await metered(
-    meter,
-    { role: "content-tool", operation: "cover.generate", model },
-    () =>
-      generateText({
-        model,
-        prompt: coverPrompt(row),
-        providerOptions: gatewayOptions(meter, "content-tool"),
-      }),
-  );
-
   // From here the user has already been debited (metered() charged the model
   // call). Any failure to actually deliver a cover refunds that debit — a
   // charge with nothing to show for it is the one outcome we never allow.
   async function refundAndFail(message: string): Promise<Response> {
-    await grantCredits({
-      userId,
-      credits: creditsForUsd(COVER_USD),
-      description: "Cover generation failed after billing — refunded",
-      externalRef: `cover-refund:${crypto.randomUUID()}`,
-      kind: "grant",
-    });
+    await refundMeteredDelivery(meter, "Cover generation failed after billing — refunded");
     return Response.json({ error: message }, { status: 502 });
   }
 
@@ -122,36 +149,147 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     return refundAndFail("The image model returned no image");
   }
 
+  const contentType = file.mediaType ?? "image/png";
+  let blob: Awaited<ReturnType<typeof put>>;
   try {
-    const contentType = file.mediaType ?? "image/png";
-    const blob = await put(
+    blob = await put(
       `covers/${projectId}/${crypto.randomUUID()}.png`,
       Buffer.from(file.uint8Array),
       { access: "public", contentType },
     );
-
-    await db.insert(schema.assets).values({
-      projectId,
-      kind: "cover",
-      blobUrl: blob.url,
-      blobPathname: blob.pathname,
-      contentType,
-      sizeBytes: file.uint8Array.byteLength,
-      meta: { title: row.title },
-    });
-
-    // The cover URL rides in front_matter next to the author byline, so the
-    // exports and reading view read one place for the book's identity.
-    await db
-      .update(schema.books)
-      .set({
-        frontMatter: { ...(row.frontMatter as Record<string, unknown>), coverUrl: blob.url },
-        updatedAt: new Date(),
-      })
-      .where(eq(schema.books.id, row.bookId));
-
-    return Response.json({ url: blob.url });
   } catch {
     return refundAndFail("Could not store the cover");
   }
+
+  try {
+    await scheduleUnreferencedBlobCleanup({ projectId, pathnames: [blob.pathname] });
+  } catch (scheduleError) {
+    try {
+      await compensateUnreferencedBlobUpload({ projectId, pathnames: [blob.pathname] });
+    } catch (cleanupError) {
+      try {
+        await refundMeteredDelivery(meter, "Cover generation failed after billing — refunded");
+      } catch (refundError) {
+        throw new AggregateError(
+          [
+            scheduleError instanceof Error ? scheduleError : new Error(String(scheduleError)),
+            cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+            refundError instanceof Error ? refundError : new Error(String(refundError)),
+          ],
+          "Cover delivery, cleanup, and refund all failed",
+        );
+      }
+      throw new AggregateError(
+        [
+          scheduleError instanceof Error ? scheduleError : new Error(String(scheduleError)),
+          cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+        ],
+        "Cover delivery failed and was refunded, but Blob cleanup could not be made durable",
+      );
+    }
+    return refundAndFail("Could not store the cover");
+  }
+
+  let displacedCover: { id: string; pathname: string } | undefined;
+  let displacedCandidate: { id: string; pathname: string } | undefined;
+  try {
+    displacedCover = await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(
+          hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
+        )`,
+      );
+      const [lockedBook] = await tx
+        .select({ frontMatter: schema.books.frontMatter })
+        .from(schema.books)
+        .where(and(eq(schema.books.id, row.bookId), eq(schema.books.projectId, projectId)))
+        .limit(1);
+      if (!lockedBook) throw new Error("Book disappeared while storing its cover");
+
+      const currentCoverUrl = (lockedBook.frontMatter as Record<string, unknown>).coverUrl;
+      const [displaced] =
+        typeof currentCoverUrl === "string"
+          ? await tx
+              .select({
+                id: schema.assets.id,
+                pathname: schema.assets.blobPathname,
+              })
+              .from(schema.assets)
+              .where(
+                and(
+                  eq(schema.assets.projectId, projectId),
+                  eq(schema.assets.kind, "cover"),
+                  eq(schema.assets.blobUrl, currentCoverUrl),
+                ),
+              )
+              .limit(1)
+          : [];
+      displacedCandidate = displaced;
+
+      await tx.insert(schema.assets).values({
+        projectId,
+        kind: "cover",
+        blobUrl: blob.url,
+        blobPathname: blob.pathname,
+        contentType,
+        sizeBytes: file.uint8Array.byteLength,
+        meta: { title: row.title, operationKey: idempotencyKey },
+      });
+
+      // The cover URL rides in front_matter next to the author byline, so the
+      // exports and reading view read one place for the book's identity.
+      const [updated] = await tx
+        .update(schema.books)
+        .set({
+          frontMatter: {
+            ...(lockedBook.frontMatter as Record<string, unknown>),
+            coverUrl: blob.url,
+          },
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.books.id, row.bookId), eq(schema.books.projectId, projectId)))
+        .returning({ id: schema.books.id });
+      if (!updated) throw new Error("Book disappeared while storing its cover");
+      return displaced;
+    });
+  } catch (error) {
+    // COMMIT acknowledgement is ambiguous. Only refund when the exact asset
+    // is proven absent.
+    let committed = false;
+    try {
+      const [storedAsset] = await db
+        .select({ id: schema.assets.id })
+        .from(schema.assets)
+        .where(
+          and(
+            eq(schema.assets.projectId, projectId),
+            eq(schema.assets.blobPathname, blob.pathname),
+          ),
+        )
+        .limit(1);
+      // The asset and pointer are inserted in one transaction. The exact,
+      // freshly generated pathname is sufficient proof that COMMIT happened;
+      // a newer concurrent cover may already have advanced the pointer.
+      committed = Boolean(storedAsset);
+    } catch (verificationError) {
+      throw new AggregateError(
+        [
+          error instanceof Error ? error : new Error(String(error)),
+          verificationError instanceof Error
+            ? verificationError
+            : new Error(String(verificationError)),
+        ],
+        "Cover persistence failed and could not be verified",
+      );
+    }
+    if (!committed) return refundAndFail("Could not store the cover");
+    displacedCover = displacedCandidate;
+  }
+
+  await scheduleReplacedAssetCleanup({
+    projectId,
+    assetId: displacedCover?.id,
+    pathname: displacedCover?.pathname,
+  });
+  return Response.json({ url: blob.url });
 }

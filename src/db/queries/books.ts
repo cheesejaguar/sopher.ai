@@ -1,6 +1,87 @@
 import { cache } from "react";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { countWords } from "@/lib/editor/anchors";
+
+type ChapterVisibilitySeed = {
+  status: "planned" | "drafting" | "drafted" | "edited" | "final";
+  title: string | null;
+  summary: string | null;
+  wordCount: number;
+};
+
+/**
+ * A reduced full-book run keeps surplus chapter rows so their revision history
+ * remains recoverable. prepareBookRunStep turns those rows into empty,
+ * untitled planned placeholders; all manuscript surfaces treat that exact
+ * shape as soft-retired. A user-inserted blank chapter remains visible because
+ * structural inserts use the drafted status.
+ */
+export function isVisibleManuscriptChapter(chapter: ChapterVisibilitySeed): boolean {
+  return !isSoftRetiredManuscriptChapter(chapter);
+}
+
+export function isSoftRetiredManuscriptChapter(chapter: ChapterVisibilitySeed): boolean {
+  return (
+    chapter.status === "planned" &&
+    chapter.wordCount === 0 &&
+    chapter.title === null &&
+    chapter.summary === null
+  );
+}
+
+type ArchivedChapterRevisionRow = {
+  chapterId: string;
+  chapterNumber: number;
+  revisionId: string;
+  content: string;
+  createdAt: Date;
+};
+
+export type ArchivedChapterRecovery = {
+  chapterId: string;
+  chapterNumber: number;
+  revisionId: string;
+  archivedAt: Date;
+  wordCount: number;
+  excerpt: string;
+};
+
+const ARCHIVED_EXCERPT_CHARS = 280;
+
+/**
+ * Selects the newest generation-reset snapshot for each currently retired
+ * chapter. Kept pure so recovery ordering and metadata can be regression
+ * tested without a database.
+ */
+export function latestArchivedChapterRecoveries(
+  rows: ArchivedChapterRevisionRow[],
+): ArchivedChapterRecovery[] {
+  const latestByChapter = new Map<number, ArchivedChapterRevisionRow>();
+  for (const row of rows) {
+    const current = latestByChapter.get(row.chapterNumber);
+    if (!current || row.createdAt.getTime() > current.createdAt.getTime()) {
+      latestByChapter.set(row.chapterNumber, row);
+    }
+  }
+
+  return [...latestByChapter.values()]
+    .sort((a, b) => a.chapterNumber - b.chapterNumber)
+    .map((row) => {
+      const normalized = row.content.replace(/\s+/g, " ").trim();
+      return {
+        chapterId: row.chapterId,
+        chapterNumber: row.chapterNumber,
+        revisionId: row.revisionId,
+        archivedAt: row.createdAt,
+        wordCount: countWords(row.content),
+        excerpt:
+          normalized.length > ARCHIVED_EXCERPT_CHARS
+            ? `${normalized.slice(0, ARCHIVED_EXCERPT_CHARS).trimEnd()}…`
+            : normalized,
+      };
+    });
+}
 
 /**
  * Project + its book row (book may be null before first generation).
@@ -21,7 +102,7 @@ export const getProjectWithBook = cache(async (userId: string, projectId: string
 
 export const getChapterList = cache(async (bookId: string) => {
   const db = getDb();
-  return db
+  const chapters = await db
     .select({
       id: schema.chapters.id,
       chapterNumber: schema.chapters.chapterNumber,
@@ -36,6 +117,38 @@ export const getChapterList = cache(async (bookId: string) => {
     .from(schema.chapters)
     .where(eq(schema.chapters.bookId, bookId))
     .orderBy(schema.chapters.chapterNumber);
+  return chapters.filter(isVisibleManuscriptChapter);
+});
+
+/**
+ * Recovery shelf for every blank chapter reset by a fresh generation. This
+ * includes target chapters if preparation later failed, not only surplus rows
+ * soft-retired by a shorter book, so no archived prose becomes inaccessible.
+ */
+export const getArchivedChapterRecoveries = cache(async (bookId: string) => {
+  const db = getDb();
+  const rows = await db
+    .select({
+      chapterId: schema.chapters.id,
+      chapterNumber: schema.chapters.chapterNumber,
+      revisionId: schema.chapterRevisions.id,
+      content: schema.chapterRevisions.content,
+      createdAt: schema.chapterRevisions.createdAt,
+    })
+    .from(schema.chapters)
+    .innerJoin(schema.chapterRevisions, eq(schema.chapterRevisions.chapterId, schema.chapters.id))
+    .where(
+      and(
+        eq(schema.chapters.bookId, bookId),
+        eq(schema.chapters.status, "planned"),
+        eq(schema.chapters.wordCount, 0),
+        eq(schema.chapters.content, ""),
+        sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
+      ),
+    )
+    .orderBy(schema.chapters.chapterNumber, desc(schema.chapterRevisions.createdAt));
+
+  return latestArchivedChapterRecoveries(rows);
 });
 
 export const getChapterWithContent = cache(async (bookId: string, chapterNumber: number) => {
@@ -47,7 +160,7 @@ export const getChapterWithContent = cache(async (bookId: string, chapterNumber:
       and(eq(schema.chapters.bookId, bookId), eq(schema.chapters.chapterNumber, chapterNumber)),
     )
     .limit(1);
-  return chapter ?? null;
+  return chapter && isVisibleManuscriptChapter(chapter) ? chapter : null;
 });
 
 export async function getChapterById(chapterId: string) {
@@ -112,6 +225,40 @@ export async function getLatestRun(projectId: string) {
     .select()
     .from(schema.generationRuns)
     .where(eq(schema.generationRuns.projectId, projectId))
+    .orderBy(desc(schema.generationRuns.createdAt))
+    .limit(1);
+  return run ?? null;
+}
+
+/** The Write surface represents whole-book production, never scoped editor jobs. */
+export async function getActiveFullBookRun(projectId: string) {
+  const db = getDb();
+  const [run] = await db
+    .select()
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        eq(schema.generationRuns.kind, "full_book"),
+        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+      ),
+    )
+    .orderBy(desc(schema.generationRuns.createdAt))
+    .limit(1);
+  return run ?? null;
+}
+
+export async function getLatestFullBookRun(projectId: string) {
+  const db = getDb();
+  const [run] = await db
+    .select()
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        eq(schema.generationRuns.kind, "full_book"),
+      ),
+    )
     .orderBy(desc(schema.generationRuns.createdAt))
     .limit(1);
   return run ?? null;

@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { runEventSchema, type RunEvent, type Stage } from "@/lib/run-events";
+import { creditsForUsd } from "@/lib/billing/credits-shared";
 
 /**
  * Client hook over GET /api/runs/[runId]/stream (NDJSON).
@@ -24,6 +25,7 @@ export type ChapterProgress = {
 };
 
 export type AgentName = Extract<RunEvent, { type: "agent" }>["agent"];
+export type PausedStage = NonNullable<Extract<RunEvent, { type: "stage" }>["resumeStage"]>;
 
 export type AgentFeedItem = {
   id: number;
@@ -38,9 +40,11 @@ export type RunStreamState = {
   stage: Stage;
   pct: number;
   detail?: string;
+  pausedStage?: PausedStage;
   chapters: Map<number, ChapterProgress>;
   agentFeed: AgentFeedItem[];
   totalUsd: number;
+  totalCredits: number;
   review?: { score: number; recommendation: string; issueCount: number };
   error?: { message: string; fatal: boolean };
   connection: RunConnection;
@@ -63,6 +67,8 @@ export type RunSnapshot = {
   chapters?: { number: number; status: ChapterStatus; wordCount?: number; qualityScore?: number }[];
   /** Metered spend for this run at render time. */
   totalUsd?: number;
+  /** Actual usage debits for this run, in retail credits. */
+  totalCredits?: number;
 };
 
 const TERMINAL_STAGES: ReadonlySet<Stage> = new Set(["done", "failed", "cancelled"]);
@@ -74,18 +80,19 @@ const STAGE_ORDER: Record<Stage, number> = {
   concept: 1,
   outline: 2,
   awaiting_approval: 3,
-  chapters: 4,
-  // Same rank as `chapters` deliberately: a credit pause happens *inside* the
-  // chapter phase and returns to it. A higher rank would trap the UI on the
-  // pause forever, since stage merges are upgrade-only (>=).
-  awaiting_credits: 4,
-  editing: 5,
-  continuity: 6,
-  revising: 7,
-  finalizing: 8,
-  done: 9,
-  failed: 10,
-  cancelled: 11,
+  bible: 4,
+  chapters: 5,
+  // A credit pause may happen before concept work or inside the chapter phase.
+  // applyEvent handles entering and leaving it explicitly rather than relying
+  // on this rank to infer where production resumes.
+  awaiting_credits: 5,
+  editing: 6,
+  continuity: 7,
+  revising: 8,
+  finalizing: 9,
+  done: 10,
+  failed: 11,
+  cancelled: 12,
 };
 
 const CHAPTER_ORDER: Record<ChapterStatus, number> = {
@@ -102,10 +109,12 @@ type Acc = {
   stage: Stage;
   pct: number;
   detail?: string;
+  pausedStage?: PausedStage;
   chapters: Map<number, ChapterProgress>;
   agentFeed: AgentFeedItem[];
   feedSeq: number;
   totalUsd: number;
+  totalCredits: number;
   review?: { score: number; recommendation: string; issueCount: number };
   error?: { message: string; fatal: boolean };
 };
@@ -113,9 +122,19 @@ type Acc = {
 function applyEvent(acc: Acc, event: RunEvent): void {
   switch (event.type) {
     case "stage": {
-      if (STAGE_ORDER[event.stage] >= STAGE_ORDER[acc.stage]) {
+      // A credit pause can happen before concept work or between chapter
+      // waves. Its rank therefore cannot describe the phase we resume into.
+      // The next concrete stage event is authoritative.
+      const resumingFromCredits =
+        acc.stage === "awaiting_credits" && event.stage !== "awaiting_credits";
+      if (
+        event.stage === "awaiting_credits" ||
+        resumingFromCredits ||
+        STAGE_ORDER[event.stage] >= STAGE_ORDER[acc.stage]
+      ) {
         acc.stage = event.stage;
         acc.detail = event.detail;
+        acc.pausedStage = event.stage === "awaiting_credits" ? event.resumeStage : undefined;
       }
       acc.pct = Math.max(acc.pct, event.pct);
       if (event.stage === "done") {
@@ -151,6 +170,10 @@ function applyEvent(acc: Acc, event: RunEvent): void {
     case "cost": {
       // Cost events carry the cumulative run total; never regress a fresher DB seed.
       acc.totalUsd = Math.max(acc.totalUsd, event.totalUsd);
+      acc.totalCredits = Math.max(
+        acc.totalCredits,
+        event.totalCredits ?? creditsForUsd(event.totalUsd),
+      );
       break;
     }
     case "review": {
@@ -206,6 +229,7 @@ function initFromSnapshot(snapshot: RunSnapshot): Acc {
     agentFeed: [],
     feedSeq: 0,
     totalUsd: snapshot.totalUsd ?? 0,
+    totalCredits: snapshot.totalCredits ?? creditsForUsd(snapshot.totalUsd ?? 0),
   };
   for (const payload of snapshot.events) {
     const parsed = runEventSchema.safeParse(payload);
@@ -220,9 +244,11 @@ function materialize(acc: Acc, connection: RunConnection): RunStreamState {
     stage: acc.stage,
     pct: acc.pct,
     detail: acc.detail,
+    pausedStage: acc.pausedStage,
     chapters: new Map(acc.chapters),
     agentFeed: [...acc.agentFeed],
     totalUsd: acc.totalUsd,
+    totalCredits: acc.totalCredits,
     review: acc.review,
     error: acc.error,
     connection,

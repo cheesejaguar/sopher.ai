@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { ImagePlus, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
 
 /** Generates (or replaces) the book cover. Priced per image, on demand only. */
 export function CoverButton({ projectId, hasCover }: { projectId: string; hasCover: boolean }) {
@@ -16,13 +17,16 @@ export function CoverButton({ projectId, hasCover }: { projectId: string; hasCov
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/cover`, { method: "POST" });
+      const response = await idempotentPaidFetch(`/api/projects/${projectId}/cover`, {
+        method: "POST",
+      });
       const body = (await response.json().catch(() => ({}))) as { error?: string };
       if (!response.ok) {
         setError(body.error ?? "Could not generate a cover");
         return;
       }
       router.refresh();
+      acknowledgePaidResponse(response);
     } catch {
       setError("Could not generate a cover");
     } finally {

@@ -8,6 +8,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ChapterProgress } from "@/hooks/use-run-stream";
 import type { Stage } from "@/lib/run-events";
 
+export function visibleDraftTabs(
+  started: number[],
+  selected: number | undefined,
+  limit = 6,
+): number[] {
+  const safeLimit = Math.max(1, limit);
+  const recent = started.slice(-safeLimit);
+  if (selected === undefined || !started.includes(selected) || recent.includes(selected)) {
+    return recent;
+  }
+  return safeLimit === 1
+    ? [selected]
+    : [selected, ...recent.slice(-(safeLimit - 1))].sort((a, b) => a - b);
+}
+
 /**
  * The paper pane where drafting chapters stream in. One tab per chapter that
  * has started drafting this session; finished chapters keep their tab (and
@@ -24,23 +39,28 @@ export function LiveDraftPane({
   stage: Stage;
   subscribeChapterProse: (chapterNumber: number, onText: (fullText: string) => void) => () => void;
 }) {
+  const [selected, setSelected] = React.useState<string | undefined>(undefined);
+  const [focusPinned, setFocusPinned] = React.useState<string | undefined>(undefined);
   // Tabs are fully derived from chapter events: every chapter that has begun
-  // drafting (or finished) gets one, capped to the most recent six. Prose for
-  // any tab replays in full from its namespace, so nothing is lost.
+  // drafting (or finished) gets one, capped to six. Keep the reader's selected
+  // tab mounted when newer chapters arrive so its trigger, panel, and keyboard
+  // focus do not disappear underneath them.
   const { openTabs, drafting } = React.useMemo(() => {
     const started = [...chapters.entries()]
       .filter(([, ch]) => ch.status !== "planned")
       .map(([n]) => n)
       .sort((a, b) => a - b);
+    const retainedTab = focusPinned ?? selected;
+    const retainedNumber = retainedTab === undefined ? undefined : Number(retainedTab);
+    const openTabs = visibleDraftTabs(started, retainedNumber);
     return {
-      openTabs: started.slice(-6),
-      drafting: started.filter((n) => chapters.get(n)?.status === "drafting"),
+      openTabs,
+      drafting: openTabs.filter((n) => chapters.get(n)?.status === "drafting"),
     };
-  }, [chapters]);
+  }, [chapters, focusPinned, selected]);
 
   // The reader's explicit choice wins while it's still a valid tab; otherwise
   // follow the earliest chapter currently drafting.
-  const [selected, setSelected] = React.useState<string | undefined>(undefined);
   const active =
     selected !== undefined && openTabs.includes(Number(selected))
       ? selected
@@ -54,7 +74,7 @@ export function LiveDraftPane({
     return (
       <div className="manuscript-sheet flex min-h-72 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
         <p className="font-serif text-lg text-paper-muted">
-          {stage === "queued" || stage === "concept" || stage === "outline"
+          {stage === "queued" || stage === "concept" || stage === "outline" || stage === "bible"
             ? "The writers take over once the outline is set."
             : stage === "awaiting_approval"
               ? "Drafting begins after you approve the outline."
@@ -69,13 +89,22 @@ export function LiveDraftPane({
   }
 
   return (
-    <Tabs value={active} onValueChange={(value) => setSelected(String(value))}>
+    <Tabs
+      value={active}
+      onValueChange={(value) => setSelected(String(value))}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (!(next instanceof Node) || !event.currentTarget.contains(next)) {
+          setFocusPinned(undefined);
+        }
+      }}
+    >
       <TabsList aria-label="Drafting chapters" className="max-w-full overflow-x-auto">
         {openTabs.map((n) => {
           const status = chapters.get(n)?.status;
           const live = status === "drafting";
           return (
-            <TabsTrigger key={n} value={String(n)}>
+            <TabsTrigger key={n} value={String(n)} onFocus={() => setFocusPinned(String(n))}>
               {live ? (
                 <span
                   aria-hidden="true"
@@ -90,7 +119,7 @@ export function LiveDraftPane({
         })}
       </TabsList>
       {openTabs.map((n) => (
-        <TabsContent key={n} value={String(n)}>
+        <TabsContent key={n} value={String(n)} onFocusCapture={() => setFocusPinned(String(n))}>
           <ChapterProseView
             chapterNumber={n}
             title={titles[n] ?? null}
@@ -149,6 +178,7 @@ function ChapterProseView({
     if (!el) return;
     followRef.current = true;
     setShowJump(false);
+    el.focus({ preventScroll: true });
     el.scrollTop = el.scrollHeight;
   }
 

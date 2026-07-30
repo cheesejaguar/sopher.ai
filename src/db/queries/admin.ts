@@ -309,6 +309,60 @@ export async function listRuns() {
   });
 }
 
+export async function listUnresolvedMeteringIntents() {
+  await requireAdmin();
+  const { rows } = await getDb().execute<{
+    intentRef: string;
+    userId: string;
+    email: string;
+    projectId: string | null;
+    projectTitle: string | null;
+    runId: string | null;
+    description: string;
+    heldCredits: string;
+    createdAt: Date;
+  }>(sql`
+    select
+      intent.external_ref as "intentRef",
+      intent.user_id as "userId",
+      users.email,
+      intent.project_id as "projectId",
+      projects.title as "projectTitle",
+      intent.run_id as "runId",
+      intent.description,
+      (-claim.amount)::text as "heldCredits",
+      intent.created_at as "createdAt"
+    from ${schema.creditLedger} intent
+    inner join ${schema.creditLedger} claim
+      on claim.external_ref = 'metering-claim:' || intent.external_ref
+      and claim.user_id = intent.user_id
+      and claim.kind = 'adjustment'
+      and claim.amount < 0
+    inner join ${schema.users} users on users.id = intent.user_id
+    left join ${schema.projects} projects on projects.id = intent.project_id
+    where intent.kind = 'adjustment'
+      and intent.amount = 0
+      and intent.external_ref like 'metering-intent:%'
+      and intent.created_at <= now() - interval '1 hour'
+      and not exists (
+        select 1
+        from ${schema.creditLedger} terminal
+        where terminal.external_ref in (
+          'intent-settled:' || intent.external_ref,
+          'intent-aborted:' || intent.external_ref
+        )
+      )
+      and not exists (
+        select 1
+        from ${schema.creditLedger} released
+        where released.external_ref = 'release:metering-claim:' || intent.external_ref
+      )
+    order by intent.created_at asc
+    limit 100
+  `);
+  return rows.map((row) => ({ ...row, heldCredits: Number(row.heldCredits) }));
+}
+
 export async function getRunEvents(runId: string) {
   await requireAdmin();
   const db = getDb();

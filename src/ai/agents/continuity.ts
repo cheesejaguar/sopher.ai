@@ -1,8 +1,9 @@
 import { generateText, isStepCount, Output } from "ai";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import { assertMeteredInputWithinBudget, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { CONTINUITY_SYSTEM_PROMPT } from "@/ai/prompts/continuity";
 import {
@@ -150,7 +151,17 @@ export async function runContinuityPhase(
       summary: schema.chapters.summary,
     })
     .from(schema.chapters)
-    .where(eq(schema.chapters.bookId, input.tools.bookId))
+    .where(
+      and(
+        eq(schema.chapters.bookId, input.tools.bookId),
+        sql`not (
+          ${schema.chapters.status} = 'planned'
+          and ${schema.chapters.wordCount} = 0
+          and ${schema.chapters.title} is null
+          and ${schema.chapters.summary} is null
+        )`,
+      ),
+    )
     .orderBy(schema.chapters.chapterNumber);
 
   const corpus = summariesCorpus(rows);
@@ -168,7 +179,18 @@ export async function runContinuityPhase(
         // Force the final step to produce the structured result — without
         // this, a phase that spends every step on tool spot-checks ends with
         // no output and the whole review fails.
-        prepareStep: ({ stepNumber }) => (stepNumber >= 3 ? { activeTools: [] } : {}),
+        prepareStep: (options) => {
+          assertMeteredInputWithinBudget(
+            `continuity.${phaseKey}`,
+            {
+              instructions: options.instructions,
+              messages: options.messages,
+            },
+            options.stepNumber,
+          );
+          return options.stepNumber >= 3 ? { activeTools: [] } : {};
+        },
+        maxOutputTokens: meteredMaxOutputTokens(`continuity.${phaseKey}`),
         output: Output.object({ schema: reviewPhaseResultSchema }),
         providerOptions: gatewayOptions(input.meter, "continuity"),
       }),
@@ -205,8 +227,14 @@ export async function persistContinuityIssues(
   runId: string | null | undefined,
   issues: ContinuityIssue[],
 ): Promise<void> {
-  if (issues.length === 0) return;
   const db = getDb();
+  // A workflow step may retry after inserts commit but before its return is
+  // checkpointed. Replace this run's finding set so retries cannot duplicate
+  // rows or leave findings from a partially completed aggregation.
+  if (runId) {
+    await db.delete(schema.continuityIssues).where(eq(schema.continuityIssues.runId, runId));
+  }
+  if (issues.length === 0) return;
   await db.insert(schema.continuityIssues).values(
     issues.map((issue) => ({
       bookId,

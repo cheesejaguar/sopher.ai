@@ -5,14 +5,25 @@ import { BookOpenText, PenLine } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
-import { RunViewer } from "@/components/generation/run-viewer";
+import { RunViewer, type RunProgressSnapshot } from "@/components/generation/run-viewer";
 import { CostDisplay } from "@/components/studio/product-primitives";
+import { useProjectProgress } from "@/components/studio/project-progress";
 import type { RunSnapshot } from "@/hooks/use-run-stream";
 import { TIER_LABELS, type QualityTier } from "@/ai/models";
 import { creditsForUsd } from "@/lib/billing/credits-shared";
+import { estimateBookCost } from "@/ai/estimate";
+import type { GenerationConfig } from "@/lib/run-events";
 
 function words(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+export function canAttachToWholeBookRun(
+  status: number,
+  runId: string | undefined,
+  kind: string | undefined,
+): runId is string {
+  return Boolean(runId && (status === 202 || (status === 409 && kind === "full_book")));
 }
 
 /**
@@ -28,7 +39,7 @@ export function WriteExperience({
   targetChapters,
   targetWordsPerChapter,
   estimateUsd,
-  estimatedMinutes,
+  initialRunShape,
   initialSnapshot,
   titles,
 }: {
@@ -39,13 +50,43 @@ export function WriteExperience({
   targetChapters: number;
   targetWordsPerChapter: number;
   estimateUsd: number;
-  estimatedMinutes: number;
+  initialRunShape?: {
+    tier: QualityTier;
+    chapters: number;
+    wordsPerChapter: number;
+    estimateUsd: number;
+  };
   initialSnapshot: RunSnapshot | null;
   titles: Record<number, string | null>;
 }) {
   const [snapshot, setSnapshot] = React.useState<RunSnapshot | null>(initialSnapshot);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [runShape, setRunShape] = React.useState(
+    initialRunShape ?? {
+      tier,
+      chapters: targetChapters,
+      wordsPerChapter: targetWordsPerChapter,
+      estimateUsd,
+    },
+  );
+  const { publishProgress } = useProjectProgress();
+  const activeRunId = snapshot?.run.id ?? null;
+  const handleProgress = React.useCallback(
+    (progress: RunProgressSnapshot) => {
+      if (!activeRunId) return;
+      publishProgress({
+        runId: activeRunId,
+        stage: progress.stage,
+        pct: progress.pct,
+        detail: progress.detail,
+        pausedStage: progress.pausedStage,
+        draftedCount: progress.draftedCount,
+        totalChapters: progress.totalChapters,
+      });
+    },
+    [activeRunId, publishProgress],
+  );
 
   // Starting (or restarting) a run unmounts the button that was just pressed,
   // which would drop keyboard focus to <body>. Move it into the live view
@@ -61,6 +102,7 @@ export function WriteExperience({
   }, [snapshot]);
 
   async function startRun() {
+    if (pending) return;
     setPending(true);
     setError(null);
     try {
@@ -70,9 +112,26 @@ export function WriteExperience({
         body: JSON.stringify({ tier, requireOutlineApproval }),
       });
       const json: unknown = await res.json().catch(() => null);
-      const runId = (json as { runId?: string } | null)?.runId;
-      if ((res.status === 202 || res.status === 409) && runId) {
-        // 409 means a run is already active — attach to it instead of erroring.
+      const responseBody = json as {
+        runId?: string;
+        kind?: string;
+        config?: Partial<GenerationConfig>;
+      } | null;
+      const runId = responseBody?.runId;
+      if (canAttachToWholeBookRun(res.status, runId, responseBody?.kind)) {
+        const returnedConfig = responseBody?.config;
+        const runTier = returnedConfig?.tier ?? tier;
+        const chapters = returnedConfig?.targetChapters ?? targetChapters;
+        const wordsPerChapter = returnedConfig?.targetWordsPerChapter ?? targetWordsPerChapter;
+        setRunShape({
+          tier: runTier,
+          chapters,
+          wordsPerChapter,
+          estimateUsd: estimateBookCost(runTier, chapters, wordsPerChapter).totalUsd,
+        });
+        // A duplicate full-book request attaches to its existing run. Scoped
+        // chapter/edit jobs deliberately stay a busy error: their event shape
+        // does not belong in this whole-manuscript viewer.
         moveFocusToRun.current = true;
         setSnapshot({
           run: { id: runId, status: res.status === 202 ? "queued" : "running", error: null },
@@ -103,7 +162,6 @@ export function WriteExperience({
         targetChapters={targetChapters}
         targetWordsPerChapter={targetWordsPerChapter}
         estimateUsd={estimateUsd}
-        estimatedMinutes={estimatedMinutes}
         onStart={startRun}
         pending={pending}
         error={error}
@@ -112,7 +170,13 @@ export function WriteExperience({
   }
 
   return (
-    <div ref={runRef} tabIndex={-1}>
+    <div
+      ref={runRef}
+      role="region"
+      aria-label="Book generation run"
+      tabIndex={-1}
+      className="focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+    >
       <RunViewer
         key={snapshot.run.id}
         runId={snapshot.run.id}
@@ -121,12 +185,14 @@ export function WriteExperience({
         projectTitle={projectTitle}
         snapshot={snapshot}
         titles={titles}
-        tier={tier}
-        estimateUsd={estimateUsd}
-        plannedChapters={targetChapters}
+        tier={runShape.tier}
+        estimateUsd={runShape.estimateUsd}
+        plannedChapters={runShape.chapters}
+        targetWordsPerChapter={runShape.wordsPerChapter}
         onRestart={startRun}
         restartPending={pending}
         restartError={error}
+        onProgress={handleProgress}
       />
     </div>
   );
@@ -138,7 +204,6 @@ function PreFlight({
   targetChapters,
   targetWordsPerChapter,
   estimateUsd,
-  estimatedMinutes,
   onStart,
   pending,
   error,
@@ -148,7 +213,6 @@ function PreFlight({
   targetChapters: number;
   targetWordsPerChapter: number;
   estimateUsd: number;
-  estimatedMinutes: number;
   onStart: () => void;
   pending: boolean;
   error: string | null;
@@ -189,8 +253,18 @@ function PreFlight({
         </dl>
 
         <div className="mt-8 flex flex-wrap items-center gap-3">
-          <Button size="lg" onClick={onStart} disabled={pending}>
-            {pending ? <Spinner /> : <PenLine aria-hidden="true" data-icon="inline-start" />}
+          <Button
+            size="lg"
+            onClick={onStart}
+            aria-busy={pending || undefined}
+            aria-disabled={pending}
+            className={pending ? "opacity-50" : undefined}
+          >
+            {pending ? (
+              <Spinner aria-hidden="true" />
+            ) : (
+              <PenLine aria-hidden="true" data-icon="inline-start" />
+            )}
             Start writing this book
           </Button>
           {error ? (
@@ -210,7 +284,7 @@ function PreFlight({
           className="mt-5"
           credits={creditsForUsd(estimateUsd)}
           usd={estimateUsd}
-          note={`±30%, metered as the agents work · about ${estimatedMinutes} min`}
+          note="±30%, metered as the agents work"
         />
       </section>
     </div>

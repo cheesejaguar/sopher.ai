@@ -1,3 +1,4 @@
+import { and, eq, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { ModerationVerdict } from "@/ai/schemas";
 
@@ -15,20 +16,38 @@ export async function recordModerationFlag(input: {
   const { verdict } = input;
   if (!verdict.flagged) return;
   try {
-    await getDb()
-      .insert(schema.moderationFlags)
-      .values({
-        projectId: input.projectId,
-        chapterNumber: input.chapterNumber,
-        source: input.source,
-        category: verdict.category ?? "other",
-        // Minors always escalates — and so does a flag with NO category, since
-        // an unclassified flag cannot rule the worst case out. An explicit
-        // "other" stays ordinary review.
-        severity: verdict.category === "minors" || !verdict.category ? "urgent" : "review",
-        excerpt: verdict.excerpt?.slice(0, 500),
-        detail: verdict.reason?.slice(0, 300),
-      });
+    const db = getDb();
+    const category = verdict.category ?? "other";
+    const excerpt = verdict.excerpt?.slice(0, 500) ?? null;
+    const detail = verdict.reason?.slice(0, 300) ?? null;
+    const [existing] = await db
+      .select({ id: schema.moderationFlags.id })
+      .from(schema.moderationFlags)
+      .where(
+        and(
+          eq(schema.moderationFlags.projectId, input.projectId),
+          eq(schema.moderationFlags.source, input.source),
+          eq(schema.moderationFlags.category, category),
+          sql`${schema.moderationFlags.chapterNumber} is not distinct from ${input.chapterNumber ?? null}`,
+          sql`${schema.moderationFlags.excerpt} is not distinct from ${excerpt}`,
+          sql`${schema.moderationFlags.detail} is not distinct from ${detail}`,
+        ),
+      )
+      .limit(1);
+    if (existing) return;
+
+    await db.insert(schema.moderationFlags).values({
+      projectId: input.projectId,
+      chapterNumber: input.chapterNumber,
+      source: input.source,
+      category,
+      // Minors always escalates — and so does a flag with NO category, since
+      // an unclassified flag cannot rule the worst case out. An explicit
+      // "other" stays ordinary review.
+      severity: verdict.category === "minors" || !verdict.category ? "urgent" : "review",
+      excerpt,
+      detail,
+    });
   } catch (error) {
     console.warn("[moderation] flag write failed:", error);
   }

@@ -1,17 +1,27 @@
-import { start } from "workflow/api";
-import { and, eq, inArray } from "drizzle-orm";
+import { getRun, start } from "workflow/api";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
-import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
-import { estimateBookCost } from "@/ai/estimate";
+import {
+  assertCreditsForUsd,
+  creditsForUsd,
+  InsufficientCreditsError,
+  reserveCredits,
+} from "@/lib/billing/credits";
 import { generateChapter } from "@/workflows/generate-chapter";
+import { singleChapterRequiredUsd } from "@/workflows/opening-credit-plan";
 import { isActiveRunConflict } from "@/lib/run-conflict";
 import type { GenerationConfig } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
+import {
+  insertQueuedAuthoringRun,
+  scheduleRunReservationCleanup,
+  terminalizeAuthoringRun,
+} from "@/lib/generation-runs";
 
 export const maxDuration = 60;
 
@@ -39,8 +49,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  // Paid path: the balance pre-check above is a read, so concurrent callers all
-  // pass it. This is what bounds how far past the floor they can get.
+  // Bound repeated paid-work requests before the serialized workflow hold.
   const limited = await rateLimit(LIMITS.llmEdit, req, userId);
   if (limited.limited) return limited.response;
   const { chapterId } = await ctx.params;
@@ -56,7 +65,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   const [row] = await db
     .select({
       chapterNumber: schema.chapters.chapterNumber,
+      chapters: schema.projects.targetChapters,
       words: schema.projects.targetWordsPerChapter,
+      brief: schema.projects.brief,
+      genre: schema.projects.genre,
+      styleGuide: schema.projects.styleGuide,
       settings: schema.projects.settings,
     })
     .from(schema.chapters)
@@ -75,6 +88,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       and(
         eq(schema.generationRuns.projectId, ownership.projectId),
         inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+        ne(schema.generationRuns.kind, "export"),
       ),
     )
     .limit(1);
@@ -83,11 +97,33 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   }
 
   const tier: QualityTier = row.settings.qualityTier ?? "standard";
-  const config: GenerationConfig = { tier, requireOutlineApproval: false, waveSize: 1 };
+  let config: GenerationConfig = {
+    tier,
+    requireOutlineApproval: false,
+    waveSize: 1,
+    targetChapters: row.chapters,
+    targetWordsPerChapter: row.words,
+    chapterRegeneration: true,
+    inputSnapshot: {
+      brief: row.brief ?? "",
+      genre: row.genre ?? null,
+      styleGuide: row.styleGuide ?? null,
+      voiceProfile: row.settings.voiceProfile ?? null,
+      pov: row.settings.pov ?? null,
+      tense: row.settings.tense ?? null,
+      tone: row.settings.tone ?? null,
+      styleProfile: row.settings.styleProfile ?? null,
+      heatLevel: row.settings.heatLevel ?? null,
+      violenceLevel: row.settings.violenceLevel ?? null,
+      profanity: row.settings.profanity ?? null,
+      avoidTopics: [...(row.settings.avoidTopics ?? [])],
+    },
+  };
 
+  const optimisticRequiredUsd = singleChapterRequiredUsd(config);
   try {
     // Single chapters are refused, not suspended: the cost is small and known.
-    await assertCreditsForUsd(userId, estimateBookCost(tier, 1, row.words).totalUsd);
+    await assertCreditsForUsd(userId, optimisticRequiredUsd);
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: "Not enough credits" }, { status: 402 });
@@ -97,16 +133,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
 
   let run: { id: string };
   try {
-    [run] = await db
-      .insert(schema.generationRuns)
-      .values({
-        projectId: ownership.projectId,
-        userId,
-        kind: "chapter",
-        status: "queued",
-        config,
-      })
-      .returning({ id: schema.generationRuns.id });
+    run = await insertQueuedAuthoringRun({
+      projectId: ownership.projectId,
+      userId,
+      kind: "chapter",
+      config,
+    });
   } catch (error) {
     // Concurrent request won the race past the pre-check; the partial unique
     // index is the backstop, and it deserves a 409 rather than a 500.
@@ -116,17 +148,183 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  const workflowRun = await start(generateChapter, [
-    run.id,
-    ownership.projectId,
-    userId,
-    row.chapterNumber,
-    config,
-  ]);
-  await db
-    .update(schema.generationRuns)
-    .set({ workflowRunId: workflowRun.runId })
-    .where(eq(schema.generationRuns.id, run.id));
+  let lockedChapter:
+    | {
+        chapterNumber: number;
+        chapters: number;
+        words: number;
+        brief: string | null;
+        genre: string | null;
+        styleGuide: string | null;
+        settings: typeof schema.projects.$inferSelect.settings;
+      }
+    | undefined;
+  try {
+    [lockedChapter] = await db
+      .select({
+        chapterNumber: schema.chapters.chapterNumber,
+        chapters: schema.projects.targetChapters,
+        words: schema.projects.targetWordsPerChapter,
+        brief: schema.projects.brief,
+        genre: schema.projects.genre,
+        styleGuide: schema.projects.styleGuide,
+        settings: schema.projects.settings,
+      })
+      .from(schema.chapters)
+      .innerJoin(schema.books, eq(schema.books.id, schema.chapters.bookId))
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.books.projectId))
+      .where(
+        and(
+          eq(schema.chapters.id, chapterId),
+          eq(schema.projects.id, ownership.projectId),
+          eq(schema.projects.userId, userId),
+        ),
+      )
+      .limit(1);
+  } catch (error) {
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "failed",
+      error: error instanceof Error ? error.message : "Could not verify the chapter",
+      releaseImmediately: true,
+    });
+    return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
+  }
+  if (!lockedChapter) {
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "cancelled",
+      error: "The manuscript changed while regeneration was starting",
+      releaseImmediately: true,
+    });
+    return Response.json(
+      { error: "The manuscript changed while regeneration was starting. Please try again." },
+      { status: 409 },
+    );
+  }
+  const lockedChapterNumber = lockedChapter.chapterNumber;
+  const lockedTier: QualityTier = lockedChapter.settings.qualityTier ?? "standard";
+  config = {
+    tier: lockedTier,
+    requireOutlineApproval: false,
+    waveSize: 1,
+    targetChapters: lockedChapter.chapters,
+    targetWordsPerChapter: lockedChapter.words,
+    chapterRegeneration: true,
+    inputSnapshot: {
+      brief: lockedChapter.brief ?? "",
+      genre: lockedChapter.genre ?? null,
+      styleGuide: lockedChapter.styleGuide ?? null,
+      voiceProfile: lockedChapter.settings.voiceProfile ?? null,
+      pov: lockedChapter.settings.pov ?? null,
+      tense: lockedChapter.settings.tense ?? null,
+      tone: lockedChapter.settings.tone ?? null,
+      styleProfile: lockedChapter.settings.styleProfile ?? null,
+      heatLevel: lockedChapter.settings.heatLevel ?? null,
+      violenceLevel: lockedChapter.settings.violenceLevel ?? null,
+      profanity: lockedChapter.settings.profanity ?? null,
+      avoidTopics: [...(lockedChapter.settings.avoidTopics ?? [])],
+    },
+  };
+  try {
+    const [updatedRun] = await db
+      .update(schema.generationRuns)
+      .set({ config })
+      .where(
+        and(
+          eq(schema.generationRuns.id, run.id),
+          eq(schema.generationRuns.userId, userId),
+          eq(schema.generationRuns.status, "queued"),
+        ),
+      )
+      .returning({ id: schema.generationRuns.id });
+    if (!updatedRun) throw new Error("Generation run changed before settings were frozen");
+  } catch (error) {
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "failed",
+      error: error instanceof Error ? error.message : "Could not freeze chapter settings",
+      releaseImmediately: true,
+    });
+    return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
+  }
+
+  const reservationRef = `generation-reservation:${run.id}:chapter:${lockedChapterNumber}`;
+  const requiredUsd = singleChapterRequiredUsd(config);
+  let authorization: Awaited<ReturnType<typeof reserveCredits>>;
+  try {
+    authorization = await reserveCredits({
+      userId,
+      credits: creditsForUsd(requiredUsd),
+      externalRef: reservationRef,
+      description: `Reserve credits to regenerate chapter ${lockedChapterNumber}`,
+      projectId: ownership.projectId,
+      runId: run.id,
+    });
+  } catch (error) {
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "failed",
+      error: error instanceof Error ? error.message : "Credit authorization unavailable",
+      releaseImmediately: true,
+    });
+    return Response.json(
+      { error: "Credit authorization is temporarily unavailable" },
+      { status: 503 },
+    );
+  }
+  if (authorization.status === "insufficient") {
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "cancelled",
+      error: "Not enough credits",
+      releaseImmediately: true,
+    });
+    return Response.json({ error: "Not enough credits" }, { status: 402 });
+  }
+
+  let workflowRun: Awaited<ReturnType<typeof start>> | undefined;
+  try {
+    workflowRun = await start(generateChapter, [
+      run.id,
+      ownership.projectId,
+      userId,
+      lockedChapterNumber,
+      config,
+      reservationRef,
+    ]);
+    await db
+      .update(schema.generationRuns)
+      .set({ workflowRunId: workflowRun.runId })
+      .where(eq(schema.generationRuns.id, run.id));
+  } catch (error) {
+    if (workflowRun) {
+      try {
+        await getRun(workflowRun.runId).cancel();
+      } catch {
+        // The terminal DB state and delayed reservation cleanup still run.
+      }
+    }
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "failed",
+      error: error instanceof Error ? error.message : "Could not start chapter regeneration",
+    });
+    await scheduleRunReservationCleanup({ userId, runId: run.id });
+    return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
+  }
 
   return Response.json({ runId: run.id });
 }

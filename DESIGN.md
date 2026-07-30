@@ -171,7 +171,7 @@ The default palette is overwhelmingly near-black, graphite, and luminous neutral
 
 The system uses a 12-column desktop structure, a compact tablet structure, and one continuous reading column on phones. The alignment grid is structural, not decorative. Persuade surfaces use uninterrupted deep-space and graphite fields while a single ruled notebook artifact owns the composition and the promise, controls, and proof align around it. Product surfaces privilege the active task, with navigation and inspectors occupying stable edges rather than floating card islands.
 
-Desktop Studio and Admin use a persistent rail. Project navigation groups Plan, Produce, Refine, and Publish. On phones, global navigation moves into an app bar and drawer; editor tools replace global bottom navigation. Horizontal scrolling is allowed only inside explicitly labeled data-table or timeline regions, never at page level.
+Desktop Studio and Admin use a persistent rail. Project navigation groups Plan, Produce, Refine, and Publish while naming two independent states: “You are here” follows the current route, and “Production now” follows the live workflow. Write visualizes real chapter signatures moving from planned to drafting, assembled, reviewed, and final; it never invents elapsed progress or an ETA. On phones, global navigation moves into an app bar and drawer; editor tools replace global bottom navigation. Route-owned editor, Write, and Manuscript navigation replaces the global folio rail rather than duplicating it. Horizontal scrolling is allowed only inside explicitly labeled data-table or timeline regions, never at page level.
 
 Spacing follows a 4px base with 8, 12, 16, 24, 32, 48, 64, and 96px steps. Touch targets are at least 44px on mobile.
 

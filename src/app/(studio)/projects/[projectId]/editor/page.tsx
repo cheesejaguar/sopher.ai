@@ -2,9 +2,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, PenLine } from "lucide-react";
 
+import { ArchivedChaptersPanel } from "@/components/editor/archived-chapters-panel";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/lib/auth";
-import { getChapterList, getProjectWithBook } from "@/db/queries/books";
+import {
+  getArchivedChapterRecoveries,
+  getChapterList,
+  getProjectWithBook,
+} from "@/db/queries/books";
 import {
   chapterStatusDotClasses,
   chapterStatusLabels,
@@ -21,7 +26,9 @@ export default async function EditorIndexPage({
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
 
-  const chapters = data.book ? await getChapterList(data.book.id) : [];
+  const [chapters, archivedChapters] = data.book
+    ? await Promise.all([getChapterList(data.book.id), getArchivedChapterRecoveries(data.book.id)])
+    : [[], []];
 
   return (
     <div className="space-y-5">
@@ -125,6 +132,8 @@ export default async function EditorIndexPage({
           </ul>
         </section>
       )}
+
+      <ArchivedChaptersPanel projectId={projectId} chapters={archivedChapters} />
     </div>
   );
 }

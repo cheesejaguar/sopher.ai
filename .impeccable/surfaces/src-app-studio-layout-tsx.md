@@ -15,8 +15,8 @@ Authors need to resume or create a book, understand current state and cost, move
 
 ## Direction and memorable moment
 
-The Future Proof becomes a calm editorial instrument: persistent desktop rail, accessible mobile app bar/drawer, positional stage navigation, manuscript-first workspaces, and inspectors at stable edges. The memorable operational moment is seeing the luminous manuscript remain central while agents, suggestions, and costs update around it.
+The Future Proof becomes a calm editorial instrument: persistent desktop rail, accessible mobile app bar/drawer, positional stage navigation, manuscript-first workspaces, and inspectors at stable edges. Lifecycle navigation always separates “You are here” from “Production now”; live generation assembles real chapter signatures from planned through reviewed without fabricated timers. The memorable operational moment is seeing the luminous manuscript remain central while agents, suggestions, and costs update around it.
 
 ## Responsive requirement
 
-No page-level horizontal overflow. Full TipTap editing works on phone and tablet. Chapters, suggestions, history, find/replace, and tools move into accessible sheets below desktop widths; the editor tool dock replaces global mobile navigation.
+No page-level horizontal overflow. Full TipTap editing works on phone and tablet. Chapters, suggestions, history, find/replace, and tools move into accessible sheets below desktop widths; the editor tool dock replaces global mobile navigation. Route-owned editor, Write, and Manuscript navigation replaces the global folio rail instead of appearing beside a duplicate.

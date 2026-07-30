@@ -3,7 +3,16 @@
 import * as React from "react";
 import Link from "next/link";
 
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 
 const MAX_SEGMENTS = 24;
 /** Segment width (0.5rem) + gap (0.25rem) — used to slide segments to center. */
@@ -21,6 +30,8 @@ export function CompletionMoment({
   recommendation,
   review,
   onWriteAgain,
+  writeAgainPending = false,
+  writeAgainError,
 }: {
   projectId: string;
   projectTitle: string;
@@ -28,8 +39,11 @@ export function CompletionMoment({
   recommendation?: string;
   review?: { score: number; issueCount: number };
   onWriteAgain?: () => void;
+  writeAgainPending?: boolean;
+  writeAgainError?: string | null;
 }) {
   const [closed, setClosed] = React.useState(false);
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
 
   React.useEffect(() => {
     // Double rAF so the open state paints before the transition begins.
@@ -115,11 +129,53 @@ export function CompletionMoment({
           Start editing
         </Button>
         {onWriteAgain ? (
-          <Button variant="ghost" onClick={onWriteAgain}>
+          <Button variant="ghost" onClick={() => setConfirmOpen(true)}>
             Write again
           </Button>
         ) : null}
       </div>
+
+      {onWriteAgain ? (
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Replace this manuscript with a new draft?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This starts a new paid production run using your latest project settings. Current
+                chapter prose is saved as a dated snapshot before replacement. If a shorter run
+                retires surplus chapters, you can restore their latest archived drafts from the
+                Editorial workbench.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {writeAgainError ? (
+              <p role="alert" className="px-6 text-sm text-destructive">
+                {writeAgainError}
+              </p>
+            ) : null}
+            <AlertDialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!writeAgainPending) setConfirmOpen(false);
+                }}
+                aria-disabled={writeAgainPending}
+              >
+                Keep this manuscript
+              </Button>
+              <Button
+                onClick={() => {
+                  if (!writeAgainPending) onWriteAgain();
+                }}
+                aria-busy={writeAgainPending || undefined}
+                aria-disabled={writeAgainPending}
+              >
+                {writeAgainPending ? <Spinner aria-hidden="true" /> : null}
+                {writeAgainPending ? "Starting…" : "Start new draft"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </section>
   );
 }

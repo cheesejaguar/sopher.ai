@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type FormEvent } from "react";
 import { Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,11 @@ export function BriefEditor({ projectId, brief }: { projectId: string; brief: st
     );
   }
 
-  function submit(formData: FormData) {
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+
+    const formData = new FormData(event.currentTarget);
     setError(null);
     const next = String(formData.get("brief") ?? "").trim();
     if (next.length < 20) {
@@ -43,7 +47,7 @@ export function BriefEditor({ projectId, brief }: { projectId: string; brief: st
   }
 
   return (
-    <form action={submit} className="space-y-3">
+    <form onSubmit={submit} className="space-y-3">
       <label htmlFor="brief-editor" className="sr-only">
         Brief
       </label>
@@ -62,10 +66,17 @@ export function BriefEditor({ projectId, brief }: { projectId: string; brief: st
         </p>
       ) : null}
       <div className="flex gap-2">
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" aria-busy={pending || undefined} aria-disabled={pending}>
           {pending ? "Saving…" : "Save brief"}
         </Button>
-        <Button type="button" variant="outline" onClick={() => setEditing(false)}>
+        <Button
+          type="button"
+          variant="outline"
+          aria-disabled={pending}
+          onClick={() => {
+            if (!pending) setEditing(false);
+          }}
+        >
           Cancel
         </Button>
       </div>

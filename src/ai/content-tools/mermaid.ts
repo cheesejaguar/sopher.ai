@@ -1,6 +1,7 @@
 import { generateText } from "ai";
 
 import { gatewayOptions, metered } from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS } from "@/ai/models";
 
 import { ContentToolError, type ContentTool } from "./registry";
@@ -41,14 +42,17 @@ export const mermaidTool: ContentTool = {
   estUsd: 0.01,
   async run(ctx, input) {
     const model = MODELS[ctx.tier].lineEdit;
+    const meter = { ...ctx.meter, authorizationUsd: 0.01 };
     const result = await metered(
-      ctx.meter,
+      meter,
       { role: "content-tool", operation: "tool.mermaid", model },
       () =>
         generateText({
           model,
           prompt: mermaidPrompt(input.text),
-          providerOptions: gatewayOptions(ctx.meter, "content-tool"),
+          maxOutputTokens: meteredMaxOutputTokens("tool.mermaid"),
+          prepareStep: meteredInputGuard("tool.mermaid"),
+          providerOptions: gatewayOptions(meter, "content-tool"),
         }),
     );
 

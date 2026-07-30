@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { ProjectSettings } from "@/db/schema";
 import { updateProject } from "@/lib/actions/projects";
 import { GENRES } from "@/lib/genres";
+import { VOICE_PROFILE_IDS, VOICE_PROFILES } from "@/ai/knowledge/voice-profiles";
 
 /**
  * Post-creation editing for everything the wizard set: genre, shape, style
@@ -32,9 +33,15 @@ export function ProjectSettingsForm({
   const [error, setError] = useState<string | null>(null);
 
   function submit(formData: FormData) {
+    if (pending) return;
     setError(null);
     setSaved(false);
     const read = (key: string) => String(formData.get(key) ?? "").trim();
+    const avoidTopics = read("avoidTopics")
+      .split(/[,\n]/)
+      .map((topic) => topic.trim())
+      .filter(Boolean)
+      .slice(0, 20);
     startTransition(async () => {
       try {
         await updateProject(projectId, {
@@ -47,7 +54,14 @@ export function ProjectSettingsForm({
             pov: (read("pov") || undefined) as ProjectSettings["pov"],
             tense: (read("tense") || undefined) as ProjectSettings["tense"],
             tone: read("tone") || undefined,
+            voiceProfile: read("voiceProfile") || undefined,
+            styleProfile: read("styleProfile") || undefined,
+            heatLevel: (read("heatLevel") || undefined) as ProjectSettings["heatLevel"],
+            violenceLevel: (read("violenceLevel") || undefined) as ProjectSettings["violenceLevel"],
+            profanity: (read("profanity") || undefined) as ProjectSettings["profanity"],
+            avoidTopics,
             qualityTier: (read("qualityTier") || undefined) as ProjectSettings["qualityTier"],
+            requireOutlineApproval: formData.get("requireOutlineApproval") === "on",
           },
         });
         setSaved(true);
@@ -61,7 +75,14 @@ export function ProjectSettingsForm({
     "border-input bg-transparent focus-visible:border-ring focus-visible:ring-ring h-11 w-full rounded-sm border px-3 text-sm shadow-xs focus-visible:ring-[3px] outline-none sm:h-9";
 
   return (
-    <form action={submit} className="instrument-surface space-y-5 rounded-sm p-5 sm:p-6">
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (pending) return;
+        submit(new FormData(event.currentTarget));
+      }}
+      className="instrument-surface space-y-5 rounded-sm p-5 sm:p-6"
+    >
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="ps-genre">Genre</Label>
@@ -136,7 +157,94 @@ export function ProjectSettingsForm({
             <option value="present">Present</option>
           </select>
         </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ps-voice">Voice profile</Label>
+          <select
+            id="ps-voice"
+            name="voiceProfile"
+            defaultValue={defaults.settings.voiceProfile ?? ""}
+            className={selectClass}
+          >
+            <option value="">No preset voice</option>
+            {VOICE_PROFILE_IDS.map((id) => (
+              <option key={id} value={id}>
+                {VOICE_PROFILES[id].name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ps-style-profile">Style profile</Label>
+          <Input
+            id="ps-style-profile"
+            name="styleProfile"
+            defaultValue={defaults.settings.styleProfile ?? ""}
+            maxLength={100}
+            placeholder="Cinematic, literary, cozy…"
+          />
+        </div>
       </div>
+
+      <fieldset className="space-y-3 border-t border-border pt-5">
+        <legend className="folio-label px-1 text-muted-foreground">Content boundaries</legend>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          These are ceilings, not requests to add mature content.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="ps-heat">Romance / heat</Label>
+            <select
+              id="ps-heat"
+              name="heatLevel"
+              defaultValue={defaults.settings.heatLevel ?? "none"}
+              className={selectClass}
+            >
+              <option value="none">None</option>
+              <option value="mild">Mild</option>
+              <option value="moderate">Moderate</option>
+              <option value="explicit">Explicit</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ps-violence">Violence</Label>
+            <select
+              id="ps-violence"
+              name="violenceLevel"
+              defaultValue={defaults.settings.violenceLevel ?? "mild"}
+              className={selectClass}
+            >
+              <option value="none">None</option>
+              <option value="mild">Mild</option>
+              <option value="moderate">Moderate</option>
+              <option value="graphic">Graphic</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ps-profanity">Profanity</Label>
+            <select
+              id="ps-profanity"
+              name="profanity"
+              defaultValue={defaults.settings.profanity ?? "mild"}
+              className={selectClass}
+            >
+              <option value="none">None</option>
+              <option value="mild">Mild</option>
+              <option value="moderate">Moderate</option>
+              <option value="strong">Strong</option>
+            </select>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="ps-avoid-topics">Topics to avoid</Label>
+          <Textarea
+            id="ps-avoid-topics"
+            name="avoidTopics"
+            defaultValue={(defaults.settings.avoidTopics ?? []).join("\n")}
+            rows={3}
+            placeholder="One topic per line"
+          />
+        </div>
+      </fieldset>
 
       <div className="space-y-1.5">
         <Label htmlFor="ps-tone">Tone</Label>
@@ -148,6 +256,25 @@ export function ProjectSettingsForm({
           placeholder="Wry, warm, a little melancholy…"
         />
       </div>
+
+      <label
+        htmlFor="ps-outline-approval"
+        className="flex min-h-11 cursor-pointer items-center gap-3 rounded-sm border border-border px-3 py-2 text-sm"
+      >
+        <input
+          id="ps-outline-approval"
+          name="requireOutlineApproval"
+          type="checkbox"
+          defaultChecked={defaults.settings.requireOutlineApproval ?? false}
+          className="size-4 accent-primary"
+        />
+        <span>
+          Pause for my approval before writing chapters
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            You can review or request a revised outline before manuscript production begins.
+          </span>
+        </span>
+      </label>
 
       <div className="space-y-1.5">
         <Label htmlFor="ps-style">Style guide</Label>
@@ -162,19 +289,24 @@ export function ProjectSettingsForm({
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={pending}>
+        <Button
+          type="submit"
+          aria-disabled={pending}
+          aria-busy={pending}
+          onClick={(event) => {
+            if (pending) event.preventDefault();
+          }}
+        >
           {pending ? "Saving…" : "Save settings"}
         </Button>
-        {saved ? (
-          <p role="status" className="text-sm text-ai">
-            Saved.
+        <div className="min-h-5 text-sm" aria-live="polite">
+          <p role="status" className="text-ai">
+            {saved ? "Saved." : ""}
           </p>
-        ) : null}
-        {error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
+          <p role="alert" className="text-destructive">
+            {error ?? ""}
           </p>
-        ) : null}
+        </div>
       </div>
     </form>
   );

@@ -16,6 +16,49 @@ export type EntitySeed = {
   attrs?: Record<string, unknown>;
 };
 
+function hasValue(value: unknown): boolean {
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== undefined && value !== null;
+}
+
+/**
+ * Adds missing profile detail without replacing established canon.
+ *
+ * Scalars are first-established-wins. Lists accrete in stable order so a Bible
+ * retry can add mannerisms or facts while preserving everything later chapters
+ * already recorded.
+ */
+export function mergeEntityAttrs(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  const keys = new Set([...Object.keys(incoming), ...Object.keys(existing)]);
+
+  for (const key of keys) {
+    const before = existing[key];
+    const after = incoming[key];
+    if (Array.isArray(before) || Array.isArray(after)) {
+      const values = [
+        ...(Array.isArray(before) ? before : []),
+        ...(Array.isArray(after) ? after : []),
+      ]
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim());
+      merged[key] = [...new Set(values)];
+      continue;
+    }
+    if (hasValue(before)) {
+      merged[key] = typeof before === "string" ? before.trim() : before;
+    } else if (hasValue(after)) {
+      merged[key] = typeof after === "string" ? after.trim() : after;
+    }
+  }
+
+  return merged;
+}
+
 function isEntityKind(value: string): value is EntityKind {
   return (ENTITY_KINDS as readonly string[]).includes(value);
 }
@@ -32,7 +75,7 @@ export async function applyEntityDeltas(input: {
   bookId: string;
   chapterNumber?: number;
   newFacts: { kind?: string; name: string; facts: string[] }[];
-  relationships?: { from: string; to: string; type: string }[];
+  relationships?: { from: string; to: string; type: string; description?: string }[];
 }): Promise<void> {
   const db = getDb();
 
@@ -54,7 +97,21 @@ export async function applyEntityDeltas(input: {
       .onConflictDoUpdate({
         target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
         set: {
-          attrs: sql`jsonb_set(${schema.entities.attrs}, '{facts}', coalesce(${schema.entities.attrs}->'facts', '[]'::jsonb) || (excluded.attrs->'facts'))`,
+          attrs: sql`jsonb_set(
+            ${schema.entities.attrs},
+            '{facts}',
+            (
+              select coalesce(jsonb_agg(deduped.value order by deduped.first_position), '[]'::jsonb)
+              from (
+                select fact.value, min(fact.position) as first_position
+                from jsonb_array_elements(
+                  coalesce(${schema.entities.attrs}->'facts', '[]'::jsonb)
+                  || coalesce(excluded.attrs->'facts', '[]'::jsonb)
+                ) with ordinality as fact(value, position)
+                group by fact.value
+              ) deduped
+            )
+          )`,
           lastUpdatedChapter: input.chapterNumber,
           updatedAt: new Date(),
         },
@@ -92,9 +149,19 @@ export async function applyEntityDeltas(input: {
         fromEntityId: from.id,
         toEntityId: to.id,
         type: rel.type || "other",
+        description: rel.description?.trim() || null,
         establishedChapter: input.chapterNumber,
       })
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [
+          schema.entityRelationships.fromEntityId,
+          schema.entityRelationships.toEntityId,
+          schema.entityRelationships.type,
+        ],
+        set: {
+          description: sql`coalesce(${schema.entityRelationships.description}, excluded.description)`,
+        },
+      });
   }
 }
 
@@ -118,6 +185,63 @@ export async function seedEntities(bookId: string, seeds: EntitySeed[]): Promise
     .onConflictDoNothing({
       target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
     });
+}
+
+/**
+ * Enriches the pre-seeded concept cast with the full story-bible profile.
+ *
+ * This happens before drafting begins, so a read/merge/write is safe here. A
+ * later retry may encounter chapter-established facts; mergeEntityAttrs keeps
+ * those values authoritative and only fills gaps.
+ */
+export async function enrichEntities(bookId: string, seeds: EntitySeed[]): Promise<void> {
+  const db = getDb();
+
+  for (const seed of seeds) {
+    const name = seed.name.trim();
+    if (!name) continue;
+    const incoming = parseAttrs(seed.kind, seed.attrs ?? {}) as Record<string, unknown>;
+    const [existing] = await db
+      .select({
+        id: schema.entities.id,
+        aliases: schema.entities.aliases,
+        attrs: schema.entities.attrs,
+      })
+      .from(schema.entities)
+      .where(
+        and(
+          eq(schema.entities.bookId, bookId),
+          eq(schema.entities.kind, seed.kind),
+          sql`lower(${schema.entities.name}) = lower(${name})`,
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(schema.entities)
+        .set({
+          aliases: [...new Set([...existing.aliases, ...(seed.aliases ?? [])])],
+          attrs: mergeEntityAttrs(existing.attrs, incoming),
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.entities.id, existing.id));
+      continue;
+    }
+
+    await db
+      .insert(schema.entities)
+      .values({
+        bookId,
+        kind: seed.kind,
+        name,
+        aliases: seed.aliases ?? [],
+        attrs: incoming,
+      })
+      .onConflictDoNothing({
+        target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
+      });
+  }
 }
 
 export type BibleEntity = {
@@ -189,6 +313,7 @@ export async function getEntityForPortrait(entityId: string) {
       kind: schema.entities.kind,
       name: schema.entities.name,
       attrs: schema.entities.attrs,
+      portraitAssetId: schema.entities.portraitAssetId,
       projectId: schema.books.projectId,
       userId: schema.projects.userId,
       genre: schema.projects.genre,

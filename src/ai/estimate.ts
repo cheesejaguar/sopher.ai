@@ -1,7 +1,16 @@
-import { MODELS, type QualityTier } from "./models";
+import { MODELS, PROSE_FALLBACK_MODELS, type QualityTier } from "./models";
 import { calculateUsd } from "@/lib/billing/pricing";
 
 const TOKENS_PER_WORD = 1.35;
+
+function costliestAllowedProseUsd(
+  primaryModel: string,
+  usage: Parameters<typeof calculateUsd>[1],
+): number {
+  return Math.max(
+    ...[primaryModel, ...PROSE_FALLBACK_MODELS].map((model) => calculateUsd(model, usage)),
+  );
+}
 
 export type StageEstimate = {
   stage: string;
@@ -44,7 +53,9 @@ export function estimateBookCost(
   stages.push({ stage: "Concept + outline", usd: conceptOutline + outlineUsd });
 
   const planUsd = calculateUsd(m.planner, { inputTokens: 2_500, outputTokens: 700 });
-  const draftUsd = calculateUsd(m.prose, {
+  // A fallback is still real provider spend. Authorize the most expensive
+  // allowed model rather than assuming the requested primary handled it.
+  const draftUsd = costliestAllowedProseUsd(m.prose, {
     inputTokens: chapterInputTokens,
     outputTokens: chapterOutputTokens,
     cachedInputTokens: chapterInputTokens * cachedShare,
@@ -57,7 +68,7 @@ export function estimateBookCost(
       outputTokens: 900,
     });
     const reviseShare = 0.45;
-    const reviseUsd = calculateUsd(m.prose, {
+    const reviseUsd = costliestAllowedProseUsd(m.prose, {
       inputTokens: chapterOutputTokens + 1_200,
       outputTokens: chapterOutputTokens * 0.25,
     });

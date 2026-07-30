@@ -2,9 +2,8 @@ import { put } from "@vercel/blob";
 import { generateText } from "ai";
 
 import { gatewayOptions, metered } from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS } from "@/ai/models";
-import { getDb, schema } from "@/db";
-
 import { ContentToolError, type ContentTool } from "./registry";
 
 /**
@@ -36,28 +35,34 @@ export const imageTool: ContentTool = {
   estUsd: 0.08,
   async run(ctx, input) {
     const promptModel = MODELS[ctx.tier].lineEdit;
+    const promptMeter = { ...ctx.meter, authorizationUsd: 0.01 };
     const promptResult = await metered(
-      ctx.meter,
+      promptMeter,
       { role: "content-tool", operation: "tool.image.prompt", model: promptModel },
       () =>
         generateText({
           model: promptModel,
           prompt: visualPromptInstruction(input.text),
-          providerOptions: gatewayOptions(ctx.meter, "content-tool"),
+          maxOutputTokens: meteredMaxOutputTokens("tool.image.prompt"),
+          prepareStep: meteredInputGuard("tool.image.prompt"),
+          providerOptions: gatewayOptions(promptMeter, "content-tool"),
         }),
     );
     const visualPrompt = promptResult.text.trim();
     if (!visualPrompt) throw new ContentToolError("Could not derive a visual prompt");
 
     const imageModel = MODELS[ctx.tier].image;
+    const imageMeter = { ...ctx.meter, authorizationUsd: 0.07 };
     const imageResult = await metered(
-      ctx.meter,
+      imageMeter,
       { role: "content-tool", operation: "tool.image.generate", model: imageModel },
       () =>
         generateText({
           model: imageModel,
           prompt: visualPrompt,
-          providerOptions: gatewayOptions(ctx.meter, "content-tool"),
+          maxOutputTokens: meteredMaxOutputTokens("tool.image.generate"),
+          prepareStep: meteredInputGuard("tool.image.generate"),
+          providerOptions: gatewayOptions(imageMeter, "content-tool"),
         }),
     );
 
@@ -71,22 +76,20 @@ export const imageTool: ContentTool = {
       { access: "public", contentType },
     );
 
-    const db = getDb();
-    await db.insert(schema.assets).values({
-      projectId: ctx.projectId,
-      chapterId: ctx.chapterId,
-      kind: "illustration",
-      blobUrl: blob.url,
-      blobPathname: blob.pathname,
-      contentType,
-      sizeBytes: file.uint8Array.byteLength,
-      meta: { prompt: visualPrompt },
-    });
-
     const alt =
       visualPrompt.length > ALT_MAX_CHARS
         ? `${visualPrompt.slice(0, ALT_MAX_CHARS - 1)}…`
         : visualPrompt;
-    return { kind: "image", url: blob.url, alt };
+    return {
+      kind: "image",
+      url: blob.url,
+      alt,
+      asset: {
+        blobPathname: blob.pathname,
+        contentType,
+        sizeBytes: file.uint8Array.byteLength,
+        prompt: visualPrompt,
+      },
+    };
   },
 };

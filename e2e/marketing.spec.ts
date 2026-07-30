@@ -19,7 +19,10 @@ test.describe("landing page", () => {
     // Main navigation landmarks.
     const nav = page.getByRole("navigation", { name: "Main" });
     await expect(nav).toBeVisible();
-    await expect(nav.getByRole("link", { name: "sopher.ai" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "sopher.ai" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     await expect(nav.getByRole("link", { name: "Pricing" })).toBeVisible();
     await expect(nav.getByRole("link", { name: "Start your book" })).toBeVisible();
 
@@ -34,6 +37,41 @@ test.describe("landing page", () => {
 
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, "landing");
+  });
+
+  test("marks the exact public route current in desktop and mobile navigation", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    for (const [route, label] of [
+      ["/genres", "Genres"],
+      ["/guides", "Guides"],
+      ["/pricing", "Pricing"],
+    ] as const) {
+      await page.goto(route);
+      const nav = page.getByRole("navigation", { name: "Main" });
+      await expect(nav.getByRole("link", { name: label, exact: true })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      await expect(nav.getByRole("link", { name: "How it works" })).not.toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+    }
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/guides/how-book-generation-works");
+    const menu = page.locator("header details");
+    await menu.locator("summary").click();
+    await expect(menu.getByRole("link", { name: "Guides", exact: true })).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
+    await expect(menu.getByRole("link", { name: "Pricing", exact: true })).not.toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   test("the brief demo is switchable by keyboard", async ({ page }) => {

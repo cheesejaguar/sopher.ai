@@ -3,7 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { start } from "workflow/api";
+import { getRun, start } from "workflow/api";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { assertNotSuspended, requireUser, SuspendedError } from "@/lib/auth";
@@ -11,6 +11,12 @@ import { isActionRateLimited, LIMITS } from "@/lib/security/rate-limit";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
 import { isActiveRunConflict } from "@/lib/run-conflict";
+import {
+  insertQueuedAuthoringRun,
+  noActiveAuthoringRunSql,
+  scheduleRunReservationCleanup,
+  terminalizeAuthoringRun,
+} from "@/lib/generation-runs";
 import type { GenerationConfig } from "@/lib/run-events";
 import {
   createProjectSchema,
@@ -84,27 +90,48 @@ async function startGenerationRun(
 
   let run: { id: string };
   try {
-    [run] = await db
-      .insert(schema.generationRuns)
-      .values({
-        projectId: project.id,
-        userId,
-        kind: "full_book",
-        status: "queued",
-        config,
-      })
-      .returning({ id: schema.generationRuns.id });
+    run = await insertQueuedAuthoringRun({
+      projectId: project.id,
+      userId,
+      kind: "full_book",
+      config,
+    });
   } catch (error) {
     // The partial unique index is the race-proof backstop behind the pre-check above.
     if (!isActiveRunConflict(error)) throw error;
     throw new Error("A generation run is already in progress");
   }
 
-  const workflowRun = await start(generateBook, [run.id, project.id, userId, config]);
-  await db
-    .update(schema.generationRuns)
-    .set({ workflowRunId: workflowRun.runId })
-    .where(eq(schema.generationRuns.id, run.id));
+  let workflowRun: Awaited<ReturnType<typeof start>> | undefined;
+  let startAttempted = false;
+  try {
+    startAttempted = true;
+    workflowRun = await start(generateBook, [run.id, project.id, userId, config]);
+    await db
+      .update(schema.generationRuns)
+      .set({ workflowRunId: workflowRun.runId })
+      .where(eq(schema.generationRuns.id, run.id));
+  } catch (error) {
+    if (workflowRun) {
+      try {
+        await getRun(workflowRun.runId).cancel();
+      } catch {
+        // Terminal DB state and reservation reconciliation are authoritative.
+      }
+    }
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: project.id,
+      userId,
+      status: "failed",
+      error: error instanceof Error ? error.message : "Could not start generation",
+      releaseImmediately: !startAttempted,
+    });
+    if (startAttempted) {
+      await scheduleRunReservationCleanup({ userId, runId: run.id });
+    }
+    throw error;
+  }
 
   return run.id;
 }
@@ -152,6 +179,22 @@ export async function startBook(input: unknown): Promise<{ error: string } | voi
     tier: data.settings.qualityTier ?? "standard",
     requireOutlineApproval: data.settings.requireOutlineApproval ?? true,
     waveSize: 4,
+    targetChapters: data.targetChapters,
+    targetWordsPerChapter: data.targetWordsPerChapter,
+    inputSnapshot: {
+      brief: data.brief,
+      genre: data.genre,
+      styleGuide: null,
+      voiceProfile: data.settings.voiceProfile ?? null,
+      pov: data.settings.pov ?? null,
+      tense: data.settings.tense ?? null,
+      tone: data.settings.tone ?? null,
+      styleProfile: data.settings.styleProfile ?? null,
+      heatLevel: data.settings.heatLevel ?? null,
+      violenceLevel: data.settings.violenceLevel ?? null,
+      profanity: data.settings.profanity ?? null,
+      avoidTopics: [...(data.settings.avoidTopics ?? [])],
+    },
   };
   await startGenerationRun(project, userId, config);
 
@@ -164,20 +207,49 @@ export async function updateProject(projectId: string, input: unknown) {
   const data = updateProjectSchema.parse(input);
 
   const db = getDb();
-  const [updated] = await db
-    .update(schema.projects)
-    .set({ ...data, updatedAt: new Date() })
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
-    .returning({ id: schema.projects.id });
+  const outcome = await db.transaction(async (tx) => {
+    // The lock is shared with run insertion and outline mutation. Because it
+    // is acquired in a statement before these reads, a mutation that started
+    // before generation cannot commit after generation's frozen snapshot.
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
+      )`,
+    );
+    const [owned] = await tx
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
+      .limit(1);
+    if (!owned) return "not_found" as const;
 
-  if (!updated) throw new Error("Project not found");
-  // Mirror a rename onto the book row so exports and the reading view agree
-  // with the dashboard (see updateBook for the reverse direction).
-  if (data.title !== undefined) {
-    await db
-      .update(schema.books)
-      .set({ title: data.title, updatedAt: new Date() })
-      .where(eq(schema.books.projectId, projectId));
+    const [updated] = await tx
+      .update(schema.projects)
+      .set({ ...data, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.projects.id, projectId),
+          eq(schema.projects.userId, userId),
+          noActiveAuthoringRunSql(projectId),
+        ),
+      )
+      .returning({ id: schema.projects.id });
+    if (!updated) return "active_run" as const;
+
+    // Mirror a rename in the same locked transaction so exports, generation,
+    // and the reading view cannot observe two different identities.
+    if (data.title !== undefined) {
+      await tx
+        .update(schema.books)
+        .set({ title: data.title, updatedAt: new Date() })
+        .where(eq(schema.books.projectId, projectId));
+    }
+    return "updated" as const;
+  });
+
+  if (outcome === "not_found") throw new Error("Project not found");
+  if (outcome === "active_run") {
+    throw new Error("Finish or stop the current run before changing project settings");
   }
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/studio");
@@ -195,7 +267,14 @@ export async function setProjectArchived(projectId: string, archived: boolean) {
   if (!archived) {
     const [stats] = await db
       .select({
-        total: sql<number>`count(*)::int`,
+        total: sql<number>`count(*) filter (
+          where not (
+            ${schema.chapters.status} = 'planned'
+            and ${schema.chapters.wordCount} = 0
+            and ${schema.chapters.title} is null
+            and ${schema.chapters.summary} is null
+          )
+        )::int`,
         written: sql<number>`count(*) filter (where length(${schema.chapters.content}) > 0)::int`,
       })
       .from(schema.chapters)
@@ -221,12 +300,115 @@ export async function setProjectArchived(projectId: string, archived: boolean) {
 export async function deleteProject(projectId: string) {
   const { userId } = await requireUser();
   const db = getDb();
-  const [deleted] = await db
-    .delete(schema.projects)
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
-    .returning({ id: schema.projects.id });
+  const outcome = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
+      )`,
+    );
+    const [owned] = await tx
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
+      .limit(1);
+    if (!owned) return "not_found" as const;
 
-  if (!deleted) throw new Error("Project not found");
+    // Metering intents use this wallet lock. Taking it after the project lock
+    // closes the gap between the open-protocol snapshot and cascade delete:
+    // a paid call either commits first and blocks deletion, or begins after
+    // the project is gone and cannot dispatch provider work.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+
+    const [activeRun] = await tx
+      .select({ id: schema.generationRuns.id })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.projectId, projectId),
+          eq(schema.generationRuns.userId, userId),
+          inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+        ),
+      )
+      .limit(1);
+    if (activeRun) return "active_run" as const;
+
+    const [openBillingProtocol] = await tx
+      .select({ id: schema.creditLedger.id })
+      .from(schema.creditLedger)
+      .where(
+        and(
+          eq(schema.creditLedger.userId, userId),
+          eq(schema.creditLedger.projectId, projectId),
+          sql`(
+            (
+              (
+                ${schema.creditLedger.externalRef} like 'generation-reservation:%'
+                or ${schema.creditLedger.externalRef} like 'interactive-reservation:%'
+              )
+              and ${schema.creditLedger.amount} < 0
+              and not exists (
+                select 1 from credit_ledger released
+                where released.external_ref =
+                  'release:' || ${schema.creditLedger.externalRef}
+              )
+            )
+            or (
+              ${schema.creditLedger.externalRef} like 'metering-intent:%'
+              and ${schema.creditLedger.amount} = 0
+              and not exists (
+                select 1 from credit_ledger terminal
+                where terminal.external_ref in (
+                  'intent-settled:' || ${schema.creditLedger.externalRef},
+                  'intent-aborted:' || ${schema.creditLedger.externalRef}
+                )
+              )
+            )
+          )`,
+        ),
+      )
+      .limit(1);
+    if (openBillingProtocol) return "open_billing" as const;
+
+    const assetRows = await tx
+      .select({ pathname: schema.assets.blobPathname })
+      .from(schema.assets)
+      .where(eq(schema.assets.projectId, projectId));
+    const pathnames = [...new Set(assetRows.map((asset) => asset.pathname).filter(Boolean))];
+    if (pathnames.length > 0) {
+      // Start the durable cleanup before deleting. Its delayed step checks
+      // that this transaction committed; if start fails, the transaction
+      // aborts and no Blob pathname is lost.
+      const [{ start }, { cleanupProjectBlobsAfterDelete }] = await Promise.all([
+        import("workflow/api"),
+        import("@/workflows/cleanup-project-blobs"),
+      ]);
+      await start(cleanupProjectBlobsAfterDelete, [projectId, pathnames]);
+    }
+
+    const [deleted] = await tx
+      .delete(schema.projects)
+      .where(
+        and(
+          eq(schema.projects.id, projectId),
+          eq(schema.projects.userId, userId),
+          noActiveAuthoringRunSql(projectId),
+        ),
+      )
+      .returning({ id: schema.projects.id });
+    return deleted ? ("deleted" as const) : ("active_run" as const);
+  });
+
+  if (outcome === "active_run") {
+    // Deleting the project cascades its run and nulls ledger run IDs, which
+    // would make an in-flight provider claim impossible to reconcile.
+    throw new Error("Stop the current generation run before deleting this project");
+  }
+  if (outcome === "open_billing") {
+    throw new Error(
+      "Wait for pending generation charges to reconcile before deleting this project",
+    );
+  }
+  if (outcome === "not_found") throw new Error("Project not found");
   revalidatePath("/studio");
   redirect("/studio");
 }

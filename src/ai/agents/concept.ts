@@ -5,6 +5,11 @@ import { seedEntities } from "@/db/queries/entities";
 import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
+import {
+  assertMeteredInputWithinBudget,
+  meteredInputGuard,
+  meteredMaxOutputTokens,
+} from "@/ai/metering-limits";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { CONCEPT_SYSTEM_PROMPT, buildConceptUserPrompt } from "@/ai/prompts/concept";
 import { conceptSchema, type BookConcept } from "@/ai/schemas";
@@ -20,6 +25,12 @@ export type ConceptCtx = {
   contentGuidelines?: string;
 };
 
+export type ConceptCheckpointOptions = {
+  expanded?: BookConcept;
+  onExpanded?: (concept: BookConcept) => void | Promise<void>;
+  onRefined?: (concept: BookConcept) => void | Promise<void>;
+};
+
 function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
   return [
     `You previously expanded an author brief into the draft book concept below. Now critique and refine it in one pass.`,
@@ -27,6 +38,7 @@ function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
     `## Original author brief\n${ctx.brief}`,
     ctx.genre ? `## Genre\n${ctx.genre}` : "",
     ctx.targetAudience ? `## Target audience\n${ctx.targetAudience}` : "",
+    ctx.contentGuidelines ? `## Authoring constraints\n${ctx.contentGuidelines}` : "",
     `Identify the 2-3 weakest elements of this concept judged against what ${
       ctx.genre ? `${ctx.genre} readers` : "readers of this genre"
     } expect — a generic logline, a low-stakes central conflict, interchangeable characters, themes that don't connect to the plot, or "unique" elements that are actually common tropes.`,
@@ -41,29 +53,48 @@ function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
  * Expands an author brief into a full book concept, then critiques and refines
  * it in a second pass. The expand step may consult genre conventions via tools.
  */
-export async function generateConcept(input: ConceptCtx): Promise<BookConcept> {
+export async function generateConcept(
+  input: ConceptCtx,
+  checkpoint: ConceptCheckpointOptions = {},
+): Promise<BookConcept> {
   const model = MODELS[input.tier].concept;
 
-  const expanded = await metered(
-    input.meter,
-    { role: "concept", operation: "concept.expand", model },
-    () =>
-      generateText({
-        model,
-        instructions: anthropicCachedSystem(CONCEPT_SYSTEM_PROMPT),
-        prompt: buildConceptUserPrompt({
-          brief: input.brief,
-          genre: input.genre,
-          targetAudience: input.targetAudience,
-          contentGuidelines: input.contentGuidelines,
+  let expanded = checkpoint.expanded;
+  if (!expanded) {
+    const result = await metered(
+      input.meter,
+      { role: "concept", operation: "concept.expand", model },
+      () =>
+        generateText({
+          model,
+          instructions: anthropicCachedSystem(CONCEPT_SYSTEM_PROMPT),
+          prompt: buildConceptUserPrompt({
+            brief: input.brief,
+            genre: input.genre,
+            targetAudience: input.targetAudience,
+            contentGuidelines: input.contentGuidelines,
+          }),
+          tools: buildToolset("concept", input.tools),
+          stopWhen: isStepCount(3),
+          prepareStep: (options) => {
+            assertMeteredInputWithinBudget(
+              "concept.expand",
+              {
+                instructions: options.instructions,
+                messages: options.messages,
+              },
+              options.stepNumber,
+            );
+            return options.stepNumber >= 2 ? { activeTools: [] } : {};
+          },
+          maxOutputTokens: meteredMaxOutputTokens("concept.expand"),
+          output: Output.object({ schema: conceptSchema }),
+          providerOptions: gatewayOptions(input.meter, "concept"),
         }),
-        tools: buildToolset("concept", input.tools),
-        stopWhen: isStepCount(3),
-        prepareStep: ({ stepNumber }) => (stepNumber >= 2 ? { activeTools: [] } : {}),
-        output: Output.object({ schema: conceptSchema }),
-        providerOptions: gatewayOptions(input.meter, "concept"),
-      }),
-  );
+    );
+    expanded = result.output;
+    await checkpoint.onExpanded?.(expanded);
+  }
 
   const refined = await metered(
     input.meter,
@@ -72,12 +103,15 @@ export async function generateConcept(input: ConceptCtx): Promise<BookConcept> {
       generateText({
         model,
         instructions: anthropicCachedSystem(CONCEPT_SYSTEM_PROMPT),
-        prompt: refinePrompt(input, expanded.output),
+        prompt: refinePrompt(input, expanded),
+        maxOutputTokens: meteredMaxOutputTokens("concept.refine"),
+        prepareStep: meteredInputGuard("concept.refine"),
         output: Output.object({ schema: conceptSchema }),
         providerOptions: gatewayOptions(input.meter, "concept"),
       }),
   );
 
+  await checkpoint.onRefined?.(refined.output);
   return refined.output;
 }
 
@@ -124,7 +158,12 @@ export async function persistConcept(bookId: string, concept: BookConcept): Prom
     concept.characters.map((c) => ({
       kind: "character" as const,
       name: c.name,
-      attrs: { role: c.role, facts: [c.description, `Arc: ${c.arc}`] },
+      attrs: {
+        role: c.role,
+        background: c.description,
+        arc: c.arc,
+        facts: [c.description, `Arc: ${c.arc}`],
+      },
     })),
   );
 }

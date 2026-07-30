@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+
+import { PublicNavLink } from "@/components/marketing/public-nav-link";
 
 const ITEMS = [
   ["How it works", "/#how-it-works"],
@@ -36,17 +37,25 @@ export function MobileMainMenu() {
       </summary>
       <div className="absolute top-[calc(100%+0.65rem)] right-0 w-64 border border-border bg-card p-2 shadow-2xl">
         {ITEMS.map(([label, href], index) => (
-          <Link
+          <PublicNavLink
             key={href}
             href={href}
+            match={
+              href.includes("#")
+                ? "none"
+                : href === "/genres" || href === "/guides"
+                  ? "section"
+                  : "exact"
+            }
             onClick={() => setOpenOnPathname(null)}
-            className="grid min-h-11 grid-cols-[2rem_1fr] items-center border-b border-black/8 px-2 text-sm text-muted-foreground last:border-b-0 hover:bg-black/[0.035] hover:text-foreground dark:border-white/8 dark:hover:bg-white/[0.04]"
+            currentClassName="border-l-primary bg-black/[0.035] text-foreground dark:border-l-primary dark:bg-white/[0.04]"
+            className="grid min-h-11 grid-cols-[2rem_1fr] items-center border-b border-l border-black/8 border-l-transparent px-2 text-sm text-muted-foreground last:border-b-0 hover:bg-black/[0.035] hover:text-foreground dark:border-white/8 dark:border-l-transparent dark:hover:bg-white/[0.04]"
           >
-            <span className="font-mono text-[0.6875rem] text-primary">
+            <span aria-hidden="true" className="font-mono text-[0.6875rem] text-primary">
               {String(index + 1).padStart(2, "0")}
             </span>
             {label}
-          </Link>
+          </PublicNavLink>
         ))}
       </div>
     </details>

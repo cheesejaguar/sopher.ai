@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type FormEvent } from "react";
 import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import {
@@ -51,7 +51,11 @@ export function ProjectMenu({
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  function rename(formData: FormData) {
+  function rename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+
+    const formData = new FormData(event.currentTarget);
     setRenameError(null);
     startTransition(async () => {
       try {
@@ -64,6 +68,7 @@ export function ProjectMenu({
   }
 
   function setArchived(next: boolean) {
+    if (pending) return;
     setActionError(null);
     startTransition(async () => {
       try {
@@ -75,6 +80,7 @@ export function ProjectMenu({
   }
 
   function destroy() {
+    if (pending) return;
     setDeleteError(null);
     startTransition(async () => {
       // deleteProject redirects to /studio on success, so only failures return.
@@ -147,12 +153,17 @@ export function ProjectMenu({
         </div>
       ) : null}
 
-      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+      <Dialog
+        open={renameOpen}
+        onOpenChange={(nextOpen) => {
+          if (!pending) setRenameOpen(nextOpen);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Rename project</DialogTitle>
           </DialogHeader>
-          <form action={rename} className="space-y-4">
+          <form onSubmit={rename} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor={`rename-${projectId}`}>Title</Label>
               <Input
@@ -169,10 +180,17 @@ export function ProjectMenu({
               </p>
             ) : null}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRenameOpen(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                aria-disabled={pending}
+                onClick={() => {
+                  if (!pending) setRenameOpen(false);
+                }}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={pending}>
+              <Button type="submit" aria-busy={pending || undefined} aria-disabled={pending}>
                 {pending ? "Saving…" : "Save"}
               </Button>
             </DialogFooter>
@@ -180,7 +198,12 @@ export function ProjectMenu({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(nextOpen) => {
+          if (!pending) setDeleteOpen(nextOpen);
+        }}
+      >
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete “{title}”?</AlertDialogTitle>
@@ -195,10 +218,21 @@ export function ProjectMenu({
             </p>
           ) : null}
           <AlertDialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={pending}>
+            <Button
+              variant="outline"
+              aria-disabled={pending}
+              onClick={() => {
+                if (!pending) setDeleteOpen(false);
+              }}
+            >
               Keep it
             </Button>
-            <Button variant="destructive" onClick={destroy} disabled={pending}>
+            <Button
+              variant="destructive"
+              onClick={destroy}
+              aria-busy={pending || undefined}
+              aria-disabled={pending}
+            >
               {pending ? "Deleting…" : "Delete forever"}
             </Button>
           </AlertDialogFooter>

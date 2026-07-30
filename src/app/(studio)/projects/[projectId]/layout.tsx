@@ -7,8 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { StageNav } from "@/components/studio/stage-nav";
 import { StatusBadge } from "@/components/studio/status-badge";
 import { WorkspaceRail } from "@/components/studio/workspace-rail";
+import { ProjectProgressProvider } from "@/components/studio/project-progress";
 import { requireUser } from "@/lib/auth";
 import { getChapterList, getProjectWithBook } from "@/db/queries/books";
+import { getProjectProductionProgress } from "@/db/queries/project-progress";
 
 interface ProjectLayoutProps {
   children: React.ReactNode;
@@ -38,6 +40,11 @@ export default async function ProjectLayout({ children, params }: ProjectLayoutP
     number: chapterNumber,
     status,
   }));
+  const initialProgress = await getProjectProductionProgress(
+    project.id,
+    chapters,
+    project.targetChapters,
+  );
 
   return (
     <div className="min-w-0 space-y-6">
@@ -67,16 +74,20 @@ export default async function ProjectLayout({ children, params }: ProjectLayoutP
         </header>
       </div>
 
-      <StageNav projectId={project.id} />
+      <ProjectProgressProvider
+        key={initialProgress.runId ?? "production-not-started"}
+        projectId={project.id}
+        initialProgress={initialProgress}
+      >
+        <StageNav projectId={project.id} />
 
-      <div className="flex min-w-0 items-start gap-8">
-        {railChapters.length > 0 ? (
-          <aside aria-label="Chapter overview" className="hidden shrink-0 xl:block">
+        <div className="flex min-w-0 items-start gap-8">
+          {railChapters.length > 0 ? (
             <WorkspaceRail projectId={project.id} chapters={railChapters} />
-          </aside>
-        ) : null}
-        <div className="min-w-0 flex-1">{children}</div>
-      </div>
+          ) : null}
+          <div className="min-w-0 flex-1">{children}</div>
+        </div>
+      </ProjectProgressProvider>
     </div>
   );
 }

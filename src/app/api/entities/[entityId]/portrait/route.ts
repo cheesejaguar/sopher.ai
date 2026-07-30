@@ -1,8 +1,15 @@
 import { put } from "@vercel/blob";
 import { generateText } from "ai";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
-import { gatewayOptions, metered } from "@/ai/metering";
+import {
+  gatewayOptions,
+  metered,
+  meteredCallAuthorizationUsd,
+  refundMeteredDelivery,
+  type MeterCtx,
+} from "@/ai/metering";
+import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getEntityForPortrait } from "@/db/queries/entities";
@@ -11,6 +18,12 @@ import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { PORTRAIT_KINDS, PORTRAIT_USD, portraitPrompt } from "@/lib/bible/portraits";
 import type { EntityKind } from "@/ai/schemas/entities";
+import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
+import { scheduleReplacedAssetCleanup } from "@/lib/blob-cleanup";
+import {
+  compensateUnreferencedBlobUpload,
+  scheduleUnreferencedBlobCleanup,
+} from "@/lib/blob/orphan-cleanup";
 
 /**
  * Generates one entity portrait on demand. Never called automatically — the
@@ -43,11 +56,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     throw error;
   }
 
-  // Paid path: the balance pre-check above is a read, so concurrent callers all
-  // pass it. This is what bounds how far past the floor they can get.
+  // Bound repeated paid-work requests before atomic provider authorization.
   const limited = await rateLimit(LIMITS.imageGen, req, userId);
   if (limited.limited) return limited.response;
   const { entityId } = await ctx.params;
+  let idempotencyKey: string;
+  try {
+    idempotencyKey = requireIdempotencyKey(req);
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
   const entity = await getEntityForPortrait(entityId);
   if (!entity || entity.userId !== userId) {
     return Response.json({ error: "Entity not found" }, { status: 404 });
@@ -64,12 +85,34 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     .from(schema.projects)
     .where(eq(schema.projects.id, entity.projectId))
     .limit(1);
+
+  const [replayed] = await db
+    .select({ url: schema.assets.blobUrl })
+    .from(schema.assets)
+    .where(
+      and(
+        eq(schema.assets.projectId, entity.projectId),
+        eq(schema.assets.kind, "portrait"),
+        sql`${schema.assets.meta}->>'entityId' = ${entityId}`,
+        sql`${schema.assets.meta}->>'operationKey' = ${idempotencyKey}`,
+      ),
+    )
+    .limit(1);
+  if (replayed) return Response.json({ url: replayed.url });
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
+  const model = MODELS[tier].image;
+  const meter: MeterCtx = {
+    userId,
+    projectId: entity.projectId,
+    authorizationUsd: PORTRAIT_USD,
+    idempotencyKey: `project:${entity.projectId}:entity:${entityId}:${idempotencyKey}`,
+  };
+  const callInfo = { role: "content-tool", operation: "entity.portrait", model };
+  const authorizationUsd = meteredCallAuthorizationUsd(meter, callInfo);
 
   try {
-    await assertCreditsForUsd(userId, PORTRAIT_USD);
+    await assertCreditsForUsd(userId, authorizationUsd);
 
-    const model = MODELS[tier].image;
     const prompt = portraitPrompt({
       kind,
       name: entity.name,
@@ -77,53 +120,162 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
       genre: entity.genre,
     });
 
-    const meter = {
-      userId,
-      projectId: entity.projectId,
-      tier,
-    } as Parameters<typeof metered>[0];
-
-    const result = await metered(
-      meter,
-      { role: "content-tool", operation: "entity.portrait", model },
-      () =>
-        generateText({
-          model,
-          prompt,
-          providerOptions: gatewayOptions(meter, "content-tool"),
-        }),
+    const result = await metered(meter, callInfo, () =>
+      generateText({
+        model,
+        prompt,
+        maxOutputTokens: meteredMaxOutputTokens("entity.portrait"),
+        prepareStep: meteredInputGuard("entity.portrait"),
+        providerOptions: gatewayOptions(meter, "content-tool"),
+      }),
     );
+
+    const refundAndFail = async (message: string): Promise<Response> => {
+      await refundMeteredDelivery(meter, "Portrait generation failed after billing — refunded");
+      return Response.json({ error: message }, { status: 502 });
+    };
 
     const file = result.files.find((f) => f.mediaType?.startsWith("image/"));
     if (!file) {
-      return Response.json({ error: "The image model returned no image" }, { status: 502 });
+      return refundAndFail("The image model returned no image");
     }
 
     const contentType = file.mediaType ?? "image/png";
-    const blob = await put(
-      `portraits/${entity.projectId}/${entityId}-${crypto.randomUUID()}.png`,
-      Buffer.from(file.uint8Array),
-      { access: "public", contentType },
-    );
+    let blob: Awaited<ReturnType<typeof put>>;
+    try {
+      blob = await put(
+        `portraits/${entity.projectId}/${entityId}-${crypto.randomUUID()}.png`,
+        Buffer.from(file.uint8Array),
+        { access: "public", contentType },
+      );
+    } catch {
+      return refundAndFail("Could not store the portrait");
+    }
 
-    const [asset] = await db
-      .insert(schema.assets)
-      .values({
+    try {
+      await scheduleUnreferencedBlobCleanup({
         projectId: entity.projectId,
-        kind: "portrait",
-        blobUrl: blob.url,
-        blobPathname: blob.pathname,
-        contentType,
-        sizeBytes: file.uint8Array.byteLength,
-        meta: { entityId, prompt },
-      })
-      .returning({ id: schema.assets.id });
+        pathnames: [blob.pathname],
+      });
+    } catch (scheduleError) {
+      try {
+        await compensateUnreferencedBlobUpload({
+          projectId: entity.projectId,
+          pathnames: [blob.pathname],
+        });
+      } catch (cleanupError) {
+        try {
+          await refundMeteredDelivery(meter, "Portrait generation failed after billing — refunded");
+        } catch (refundError) {
+          throw new AggregateError(
+            [
+              scheduleError instanceof Error ? scheduleError : new Error(String(scheduleError)),
+              cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+              refundError instanceof Error ? refundError : new Error(String(refundError)),
+            ],
+            "Portrait delivery, cleanup, and refund all failed",
+          );
+        }
+        throw new AggregateError(
+          [
+            scheduleError instanceof Error ? scheduleError : new Error(String(scheduleError)),
+            cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError)),
+          ],
+          "Portrait delivery failed and was refunded, but Blob cleanup could not be made durable",
+        );
+      }
+      return refundAndFail("Could not store the portrait");
+    }
 
-    await db
-      .update(schema.entities)
-      .set({ portraitAssetId: asset.id, updatedAt: new Date() })
-      .where(eq(schema.entities.id, entityId));
+    let displacedPortrait: { id: string; pathname: string } | undefined;
+    let displacedCandidate: { id: string; pathname: string } | undefined;
+    try {
+      displacedPortrait = await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(
+            hashtextextended('sopher:project-authoring:' || ${entity.projectId}, 0)
+          )`,
+        );
+        const [lockedEntity] = await tx
+          .select({ portraitAssetId: schema.entities.portraitAssetId })
+          .from(schema.entities)
+          .where(eq(schema.entities.id, entityId))
+          .limit(1);
+        if (!lockedEntity) throw new Error("Entity disappeared while storing its portrait");
 
+        const [displaced] = lockedEntity.portraitAssetId
+          ? await tx
+              .select({
+                id: schema.assets.id,
+                pathname: schema.assets.blobPathname,
+              })
+              .from(schema.assets)
+              .where(eq(schema.assets.id, lockedEntity.portraitAssetId))
+              .limit(1)
+          : [];
+        displacedCandidate = displaced;
+
+        const [asset] = await tx
+          .insert(schema.assets)
+          .values({
+            projectId: entity.projectId,
+            kind: "portrait",
+            blobUrl: blob.url,
+            blobPathname: blob.pathname,
+            contentType,
+            sizeBytes: file.uint8Array.byteLength,
+            meta: { entityId, prompt, operationKey: idempotencyKey },
+          })
+          .returning({ id: schema.assets.id });
+        if (!asset) throw new Error("Could not record portrait asset");
+
+        const [updated] = await tx
+          .update(schema.entities)
+          .set({ portraitAssetId: asset.id, updatedAt: new Date() })
+          .where(eq(schema.entities.id, entityId))
+          .returning({ id: schema.entities.id });
+        if (!updated) throw new Error("Entity disappeared while storing its portrait");
+        return displaced;
+      });
+    } catch (error) {
+      let committedAsset: { id: string } | undefined;
+      try {
+        const [storedAsset] = await db
+          .select({ id: schema.assets.id })
+          .from(schema.assets)
+          .where(
+            and(
+              eq(schema.assets.projectId, entity.projectId),
+              eq(schema.assets.blobPathname, blob.pathname),
+            ),
+          )
+          .limit(1);
+        // The exact uploaded asset can only exist if the transaction committed.
+        // A newer concurrent portrait may already have advanced the entity
+        // pointer by the time this ambiguous acknowledgement is verified.
+        if (storedAsset) {
+          committedAsset = storedAsset;
+        }
+      } catch (verificationError) {
+        throw new AggregateError(
+          [
+            error instanceof Error ? error : new Error(String(error)),
+            verificationError instanceof Error
+              ? verificationError
+              : new Error(String(verificationError)),
+          ],
+          "Portrait persistence failed and could not be verified",
+        );
+      }
+      if (!committedAsset) return refundAndFail("Could not store the portrait");
+      displacedPortrait = displacedCandidate;
+    }
+
+    await scheduleReplacedAssetCleanup({
+      projectId: entity.projectId,
+      assetId: displacedPortrait?.id,
+      pathname: displacedPortrait?.pathname,
+    });
     return Response.json({ url: blob.url });
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {
