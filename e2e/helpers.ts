@@ -73,17 +73,22 @@ export function missingE2EFixture(message: string): never {
 // Every serious/critical finding fails the suite. Keep the set explicit so a
 // future exception requires a visible code review instead of a hidden filter.
 const ADVISORY_RULES = new Set<string>([]);
+const REQUIRED_BEST_PRACTICE_RULES = new Set(["region"]);
 
 /**
  * Runs axe-core against the current page state. Fails the test on any
- * violation of impact "serious" or "critical" (except ADVISORY_RULES);
- * everything else is logged to the test output but tolerated.
+ * violation of impact "serious" or "critical", plus explicitly required
+ * landmark best practices (except ADVISORY_RULES); everything else is logged.
  */
 export async function axeCheck(page: Page): Promise<void> {
   const { violations } = await new AxeBuilder({ page }).analyze();
 
   const blocking = violations.filter(
-    (v) => (v.impact === "serious" || v.impact === "critical") && !ADVISORY_RULES.has(v.id),
+    (v) =>
+      (v.impact === "serious" ||
+        v.impact === "critical" ||
+        REQUIRED_BEST_PRACTICE_RULES.has(v.id)) &&
+      !ADVISORY_RULES.has(v.id),
   );
   const advisory = violations.filter((v) => !blocking.includes(v));
 
@@ -101,7 +106,7 @@ export async function axeCheck(page: Page): Promise<void> {
       help: v.help,
       targets: v.nodes.map((n) => n.target.join(" ")),
     })),
-    "serious/critical axe violations must be empty",
+    "serious/critical axe violations and required landmark checks must be empty",
   ).toEqual([]);
 }
 
