@@ -188,16 +188,12 @@ function Navigation({
   );
 }
 
-function CommandButton({ compact = false }: { compact?: boolean }) {
-  function openCommandPalette() {
-    window.dispatchEvent(new Event("sopher:open-command-palette"));
-  }
-
+function CommandButton({ compact = false, onOpen }: { compact?: boolean; onOpen: () => void }) {
   return (
     <Button
       type="button"
       variant="ghost"
-      onClick={openCommandPalette}
+      onClick={onOpen}
       aria-label="Open command palette"
       className={cn(
         "rounded-sm border border-sidebar-border bg-sidebar-accent/45 text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground",
@@ -321,6 +317,7 @@ export function ProductShell({ children, variant = "studio", credits }: ProductS
 function ProductShellWithPathname({ children, variant = "studio", credits }: ProductShellProps) {
   const pathname = usePathname() ?? (variant === "admin" ? "/admin" : "/studio");
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
   const editorOwnsMobileChrome =
     variant === "studio" && /^\/projects\/[^/]+\/editor\/\d+\/?$/.test(pathname);
 
@@ -330,7 +327,7 @@ function ProductShellWithPathname({ children, variant = "studio", credits }: Pro
         <ProductMark variant={variant} />
         {variant === "studio" ? (
           <div className="mt-6">
-            <CommandButton />
+            <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
           </div>
         ) : (
           <div className="mt-6 flex items-center gap-2 border-y border-sidebar-border py-3 font-mono text-[0.6875rem] tracking-[0.12em] text-sidebar-foreground/75 uppercase">
@@ -381,7 +378,7 @@ function ProductShellWithPathname({ children, variant = "studio", credits }: Pro
                 <div className="min-h-0 flex-1 overflow-y-auto p-4">
                   {variant === "studio" ? (
                     <div className="mb-6">
-                      <CommandButton />
+                      <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
                     </div>
                   ) : null}
                   <Navigation variant={variant} pathname={pathname} mobile credits={credits} />
@@ -394,7 +391,11 @@ function ProductShellWithPathname({ children, variant = "studio", credits }: Pro
 
             <ProductMark variant={variant} />
             <div className="flex items-center gap-1">
-              {variant === "studio" ? <CommandButton compact /> : <ThemeToggle />}
+              {variant === "studio" ? (
+                <CommandButton compact onOpen={() => setCommandPaletteOpen(true)} />
+              ) : (
+                <ThemeToggle />
+              )}
             </div>
           </header>
         )}
@@ -408,7 +409,9 @@ function ProductShellWithPathname({ children, variant = "studio", credits }: Pro
         </main>
       </div>
 
-      {variant === "studio" ? <CommandPalette /> : null}
+      {variant === "studio" ? (
+        <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
+      ) : null}
     </div>
   );
 }

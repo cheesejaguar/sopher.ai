@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
 
@@ -19,47 +19,51 @@ import {
  * palette only ever navigates, so it can never surprise.
  */
 /** usePathname must sit under Suspense with cacheComponents (see stage-nav). */
-export function CommandPalette() {
+type CommandPaletteProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+};
+
+export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   return (
     <Suspense fallback={null}>
-      <CommandPaletteInner />
+      <CommandPaletteInner open={open} onOpenChange={onOpenChange} />
     </Suspense>
   );
 }
 
-function CommandPaletteInner() {
+function CommandPaletteInner({ open, onOpenChange }: CommandPaletteProps) {
   const router = useRouter();
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        setOpen((prev) => !prev);
+        onOpenChange(!open);
       }
     }
-    function onOpenRequest() {
-      setOpen(true);
-    }
     window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("sopher:open-command-palette", onOpenRequest);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("sopher:open-command-palette", onOpenRequest);
     };
-  }, []);
+  }, [onOpenChange, open]);
 
   const projectMatch = pathname?.match(/^\/projects\/([^/]+)/);
   const projectId = projectMatch?.[1];
 
   function go(href: string) {
-    setOpen(false);
+    onOpenChange(false);
     router.push(href as Route);
   }
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen} title="Go to" description="Jump anywhere">
+    <CommandDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Go to"
+      description="Jump anywhere"
+    >
       <CommandInput aria-label="Search destinations" placeholder="Where to?" />
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
