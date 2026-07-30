@@ -30,7 +30,7 @@ const BLOB = ["https://*.public.blob.vercel-storage.com"];
  * anything, and the XSS fix in the markdown renderer is the real control here
  * rather than the CSP.
  */
-function fullPolicy(): string {
+function fullPolicy(includeUpgrade = true): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${[...CLERK, ...STRIPE, ...GOOGLE, ...VERCEL].join(" ")}`,
@@ -44,7 +44,7 @@ function fullPolicy(): string {
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",
-    "upgrade-insecure-requests",
+    ...(includeUpgrade ? ["upgrade-insecure-requests"] : []),
   ].join("; ");
 }
 
@@ -75,7 +75,9 @@ export function securityHeaders(): { key: string; value: string }[] {
   } else {
     headers.push(
       { key: "Content-Security-Policy", value: ENFORCED_CSP },
-      { key: "Content-Security-Policy-Report-Only", value: fullPolicy() },
+      // Browsers ignore upgrade-insecure-requests in report-only mode and log
+      // a warning for every page, so omit the no-op directive until enforcement.
+      { key: "Content-Security-Policy-Report-Only", value: fullPolicy(false) },
     );
   }
 

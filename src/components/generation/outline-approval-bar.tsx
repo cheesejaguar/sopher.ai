@@ -48,7 +48,7 @@ export function OutlineApprovalBar({ runId, projectId }: { runId: string; projec
   }
 
   return (
-    <div className="sticky bottom-4 z-10 rounded-xl bg-popover p-4 shadow-lg ring-1 ring-foreground/10">
+    <div className="instrument-surface-raised sticky bottom-4 z-10 rounded-sm p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">Writing is paused for your approval.</p>
@@ -56,7 +56,7 @@ export function OutlineApprovalBar({ runId, projectId }: { runId: string; projec
             Approve the outline to start the chapters, or send notes for a revision.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             onClick={() => setNotesOpen((open) => !open)}

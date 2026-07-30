@@ -2,14 +2,8 @@
 
 import { CircleDollarSign } from "lucide-react";
 
-import { cn } from "@/lib/utils";
-
-import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
-
-/** Credits are what the wallet is debited — always the primary figure. */
-function credits(value: number): string {
-  return `${(value * CREDIT_MARKUP).toFixed(1)} cr`;
-}
+import { CostDisplay } from "@/components/studio/product-primitives";
+import { creditsForUsd } from "@/lib/billing/credits-shared";
 
 /**
  * Live metered spend for this run. Ember is reserved for cost — the numbers
@@ -19,28 +13,20 @@ export function CostTicker({ totalUsd, estimateUsd }: { totalUsd: number; estima
   const over = totalUsd > estimateUsd;
 
   return (
-    <section
-      aria-label="Run spend"
-      className="rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10"
-    >
-      <div className="flex items-center gap-2">
+    <section aria-label="Run spend" className="instrument-surface rounded-sm px-4 py-4">
+      <div className="mb-3 flex items-center gap-2 border-b border-border pb-3">
         <CircleDollarSign aria-hidden="true" className="size-3.5 text-ember" />
-        <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-          Spend this run
-        </h3>
+        <h3 className="folio-label text-muted-foreground">Spend this run</h3>
       </div>
-      <p
-        className={cn(
-          "mt-1.5 font-mono text-2xl font-medium tabular-nums",
-          over ? "text-ember" : "text-foreground",
-        )}
-      >
-        {credits(totalUsd)}
-      </p>
-      <p className="mt-0.5 font-mono text-xs text-muted-foreground tabular-nums">
-        estimated {credits(estimateUsd)}
-        {over ? <span className="text-ember"> · over estimate</span> : null}
-      </p>
+      <CostDisplay
+        credits={creditsForUsd(totalUsd)}
+        usd={totalUsd}
+        label="Credits used"
+        valueClassName={over ? "text-ember" : undefined}
+        note={`Estimated ${creditsForUsd(estimateUsd).toFixed(1)} credits${
+          over ? " · over estimate" : ""
+        }`}
+      />
     </section>
   );
 }

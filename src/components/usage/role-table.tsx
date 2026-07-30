@@ -7,7 +7,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatTokens, formatUsd } from "./format";
+import { AsyncState } from "@/components/studio/product-primitives";
+import { creditsForUsd } from "@/lib/billing/credits-shared";
+import { formatCredits, formatTokens, formatUsd } from "./format";
 
 export type RoleSpendRow = {
   agentRole: string;
@@ -25,14 +27,20 @@ export function RoleTable({ rows }: { rows: RoleSpendRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <p className="py-6 text-center text-sm text-muted-foreground">
-        No model calls yet — costs appear here as agents work.
-      </p>
+      <AsyncState
+        status="empty"
+        compact
+        title="No agent usage yet"
+        description="Credit use appears here as agents begin working."
+      />
     );
   }
 
   return (
-    <Table aria-label="Spend by agent role and model">
+    <Table
+      aria-label="Credit use by agent role and model"
+      scrollLabel="Credit use by agent role and model"
+    >
       <TableHeader>
         <TableRow>
           <TableHead scope="col">Role</TableHead>
@@ -52,7 +60,7 @@ export function RoleTable({ rows }: { rows: RoleSpendRow[] }) {
             Cached (90% off)
           </TableHead>
           <TableHead scope="col" className="text-right">
-            Cost
+            Credits
           </TableHead>
         </TableRow>
       </TableHeader>
@@ -78,7 +86,10 @@ export function RoleTable({ rows }: { rows: RoleSpendRow[] }) {
               {formatTokens(row.cachedInputTokens)}
             </TableCell>
             <TableCell className="text-right font-mono tabular-nums">
-              {formatUsd(row.usd)}
+              <span className="block">{formatCredits(creditsForUsd(row.usd))}</span>
+              <span className="block text-[0.65rem] text-muted-foreground">
+                {formatUsd(row.usd)}
+              </span>
             </TableCell>
           </TableRow>
         ))}
@@ -93,7 +104,12 @@ export function RoleTable({ rows }: { rows: RoleSpendRow[] }) {
           <TableCell className="hidden sm:table-cell" />
           <TableCell className="hidden sm:table-cell" />
           <TableCell className="hidden md:table-cell" />
-          <TableCell className="text-right font-mono tabular-nums">{formatUsd(totalUsd)}</TableCell>
+          <TableCell className="text-right font-mono tabular-nums">
+            <span className="block">{formatCredits(creditsForUsd(totalUsd))}</span>
+            <span className="block text-[0.65rem] font-normal text-muted-foreground">
+              {formatUsd(totalUsd)}
+            </span>
+          </TableCell>
         </TableRow>
       </TableFooter>
     </Table>

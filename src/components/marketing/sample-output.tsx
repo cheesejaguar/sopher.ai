@@ -44,26 +44,40 @@ const SAMPLES: Sample[] = [
 
 export function SampleOutput() {
   return (
-    <section aria-labelledby="sample-output-heading">
-      <div className="mx-auto w-full max-w-6xl px-6 py-24 sm:py-32">
-        <div className="max-w-2xl">
-          <p className="font-mono text-xs tracking-[0.2em] text-primary uppercase">Sample output</p>
+    <section
+      aria-labelledby="sample-output-heading"
+      className="border-b border-black/10 dark:border-white/10"
+    >
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
+        <div className="lg:col-span-4">
+          <p className="folio-label text-primary">Proof 02 / sample output</p>
           <h2
             id="sample-output-heading"
-            className="mt-3 font-display text-3xl font-semibold tracking-tight text-balance sm:text-4xl"
+            className="mt-5 font-display text-4xl font-semibold leading-[1.04] tracking-[-0.04em] text-balance"
           >
             Judge the prose first
           </h2>
-          <p className="mt-4 text-muted-foreground">
-            Opening pages from three briefs, exactly as the agents delivered them — drafted, edited,
-            and continuity-checked.
+          <p className="mt-5 max-w-sm leading-7 text-muted-foreground">
+            Illustrative opening pages from three labeled sample briefs, shown so you can judge
+            voice, pacing, and control of detail.
           </p>
+          <div className="mt-8 hidden border-t border-black/10 pt-4 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase dark:border-white/10 lg:block">
+            Manuscript view / chapter 01
+          </div>
         </div>
 
-        <Tabs defaultValue="fantasy" className="mt-10">
-          <TabsList aria-label="Sample genre">
+        <Tabs defaultValue="fantasy" className="min-w-0 lg:col-span-8">
+          <TabsList
+            aria-label="Sample genre"
+            variant="line"
+            className="h-auto w-full justify-start gap-0 border-y border-black/10 p-0 dark:border-white/10"
+          >
             {SAMPLES.map((sample) => (
-              <TabsTrigger key={sample.value} value={sample.value}>
+              <TabsTrigger
+                key={sample.value}
+                value={sample.value}
+                className="min-h-11 flex-none rounded-none border-r border-black/10 px-4 text-xs uppercase dark:border-white/10 sm:px-6"
+              >
                 {sample.genre}
               </TabsTrigger>
             ))}
@@ -76,9 +90,13 @@ export function SampleOutput() {
           */}
           {SAMPLES.map((sample) => (
             <TabsContent key={sample.value} value={sample.value} keepMounted>
-              <article className="paper-surface mt-4 px-6 py-10 sm:px-12 sm:py-12">
+              <article className="manuscript-sheet mt-6 px-6 py-10 sm:px-12 sm:py-14">
+                <span
+                  aria-hidden="true"
+                  className="absolute top-0 right-8 h-6 w-20 bg-primary/75"
+                />
                 <div className="mx-auto max-w-[68ch]">
-                  <p className="font-sans text-[0.65rem] font-medium tracking-[0.2em] text-paper-muted uppercase">
+                  <p className="font-sans text-[0.6875rem] font-medium tracking-[0.18em] text-paper-muted uppercase">
                     {sample.title} · Chapter one
                   </p>
                   <div className="prose-manuscript prose-manuscript--book mt-5">
@@ -86,8 +104,9 @@ export function SampleOutput() {
                       <p key={paragraph.slice(0, 24)}>{paragraph}</p>
                     ))}
                   </div>
-                  <p className="mt-8 border-t border-paper-edge pt-4 font-sans text-xs text-paper-muted">
-                    {sample.genre} · chapter 1 excerpt
+                  <p className="mt-10 flex items-center justify-between border-t border-paper-edge pt-4 font-sans text-xs text-paper-muted">
+                    <span>{sample.genre} · chapter 1 excerpt</span>
+                    <span className="font-mono">01</span>
                   </p>
                 </div>
               </article>

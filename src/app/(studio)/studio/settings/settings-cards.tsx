@@ -71,7 +71,7 @@ export function AppearanceCard() {
   const mounted = useHydrated();
 
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
           Appearance
@@ -83,7 +83,7 @@ export function AppearanceCard() {
       <CardContent>
         <SettingRow
           label="Theme"
-          description="Midnight study by default. Follows your system if you let it."
+          description="Future Proof dark by default. Follows your system if you let it."
           descriptionId="theme-hint"
         >
           {mounted ? (
@@ -143,7 +143,7 @@ export function DefaultsCard() {
   );
 
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
           Generation defaults

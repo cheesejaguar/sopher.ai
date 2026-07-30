@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { RelativeTime } from "@/components/relative-time";
 import { listAllBooks } from "@/db/queries/admin";
+import { PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Books — admin" };
 
@@ -19,8 +20,12 @@ export default async function AdminBooks() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-semibold tracking-tight">Books</h1>
-      <Table aria-label="All books">
+      <PageHeader
+        label="Admin / Manuscripts"
+        title="Books"
+        description="Project state, production volume, and open moderation flags."
+      />
+      <Table aria-label="All books" scrollLabel="All books">
         <TableHeader>
           <TableRow>
             <TableHead scope="col">Title</TableHead>

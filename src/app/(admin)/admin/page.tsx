@@ -6,20 +6,25 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { formatCredits, formatUsd } from "@/components/usage/format";
 import { getOverviewKpis } from "@/db/queries/admin";
 import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
+import { PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Admin" };
 
 function Kpi({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
-    <Card>
-      <CardHeader className="pb-1">
+    <Card className="instrument-surface gap-2 rounded-sm py-4 sm:gap-3 sm:py-5">
+      <CardHeader className="px-4 pb-0 sm:px-5">
         <CardTitle className="font-mono text-[0.68rem] font-normal tracking-[0.14em] text-muted-foreground uppercase">
           {label}
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <p className="font-display text-2xl font-semibold tabular-nums">{value}</p>
-        {note ? <p className="mt-0.5 text-xs text-muted-foreground">{note}</p> : null}
+      <CardContent className="px-4 sm:px-5">
+        <p className="font-display text-xl font-semibold tabular-nums sm:text-2xl">{value}</p>
+        {note ? (
+          <p className="mt-1 text-[0.6875rem] leading-4 text-pretty text-muted-foreground sm:text-xs">
+            {note}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -33,7 +38,7 @@ async function Kpis() {
 
   return (
     <>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 min-[360px]:grid-cols-2 sm:gap-4 lg:grid-cols-4">
         <Kpi
           label="Users"
           value={String(kpis.users.total)}
@@ -94,12 +99,16 @@ async function Kpis() {
 export default function AdminOverview() {
   return (
     <div className="space-y-6">
-      <h1 className="font-display text-2xl font-semibold tracking-tight">Overview</h1>
+      <PageHeader
+        label="Admin / Control room"
+        title="Overview"
+        description="Operational, financial, and moderation state across the writing system."
+      />
       <Suspense
         fallback={
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 min-[360px]:grid-cols-2 sm:gap-4 lg:grid-cols-4">
             {Array.from({ length: 8 }, (_, i) => (
-              <Skeleton key={i} className="h-28 rounded-xl" />
+              <Skeleton key={i} className="h-24 rounded-sm sm:h-28" />
             ))}
           </div>
         }

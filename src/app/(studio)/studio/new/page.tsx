@@ -24,10 +24,11 @@ export default async function NewBookPage({
     : undefined;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8">
-      <header className="space-y-1">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">A new book</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="mx-auto max-w-6xl space-y-8">
+      <header className="max-w-3xl border-b border-border pb-7">
+        <p className="folio-label text-primary">Studio / New production</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">A new book</h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
           Four short steps from idea to estimate. Nothing runs until you approve the cost.
         </p>
       </header>

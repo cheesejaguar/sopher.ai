@@ -54,25 +54,41 @@ export const test = base.extend<ThemeOptions>({
 export { expect };
 
 /**
- * Rules whose violations are reported but do not fail the test, regardless of
- * impact. "color-contrast" is currently on this list because the app's oklch
- * palette has known serious contrast findings (e.g. Base UI badge/secondary
- * hover text) that live in src/ — re-tighten this once the palette is fixed.
+ * Ends a fixture-dependent test when its isolated seed is incomplete.
+ *
+ * Ad-hoc local DB runs may point at a fresh branch, so missing data remains a
+ * skip by default. Acceptance runs set E2E_FIXTURES_REQUIRED=1: in that mode a
+ * missing fixture is a broken seed/contract and must fail loudly.
  */
-// Contrast issues were fixed app-side (tokens + tab trigger); nothing is
-// advisory anymore — every serious/critical finding fails the suite.
+export function missingE2EFixture(message: string): never {
+  if (process.env.E2E_FIXTURES_REQUIRED === "1") {
+    throw new Error(`Required E2E fixture missing: ${message}`);
+  }
+  test.skip(true, message);
+  // Playwright's runtime skip interrupts the test. This keeps the return type
+  // honest if that behavior ever changes.
+  throw new Error(`Playwright did not skip after missing fixture: ${message}`);
+}
+
+// Every serious/critical finding fails the suite. Keep the set explicit so a
+// future exception requires a visible code review instead of a hidden filter.
 const ADVISORY_RULES = new Set<string>([]);
+const REQUIRED_BEST_PRACTICE_RULES = new Set(["region"]);
 
 /**
  * Runs axe-core against the current page state. Fails the test on any
- * violation of impact "serious" or "critical" (except ADVISORY_RULES);
- * everything else is logged to the test output but tolerated.
+ * violation of impact "serious" or "critical", plus explicitly required
+ * landmark best practices (except ADVISORY_RULES); everything else is logged.
  */
 export async function axeCheck(page: Page): Promise<void> {
   const { violations } = await new AxeBuilder({ page }).analyze();
 
   const blocking = violations.filter(
-    (v) => (v.impact === "serious" || v.impact === "critical") && !ADVISORY_RULES.has(v.id),
+    (v) =>
+      (v.impact === "serious" ||
+        v.impact === "critical" ||
+        REQUIRED_BEST_PRACTICE_RULES.has(v.id)) &&
+      !ADVISORY_RULES.has(v.id),
   );
   const advisory = violations.filter((v) => !blocking.includes(v));
 
@@ -90,7 +106,7 @@ export async function axeCheck(page: Page): Promise<void> {
       help: v.help,
       targets: v.nodes.map((n) => n.target.join(" ")),
     })),
-    "serious/critical axe violations must be empty",
+    "serious/critical axe violations and required landmark checks must be empty",
   ).toEqual([]);
 }
 

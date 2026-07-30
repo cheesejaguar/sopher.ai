@@ -1,4 +1,5 @@
 import { GENRE_IDS, GENRE_TEMPLATES, type GenreId } from "@/ai/knowledge/genres";
+import { PUBLIC_TIER_COSTS } from "@/lib/billing/public-pricing";
 
 /**
  * Public genre pages.
@@ -28,7 +29,7 @@ const CONTENT: Record<GenreId, GenrePageContent> = {
   romance: {
     heading: "Write a romance novel",
     metaDescription:
-      "Describe the couple and the thing keeping them apart. sopher.ai plans the beats, writes every chapter, and edits the manuscript — usually in under an hour.",
+      "Describe the couple and the thing keeping them apart. sopher.ai plans the beats, writes every chapter, and edits the complete manuscript.",
     intro: [
       "Romance is the most structurally demanding popular genre, which is exactly why it suits a planned pipeline. Readers arrive knowing the couple will end up together; the pleasure is entirely in how the book earns it. A romance that skips the black moment, or resolves its conflict with a misunderstanding that a single conversation would have fixed, fails no matter how good the prose is.",
       "So the outline is written first, with the beats placed where they belong — the meet-cute in the opening tenth, the first real intimacy around the third, the black moment late enough to hurt. Then the chapters are drafted against that plan rather than improvised forward, which is what stops the middle from sagging.",
@@ -102,7 +103,7 @@ const CONTENT: Record<GenreId, GenrePageContent> = {
       {
         question: "Can it write epic fantasy at full length?",
         answer:
-          "Up to 60 chapters. Chapters are drafted four at a time, so a long book does not take proportionally longer than a short one.",
+          "Up to 60 chapters. The shared outline and story bible keep long manuscripts coordinated across every drafting wave.",
       },
     ],
   },
@@ -145,8 +146,7 @@ const CONTENT: Record<GenreId, GenrePageContent> = {
     faqs: [
       {
         question: "Which tier should I use for literary fiction?",
-        answer:
-          "Premium. It uses the strongest prose model for both drafting and the editorial pass, which matters more here than in any other genre — roughly 36 credits for a finished novella against 21 for a draft-tier one.",
+        answer: `Premium. It uses the strongest prose model for both drafting and the editorial pass, which matters more here than in any other genre — roughly ${PUBLIC_TIER_COSTS.premium.credits} credits for a finished novella against ${PUBLIC_TIER_COSTS.draft.credits} for a draft-tier one.`,
       },
       {
         question: "Can I control the voice?",

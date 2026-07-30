@@ -17,7 +17,7 @@ function ScrollArea({ className, children, ...props }: ScrollAreaPrimitive.Root.
         // No `outline-none`: it sets --tw-outline-style to `none`, which made
         // the `focus-visible:outline-1` below resolve to outline-style: none —
         // leaving the focusable viewport with only a 50%-opacity ring.
-        className="size-full rounded-[inherit] transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className="size-full rounded-[inherit] transition-[color,box-shadow] focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-1"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

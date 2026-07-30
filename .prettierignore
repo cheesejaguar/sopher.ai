@@ -4,5 +4,6 @@ pnpm-lock.yaml
 drizzle
 .agents
 .claude
+.playwright-cli
 doc
 src/app/.well-known

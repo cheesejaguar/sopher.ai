@@ -47,37 +47,41 @@ export function ProjectMenu({
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function rename(formData: FormData) {
-    setError(null);
+    setRenameError(null);
     startTransition(async () => {
       try {
         await updateProject(projectId, { title: String(formData.get("title") ?? "").trim() });
         setRenameOpen(false);
       } catch {
-        setError("Could not rename — try again.");
+        setRenameError("Could not rename — try again.");
       }
     });
   }
 
   function setArchived(next: boolean) {
+    setActionError(null);
     startTransition(async () => {
       try {
         await setProjectArchived(projectId, next);
       } catch {
-        // The card simply doesn't move; nothing destructive happened.
+        setActionError(`Could not ${next ? "archive" : "restore"} this book — try again.`);
       }
     });
   }
 
   function destroy() {
+    setDeleteError(null);
     startTransition(async () => {
       // deleteProject redirects to /studio on success, so only failures return.
       try {
         await deleteProject(projectId);
       } catch {
-        setDeleteOpen(false);
+        setDeleteError("Could not delete this book. Nothing was removed — try again.");
       }
     });
   }
@@ -98,7 +102,12 @@ export function ProjectMenu({
           <MoreHorizontal aria-hidden="true" className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={() => setRenameOpen(true)}>
+          <DropdownMenuItem
+            onClick={() => {
+              setRenameError(null);
+              setRenameOpen(true);
+            }}
+          >
             <Pencil aria-hidden="true" className="size-3.5" /> Rename
           </DropdownMenuItem>
           {archived ? (
@@ -111,11 +120,32 @@ export function ProjectMenu({
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => {
+              setDeleteError(null);
+              setDeleteOpen(true);
+            }}
+          >
             <Trash2 aria-hidden="true" className="size-3.5" /> Delete…
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      {actionError ? (
+        <div
+          role="alert"
+          className="absolute top-10 right-0 z-20 w-64 border border-destructive/35 bg-popover p-3 text-xs text-destructive shadow-lg"
+        >
+          <p>{actionError}</p>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="mt-2 min-h-11 text-foreground underline underline-offset-4 sm:min-h-9"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent>
@@ -133,9 +163,9 @@ export function ProjectMenu({
                 maxLength={200}
               />
             </div>
-            {error ? (
+            {renameError ? (
               <p role="alert" className="text-sm text-destructive">
-                {error}
+                {renameError}
               </p>
             ) : null}
             <DialogFooter>
@@ -159,6 +189,11 @@ export function ProjectMenu({
               no undo. Export anything you want to keep first.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {deleteError ? (
+            <p role="alert" className="text-sm text-destructive">
+              {deleteError}
+            </p>
+          ) : null}
           <AlertDialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={pending}>
               Keep it

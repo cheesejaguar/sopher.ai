@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { BibleEntity } from "@/db/queries/entities";
 import { PORTRAIT_USD, PORTRAIT_KINDS } from "@/lib/bible/portraits";
+import { creditsForUsd } from "@/lib/billing/credits-shared";
 import { setContinuityIssueStatus } from "@/lib/actions/continuity";
 import { cn } from "@/lib/utils";
 
@@ -85,14 +86,16 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
   const [busy, setBusy] = useState(false);
   const [busyIssue, setBusyIssue] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [issueError, setIssueError] = useState<string | null>(null);
 
   async function settleIssue(issueId: string, status: "resolved" | "dismissed") {
     setBusyIssue(issueId);
+    setIssueError(null);
     try {
       await setContinuityIssueStatus(issueId, status);
       router.refresh();
     } catch {
-      // The row simply stays; nothing destructive happened.
+      setIssueError("Could not update this conflict. Nothing changed — try again.");
     } finally {
       setBusyIssue(null);
     }
@@ -121,7 +124,7 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
   }
 
   return (
-    <article className="flex h-full flex-col gap-3 rounded-lg border border-border bg-card p-4">
+    <article className="instrument-surface flex h-full flex-col gap-3 rounded-sm p-4">
       <div className="flex items-start gap-3">
         {portraitUrl ? (
           <Image
@@ -200,7 +203,7 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
       ) : null}
 
       {conflicts.length > 0 ? (
-        <ul className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
+        <ul className="space-y-2 rounded-sm border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
           {conflicts.map((c) => (
             <li key={c.id} className="space-y-1">
               <p>{c.description}</p>
@@ -209,7 +212,7 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
                   type="button"
                   disabled={busyIssue !== null}
                   onClick={() => settleIssue(c.id, "resolved")}
-                  className="rounded border border-destructive/40 px-1.5 py-0.5 font-sans font-medium hover:bg-destructive/10 disabled:opacity-50"
+                  className="min-h-11 rounded-sm border border-destructive/40 px-2 font-sans font-medium hover:bg-destructive/10 disabled:opacity-50 sm:min-h-9"
                 >
                   {busyIssue === c.id ? "…" : "Mark resolved"}
                 </button>
@@ -217,13 +220,18 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
                   type="button"
                   disabled={busyIssue !== null}
                   onClick={() => settleIssue(c.id, "dismissed")}
-                  className="rounded px-1.5 py-0.5 font-sans text-muted-foreground hover:text-foreground disabled:opacity-50"
+                  className="min-h-11 rounded-sm px-2 font-sans text-muted-foreground hover:text-foreground disabled:opacity-50 sm:min-h-9"
                 >
                   Dismiss
                 </button>
               </span>
             </li>
           ))}
+          {issueError ? (
+            <li role="alert" className="border-t border-destructive/30 pt-2">
+              {issueError}
+            </li>
+          ) : null}
         </ul>
       ) : null}
 
@@ -242,8 +250,13 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
             ) : (
               <ImagePlus aria-hidden="true" className="size-3.5" />
             )}
-            {busy ? "Generating…" : `Generate portrait · $${PORTRAIT_USD.toFixed(3)}`}
+            {busy
+              ? "Generating…"
+              : `Generate portrait · ${creditsForUsd(PORTRAIT_USD).toFixed(1)} credits`}
           </Button>
+          <p className="mt-1 text-[0.65rem] text-muted-foreground">
+            ${PORTRAIT_USD.toFixed(3)} metered image cost
+          </p>
           {error ? (
             <p role="alert" className={cn("mt-1 text-xs text-destructive")}>
               {error}

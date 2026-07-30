@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="sopher.ai">
-  <rect width="32" height="32" rx="7.5" fill="#4A5FD0" />
-  <rect x="7.5" y="6" width="4.5" height="20" rx="2" fill="#2B3894" />
-  <rect x="11" y="6" width="13.5" height="20" rx="2" fill="#FBFAF6" />
-  <path d="M17.5 6h4.5v9.2l-2.25-2.1-2.25 2.1z" fill="#14B8A6" />
+  <rect width="32" height="32" rx="3" fill="#080910" />
+  <path d="M11 4.5h15.5V24H11z" fill="none" stroke="#A5A4B2" stroke-width="1.25" opacity=".55" />
+  <path d="M5.5 8H22v5H10.5v3H22v10H5.5v-5h11.25v-3H5.5z" fill="#7357E8" />
+  <path d="M22 8v5h4.5" fill="none" stroke="#79A9FF" stroke-width="1.5" />
 </svg>

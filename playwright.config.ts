@@ -3,20 +3,16 @@
  *
  * Two run modes, both designed to pass:
  *
- * 1. DB-free (what CI runs) — `pnpm test:e2e` with E2E_DB unset.
- *    Runs only the "light" and "dark" projects: marketing pages, the guest
- *    sign-in card, and the /studio/new wizard through the estimate step.
- *    None of these touch Postgres — POST /api/estimates is pure computation,
- *    and the wizard's /api/usage budget readout fails soft when the DB is
- *    unreachable. This split exists because src/db/index.ts uses
- *    @neondatabase/serverless's neon-http driver, which speaks Neon's HTTP
- *    proxy protocol and cannot connect to a plain postgres:16 service
- *    container, so the CI job runs with no database at all.
+ * 1. Public-only — `pnpm test:e2e` with E2E_DB unset.
+ *    Runs desktop light/dark, responsive light/dark, and focused Firefox /
+ *    WebKit smoke projects for marketing, auth, and SEO. Private Studio and
+ *    wizard specs are excluded so this mode cannot inherit and touch a local
+ *    DATABASE_URL through Next's .env loading.
  *
- * 2. Full (local) — `E2E_DB=1 pnpm test:e2e` with a real Neon DATABASE_URL in
- *    .env.local. Adds the "dbDependent-light" / "dbDependent-dark" projects
- *    (e2e/studio.spec.ts): the /studio dashboard and /studio/usage pages,
- *    which server-render from the database.
+ * 2. Full acceptance — CI, or an explicit local opt-in with E2E_DB=1,
+ *    E2E_DATABASE_ISOLATED=1, and E2E_DATABASE_URL. Adds the Studio, wizard,
+ *    Admin, responsive product, and mobile mutation projects against a seeded,
+ *    disposable Neon branch.
  *
  * Auth: the webServer command blanks NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and
  * CLERK_SECRET_KEY, which forces guest mode (shared dev-user, no sign-in)
@@ -32,9 +28,30 @@ import { defineConfig, devices } from "@playwright/test";
 import type { ThemeOptions } from "./e2e/helpers";
 
 const runDbTests = process.env.E2E_DB === "1";
+const runEditorMutationTests = runDbTests && process.env.E2E_EDITOR_MUTATIONS === "1";
+const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
+
+if (runDbTests && (!e2eDatabaseUrl || process.env.E2E_DATABASE_ISOLATED !== "1")) {
+  throw new Error(
+    "DB-backed E2E requires E2E_DATABASE_URL and E2E_DATABASE_ISOLATED=1. Never point it at an inherited .env.local database.",
+  );
+}
 
 /** Specs that require a reachable (Neon) database. */
-const DB_SPEC = /studio\.spec\.ts$/;
+const DB_DESKTOP_SPEC = /[/\\](studio|wizard)\.spec\.ts$/;
+const DB_RESPONSIVE_SPEC = /[/\\]studio-responsive\.spec\.ts$/;
+const DB_SPEC = /(studio|studio-responsive)\.spec\.ts$/;
+const WIZARD_SPEC = /[/\\]wizard\.spec\.ts$/;
+const RESPONSIVE_SPEC = /[/\\]responsive\.spec\.ts$/;
+const BROWSER_SMOKE_SPEC = /browser-smoke\.spec\.ts$/;
+const EDITOR_MUTATION_SPEC = /editor-mobile\.spec\.ts$/;
+const DB_FREE_EXCLUSIONS = [
+  DB_SPEC,
+  WIZARD_SPEC,
+  RESPONSIVE_SPEC,
+  BROWSER_SMOKE_SPEC,
+  EDITOR_MUTATION_SPEC,
+];
 
 export default defineConfig<ThemeOptions>({
   testDir: "./e2e",
@@ -46,7 +63,7 @@ export default defineConfig<ThemeOptions>({
   expect: { timeout: 15_000 },
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://localhost:4321",
+    baseURL: "http://127.0.0.1:4321",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     // Kills marketing/typewriter animations so waits and screenshots are stable.
@@ -55,26 +72,100 @@ export default defineConfig<ThemeOptions>({
   projects: [
     {
       name: "light",
-      testIgnore: DB_SPEC,
+      testIgnore: DB_FREE_EXCLUSIONS,
       use: { ...devices["Desktop Chrome"], appTheme: "light" },
     },
     {
       name: "dark",
-      testIgnore: DB_SPEC,
+      testIgnore: DB_FREE_EXCLUSIONS,
       use: { ...devices["Desktop Chrome"], appTheme: "dark" },
     },
-    // DB-backed pages: only present when E2E_DB=1 (never set in CI).
+    {
+      name: "mobile-light",
+      testMatch: RESPONSIVE_SPEC,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        appTheme: "light",
+      },
+    },
+    {
+      name: "mobile-dark",
+      testMatch: RESPONSIVE_SPEC,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 390, height: 844 },
+        appTheme: "dark",
+      },
+    },
+    {
+      name: "firefox-smoke",
+      testMatch: BROWSER_SMOKE_SPEC,
+      use: { ...devices["Desktop Firefox"], appTheme: "dark" },
+    },
+    {
+      name: "webkit-smoke",
+      testMatch: BROWSER_SMOKE_SPEC,
+      use: { ...devices["Desktop Safari"], appTheme: "light" },
+    },
+    // DB-backed pages: only present when the explicit isolation guard passes.
     ...(runDbTests
       ? [
           {
             name: "dbDependent-light",
-            testMatch: DB_SPEC,
+            testMatch: DB_DESKTOP_SPEC,
             use: { ...devices["Desktop Chrome"], appTheme: "light" as const },
           },
           {
             name: "dbDependent-dark",
-            testMatch: DB_SPEC,
+            testMatch: DB_DESKTOP_SPEC,
             use: { ...devices["Desktop Chrome"], appTheme: "dark" as const },
+          },
+          {
+            name: "dbMobile-light",
+            testMatch: DB_RESPONSIVE_SPEC,
+            use: {
+              ...devices["Desktop Chrome"],
+              viewport: { width: 390, height: 844 },
+              appTheme: "light" as const,
+            },
+          },
+          {
+            name: "dbMobile-dark",
+            testMatch: DB_RESPONSIVE_SPEC,
+            use: {
+              ...devices["Desktop Chrome"],
+              viewport: { width: 390, height: 844 },
+              appTheme: "dark" as const,
+            },
+          },
+        ]
+      : []),
+    ...(runEditorMutationTests
+      ? [
+          {
+            name: "dbEditor-mobile",
+            testMatch: EDITOR_MUTATION_SPEC,
+            // Preserve deterministic screenshots and pending-suggestion
+            // fixtures: destructive editor checks run after every read-only
+            // surface has completed.
+            dependencies: [
+              "light",
+              "dark",
+              "mobile-light",
+              "mobile-dark",
+              "firefox-smoke",
+              "webkit-smoke",
+              "dbDependent-light",
+              "dbDependent-dark",
+              "dbMobile-light",
+              "dbMobile-dark",
+            ],
+            use: {
+              ...devices["Desktop Chrome"],
+              viewport: { width: 390, height: 844 },
+              appTheme: "dark" as const,
+            },
           },
         ]
       : []),
@@ -82,8 +173,15 @@ export default defineConfig<ThemeOptions>({
   webServer: {
     // Explicit empty Clerk vars force guest mode; explicit PORT avoids the
     // "3000 busy, fall back to 3001" dance in `next dev`.
-    command: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY= CLERK_SECRET_KEY= PORT=4321 pnpm dev",
-    url: "http://localhost:4321",
+    command: "pnpm dev --hostname 127.0.0.1",
+    env: {
+      ...process.env,
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
+      CLERK_SECRET_KEY: "",
+      PORT: "4321",
+      ...(e2eDatabaseUrl ? { DATABASE_URL: e2eDatabaseUrl } : {}),
+    },
+    url: "http://127.0.0.1:4321",
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },

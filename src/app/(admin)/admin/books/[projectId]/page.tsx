@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { markdownToHtml } from "@/lib/export/assemble";
 import { getAdminBook } from "@/db/queries/admin";
 import { AuthorInputsPanel } from "@/components/admin/author-inputs";
+import { PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Book — admin" };
 
@@ -24,16 +25,19 @@ export default async function AdminBookView({
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-display text-2xl font-semibold tracking-tight">{book.title}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          by{" "}
-          <Link href={`/admin/users/${book.userId}`} className="text-primary hover:underline">
-            {book.email}
-          </Link>{" "}
-          · {book.genre ?? "no genre"} · {book.status}
-        </p>
-      </header>
+      <PageHeader
+        label="Admin / Read-only manuscript"
+        title={book.title}
+        description={`By ${book.email} · ${book.genre ?? "no genre"} · ${book.status}`}
+        actions={
+          <Link
+            href={`/admin/users/${book.userId}`}
+            className="inline-flex min-h-9 items-center text-sm font-medium text-primary hover:underline"
+          >
+            View author
+          </Link>
+        }
+      />
 
       <p className="rounded-md border border-ember/40 bg-ember/5 px-4 py-2.5 text-sm">
         This is the author&rsquo;s private work, shown read-only for terms enforcement. Access is
@@ -72,7 +76,7 @@ export default async function AdminBookView({
 
       <section aria-label="Manuscript" className="space-y-8">
         {book.chapters.map((chapter) => (
-          <article key={chapter.id} className="paper-surface px-6 py-8 sm:px-10">
+          <article key={chapter.id} className="manuscript-sheet px-6 py-8 sm:px-10">
             <h2 className="font-display text-lg font-semibold text-paper-foreground">
               Chapter {chapter.chapterNumber}
               {chapter.title ? ` — ${chapter.title}` : ""}

@@ -22,6 +22,7 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon-sm"
       aria-label={label}
+      suppressHydrationWarning
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
     >
       <Sun aria-hidden="true" className="dark:hidden" />

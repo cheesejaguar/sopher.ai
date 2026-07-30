@@ -40,7 +40,7 @@ async function ProjectUsage({ projectId }: { projectId: string }) {
 
       <EstimateReceipt estimate={estimate} actualUsd={spend} />
 
-      <div className="rounded-xl bg-card px-4 py-2 ring-1 ring-foreground/10">
+      <div className="instrument-surface rounded-sm px-4 py-2">
         <RoleTable
           rows={byRole.map((r) => ({
             agentRole: r.agentRole,
@@ -73,10 +73,10 @@ function UsageSkeleton() {
         <Skeleton className="h-5 w-40" />
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Skeleton className="h-56 w-full rounded-xl" />
-        <Skeleton className="h-56 w-full rounded-xl" />
+        <Skeleton className="h-56 w-full rounded-sm" />
+        <Skeleton className="h-56 w-full rounded-sm" />
       </div>
-      <Skeleton className="h-48 w-full rounded-xl" />
+      <Skeleton className="h-48 w-full rounded-sm" />
     </>
   );
 }

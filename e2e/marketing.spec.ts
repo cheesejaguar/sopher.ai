@@ -6,12 +6,13 @@ import { axeCheck, expect, fullPageScreenshot, test } from "./helpers";
 test.describe("landing page", () => {
   test("shows hero, nav, and pricing tiers", async ({ page }, testInfo) => {
     await page.goto("/");
+    await expect(page).toHaveTitle("sopher.ai — The book in your head, finally on the page.");
 
     // Hero headline.
     await expect(
       page.getByRole("heading", {
         level: 1,
-        name: "Any book you can imagine. Made for the people you love.",
+        name: "The book in your head, finally on the page.",
       }),
     ).toBeVisible();
 
@@ -44,11 +45,25 @@ test.describe("landing page", () => {
     const mystery = examples.getByRole("button", { name: "Mystery" });
     await expect(mystery).toHaveAttribute("aria-pressed", "false");
 
-    await mystery.click();
+    await mystery.focus();
+    await expect(mystery).toBeFocused();
+    await page.keyboard.press("Enter");
     await expect(mystery).toHaveAttribute("aria-pressed", "true");
     await expect(
       page.getByText("A locked-room mystery set in my hometown", { exact: false }),
     ).toBeVisible();
+  });
+
+  test("reduced motion exposes the complete production sequence", async ({ page }) => {
+    await page.goto("/");
+    const rail = page.getByRole("navigation", {
+      name: "Five-stage story journey",
+    });
+    await expect(rail.getByRole("link", { name: /Continuity/ })).toHaveAttribute(
+      "aria-current",
+      "step",
+    );
+    await expect(rail.getByRole("button", { name: /story journey/ })).toHaveCount(0);
   });
 
   test.describe("with motion allowed", () => {
@@ -69,6 +84,20 @@ test.describe("landing page", () => {
       // Choosing an example hands control to the reader, so auto-advance stops for good.
       await page.getByRole("button", { name: "Family memoir" }).click();
       await expect(page.getByRole("button", { name: /cycling through examples/ })).toHaveCount(0);
+    });
+
+    test("the manuscript rail can be paused and controlled by keyboard", async ({ page }) => {
+      await page.goto("/");
+      const rail = page.getByRole("navigation", {
+        name: "Five-stage story journey",
+      });
+      const pause = rail.getByRole("button", { name: "Pause story journey" });
+      await pause.click();
+      await expect(rail.getByRole("button", { name: "Resume story journey" })).toBeVisible();
+
+      const editorStage = rail.getByRole("link", { name: /Editor/ });
+      await editorStage.focus();
+      await expect(editorStage).toHaveAttribute("aria-current", "step");
     });
   });
 

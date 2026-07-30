@@ -15,6 +15,8 @@ import { FAQS, PIPELINE_STEPS } from "@/components/marketing/content";
  */
 
 export const SITE_URL = "https://sopher.ai";
+export const SOCIAL_IMAGE = `${SITE_URL}/opengraph-image`;
+export const SOCIAL_IMAGE_ALT = "sopher.ai — The book in your head, finally on the page.";
 
 /**
  * JSON-LD goes in a script tag, so it needs dangerouslySetInnerHTML. The input
@@ -47,7 +49,7 @@ export function SiteJsonLd() {
             url: SITE_URL,
             logo: `${SITE_URL}/icon.svg`,
             description:
-              "sopher.ai turns a one-sentence brief into a complete, edited manuscript using a pipeline of AI agents.",
+              "sopher.ai turns the book in an author's head into a complete, edited manuscript using a five-stage pipeline of AI agents.",
             email: "support@sopher.ai",
           },
           {
@@ -81,7 +83,7 @@ export function ProductJsonLd() {
         url: SITE_URL,
         publisher: { "@id": `${SITE_URL}/#organization` },
         description:
-          "Describe a book in a sentence and sopher.ai plans it, writes every chapter in parallel, edits the manuscript, and checks continuity across the whole book.",
+          "Describe the book in your head and sopher.ai plans it, writes every chapter in parallel, edits the manuscript, and checks continuity across the whole book.",
         offers: CREDIT_PACKS.map((pack) => ({
           "@type": "Offer",
           name: `${pack.name} — ${pack.credits} credits`,
@@ -121,9 +123,7 @@ export function HowToJsonLd() {
         "@context": "https://schema.org",
         "@type": "HowTo",
         name: "How sopher.ai writes a book",
-        description:
-          "Five agent stages take a one-sentence brief to a finished, edited manuscript.",
-        totalTime: "PT1H",
+        description: "Five agent stages turn an author's idea into a finished, edited manuscript.",
         step: PIPELINE_STEPS.map((step, index) => ({
           "@type": "HowToStep",
           position: index + 1,

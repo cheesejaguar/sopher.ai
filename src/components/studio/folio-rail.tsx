@@ -31,9 +31,9 @@ const statusLabels: Record<FolioChapterStatus, string> = {
 const statusClasses: Record<FolioChapterStatus, string> = {
   planned: "border-border bg-transparent hover:border-muted-foreground/60",
   drafting: "border-ai/40 bg-transparent hover:border-ai/70",
-  drafted: "border-transparent bg-primary/70 hover:bg-primary/80",
-  edited: "border-transparent bg-primary hover:bg-primary/90",
-  final: "border-transparent bg-primary hover:bg-primary/90",
+  drafted: "border-primary/50 bg-primary/20 text-primary hover:bg-primary/28",
+  edited: "border-transparent bg-primary text-primary-foreground hover:bg-primary/90",
+  final: "border-transparent bg-primary text-primary-foreground hover:bg-primary/90",
 };
 
 /**
@@ -49,6 +49,7 @@ export function FolioRail({
   className,
 }: FolioRailProps) {
   const vertical = orientation === "vertical";
+  const railRef = React.useRef<HTMLDivElement>(null);
   const activeIndex = chapters.findIndex((c) => c.number === activeChapter);
   const [focusIndex, setFocusIndex] = React.useState<number | null>(null);
   // Clamped: if the chapter list shrinks below a remembered focus index, no
@@ -57,6 +58,13 @@ export function FolioRail({
     focusIndex ?? (activeIndex >= 0 ? activeIndex : 0),
     chapters.length - 1,
   );
+
+  React.useEffect(() => {
+    if (vertical || activeChapter === undefined) return;
+    railRef.current
+      ?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [activeChapter, vertical]);
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
     const forward = vertical ? "ArrowDown" : "ArrowRight";
@@ -83,14 +91,50 @@ export function FolioRail({
   return (
     <TooltipProvider>
       <div
-        role="listbox"
-        aria-label="Chapters"
-        aria-orientation={orientation}
-        className={cn("flex w-fit gap-1", vertical ? "flex-col" : "flex-row", className)}
+        ref={railRef}
+        role={onSelect ? "listbox" : "list"}
+        aria-label={onSelect ? "Choose a chapter" : "Chapter status"}
+        aria-orientation={onSelect ? orientation : undefined}
+        className={cn(
+          "flex w-fit max-w-full gap-1",
+          vertical ? "flex-col" : "flex-row overflow-x-auto p-1",
+          className,
+        )}
       >
         {chapters.map((chapter, index) => {
           const isActive = chapter.number === activeChapter;
           const label = `Chapter ${chapter.number} · ${statusLabels[chapter.status]}`;
+          const segmentClassName = cn(
+            "relative grid place-items-center overflow-hidden rounded-[3px] border font-mono text-[0.62rem] tabular-nums transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-safe:duration-200",
+            vertical ? "h-6 w-10" : "h-11 min-w-11 px-1",
+            statusClasses[chapter.status],
+            isActive && "ring-2 ring-ring ring-offset-2 ring-offset-background",
+          );
+          const contents = (
+            <>
+              {!vertical ? (
+                <span className="relative z-10" aria-hidden="true">
+                  {String(chapter.number).padStart(2, "0")}
+                </span>
+              ) : null}
+              {chapter.status === "drafting" ? (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-0 bottom-0 h-[55%] bg-ai motion-safe:animate-pulse"
+                />
+              ) : null}
+            </>
+          );
+
+          if (!onSelect) {
+            return (
+              <span key={chapter.number} role="listitem" className={segmentClassName}>
+                <span className="sr-only">{label}</span>
+                {contents}
+              </span>
+            );
+          }
+
           return (
             <Tooltip key={chapter.number}>
               <TooltipTrigger
@@ -103,21 +147,13 @@ export function FolioRail({
                 onKeyDown={handleKeyDown}
                 onFocus={() => setFocusIndex(index)}
                 className={cn(
-                  // Keyboard focus must stay visible: the `ring` below marks the
-                  // selected chapter, not the focused one, so the outline is kept.
-                  "relative overflow-hidden rounded-[3px] border transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring motion-safe:duration-200",
-                  vertical ? "h-6 w-10" : "h-10 w-6",
-                  statusClasses[chapter.status],
-                  isActive && "ring-2 ring-ring ring-offset-2 ring-offset-background",
-                  onSelect ? "cursor-pointer" : "cursor-default",
+                  segmentClassName,
+                  // Keyboard focus must stay visible: the `ring` marks the
+                  // selected chapter, not the focused one.
+                  "cursor-pointer",
                 )}
               >
-                {chapter.status === "drafting" ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute inset-x-0 bottom-0 h-[55%] bg-ai motion-safe:animate-pulse"
-                  />
-                ) : null}
+                {contents}
               </TooltipTrigger>
               <TooltipContent side={vertical ? "right" : "top"}>{label}</TooltipContent>
             </Tooltip>

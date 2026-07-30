@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 import { listEntities, openContradictions } from "@/db/queries/entities";
 import { ENTITY_KINDS, type EntityKind } from "@/ai/schemas/entities";
+import { cn } from "@/lib/utils";
 
 const KIND_LABELS: Record<EntityKind, string> = {
   character: "Characters",
@@ -31,7 +32,7 @@ export default async function BiblePage({ params }: { params: Promise<{ projectI
     return (
       <div className="space-y-4">
         <h2 className="font-display text-xl font-semibold tracking-tight">Story bible</h2>
-        <div className="paper-surface flex flex-col items-center gap-3 px-6 py-16 text-center">
+        <div className="manuscript-sheet flex flex-col items-center gap-3 px-6 py-16 text-center">
           <p aria-hidden="true" className="text-2xl text-paper-muted">
             ⁂
           </p>
@@ -72,16 +73,26 @@ export default async function BiblePage({ params }: { params: Promise<{ projectI
         const group = entities.filter((e) => e.kind === kind);
         if (group.length === 0) return null;
         return (
-          <section key={kind} aria-labelledby={`bible-${kind}`} className="space-y-3">
+          <section
+            key={kind}
+            aria-labelledby={`bible-${kind}`}
+            className="grid gap-4 border-t border-border pt-5 xl:grid-cols-[9rem_minmax(0,1fr)]"
+          >
             <h3
               id={`bible-${kind}`}
               className="font-mono text-xs tracking-[0.16em] text-muted-foreground uppercase"
             >
               {KIND_LABELS[kind]} · {group.length}
             </h3>
-            <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            <ul
+              className={cn(
+                "grid min-w-0 gap-4",
+                group.length > 1 && "sm:grid-cols-2",
+                group.length > 2 && "2xl:grid-cols-3",
+              )}
+            >
               {group.map((entity) => (
-                <li key={entity.id}>
+                <li key={entity.id} className="min-w-0">
                   <EntityCard entity={entity} conflicts={contradictionsFor(entity.name)} />
                 </li>
               ))}

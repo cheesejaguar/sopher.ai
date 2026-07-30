@@ -12,6 +12,7 @@ import {
 import { CancelRunButton } from "@/components/admin/cancel-run-button";
 import { RelativeTime } from "@/components/relative-time";
 import { formatUsd } from "@/components/usage/format";
+import { PageHeader } from "@/components/studio/product-primitives";
 import { listRuns } from "@/db/queries/admin";
 
 export const metadata = { title: "Runs — admin" };
@@ -23,14 +24,12 @@ export default async function AdminRuns() {
 
   return (
     <div className="space-y-4">
-      <header>
-        <h1 className="font-display text-2xl font-semibold tracking-tight">Generation runs</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Stuck = awaiting input for 24h+ or running for 2h+. The event log shows exactly what the
-          author saw.
-        </p>
-      </header>
-      <Table aria-label="Recent generation runs">
+      <PageHeader
+        label="Admin / Production"
+        title="Generation runs"
+        description="Stuck means awaiting input for 24h+ or running for 2h+. The event log shows exactly what the author saw."
+      />
+      <Table aria-label="Recent generation runs" scrollLabel="Recent generation runs">
         <TableHeader>
           <TableRow>
             <TableHead scope="col">When</TableHead>

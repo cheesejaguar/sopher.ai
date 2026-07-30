@@ -12,6 +12,7 @@ import {
 import { formatCredits, formatUsd } from "@/components/usage/format";
 import { listUsersWithStats } from "@/db/queries/admin";
 import { RelativeTime } from "@/components/relative-time";
+import { PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Users — admin" };
 
@@ -20,8 +21,12 @@ export default async function AdminUsers() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-semibold tracking-tight">Users</h1>
-      <Table aria-label="All users">
+      <PageHeader
+        label="Admin / Accounts"
+        title="Users"
+        description="Balances, book activity, and account state."
+      />
+      <Table aria-label="All users" scrollLabel="All users">
         <TableHeader>
           <TableRow>
             <TableHead scope="col">User</TableHead>

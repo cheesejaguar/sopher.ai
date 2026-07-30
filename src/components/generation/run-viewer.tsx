@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CircleAlert, OctagonX } from "lucide-react";
+import { CircleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -15,6 +15,7 @@ import { RunControls } from "@/components/generation/run-controls";
 import { ApprovalBanner } from "@/components/generation/approval-banner";
 import { CreditsBanner } from "@/components/generation/credits-banner";
 import { CompletionMoment } from "@/components/generation/completion-moment";
+import { AsyncState, ResponsiveInspector } from "@/components/studio/product-primitives";
 import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
 
@@ -124,7 +125,7 @@ export function RunViewer({
   } else if (state.stage === "failed") {
     content = (
       <EndCard
-        icon={<CircleAlert aria-hidden="true" className="size-5 text-destructive" />}
+        status="error"
         title="The run hit a wall."
         body={
           state.error?.message ??
@@ -139,7 +140,7 @@ export function RunViewer({
   } else if (state.stage === "cancelled") {
     content = (
       <EndCard
-        icon={<OctagonX aria-hidden="true" className="size-5 text-muted-foreground" />}
+        status="empty"
         title="You stopped this run."
         body="Everything drafted before the stop is saved. A new run starts fresh from the brief."
         actionLabel={runKind === "full_book" ? "Start a new run" : undefined}
@@ -169,7 +170,7 @@ export function RunViewer({
         {state.error && !state.error.fatal ? (
           <p
             role="alert"
-            className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+            className="flex items-center gap-2 rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
           >
             <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
             {state.error.message}
@@ -189,7 +190,10 @@ export function RunViewer({
             />
           </div>
 
-          <div className="space-y-4">
+          <ResponsiveInspector
+            title="Production inspector"
+            description="Live credit use, agent notes, and run controls."
+          >
             <CostTicker totalUsd={state.totalUsd} estimateUsd={estimateUsd} />
             <AgentFeed items={state.agentFeed} connection={state.connection} />
             <RunControls
@@ -197,7 +201,7 @@ export function RunViewer({
               connection={state.connection}
               onCancelled={markCancelled}
             />
-          </div>
+          </ResponsiveInspector>
         </div>
       </div>
     );
@@ -216,7 +220,7 @@ export function RunViewer({
 }
 
 function EndCard({
-  icon,
+  status,
   title,
   body,
   actionLabel,
@@ -224,7 +228,7 @@ function EndCard({
   pending,
   error,
 }: {
-  icon: React.ReactNode;
+  status: "error" | "empty";
   title: string;
   body: string;
   actionLabel?: string;
@@ -233,23 +237,30 @@ function EndCard({
   error: string | null;
 }) {
   return (
-    <section className="flex flex-col items-center gap-4 rounded-xl bg-card px-6 py-12 text-center ring-1 ring-foreground/10">
-      {icon}
-      <div className="space-y-1.5">
-        <h2 className="font-display text-xl font-semibold tracking-tight">{title}</h2>
-        <p className="mx-auto max-w-md text-sm text-muted-foreground">{body}</p>
-      </div>
-      {actionLabel && onAction ? (
-        <Button onClick={onAction} disabled={pending}>
-          {pending ? <Spinner /> : null}
-          {actionLabel}
-        </Button>
-      ) : null}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </section>
+    <AsyncState
+      status={status}
+      headingLevel={2}
+      title={title}
+      description={body}
+      action={
+        actionLabel && onAction ? (
+          <div className="space-y-3">
+            <Button onClick={onAction} disabled={pending}>
+              {pending ? <Spinner /> : null}
+              {actionLabel}
+            </Button>
+            {error ? (
+              <p role="alert" className="text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+          </div>
+        ) : error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null
+      }
+    />
   );
 }

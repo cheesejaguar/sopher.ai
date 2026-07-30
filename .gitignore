@@ -52,9 +52,16 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 /e2e/screenshots/
+/.lighthouseci/
+/output/
+
+# local Impeccable session state
+/.impeccable/config.local.json
+/.impeccable/hook.cache.json
 
 # Playwright MCP session artifacts
 .playwright-mcp/
+.playwright-cli/
 
 # Filesystem-sync duplicate artifacts (sync-duplicate guard; also enforced in CI)
 * [0-9].*

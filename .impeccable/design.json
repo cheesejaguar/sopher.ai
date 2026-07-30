@@ -1,0 +1,385 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-30T00:19:38Z",
+  "title": "Design System: sopher.ai — The Future Proof",
+  "extensions": {
+    "colorMeta": {
+      "deep-space": {
+        "role": "neutral",
+        "displayName": "Deep Space",
+        "canonical": "oklch(0.105 0.017 274)",
+        "tonalRamp": [
+          "oklch(0.15 0.017 274)",
+          "oklch(0.24 0.017 274)",
+          "oklch(0.34 0.017 274)",
+          "oklch(0.46 0.017 274)",
+          "oklch(0.58 0.017 274)",
+          "oklch(0.7 0.017 274)",
+          "oklch(0.83 0.012 274)",
+          "oklch(0.95 0.007 274)"
+        ]
+      },
+      "luminous-ink": {
+        "role": "neutral",
+        "displayName": "Luminous Ink",
+        "canonical": "oklch(0.95 0.01 270)",
+        "tonalRamp": [
+          "oklch(0.15 0.01 270)",
+          "oklch(0.26 0.01 270)",
+          "oklch(0.38 0.01 270)",
+          "oklch(0.5 0.01 270)",
+          "oklch(0.62 0.01 270)",
+          "oklch(0.74 0.01 270)",
+          "oklch(0.86 0.01 270)",
+          "oklch(0.95 0.01 270)"
+        ]
+      },
+      "instrument-graphite": {
+        "role": "neutral",
+        "displayName": "Instrument Graphite",
+        "canonical": "oklch(0.125 0.022 274)",
+        "tonalRamp": [
+          "oklch(0.15 0.022 274)",
+          "oklch(0.25 0.022 274)",
+          "oklch(0.35 0.022 274)",
+          "oklch(0.47 0.022 274)",
+          "oklch(0.59 0.022 274)",
+          "oklch(0.71 0.02 274)",
+          "oklch(0.83 0.014 274)",
+          "oklch(0.95 0.008 274)"
+        ]
+      },
+      "instrument-raised": {
+        "role": "neutral",
+        "displayName": "Raised Graphite",
+        "canonical": "oklch(0.18 0.028 274)",
+        "tonalRamp": [
+          "oklch(0.15 0.028 274)",
+          "oklch(0.25 0.028 274)",
+          "oklch(0.35 0.028 274)",
+          "oklch(0.47 0.028 274)",
+          "oklch(0.59 0.026 274)",
+          "oklch(0.71 0.022 274)",
+          "oklch(0.83 0.016 274)",
+          "oklch(0.95 0.009 274)"
+        ]
+      },
+      "etched-rule": {
+        "role": "neutral",
+        "displayName": "Etched Rule",
+        "canonical": "oklch(0.255 0.028 274)",
+        "tonalRamp": [
+          "oklch(0.15 0.028 274)",
+          "oklch(0.26 0.028 274)",
+          "oklch(0.37 0.028 274)",
+          "oklch(0.48 0.026 274)",
+          "oklch(0.6 0.024 274)",
+          "oklch(0.72 0.02 274)",
+          "oklch(0.84 0.014 274)",
+          "oklch(0.95 0.008 274)"
+        ]
+      },
+      "ultraviolet-core": {
+        "role": "primary",
+        "displayName": "Ultraviolet Core",
+        "canonical": "oklch(0.56 0.24 289)",
+        "tonalRamp": [
+          "oklch(0.15 0.08 289)",
+          "oklch(0.26 0.13 289)",
+          "oklch(0.37 0.18 289)",
+          "oklch(0.48 0.22 289)",
+          "oklch(0.59 0.23 289)",
+          "oklch(0.71 0.19 289)",
+          "oklch(0.83 0.12 289)",
+          "oklch(0.95 0.04 289)"
+        ]
+      },
+      "ion-blue": {
+        "role": "secondary",
+        "displayName": "Ion Blue",
+        "canonical": "oklch(0.72 0.15 251)",
+        "tonalRamp": [
+          "oklch(0.15 0.055 251)",
+          "oklch(0.26 0.09 251)",
+          "oklch(0.37 0.12 251)",
+          "oklch(0.48 0.145 251)",
+          "oklch(0.6 0.155 251)",
+          "oklch(0.72 0.15 251)",
+          "oklch(0.84 0.1 251)",
+          "oklch(0.95 0.035 251)"
+        ]
+      },
+      "spectral-violet": {
+        "role": "secondary",
+        "displayName": "Spectral Violet",
+        "canonical": "oklch(0.66 0.21 280)",
+        "tonalRamp": [
+          "oklch(0.15 0.07 280)",
+          "oklch(0.26 0.12 280)",
+          "oklch(0.37 0.17 280)",
+          "oklch(0.48 0.2 280)",
+          "oklch(0.6 0.21 280)",
+          "oklch(0.72 0.18 280)",
+          "oklch(0.84 0.11 280)",
+          "oklch(0.95 0.035 280)"
+        ]
+      },
+      "night-paper": {
+        "role": "neutral",
+        "displayName": "Night Paper",
+        "canonical": "oklch(0.94 0.012 88)",
+        "tonalRamp": [
+          "oklch(0.15 0.012 88)",
+          "oklch(0.26 0.012 88)",
+          "oklch(0.38 0.012 88)",
+          "oklch(0.5 0.012 88)",
+          "oklch(0.62 0.012 88)",
+          "oklch(0.74 0.012 88)",
+          "oklch(0.86 0.012 88)",
+          "oklch(0.95 0.012 88)"
+        ]
+      },
+      "paper-ink": {
+        "role": "neutral",
+        "displayName": "Paper Ink",
+        "canonical": "oklch(0.19 0.018 78)",
+        "tonalRamp": [
+          "oklch(0.15 0.018 78)",
+          "oklch(0.26 0.018 78)",
+          "oklch(0.38 0.018 78)",
+          "oklch(0.5 0.018 78)",
+          "oklch(0.62 0.016 78)",
+          "oklch(0.74 0.014 78)",
+          "oklch(0.86 0.011 78)",
+          "oklch(0.95 0.007 78)"
+        ]
+      },
+      "editorial-amber": {
+        "role": "tertiary",
+        "displayName": "Editorial Amber",
+        "canonical": "oklch(0.73 0.14 66)",
+        "tonalRamp": [
+          "oklch(0.15 0.045 66)",
+          "oklch(0.26 0.075 66)",
+          "oklch(0.37 0.105 66)",
+          "oklch(0.48 0.13 66)",
+          "oklch(0.6 0.14 66)",
+          "oklch(0.72 0.14 66)",
+          "oklch(0.84 0.09 66)",
+          "oklch(0.95 0.03 66)"
+        ]
+      },
+      "success": {
+        "role": "tertiary",
+        "displayName": "Verified Green",
+        "canonical": "oklch(0.69 0.13 153)",
+        "tonalRamp": [
+          "oklch(0.15 0.04 153)",
+          "oklch(0.26 0.07 153)",
+          "oklch(0.37 0.1 153)",
+          "oklch(0.48 0.12 153)",
+          "oklch(0.6 0.13 153)",
+          "oklch(0.72 0.125 153)",
+          "oklch(0.84 0.08 153)",
+          "oklch(0.95 0.025 153)"
+        ]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "Editorial Red",
+        "canonical": "oklch(0.62 0.19 25)",
+        "tonalRamp": [
+          "oklch(0.15 0.055 25)",
+          "oklch(0.26 0.1 25)",
+          "oklch(0.37 0.145 25)",
+          "oklch(0.48 0.18 25)",
+          "oklch(0.6 0.19 25)",
+          "oklch(0.72 0.16 25)",
+          "oklch(0.84 0.1 25)",
+          "oklch(0.95 0.03 25)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "One decisive statement on a Persuade surface."
+      },
+      "headline": {
+        "displayName": "Interface Headline",
+        "purpose": "Route and section orientation."
+      },
+      "body": {
+        "displayName": "Interface Body",
+        "purpose": "Plain-language guidance, controls, and marketing copy."
+      },
+      "manuscript": {
+        "displayName": "Manuscript",
+        "purpose": "Long-form prose inside writing and reading surfaces only."
+      },
+      "label": {
+        "displayName": "Folio Label",
+        "purpose": "Short production indices, statuses, and measured data."
+      }
+    },
+    "shadows": [
+      {
+        "name": "paper-lift",
+        "value": "0 1px 0 oklch(1 0 0 / 40%) inset, 0 18px 48px -28px oklch(0.02 0.02 274 / 85%)",
+        "purpose": "Separates a manuscript page from the instrument beneath it."
+      },
+      {
+        "name": "instrument-raised",
+        "value": "0 18px 50px -34px oklch(0.02 0.02 274 / 90%)",
+        "purpose": "Reserved for transient or genuinely raised work surfaces."
+      },
+      {
+        "name": "page-signature",
+        "value": "4px 4px 0 color-mix(in oklch, var(--paper) 82%, var(--paper-edge)), 8px 8px 0 color-mix(in oklch, var(--paper) 70%, var(--paper-edge)), 0 28px 70px -40px oklch(0.02 0.02 274 / 95%)",
+        "purpose": "Makes a finished manuscript read as a physical page stack."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "150ms ease",
+        "purpose": "Color, border, focus, and compact control-state transitions."
+      },
+      {
+        "name": "rail-page-scan",
+        "value": "vertical scan across the active page proof",
+        "purpose": "Shows editorial work moving from brief to finished manuscript; disabled under reduced motion."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms, one iteration",
+        "purpose": "Returns every animated surface to a complete, stable state."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      },
+      {
+        "name": "2xl",
+        "value": "1536px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single decisive action in a region.",
+      "html": "<button class=\"ds-btn-primary\">Start your book</button>",
+      "css": ".ds-btn-primary { min-height: 44px; padding: 0 16px; border: 1px solid transparent; border-radius: 4px; background: var(--primary, oklch(0.56 0.24 289)); color: var(--primary-foreground, oklch(0.99 0.004 275)); font: 600 14px/1 Archivo, Arial, sans-serif; transition: background-color 150ms ease, transform 150ms ease; } .ds-btn-primary:hover { background: color-mix(in oklch, var(--primary, oklch(0.56 0.24 289)) 88%, transparent); } .ds-btn-primary:active { transform: translateY(1px); } .ds-btn-primary:focus-visible { outline: 2px solid var(--ring, oklch(0.71 0.16 251)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Outline Action",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "A supporting action separated with an etched rule.",
+      "html": "<button class=\"ds-btn-outline\">Review outline</button>",
+      "css": ".ds-btn-outline { min-height: 44px; padding: 0 16px; border: 1px solid var(--border, oklch(0.255 0.028 274)); border-radius: 4px; background: var(--background, oklch(0.105 0.017 274)); color: var(--foreground, oklch(0.95 0.01 270)); font: 600 14px/1 Archivo, Arial, sans-serif; transition: background-color 150ms ease, transform 150ms ease; } .ds-btn-outline:hover { background: var(--muted, oklch(0.18 0.02 274)); } .ds-btn-outline:active { transform: translateY(1px); } .ds-btn-outline:focus-visible { outline: 2px solid var(--ring, oklch(0.71 0.16 251)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Brief Field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "A precise, plainly labeled author input.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-brief\">Your book idea</label><input class=\"ds-field\" id=\"ds-brief\" value=\"A family story about starting over\" />",
+      "css": ".ds-field-label { display: block; margin-bottom: 8px; color: var(--foreground, oklch(0.95 0.01 270)); font: 500 13px/1.3 Archivo, Arial, sans-serif; } .ds-field { box-sizing: border-box; width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid var(--input, oklch(0.255 0.028 274)); border-radius: 4px; background: color-mix(in oklch, var(--input, oklch(0.255 0.028 274)) 30%, transparent); color: var(--foreground, oklch(0.95 0.01 270)); font: 400 16px/1.5 Archivo, Arial, sans-serif; } .ds-field:focus-visible { border-color: var(--ring, oklch(0.71 0.16 251)); outline: 2px solid color-mix(in oklch, var(--ring, oklch(0.71 0.16 251)) 45%, transparent); outline-offset: 1px; }"
+    },
+    {
+      "name": "Lifecycle Navigation",
+      "kind": "nav",
+      "description": "Grouped project navigation that makes the author’s current stage positional.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Project lifecycle\"><a class=\"ds-nav-link\" href=\"#\">Plan</a><a class=\"ds-nav-link ds-nav-link-active\" href=\"#\" aria-current=\"page\">Produce</a><a class=\"ds-nav-link\" href=\"#\">Refine</a><a class=\"ds-nav-link\" href=\"#\">Publish</a></nav>",
+      "css": ".ds-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--border, oklch(0.255 0.028 274)); } .ds-nav-link { min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-bottom: 2px solid transparent; color: var(--muted-foreground, oklch(0.69 0.022 270)); font: 600 13px/1 Archivo, Arial, sans-serif; text-decoration: none; } .ds-nav-link:hover { color: var(--foreground, oklch(0.95 0.01 270)); } .ds-nav-link-active { border-bottom-color: var(--primary, oklch(0.56 0.24 289)); color: var(--foreground, oklch(0.95 0.01 270)); background: var(--accent, oklch(0.205 0.045 281)); } .ds-nav-link:focus-visible { outline: 2px solid var(--ring, oklch(0.71 0.16 251)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Instrument Surface",
+      "kind": "card",
+      "description": "A flat-at-rest operational grouping separated by tone and an etched rule.",
+      "html": "<section class=\"ds-instrument\"><p class=\"ds-folio\">03 / EDITOR</p><h3 class=\"ds-instrument-title\">Refine the manuscript</h3><p class=\"ds-instrument-copy\">Review suggestions while the page remains primary.</p></section>",
+      "css": ".ds-instrument { padding: 16px; border: 1px solid var(--border, oklch(0.255 0.028 274)); border-radius: 4px; background: var(--instrument, oklch(0.125 0.022 274)); color: var(--foreground, oklch(0.95 0.01 270)); font-family: Archivo, Arial, sans-serif; } .ds-folio { margin: 0 0 12px; color: var(--ai, oklch(0.72 0.15 251)); font: 500 11px/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .09em; } .ds-instrument-title { margin: 0; font-size: 18px; letter-spacing: -.02em; } .ds-instrument-copy { margin: 8px 0 0; color: var(--muted-foreground, oklch(0.69 0.022 270)); font-size: 14px; line-height: 1.6; }"
+    },
+    {
+      "name": "Status Folio",
+      "kind": "chip",
+      "description": "A compact status reserved for discrete system state.",
+      "html": "<span class=\"ds-status\"><span class=\"ds-status-dot\"></span>Continuity checked</span>",
+      "css": ".ds-status { min-height: 24px; display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border, oklch(0.255 0.028 274)); border-radius: 9999px; background: var(--secondary, oklch(0.195 0.025 274)); color: var(--secondary-foreground, oklch(0.86 0.014 270)); font: 500 11px/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .04em; text-transform: uppercase; } .ds-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success, oklch(0.69 0.13 153)); }"
+    },
+    {
+      "name": "Manuscript Sheet",
+      "kind": "custom",
+      "refersTo": "manuscript-sheet",
+      "description": "The luminous reading and editing plane set apart from product chrome.",
+      "html": "<article class=\"ds-manuscript\"><p class=\"ds-chapter\">Chapter three</p><h3>The Long Way Home</h3><p>By morning, the road had become a pale line between fields she remembered only in pieces.</p></article>",
+      "css": ".ds-manuscript { max-width: 68ch; padding: 32px; border: 1px solid var(--paper-edge, oklch(0.72 0.025 84)); border-radius: 2px; background: var(--paper, oklch(0.94 0.012 88)); color: var(--paper-foreground, oklch(0.19 0.018 78)); box-shadow: 4px 4px 0 color-mix(in oklch, var(--paper, oklch(0.94 0.012 88)) 82%, var(--paper-edge, oklch(0.72 0.025 84))), 8px 8px 0 color-mix(in oklch, var(--paper, oklch(0.94 0.012 88)) 70%, var(--paper-edge, oklch(0.72 0.025 84))); font: 400 17px/1.75 \"Source Serif 4\", Georgia, serif; } .ds-manuscript h3 { margin: 8px 0 20px; font-size: 28px; line-height: 1.2; } .ds-manuscript p { margin: .9em 0; } .ds-chapter { color: var(--paper-muted, oklch(0.42 0.022 82)); font: 500 11px/1.2 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .09em; text-transform: uppercase; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Future Proof",
+    "overview": "sopher.ai feels like a world-class editorial instrument built for someone who has never used one before. It is dark-first, exact, and quietly futuristic rather than theatrical or intimidating. The system makes sequence visible: numbered telemetry, hovering page signatures, edge tabs, and fine proof marks show ideas moving from brief to finished manuscript.\n\nPersuade surfaces use restrained spectral light and dimensional manuscript planes at page scale. Operate surfaces become calmer and denser while keeping the same instrument topology. Read surfaces recede around luminous text and use telemetry as quiet orientation rather than decoration.",
+    "keyCharacteristics": [
+      "Sequence is visible and legible.",
+      "Light, etched rules, and precise offsets create depth without neon card chrome.",
+      "Manuscript typography appears only where prose is genuinely being read.",
+      "Color fields own regions; accents are not sprinkled across generic neutral cards.",
+      "Motion shows editorial progress and never hides content."
+    ],
+    "rules": [
+      {
+        "name": "The Spectral Restraint Rule",
+        "body": "Ultraviolet and ion blue appear only where work is active or direction is primary; most of every screen remains neutral.",
+        "section": "colors"
+      },
+      {
+        "name": "The Semantic Separation Rule",
+        "body": "AI, success, money, warning, and danger never share one color role.",
+        "section": "colors"
+      },
+      {
+        "name": "The Prose Boundary Rule",
+        "body": "Serif type never brands generic interface chrome; it begins where manuscript reading begins.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-at-Rest Rule",
+        "body": "A resting container is separated by field, rule, or offset; shadow appears only when hierarchy or transient state requires it.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do make the current stage, state, and next action obvious before adding expression.",
+      "Do use deep instrument fields, numbered telemetry, edge tabs, etched rules, luminous page planes, and precise offsets as the identity.",
+      "Do preserve semantic HTML, server-rendered public content, and familiar control behavior.",
+      "Do adapt the same world into persuasive, operational, and reading densities.",
+      "Do keep authored sample content clearly labeled."
+    ],
+    "donts": [
+      "Don't use auroras, gradient text, generic glass cards, neon outlines on every surface, generic icon tiles, or stock AI imagery.",
+      "Don't use a centered headline-plus-two-buttons hero as the first viewport.",
+      "Don't repeat the same rounded card grid for unrelated tasks.",
+      "Don't use decorative serif typography outside real prose.",
+      "Don't hide navigation on mobile without an accessible replacement.",
+      "Don't invent testimonials, customers, benchmarks, metrics, or publishing outcomes."
+    ]
+  }
+}

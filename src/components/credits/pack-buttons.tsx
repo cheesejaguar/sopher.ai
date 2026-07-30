@@ -47,11 +47,16 @@ export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo
       <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {packs.map((pack) => (
           <li key={pack.id}>
-            <div className="flex h-full flex-col rounded-lg border border-border bg-card p-5">
-              <h3 className="font-sans font-semibold">{pack.name}</h3>
-              <p className="mt-1 font-display text-3xl font-semibold tabular-nums">${pack.usd}</p>
+            <div className="instrument-surface flex h-full flex-col rounded-sm p-5">
+              <p className="folio-label text-muted-foreground">{pack.name}</p>
+              <p className="mt-4 font-mono text-3xl font-semibold tracking-[-0.03em] tabular-nums">
+                {pack.credits}
+                <span className="ml-2 text-sm font-medium tracking-normal text-muted-foreground">
+                  credits
+                </span>
+              </p>
               <p className="mt-1 text-sm text-muted-foreground">
-                <span className="tabular-nums">{pack.credits}</span> credits
+                ${pack.usd}
                 {pack.bonus > 0 ? (
                   <span className="text-ai"> · {Math.round(pack.bonus * 100)}% bonus</span>
                 ) : null}

@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SpendTable } from "@/components/studio/spend-table";
+import { CostDisplay, PageHeader } from "@/components/studio/product-primitives";
 import Link from "next/link";
 
 import { formatCredits, formatUsd } from "@/components/usage/format";
@@ -29,7 +30,7 @@ async function WalletCard() {
   const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date());
 
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
           Credits
@@ -40,10 +41,11 @@ async function WalletCard() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="font-mono text-2xl tabular-nums">
-          <span className={balance <= 0 ? "text-ember" : undefined}>{formatCredits(balance)}</span>{" "}
-          <span className="text-sm text-muted-foreground">available</span>
-        </p>
+        <CostDisplay
+          credits={balance}
+          label="Available balance"
+          valueClassName={balance <= 0 ? "text-ember" : undefined}
+        />
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
           {formatCredits(spentCredits)} used in {monthName} ({formatUsd(spentUsd)} metered)
         </p>
@@ -62,7 +64,7 @@ async function ProjectSpendCard() {
   const { userId } = await requireUser();
   const rows = await getSpendByProject(userId, monthStartUtc());
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
           Spend by book
@@ -80,7 +82,7 @@ async function RoleSpendCard() {
   const { userId } = await requireUser();
   const rows = await getSpendByRole(userId, undefined, monthStartUtc());
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <CardTitle role="heading" aria-level={2}>
           Spend by role
@@ -109,7 +111,7 @@ async function RoleSpendCard() {
 
 function CardSkeleton({ lines }: { lines: number }) {
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <Skeleton className="h-5 w-36" />
         <Skeleton className="h-4 w-64" />
@@ -125,11 +127,12 @@ function CardSkeleton({ lines }: { lines: number }) {
 
 export default function UsagePage() {
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <header className="space-y-1">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Usage</h1>
-        <p className="text-sm text-muted-foreground">What generation has cost, book by book.</p>
-      </header>
+    <div className="mx-auto max-w-5xl space-y-6">
+      <PageHeader
+        label="Account / Usage"
+        title="Usage"
+        description="Follow credit use by book, agent, and model. Metered USD stays visible as the underlying detail."
+      />
 
       <Suspense fallback={<CardSkeleton lines={3} />}>
         <WalletCard />

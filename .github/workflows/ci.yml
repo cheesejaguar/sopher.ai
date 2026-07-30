@@ -43,6 +43,20 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     needs: check
+    concurrency:
+      # The suite deliberately resets one isolated Neon branch before it runs.
+      # Serialize every ref so two PRs cannot mutate the fixture set together.
+      group: sopher-isolated-e2e-database
+      cancel-in-progress: false
+    env:
+      E2E_DB: "1"
+      E2E_EDITOR_MUTATIONS: "1"
+      E2E_DATABASE_ISOLATED: "1"
+      E2E_FIXTURES_REQUIRED: "1"
+      # Exact allowlist consumed by scripts/seed-e2e.ts. The password remains
+      # only in E2E_DATABASE_URL.
+      E2E_DATABASE_HOST: ep-bitter-mode-awgyoll1-pooler.c-12.us-east-1.aws.neon.tech
+      E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -51,10 +65,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install chromium --with-deps
-      # E2E_DB is intentionally NOT set: the app's neon-http driver cannot
-      # reach a plain postgres container, so CI runs the DB-free subset
-      # (marketing, guest sign-in, wizard). See playwright.config.ts.
+      - run: pnpm exec playwright install chromium firefox webkit --with-deps
+      - name: Seed the isolated Neon acceptance branch
+        run: pnpm e2e:seed
       - run: pnpm test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
@@ -67,4 +80,33 @@ jobs:
         with:
           name: e2e-screenshots
           path: e2e/screenshots
+          retention-days: 14
+
+  lighthouse:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install chromium --with-deps
+      - name: Expose Playwright Chromium to Lighthouse
+        run: node -e 'console.log(`CHROME_PATH=${require("@playwright/test").chromium.executablePath()}`)' >> "$GITHUB_ENV"
+      - name: Build the production application
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ""
+          CLERK_SECRET_KEY: ""
+      - name: Lighthouse production routes
+        run: pnpm lighthouse
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lighthouse-reports
+          path: .lighthouseci
+          include-hidden-files: true
           retention-days: 14

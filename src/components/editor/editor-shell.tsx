@@ -10,7 +10,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import Link from "next/link";
 import type { Route } from "next";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
@@ -18,7 +17,7 @@ import type { Node as PMNode } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import CharacterCount from "@tiptap/extension-character-count";
 import { Markdown } from "tiptap-markdown";
-import { BookOpen, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -33,7 +32,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import type {
@@ -50,8 +55,8 @@ import { ChapterSidebar } from "./chapter-sidebar";
 import { ImageNode } from "./image-node";
 import { mermaidCodeBlockView } from "./mermaid-code-block-view";
 import { ReviewPanel } from "./review-panel";
-import { SelectionToolbar, type ContentToolId } from "./selection-toolbar";
-import { StatusBar } from "./status-bar";
+import { SelectionToolbar, SelectionToolsSheet, type ContentToolId } from "./selection-toolbar";
+import { MobileEditorHeader, MobileEditorToolbar, StatusBar } from "./status-bar";
 import { HistoryPanel } from "./history-panel";
 import { FindReplace } from "./find-replace";
 import { SuggestionCard } from "./suggestion-card";
@@ -143,29 +148,24 @@ function prefersReducedMotion(): boolean {
 }
 
 async function postJson<T>(url: string, body: unknown): Promise<{ status: number; data: T }> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = (await res.json().catch(() => ({}))) as T;
-  return { status: res.status, data };
-}
-
-function MobileInterstitial({ projectId }: { projectId: string }) {
-  return (
-    <div className="paper-surface flex min-h-72 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-      <BookOpen aria-hidden="true" className="size-6 text-paper-muted" />
-      <h2 className="font-display text-lg font-semibold">The editor is best at a desk</h2>
-      <p className="max-w-sm text-sm leading-relaxed text-paper-muted">
-        Accepting suggestions and line-editing want a wide screen and a keyboard. On this device you
-        can read the manuscript instead.
-      </p>
-      <Button render={<Link href={`/projects/${projectId}/manuscript`} />}>
-        Read the manuscript
-      </Button>
-    </div>
-  );
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as T;
+    return { status: res.status, data };
+  } catch {
+    // Mutation handlers already map non-success statuses to a visible toast or
+    // partial-success message. Returning a synthetic offline status keeps a
+    // rejected fetch from becoming an unhandled promise when callbacks are
+    // intentionally invoked with `void`.
+    return {
+      status: 0,
+      data: { error: "Network unavailable. Check your connection and try again." } as T,
+    };
+  }
 }
 
 export function EditorShell({
@@ -184,8 +184,8 @@ export function EditorShell({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const zen = searchParams.get("zen") === "1";
-  const isDesktop = useMediaQuery("(min-width: 1024px)");
-  const isXl = useMediaQuery("(min-width: 1280px)");
+  const isPhone = useMediaQuery("(max-width: 767px)");
+  const isWideWorkbench = useMediaQuery("(min-width: 1280px)");
 
   const [suggestions, setSuggestions] = useState<SuggestionDTO[]>(() =>
     initialSuggestions.filter((s) => s.status === "pending"),
@@ -194,14 +194,17 @@ export function EditorShell({
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [conflict, setConflict] = useState<{ currentVersion: number } | null>(null);
+  const [chaptersOpen, setChaptersOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
+  const [selectionToolsOpen, setSelectionToolsOpen] = useState(false);
   const [, forceLayout] = useReducer((n: number) => n + 1, 0);
 
   const [paperEl, setPaperEl] = useState<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
   const suppressDirtyRef = useRef(false);
   const zenRef = useRef<HTMLDivElement | null>(null);
+  const phoneShellRef = useRef<HTMLDivElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   /** Set to a suggestion id when an async result should take focus once it renders. */
   const focusCardRef = useRef<string | null>(null);
@@ -342,12 +345,16 @@ export function EditorShell({
       setAnnouncement("Asking the editor to revise the selection…");
       try {
         if (!(await autosaveRef.current.flush())) {
-          toast.error("Couldn't save the chapter before editing — resolve the conflict first.");
+          const message = "Couldn't save the chapter before editing — resolve the conflict first.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         const selection = markdownSelection(ed.state, serializeDoc, from, to);
         if (!selection) {
-          toast.error("Couldn't map that selection — try selecting a slightly larger passage.");
+          const message = "Couldn't map that selection — try selecting a slightly larger passage.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         const { status, data } = await postJson<SelectionEditResponse & { error?: unknown }>(
@@ -362,11 +369,17 @@ export function EditorShell({
           focusCardRef.current = data.suggestion.id;
           setAnnouncement("A suggestion is ready below the passage.");
         } else if (status === 402) {
-          toast.error(String(data.error ?? "Monthly budget reached."));
+          const message = String(data.error ?? "Monthly budget reached.");
+          toast.error(message);
+          setAnnouncement(message);
         } else if (status === 409) {
-          toast.error("The saved chapter moved under you — try again.");
+          const message = "The saved chapter moved under you — try again.";
+          toast.error(message);
+          setAnnouncement(message);
         } else {
-          toast.error("The editor couldn't produce a suggestion. Try again.");
+          const message = "The editor couldn't produce a suggestion. Try again.";
+          toast.error(message);
+          setAnnouncement(message);
         }
       } finally {
         setBusy(null);
@@ -389,12 +402,16 @@ export function EditorShell({
       );
       try {
         if (!(await autosaveRef.current.flush())) {
-          toast.error("Couldn't save the chapter first — resolve the conflict.");
+          const message = "Couldn't save the chapter first — resolve the conflict.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         const selection = markdownSelection(ed.state, serializeDoc, from, to);
         if (!selection) {
-          toast.error("Couldn't read that selection — try reselecting.");
+          const message = "Couldn't read that selection — try reselecting.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         const { status, data } = await postJson<ContentToolResponse & { error?: unknown }>(
@@ -402,11 +419,12 @@ export function EditorShell({
           { chapterId, text: selection.text },
         );
         if (status !== 200 || !data.output) {
-          toast.error(
+          const message =
             status === 402
               ? String(data.error ?? "Monthly budget reached.")
-              : String(data.error ?? "The tool didn't produce a result."),
-          );
+              : String(data.error ?? "The tool didn't produce a result.");
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         const insertPos = ed.state.selection.$to.after(1);
@@ -436,6 +454,11 @@ export function EditorShell({
             .run();
           toast.success("Illustration added below the passage.");
         }
+        setAnnouncement(
+          data.output.kind === "mermaid"
+            ? "Diagram added below the passage."
+            : "Illustration added below the passage.",
+        );
       } finally {
         setBusy(null);
       }
@@ -478,7 +501,9 @@ export function EditorShell({
       ed.setEditable(false);
       try {
         if (!(await autosaveRef.current.flush())) {
-          toast.error("Couldn't save the chapter first — resolve the conflict.");
+          const message = "Couldn't save the chapter first — resolve the conflict.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         if (editedText !== undefined) {
@@ -493,10 +518,33 @@ export function EditorShell({
             .focus()
             .insertContentAt({ from: item.range.from, to: item.range.to }, editedText)
             .run();
-          void postJson(`/api/chapters/${chapterId}/edits/${id}`, { action: "reject" });
-          setSuggestions((prev) => prev.filter((s) => s.id !== id));
-          setActiveId((cur) => (cur === id ? null : cur));
-          setAnnouncement("Your edit was applied to the passage.");
+          try {
+            const { status: dismissStatus } = await postJson(
+              `/api/chapters/${chapterId}/edits/${id}`,
+              { action: "reject" },
+            );
+            if (dismissStatus === 200 || dismissStatus === 409) {
+              setSuggestions((prev) => prev.filter((s) => s.id !== id));
+              setActiveId((cur) => (cur === id ? null : cur));
+              setAnnouncement("Your edit was applied to the passage.");
+            } else {
+              setActiveId((cur) => (cur === id ? null : cur));
+              toast.warning(
+                "Your wording was applied, but the suggestion could not be dismissed. You can retry from Suggestions.",
+              );
+              setAnnouncement(
+                "Your edit was applied, but the suggestion is still pending and can be dismissed from Suggestions.",
+              );
+            }
+          } catch {
+            setActiveId((cur) => (cur === id ? null : cur));
+            toast.warning(
+              "Your wording was applied, but the suggestion could not be dismissed. You can retry from Suggestions.",
+            );
+            setAnnouncement(
+              "Your edit was applied, but the suggestion is still pending and can be dismissed from Suggestions.",
+            );
+          }
           return;
         }
         const { status, data } = await postJson<SuggestionActionResponse & { error?: unknown }>(
@@ -568,12 +616,31 @@ export function EditorShell({
     if (ids.length === 0) return;
     setBusy("apply");
     try {
-      await Promise.allSettled(
+      const results = await Promise.allSettled(
         ids.map((id) => postJson(`/api/chapters/${chapterId}/edits/${id}`, { action: "reject" })),
       );
-      setSuggestions([]);
-      setActiveId(null);
-      setAnnouncement(`Dismissed ${ids.length} suggestion${ids.length === 1 ? "" : "s"}.`);
+      const dismissed = new Set<string>();
+      results.forEach((result, index) => {
+        if (
+          result.status === "fulfilled" &&
+          (result.value.status === 200 || result.value.status === 409)
+        ) {
+          dismissed.add(ids[index]);
+        }
+      });
+      const failed = ids.length - dismissed.size;
+      setSuggestions((prev) => prev.filter((suggestion) => !dismissed.has(suggestion.id)));
+      setActiveId((current) => (current && dismissed.has(current) ? null : current));
+      if (failed > 0) {
+        toast.warning(
+          `Dismissed ${dismissed.size}; ${failed} suggestion${failed === 1 ? "" : "s"} could not be dismissed. Try again.`,
+        );
+        setAnnouncement(
+          `${failed} suggestion${failed === 1 ? " remains" : "s remain"} pending after a partial dismissal.`,
+        );
+      } else {
+        setAnnouncement(`Dismissed ${ids.length} suggestion${ids.length === 1 ? "" : "s"}.`);
+      }
     } finally {
       setBusy(null);
     }
@@ -585,7 +652,9 @@ export function EditorShell({
       setAnnouncement(`The editor is reading chapter ${chapterNumber}…`);
       try {
         if (!(await autosaveRef.current.flush())) {
-          toast.error("Couldn't save the chapter first — resolve the conflict.");
+          const message = "Couldn't save the chapter first — resolve the conflict.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         const { status, data } = await postJson<ReviewResponse & { error?: unknown }>(
@@ -593,11 +662,12 @@ export function EditorShell({
           { instruction },
         );
         if (status !== 200 || !data.suggestions) {
-          toast.error(
+          const message =
             status === 402
               ? String(data.error ?? "Monthly budget reached.")
-              : "The review didn't complete — try again.",
-          );
+              : "The review didn't complete — try again.";
+          toast.error(message);
+          setAnnouncement(message);
           return;
         }
         setSuggestions((prev) => {
@@ -738,6 +808,14 @@ export function EditorShell({
     return hideBehindOverlay(zenRef.current);
   }, [zen]);
 
+  // The phone editor is a focused full-viewport workspace. Until the product
+  // shell omits its mobile chrome on editor routes, keep that covered chrome
+  // out of the accessibility tree as well as visually behind this surface.
+  useEffect(() => {
+    if (!isPhone || zen || !phoneShellRef.current) return;
+    return hideBehindOverlay(phoneShellRef.current);
+  }, [isPhone, zen]);
+
   // Move focus onto a suggestion card that arrived from an async request.
   useEffect(() => {
     const wanted = focusCardRef.current;
@@ -752,23 +830,41 @@ export function EditorShell({
     el.focus();
   });
 
-  if (!isDesktop) {
-    return <MobileInterstitial projectId={projectId} />;
-  }
-
   const activeSuggestion = activeId ? suggestions.find((s) => s.id === activeId) : undefined;
   const activeItem = activeId ? items.find((i) => i.suggestion.id === activeId) : undefined;
-  const cardPos = computeCardPosition(editor, activeItem, paperEl);
+  const cardPos = isWideWorkbench ? computeCardPosition(editor, activeItem, paperEl) : null;
 
   const canvas = (
-    <div className="relative h-full overflow-y-auto">
-      <div className={cn("mx-auto max-w-[78ch] px-4 py-8", zen && "py-16")}>
-        <div ref={setPaperEl} className="paper-surface relative px-8 py-12 sm:px-14 sm:py-16">
-          <header className="mb-8">
-            <p className="font-mono text-[10px] tracking-widest text-paper-muted uppercase">
-              Chapter {chapterNumber}
-            </p>
-            <h2 className="mt-1 font-display text-2xl font-semibold tracking-tight text-balance">
+    <div
+      className={cn(
+        "instrument-canvas relative h-full min-w-0 overflow-y-auto overscroll-contain",
+        isPhone && "bg-paper",
+      )}
+    >
+      <div
+        className={cn(
+          "mx-auto max-w-[78ch] px-4 py-8",
+          zen && !isPhone && "py-16",
+          isPhone && "min-h-full max-w-none p-0",
+        )}
+      >
+        <div
+          ref={setPaperEl}
+          className={cn(
+            "relative px-8 py-12 sm:px-14 sm:py-16",
+            isPhone
+              ? "paper-surface min-h-full rounded-none border-x-0 border-y-0 px-5 pt-7 pb-28 shadow-none"
+              : "manuscript-sheet",
+          )}
+        >
+          <header className={cn("mb-8", isPhone && "mb-6")}>
+            <p className="folio-label text-paper-muted">Chapter {chapterNumber}</p>
+            <h2
+              className={cn(
+                "mt-1 font-serif text-2xl font-semibold tracking-tight text-balance",
+                isPhone && "text-xl",
+              )}
+            >
               {chapterTitle ?? `Chapter ${chapterNumber}`}
             </h2>
           </header>
@@ -780,12 +876,20 @@ export function EditorShell({
             to save, and Control or Command F to find and replace. When a suggestion is selected,
             press Control or Command Enter to accept it and Control or Command Backspace to reject
             it. Press Escape to close a suggestion, the find bar, or zen mode. Every suggestion is
-            also listed in the suggestions panel, and past versions are in the History dialog.
+            also listed in the suggestions panel, and past versions are in Chapter history. On a
+            touch screen, select a passage and use Edit selected passage in the bottom toolbar for
+            the same AI and content tools.
           </p>
 
-          <EditorContent editor={editor} />
+          <EditorContent
+            editor={editor}
+            className={cn(
+              isPhone &&
+                "[&_.ProseMirror]:min-h-[calc(100dvh-15rem)] [&_.ProseMirror]:scroll-pb-32",
+            )}
+          />
 
-          {editor ? (
+          {editor && isWideWorkbench ? (
             <SelectionToolbar
               editor={editor}
               busy={busy === "edit" || busy === "tool"}
@@ -794,7 +898,7 @@ export function EditorShell({
             />
           ) : null}
 
-          {activeSuggestion && cardPos ? (
+          {activeSuggestion && cardPos && isWideWorkbench ? (
             <div
               ref={cardRef}
               role="group"
@@ -834,8 +938,14 @@ export function EditorShell({
       onReject={(id) => void rejectSuggestion(id)}
       onAcceptAll={() => void acceptAll()}
       onRejectAll={() => void rejectAll()}
+      touchFriendly={!isWideWorkbench}
     />
   );
+
+  const restoreFromHistory = (restoredContent: string, restoredVersion: number) => {
+    editor?.commands.setContent(restoredContent);
+    autosave.markSynced(restoredVersion);
+  };
 
   const statusBar = (
     <StatusBar
@@ -845,7 +955,6 @@ export function EditorShell({
       pendingCount={suggestions.length}
       zen={zen}
       onToggleZen={toggleZen}
-      onOpenReview={!zen && !isXl ? () => setReviewOpen(true) : undefined}
       extras={
         <>
           <Button
@@ -861,10 +970,7 @@ export function EditorShell({
             chapterId={chapterId}
             getCurrentContent={() => (editor ? serializeDoc(editor.state.doc) : "")}
             flush={() => autosave.flush()}
-            onRestored={(content, version) => {
-              editor?.commands.setContent(content);
-              autosave.markSynced(version);
-            }}
+            onRestored={restoreFromHistory}
           />
         </>
       }
@@ -872,18 +978,54 @@ export function EditorShell({
   );
 
   const findBar =
-    findOpen && editor ? <FindReplace editor={editor} onClose={() => setFindOpen(false)} /> : null;
+    findOpen && editor && isWideWorkbench ? (
+      <FindReplace editor={editor} onClose={() => setFindOpen(false)} />
+    ) : null;
+
+  const mobileToolbar = (
+    <MobileEditorToolbar
+      editor={editor}
+      pendingCount={suggestions.length}
+      zen={zen}
+      reviewOpen={reviewOpen}
+      selectionToolsOpen={selectionToolsOpen}
+      findOpen={findOpen}
+      onOpenSelectionTools={() => setSelectionToolsOpen(true)}
+      onOpenReview={() => setReviewOpen(true)}
+      onOpenFind={() => setFindOpen(true)}
+      onToggleZen={toggleZen}
+      history={
+        <HistoryPanel
+          compact
+          chapterId={chapterId}
+          getCurrentContent={() => (editor ? serializeDoc(editor.state.doc) : "")}
+          flush={() => autosave.flush()}
+          onRestored={restoreFromHistory}
+        />
+      }
+    />
+  );
+
+  const mobileHeader = (
+    <MobileEditorHeader
+      chapterNumber={chapterNumber}
+      chapterTitle={chapterTitle}
+      saveState={autosave.state}
+      chaptersOpen={chaptersOpen}
+      onOpenChapters={() => setChaptersOpen(true)}
+    />
+  );
 
   return (
     <>
       {zen ? (
         <div ref={zenRef} className="fixed inset-0 z-50 flex flex-col bg-background">
-          {findBar}
+          {isWideWorkbench ? findBar : mobileHeader}
           <div className="min-h-0 flex-1 overflow-hidden">{canvas}</div>
-          {statusBar}
+          {isWideWorkbench ? statusBar : mobileToolbar}
         </div>
-      ) : (
-        <div className="flex h-[calc(100dvh-13rem)] min-h-[520px] flex-col overflow-hidden rounded-xl border border-border bg-card">
+      ) : isWideWorkbench ? (
+        <div className="instrument-surface flex h-[calc(100dvh-13rem)] min-h-[520px] flex-col overflow-hidden">
           <div className="min-h-0 flex-1">
             <ResizablePanelGroup orientation="horizontal">
               <ResizablePanel defaultSize={230} minSize={180} maxSize={340}>
@@ -901,27 +1043,137 @@ export function EditorShell({
                   <div className="min-h-0 flex-1">{canvas}</div>
                 </div>
               </ResizablePanel>
-              {isXl ? (
-                <>
-                  <ResizableHandle />
-                  <ResizablePanel defaultSize={330} minSize={260} maxSize={460}>
-                    {reviewPanel}
-                  </ResizablePanel>
-                </>
-              ) : null}
+              <ResizableHandle />
+              <ResizablePanel defaultSize={330} minSize={260} maxSize={460}>
+                {reviewPanel}
+              </ResizablePanel>
             </ResizablePanelGroup>
           </div>
           {statusBar}
         </div>
+      ) : (
+        <div
+          ref={phoneShellRef}
+          data-editor-workbench="true"
+          className={cn(
+            "instrument-surface flex h-[calc(100dvh-13rem)] min-h-[520px] min-w-0 flex-col overflow-hidden",
+            isPhone &&
+              "fixed inset-0 z-[45] h-dvh min-h-0 w-full rounded-none border-0 bg-background",
+          )}
+        >
+          {mobileHeader}
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">{canvas}</div>
+          {mobileToolbar}
+        </div>
       )}
 
-      {!isXl && !zen ? (
+      {!isWideWorkbench ? (
         <Sheet open={reviewOpen} onOpenChange={setReviewOpen}>
-          <SheetContent side="right" className="w-[380px] p-0 sm:max-w-[380px]">
+          <SheetContent
+            side="right"
+            className={cn(
+              "w-[380px] gap-0 p-0 sm:max-w-[380px]",
+              isPhone && "h-dvh w-full max-w-none sm:max-w-none",
+            )}
+          >
             <SheetHeader className="sr-only">
               <SheetTitle>Suggestions</SheetTitle>
+              <SheetDescription>
+                Review, accept, reject, or request editorial suggestions for this chapter.
+              </SheetDescription>
             </SheetHeader>
             {reviewPanel}
+          </SheetContent>
+        </Sheet>
+      ) : null}
+
+      {!isWideWorkbench ? (
+        <Sheet open={chaptersOpen} onOpenChange={setChaptersOpen}>
+          <SheetContent
+            side="left"
+            className={cn(
+              "w-[22rem] gap-0 p-0 sm:max-w-[22rem]",
+              isPhone && "h-dvh w-[min(92vw,24rem)]",
+            )}
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>Choose a chapter</SheetTitle>
+              <SheetDescription>Open another drafted chapter in the editor.</SheetDescription>
+            </SheetHeader>
+            <ChapterSidebar
+              projectId={projectId}
+              bookTitle={bookTitle}
+              chapters={chapters}
+              activeChapterNumber={chapterNumber}
+              touchFriendly
+              onNavigate={() => setChaptersOpen(false)}
+            />
+          </SheetContent>
+        </Sheet>
+      ) : null}
+
+      {!isWideWorkbench && editor ? (
+        <Sheet open={findOpen} onOpenChange={setFindOpen}>
+          <SheetContent
+            side="bottom"
+            className="max-h-[min(86dvh,34rem)] gap-0 overflow-y-auto p-0"
+          >
+            <SheetHeader className="border-b border-border px-4 py-3 pr-14 text-left">
+              <SheetTitle>Find and replace</SheetTitle>
+              <SheetDescription>Search within chapter {chapterNumber}.</SheetDescription>
+            </SheetHeader>
+            <FindReplace editor={editor} onClose={() => setFindOpen(false)} touchLayout />
+            <div className="safe-area-bottom" />
+          </SheetContent>
+        </Sheet>
+      ) : null}
+
+      {!isWideWorkbench ? (
+        <SelectionToolsSheet
+          open={selectionToolsOpen}
+          onOpenChange={setSelectionToolsOpen}
+          busy={busy === "edit" || busy === "tool"}
+          onEdit={requestSelectionEdit}
+          onTool={runContentTool}
+        />
+      ) : null}
+
+      {!isWideWorkbench && activeSuggestion ? (
+        <Sheet
+          open
+          onOpenChange={(open) => {
+            if (!open) dismissCard();
+          }}
+        >
+          <SheetContent
+            side="bottom"
+            showCloseButton={false}
+            className="max-h-[min(88dvh,40rem)] gap-0 overflow-y-auto bg-popover p-0"
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>Editor suggestion</SheetTitle>
+              <SheetDescription>
+                Compare the proposed wording, then accept, edit, or reject it.
+              </SheetDescription>
+            </SheetHeader>
+            <div
+              ref={cardRef}
+              role="group"
+              aria-label="Editor suggestion"
+              tabIndex={-1}
+              className="safe-area-bottom focus:ring-2 focus:ring-inset focus:ring-ring focus:outline-none"
+            >
+              <SuggestionCard
+                key={activeSuggestion.id}
+                suggestion={activeSuggestion}
+                busy={busy === "apply"}
+                onAccept={() => void acceptSuggestion(activeSuggestion.id)}
+                onAcceptEdited={(text) => void acceptSuggestion(activeSuggestion.id, text)}
+                onReject={() => void rejectSuggestion(activeSuggestion.id)}
+                onDismiss={dismissCard}
+                touchFriendly
+              />
+            </div>
           </SheetContent>
         </Sheet>
       ) : null}
@@ -937,10 +1189,14 @@ export function EditorShell({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => window.location.reload()}>
+            <AlertDialogCancel
+              className={cn(!isWideWorkbench && "min-h-11 rounded-sm")}
+              onClick={() => window.location.reload()}
+            >
               Reload theirs
             </AlertDialogCancel>
             <AlertDialogAction
+              className={cn(!isWideWorkbench && "min-h-11 rounded-sm")}
               onClick={() => {
                 setConflict(null);
                 void autosave.keepMine();
@@ -957,7 +1213,7 @@ export function EditorShell({
         {announcement}
       </p>
 
-      <Toaster position="bottom-center" />
+      <Toaster position={isPhone ? "top-center" : "bottom-center"} />
     </>
   );
 }

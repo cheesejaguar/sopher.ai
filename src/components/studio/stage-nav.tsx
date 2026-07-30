@@ -1,69 +1,213 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const stages = [
-  { slug: "brief", label: "Brief" },
-  { slug: "outline", label: "Outline" },
-  { slug: "bible", label: "Bible" },
-  { slug: "write", label: "Write" },
-  { slug: "editor", label: "Editor" },
-  { slug: "manuscript", label: "Manuscript" },
+const lifecycle = [
+  {
+    label: "Plan",
+    stages: [
+      { slug: "brief", label: "Brief" },
+      { slug: "outline", label: "Outline" },
+    ],
+  },
+  {
+    label: "Produce",
+    stages: [
+      { slug: "bible", label: "Story bible" },
+      { slug: "write", label: "Write" },
+    ],
+  },
+  {
+    label: "Refine",
+    stages: [{ slug: "editor", label: "Editor" }],
+  },
+  {
+    label: "Publish",
+    stages: [{ slug: "manuscript", label: "Manuscript" }],
+  },
+] as const;
+
+const secondary = [
   { slug: "usage", label: "Usage" },
   { slug: "settings", label: "Settings" },
 ] as const;
 
-function StageTabs({ projectId, pathname }: { projectId: string; pathname?: string }) {
+type StageSlug =
+  "brief" | "outline" | "bible" | "write" | "editor" | "manuscript" | "usage" | "settings";
+
+type Stage = { slug: StageSlug; label: string };
+
+function getStageState(projectId: string, pathname: string | undefined, stage: Stage) {
+  const href = `/projects/${projectId}/${stage.slug}` as Route;
+  const current =
+    pathname === undefined
+      ? undefined
+      : pathname === href
+        ? ("page" as const)
+        : pathname.startsWith(`${href}/`)
+          ? ("true" as const)
+          : undefined;
+
+  return { href, current, active: current !== undefined };
+}
+
+function DesktopStageTabs({ projectId, pathname }: { projectId: string; pathname?: string }) {
+  function stageLink(stage: Stage) {
+    const { href, current, active } = getStageState(projectId, pathname, stage);
+
+    return (
+      <Link
+        key={stage.slug}
+        href={href}
+        aria-current={current}
+        className={cn(
+          "relative inline-flex min-h-11 items-center rounded-sm px-2.5 text-[0.78rem] font-medium whitespace-nowrap transition-colors lg:min-h-9",
+          active
+            ? "bg-accent text-foreground"
+            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn("absolute inset-x-2 bottom-0 h-px bg-transparent", active && "bg-primary")}
+        />
+        {stage.label}
+      </Link>
+    );
+  }
+
   return (
-    <div className="flex w-fit items-center gap-1 rounded-lg bg-muted p-1">
-      {stages.map((stage) => {
-        const href = `/projects/${projectId}/${stage.slug}` as const;
-        // `"page"` only for the exact route. A nested route such as
-        // /editor/3 is inside the stage but is not the tab's own page, so it
-        // gets the generic `"true"` rather than mislabelling the location.
-        const current =
-          pathname === undefined
-            ? undefined
-            : pathname === href
-              ? "page"
-              : pathname.startsWith(`${href}/`)
-                ? "true"
-                : undefined;
-        const active = current !== undefined;
-        return (
-          <Link
-            key={stage.slug}
-            href={href}
-            aria-current={current}
-            className={cn(
-              "inline-flex h-7 items-center rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors",
-              active
-                ? "bg-background text-foreground shadow-sm dark:bg-input/30"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {stage.label}
-          </Link>
-        );
-      })}
+    <div className="flex min-w-max items-stretch gap-3 lg:min-w-0 lg:flex-wrap">
+      {lifecycle.map((group, index) => (
+        <div
+          key={group.label}
+          className="flex items-center gap-1 border-r border-border pr-3 last:border-r-0"
+        >
+          <span className="mr-1 flex items-center gap-1.5 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
+            <span className="text-primary">{String(index + 1).padStart(2, "0")}</span>
+            {group.label}
+          </span>
+          {group.stages.map(stageLink)}
+        </div>
+      ))}
+      <div className="flex items-center gap-1 border-l border-border pl-3">
+        <span className="mr-1 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
+          Project tools
+        </span>
+        {secondary.map(stageLink)}
+      </div>
     </div>
   );
 }
 
-function StageTabsWithPathname({ projectId }: { projectId: string }) {
+function MobileStageMenu({ projectId, pathname }: { projectId: string; pathname?: string }) {
+  const [openOnPathname, setOpenOnPathname] = useState<string | null>(null);
+  const menuPathname = pathname ?? "";
+  const open = openOnPathname === menuPathname;
+  const activeStage =
+    lifecycle
+      .flatMap((group) => group.stages.map((stage) => ({ group: group.label, ...stage })))
+      .find((stage) => getStageState(projectId, pathname, stage).active) ??
+    secondary
+      .map((stage) => ({ group: "Project tools", ...stage }))
+      .find((stage) => getStageState(projectId, pathname, stage).active);
+
+  function mobileLink(stage: Stage) {
+    const { href, current, active } = getStageState(projectId, pathname, stage);
+    return (
+      <Link
+        key={stage.slug}
+        href={href}
+        aria-current={current}
+        onClick={() => setOpenOnPathname(null)}
+        className={cn(
+          "grid min-h-11 grid-cols-[1fr_auto] items-center border-l-2 px-3 text-sm font-medium",
+          active
+            ? "border-primary bg-accent text-foreground"
+            : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+        )}
+      >
+        {stage.label}
+        {active ? (
+          <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
+            Current
+          </span>
+        ) : null}
+      </Link>
+    );
+  }
+
+  return (
+    <details
+      open={open}
+      onToggle={(event) => setOpenOnPathname(event.currentTarget.open ? menuPathname : null)}
+      className="group lg:hidden"
+    >
+      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 px-4 py-2 marker:content-none">
+        <span className="min-w-0">
+          <span className="folio-label block text-muted-foreground">Project navigation</span>
+          <span className="mt-1 block truncate text-sm font-semibold">
+            {activeStage ? `${activeStage.group} / ${activeStage.label}` : "Choose a stage"}
+          </span>
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div className="border-t border-border bg-background p-3">
+        {lifecycle.map((group, index) => (
+          <section key={group.label} aria-label={group.label} className="mt-3 first:mt-0">
+            <p className="folio-label px-3 pb-1 text-muted-foreground">
+              <span className="mr-2 text-ai">{String(index + 1).padStart(2, "0")}</span>
+              {group.label}
+            </p>
+            <div>{group.stages.map(mobileLink)}</div>
+          </section>
+        ))}
+        <section aria-label="Project tools" className="mt-4 border-t border-border pt-3">
+          <p className="folio-label px-3 pb-1 text-muted-foreground">Project tools</p>
+          <div>{secondary.map(mobileLink)}</div>
+        </section>
+      </div>
+    </details>
+  );
+}
+
+function StageNavigationWithPathname({ projectId }: { projectId: string }) {
   const pathname = usePathname();
-  return <StageTabs projectId={projectId} pathname={pathname} />;
+  return (
+    <>
+      <MobileStageMenu projectId={projectId} pathname={pathname} />
+      <div className="hidden px-2 py-2 lg:block">
+        <DesktopStageTabs projectId={projectId} pathname={pathname} />
+      </div>
+    </>
+  );
 }
 
 export function StageNav({ projectId }: { projectId: string }) {
   return (
-    <nav aria-label="Workspace stages" className="max-w-full overflow-x-auto">
-      <Suspense fallback={<StageTabs projectId={projectId} />}>
-        <StageTabsWithPathname projectId={projectId} />
+    <nav aria-label="Project lifecycle" className="min-w-0 border-y border-border bg-card/35">
+      <Suspense
+        fallback={
+          <>
+            <div className="flex min-h-12 items-center px-4 lg:hidden">
+              <span className="folio-label text-muted-foreground">Project navigation</span>
+            </div>
+            <div className="hidden px-2 py-2 lg:block">
+              <DesktopStageTabs projectId={projectId} />
+            </div>
+          </>
+        }
+      >
+        <StageNavigationWithPathname projectId={projectId} />
       </Suspense>
     </nav>
   );

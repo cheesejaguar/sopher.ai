@@ -6,8 +6,10 @@ import { BookOpenText, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { RunViewer } from "@/components/generation/run-viewer";
+import { CostDisplay } from "@/components/studio/product-primitives";
 import type { RunSnapshot } from "@/hooks/use-run-stream";
 import { TIER_LABELS, type QualityTier } from "@/ai/models";
+import { creditsForUsd } from "@/lib/billing/credits-shared";
 
 function words(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
@@ -160,26 +162,28 @@ function PreFlight({
   ];
 
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_18rem]">
-      <section className="rounded-xl bg-card px-6 py-8 ring-1 ring-foreground/10 sm:px-8">
-        <p className="font-mono text-[10px] tracking-widest text-muted-foreground uppercase">
-          Pre-flight
-        </p>
-        <h3 className="mt-3 font-display text-xl font-semibold tracking-tight text-balance">
+    <div className="grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
+      <section className="instrument-surface-raised relative overflow-hidden rounded-sm px-5 py-7 sm:px-8 sm:py-9">
+        <span aria-hidden="true" className="spectral-rule absolute inset-y-0 left-0 w-px" />
+        <p className="folio-label text-primary">Production ready</p>
+        <h3 className="mt-3 text-xl font-semibold tracking-[-0.02em] text-balance sm:text-2xl">
           Everything&apos;s set. The writers are waiting on you.
         </h3>
-        <p className="mt-2 max-w-prose text-sm text-muted-foreground">
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
           {tierLabel.name} tier — {tierLabel.blurb.toLowerCase()}.{" "}
           {requireOutlineApproval
             ? "The run pauses after the outline so you can approve it before any chapters are written."
             : "The run goes straight from outline to chapters without stopping."}
         </p>
 
-        <dl className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <dl className="mt-7 grid grid-cols-2 border-y border-border sm:grid-cols-4">
           {facts.map((fact) => (
-            <div key={fact.label}>
-              <dt className="text-xs text-muted-foreground">{fact.label}</dt>
-              <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{fact.value}</dd>
+            <div
+              key={fact.label}
+              className="border-r border-border px-3 py-4 first:pl-0 last:border-r-0"
+            >
+              <dt className="folio-label text-muted-foreground">{fact.label}</dt>
+              <dd className="mt-2 font-mono text-sm font-medium tabular-nums">{fact.value}</dd>
             </div>
           ))}
         </dl>
@@ -197,22 +201,17 @@ function PreFlight({
         </div>
       </section>
 
-      <section
-        aria-label="Cost estimate"
-        className="rounded-xl bg-card px-4 py-4 ring-1 ring-foreground/10"
-      >
-        <div className="flex items-center gap-2">
-          <BookOpenText aria-hidden="true" className="size-3.5 text-muted-foreground" />
-          <h4 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-            Estimate
-          </h4>
+      <section aria-label="Cost estimate" className="instrument-surface rounded-sm p-5">
+        <div className="flex items-center gap-2 border-b border-border pb-3">
+          <BookOpenText aria-hidden="true" className="size-3.5 text-primary" />
+          <h4 className="folio-label text-muted-foreground">Credit quote</h4>
         </div>
-        <p className="mt-2 font-mono text-2xl font-medium tabular-nums">
-          ${estimateUsd.toFixed(2)}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          ±30%, metered as the agents work · about {estimatedMinutes} min
-        </p>
+        <CostDisplay
+          className="mt-5"
+          credits={creditsForUsd(estimateUsd)}
+          usd={estimateUsd}
+          note={`±30%, metered as the agents work · about ${estimatedMinutes} min`}
+        />
       </section>
     </div>
   );

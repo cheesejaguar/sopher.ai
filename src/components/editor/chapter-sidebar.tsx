@@ -19,20 +19,34 @@ export function ChapterSidebar({
   bookTitle,
   chapters,
   activeChapterNumber,
+  touchFriendly = false,
+  onNavigate,
 }: {
   projectId: string;
   bookTitle: string;
   chapters: ChapterNavItem[];
   activeChapterNumber: number;
+  /** Uses 44px chapter controls when the sidebar is hosted in a touch sheet. */
+  touchFriendly?: boolean;
+  onNavigate?: () => void;
 }) {
   const router = useRouter();
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col",
+        touchFriendly && "[&_button]:min-h-11 [&_button]:min-w-11",
+      )}
+    >
       <div className="border-b border-border p-4">
         <Link
           href={`/projects/${projectId}/editor`}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className={cn(
+            "flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground",
+            touchFriendly && "min-h-11",
+          )}
+          onClick={onNavigate}
         >
           <ArrowLeft aria-hidden="true" className="size-3" />
           All chapters
@@ -47,8 +61,14 @@ export function ChapterSidebar({
           chapters={chapters.map((c) => ({ number: c.chapterNumber, status: c.status }))}
           activeChapter={activeChapterNumber}
           orientation="vertical"
-          onSelect={(n) => router.push(`/projects/${projectId}/editor/${n}`)}
-          className="sticky top-0 shrink-0"
+          onSelect={(n) => {
+            onNavigate?.();
+            router.push(`/projects/${projectId}/editor/${n}`);
+          }}
+          className={cn(
+            "sticky top-0 shrink-0",
+            touchFriendly && "[&_[role=option]]:h-11 [&_[role=option]]:w-11",
+          )}
         />
         <nav aria-label="Chapters" className="min-w-0 flex-1">
           <ul className="space-y-0.5">
@@ -82,7 +102,8 @@ export function ChapterSidebar({
                 </>
               );
               const itemClass = cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5",
+                "flex items-center gap-2 rounded-sm px-2 py-1.5",
+                touchFriendly && "min-h-11 px-3 py-2",
                 active && "bg-accent text-accent-foreground",
               );
               return (
@@ -92,13 +113,19 @@ export function ChapterSidebar({
                       href={`/projects/${projectId}/editor/${chapter.chapterNumber}`}
                       aria-current={active ? "page" : undefined}
                       className={cn(itemClass, "pr-8 transition-colors hover:bg-accent/70")}
+                      onClick={onNavigate}
                     >
                       {inner}
                     </Link>
                   ) : (
                     <div className={cn(itemClass, "pr-8 opacity-50")}>{inner}</div>
                   )}
-                  <span className="absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-focus-within/chapter:opacity-100 group-hover/chapter:opacity-100">
+                  <span
+                    className={cn(
+                      "absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity group-focus-within/chapter:opacity-100 group-hover/chapter:opacity-100",
+                      touchFriendly && "opacity-100",
+                    )}
+                  >
                     <ChapterMenu
                       projectId={projectId}
                       chapterId={chapter.id}

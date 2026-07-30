@@ -17,7 +17,7 @@ import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/
 
 function EmptyManuscript({ projectId }: { projectId: string }) {
   return (
-    <div className="paper-surface flex flex-col items-center gap-4 px-6 py-20 text-center">
+    <div className="manuscript-sheet flex flex-col items-center gap-4 px-6 py-20 text-center">
       <p aria-hidden="true" className="text-2xl text-paper-muted">
         ⁂
       </p>
@@ -85,22 +85,29 @@ export default async function ManuscriptPage({
     <div className="space-y-4">
       <h2 className="sr-only">Manuscript</h2>
 
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="instrument-surface flex flex-wrap items-center justify-between gap-4 rounded-sm p-4">
         <div className="min-w-0 space-y-2">
-          <p className="font-mono text-xs text-muted-foreground tabular-nums">
+          <p className="folio-label text-muted-foreground">
             Chapter {active.chapterNumber} of {readable.length} readable ·{" "}
             {totalWords.toLocaleString("en-US")} words
           </p>
-          <ManuscriptRail
-            projectId={projectId}
-            chapters={chapterRows.map(({ chapterNumber, status }) => ({
-              number: chapterNumber,
-              status,
-            }))}
-            activeChapter={active.chapterNumber}
-          />
+          <div
+            role="region"
+            aria-label="Manuscript chapters"
+            tabIndex={0}
+            className="max-w-full overflow-x-auto py-1 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <ManuscriptRail
+              projectId={projectId}
+              chapters={chapterRows.map(({ chapterNumber, status }) => ({
+                number: chapterNumber,
+                status,
+              }))}
+              activeChapter={active.chapterNumber}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
           <CoverButton
             projectId={projectId}
             hasCover={Boolean((book.frontMatter as { coverUrl?: string }).coverUrl)}
@@ -115,7 +122,7 @@ export default async function ManuscriptPage({
         </div>
       </header>
 
-      <div className="paper-surface px-6 py-12 sm:px-12 sm:py-16">
+      <div className="manuscript-sheet px-6 py-12 sm:px-12 sm:py-16">
         {isOpening ? (
           <header className="mx-auto max-w-2xl py-10 text-center sm:py-16 [content-visibility:auto]">
             {(book.frontMatter as { coverUrl?: string }).coverUrl ? (

@@ -4,12 +4,22 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-function Table({ className, ...props }: React.ComponentProps<"table">) {
+function Table({
+  className,
+  scrollLabel = "Data table",
+  ...props
+}: React.ComponentProps<"table"> & { scrollLabel?: string }) {
   return (
     // The container scrolls horizontally at narrow widths and tables rarely
     // contain focusable cells, so it needs to be reachable by keyboard for the
     // hidden columns to be readable at all (WCAG 2.1.1).
-    <div data-slot="table-container" tabIndex={0} className="relative w-full overflow-x-auto">
+    <div
+      data-slot="table-container"
+      role="region"
+      aria-label={scrollLabel}
+      tabIndex={0}
+      className="relative w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
       <table
         data-slot="table"
         className={cn("w-full caption-bottom text-sm", className)}

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { BriefEditor } from "@/components/studio/brief-editor";
+import { ResponsiveInspector } from "@/components/studio/product-primitives";
 import { requireUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 import { TIER_LABELS } from "@/ai/models";
@@ -52,10 +52,8 @@ export default async function BriefPage({ params }: { params: Promise<{ projectI
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_16rem]">
       <h2 className="sr-only">Brief</h2>
 
-      <article className="paper-surface px-6 py-8 sm:px-10 sm:py-10">
-        <p className="font-sans text-xs tracking-widest text-paper-muted uppercase">
-          The brief, as written
-        </p>
+      <article className="manuscript-sheet px-6 py-8 sm:px-10 sm:py-10">
+        <p className="folio-label text-paper-muted">The brief, as written</p>
         <div className="prose-manuscript mt-6">
           {paragraphs.length > 0 ? (
             paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)
@@ -70,23 +68,22 @@ export default async function BriefPage({ params }: { params: Promise<{ projectI
         </div>
       </article>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-        {facts.map((fact) => (
-          <Card key={fact.label} size="sm">
-            <CardHeader>
-              <CardDescription className="text-xs tracking-widest uppercase">
-                {fact.label}
-              </CardDescription>
-              <CardTitle className="text-sm font-medium">{fact.value}</CardTitle>
-            </CardHeader>
-          </Card>
-        ))}
-        <Card size="sm">
-          <CardContent className="text-xs text-muted-foreground">
-            The brief is the source of truth. Everything the agents write traces back to this page.
-          </CardContent>
-        </Card>
-      </div>
+      <ResponsiveInspector
+        title="Brief inspector"
+        description="The production constraints the agents read."
+      >
+        <dl className="divide-y divide-border">
+          {facts.map((fact) => (
+            <div key={fact.label} className="py-3 first:pt-0">
+              <dt className="folio-label text-muted-foreground">{fact.label}</dt>
+              <dd className="mt-1 text-sm font-medium">{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
+          The brief is the source of truth. Everything the agents write traces back to this page.
+        </div>
+      </ResponsiveInspector>
     </div>
   );
 }

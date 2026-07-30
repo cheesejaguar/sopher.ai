@@ -1,6 +1,7 @@
 import { PIPELINE_STEPS } from "@/components/marketing/content";
 import { REVIEW_PHASES } from "@/ai/prompts/review-rubric";
 import { CREDIT_PACKS, SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
+import { PUBLIC_TIER_COSTS } from "@/lib/billing/public-pricing";
 
 /**
  * Guides.
@@ -48,7 +49,7 @@ const tierGuide: Guide = {
     { kind: "h2", text: "Draft", id: "draft" },
     {
       kind: "p",
-      text: "A single pass. Chapters are planned, drafted, and checked with free heuristics — no model-driven critique, no revision pass. Roughly 21 credits for a finished novella.",
+      text: `A single pass. Chapters are planned, drafted, and checked with free heuristics — no model-driven critique, no revision pass. Roughly ${PUBLIC_TIER_COSTS.draft.credits} credits for a finished novella.`,
     },
     {
       kind: "p",
@@ -57,7 +58,7 @@ const tierGuide: Guide = {
     { kind: "h2", text: "Standard", id: "standard" },
     {
       kind: "p",
-      text: "The default. Each chapter is drafted, then critiqued, then revised in targeted passes against the critique — changing the parts that need changing rather than regenerating wholesale. Roughly 27 credits.",
+      text: `The default. Each chapter is drafted, then critiqued, then revised in targeted passes against the critique — changing the parts that need changing rather than regenerating wholesale. Roughly ${PUBLIC_TIER_COSTS.standard.credits} credits.`,
     },
     {
       kind: "p",
@@ -66,7 +67,7 @@ const tierGuide: Guide = {
     { kind: "h2", text: "Premium", id: "premium" },
     {
       kind: "p",
-      text: "The strongest available prose model for both drafting and editing, plus a deeper editorial pass. Roughly 36 credits.",
+      text: `The strongest available prose model for both drafting and editing, plus a deeper editorial pass. Roughly ${PUBLIC_TIER_COSTS.premium.credits} credits.`,
     },
     {
       kind: "p",
@@ -105,7 +106,8 @@ const pipelineGuide: Guide = {
   title: "How book generation works",
   description:
     "Five agents, in order: concept, outline, chapters, editor, continuity. What each one does and where you can intervene.",
-  standfirst: "A brief goes in. Five stages later, an edited manuscript comes out.",
+  standfirst:
+    "Follow one idea as it becomes a concept, an outline, a draft, and finally a polished manuscript.",
   blocks: [
     {
       kind: "p",
@@ -135,7 +137,7 @@ const pipelineGuide: Guide = {
     { kind: "h2", text: "Why chapters are written four at a time", id: "waves" },
     {
       kind: "p",
-      text: "Chapters are drafted in waves of four, in parallel. That is why a thirty-chapter novel does not take thirty times as long as one chapter — most books finish in under an hour.",
+      text: "Chapters are drafted in parallel waves of four. Every writer follows the same outline, story bible, voice settings, and continuity record so the separate chapters still form one manuscript.",
     },
     {
       kind: "p",
@@ -148,9 +150,9 @@ const pipelineGuide: Guide = {
   ],
   faqs: [
     {
-      question: "How long does a book take?",
+      question: "Can I follow generation as it runs?",
       answer:
-        "Usually under an hour. Chapters are drafted four at a time, so length does not scale time proportionally.",
+        "Yes. The Studio shows the active stage, drafted chapters, agent notes, credit use, approvals, and recoverable pause or failure states while the manuscript is being built.",
     },
     {
       question: "What happens if a chapter fails to generate?",

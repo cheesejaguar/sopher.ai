@@ -10,7 +10,7 @@ import type { GenreId } from "@/ai/knowledge/genres";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StepBrief } from "@/components/wizard/step-brief";
-import { StepEstimate } from "@/components/wizard/step-estimate";
+import { StepEstimate, type WizardQuoteSummary } from "@/components/wizard/step-estimate";
 import { StepGenre } from "@/components/wizard/step-genre";
 import { StepShape } from "@/components/wizard/step-shape";
 import {
@@ -52,12 +52,12 @@ const STEP_HEADINGS: Record<(typeof WIZARD_STEPS)[number]["id"], { title: string
 function FolioProgress({ state, onGoto }: { state: WizardState; onGoto: (step: number) => void }) {
   const reachable = maxReachableStep(state);
   return (
-    <ol aria-label="Wizard steps" className="flex items-center gap-4">
+    <ol aria-label="Wizard steps" className="grid grid-cols-2 gap-1 lg:grid-cols-1">
       {WIZARD_STEPS.map((step, index) => {
         const status = index === state.step ? "current" : index <= reachable ? "open" : "locked";
         const locked = status === "locked";
         return (
-          <li key={step.id}>
+          <li key={step.id} className="min-w-0">
             <button
               type="button"
               onClick={() => {
@@ -69,27 +69,42 @@ function FolioProgress({ state, onGoto }: { state: WizardState; onGoto: (step: n
               aria-current={status === "current" ? "step" : undefined}
               // `after` widens the pointer target to >=24px without changing layout,
               // matching how the UI primitives here handle small controls.
-              className="group relative flex items-center gap-1.5 rounded-md outline-none after:absolute after:-inset-x-1 after:-inset-y-1.5 focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-default"
+              className={cn(
+                "group relative flex min-h-11 w-full items-center gap-3 rounded-sm px-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-default",
+                status === "current" && "bg-accent",
+              )}
             >
               <span
                 aria-hidden="true"
                 className={cn(
-                  "h-5 w-3.5 rounded-[2px] border transition-colors",
+                  "grid size-7 shrink-0 place-items-center border font-mono text-[0.6875rem] transition-colors",
                   status === "current"
-                    ? "border-transparent bg-primary"
+                    ? "border-primary bg-primary text-primary-foreground"
                     : status === "open"
-                      ? "border-transparent bg-primary/40 group-hover:bg-primary/60"
-                      : "border-border bg-transparent",
-                )}
-              />
-              <span
-                className={cn(
-                  "text-xs font-medium",
-                  status === "current" ? "text-foreground" : "text-muted-foreground",
-                  locked && "opacity-60",
+                      ? "border-primary/45 text-primary group-hover:border-primary"
+                      : "border-border bg-transparent text-muted-foreground",
                 )}
               >
-                {step.label}
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span className="min-w-0">
+                <span
+                  className={cn(
+                    "block truncate text-sm font-medium",
+                    status === "current" ? "text-foreground" : "text-muted-foreground",
+                    locked && "opacity-60",
+                  )}
+                >
+                  {step.label}
+                </span>
+                <span
+                  className={cn(
+                    "block font-mono text-[0.6875rem] tracking-wider text-muted-foreground uppercase",
+                    locked && "opacity-60",
+                  )}
+                >
+                  {status === "current" ? "Current" : status === "open" ? "Available" : "Locked"}
+                </span>
               </span>
               <span className="sr-only">
                 {` Step ${index + 1} of ${WIZARD_STEPS.length}`}
@@ -127,6 +142,45 @@ function draftHasContent(draft: WizardState): boolean {
   return draft.genre !== null || draft.brief.trim().length > 0 || draft.title.trim().length > 0;
 }
 
+function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuoteSummary | null }) {
+  const brief = state.brief.trim();
+  return (
+    <dl className="space-y-3 text-xs">
+      <div>
+        <dt className="folio-label text-muted-foreground">Shelf</dt>
+        <dd className="mt-1 font-medium capitalize">{state.genre ?? "Not chosen"}</dd>
+      </div>
+      <div>
+        <dt className="folio-label text-muted-foreground">Brief</dt>
+        <dd className="mt-1 line-clamp-3 leading-relaxed text-muted-foreground">
+          {brief || "Waiting for your story."}
+        </dd>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <dt className="folio-label text-muted-foreground">Shape</dt>
+          <dd className="mt-1 font-mono tabular-nums">
+            {state.chapters} × {state.wordsPerChapter.toLocaleString("en-US")}
+          </dd>
+        </div>
+        <div>
+          <dt className="folio-label text-muted-foreground">Tier</dt>
+          <dd className="mt-1 font-medium capitalize">{state.tier}</dd>
+        </div>
+      </div>
+      <div className="border-t border-border pt-3">
+        <dt className="folio-label text-muted-foreground">Current quote</dt>
+        <dd className="mt-1 font-mono font-semibold tabular-nums">
+          {quote ? `${quote.credits.toFixed(1)} credits` : "Pending step 4"}
+        </dd>
+        {quote ? (
+          <dd className="mt-1 text-muted-foreground">About {quote.estimatedMinutes} minutes</dd>
+        ) : null}
+      </div>
+    </dl>
+  );
+}
+
 export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {}) {
   const [ui, dispatch] = React.useReducer(uiReducer, {
     wizard: initialWizardState,
@@ -134,6 +188,7 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
   });
   const state = ui.wizard;
   const [error, setError] = React.useState<string | null>(null);
+  const [quoteSummary, setQuoteSummary] = React.useState<WizardQuoteSummary | null>(null);
   const [pending, startTransition] = React.useTransition();
   const hydrated = React.useRef(false);
   // Set only by the step controls, so the heading is never focused on mount
@@ -266,10 +321,12 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
         const result = await startBook(payload);
         if (result?.error) {
           window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
+          submitted.current = false;
           setError(result.error);
         }
       } catch {
         window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
+        submitted.current = false;
         setError("The book could not be started. Your brief is saved — please try again.");
       }
     });
@@ -286,88 +343,118 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
       : "Describe the story in a few sentences to continue.";
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="instrument-surface-raised overflow-hidden rounded-sm lg:grid lg:grid-cols-[14rem_minmax(0,1fr)]">
+      <aside className="border-b border-border bg-background/35 p-4 lg:border-r lg:border-b-0 lg:p-5">
+        <p className="folio-label mb-3 text-muted-foreground">Brief sequence</p>
         <FolioProgress state={state} onGoto={(step) => goToStep({ type: "goto", step })} />
         {ui.resumed ? (
-          <p className="text-xs text-muted-foreground">
-            Resumed your saved draft.{" "}
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Resumed your saved draft.
+            </p>
             <button
               type="button"
               onClick={handleStartOver}
-              className="rounded-sm underline underline-offset-2 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              className="mt-2 min-h-11 rounded-sm text-xs font-medium text-foreground underline underline-offset-4 outline-none hover:text-primary focus-visible:ring-2 focus-visible:ring-ring lg:min-h-9"
             >
               Start over
             </button>
-          </p>
+          </div>
         ) : null}
-      </div>
+        <div className="mt-5 hidden border-t border-border pt-4 lg:block">
+          <p className="folio-label mb-3 text-muted-foreground">Current setup</p>
+          <SetupSummary state={state} quote={quoteSummary} />
+        </div>
+        <details className="mt-4 border-t border-border pt-3 lg:hidden">
+          <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium">
+            Current setup &amp; quote
+          </summary>
+          <div className="pb-2">
+            <SetupSummary state={state} quote={quoteSummary} />
+          </div>
+        </details>
+      </aside>
 
-      <header className="space-y-1">
-        <h2
-          ref={headingRef}
-          tabIndex={-1}
-          className="font-display text-xl font-semibold tracking-tight outline-none"
-        >
-          {heading.title}
-          <span className="sr-only">{` — step ${state.step + 1} of ${WIZARD_STEPS.length}`}</span>
-        </h2>
-        <p className="text-sm text-muted-foreground">{heading.hint}</p>
-      </header>
-
-      {stepId === "genre" ? <StepGenre state={state} dispatch={dispatch} /> : null}
-      {stepId === "brief" ? <StepBrief state={state} dispatch={dispatch} /> : null}
-      {stepId === "shape" ? <StepShape state={state} dispatch={dispatch} /> : null}
-      {stepId === "estimate" ? <StepEstimate state={state} dispatch={dispatch} /> : null}
-
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-
-      <footer className="flex items-center justify-between gap-3 border-t pt-4">
-        <Button
-          variant="ghost"
-          onClick={() => goToStep({ type: "back" })}
-          disabled={state.step === 0 || pending}
-        >
-          <ArrowLeft aria-hidden="true" data-icon="inline-start" />
-          Back
-        </Button>
-        {lastStep ? (
-          <Button
-            onClick={handleSubmit}
-            disabled={pending}
-            // Stays focused while the book starts, so the label change is heard.
-            focusableWhenDisabled
-            className="aria-disabled:opacity-50"
+      <div className="min-w-0">
+        <header className="border-b border-border px-5 py-6 sm:px-8">
+          <p className="folio-label text-primary">
+            Step {String(state.step + 1).padStart(2, "0")} /{" "}
+            {String(WIZARD_STEPS.length).padStart(2, "0")}
+          </p>
+          <h2
+            ref={headingRef}
+            tabIndex={-1}
+            className="mt-3 text-xl font-semibold tracking-[-0.02em] text-balance outline-none sm:text-2xl"
           >
-            {pending ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <Feather aria-hidden="true" data-icon="inline-start" />
-            )}
-            {pending ? "Starting the book…" : "Start the book"}
-          </Button>
-        ) : (
-          <>
-            <p id="wizard-next-hint" className="sr-only">
-              {canAdvance ? "" : blockedReason}
-            </p>
-            <Button
-              onClick={() => goToStep({ type: "next" })}
-              disabled={!canAdvance}
-              focusableWhenDisabled
-              aria-describedby={canAdvance ? undefined : "wizard-next-hint"}
-              className="aria-disabled:opacity-50"
+            {heading.title}
+            <span className="sr-only">{` — step ${state.step + 1} of ${WIZARD_STEPS.length}`}</span>
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {heading.hint}
+          </p>
+        </header>
+
+        <div className="min-w-0 px-5 py-6 sm:px-8 sm:py-8">
+          {stepId === "genre" ? <StepGenre state={state} dispatch={dispatch} /> : null}
+          {stepId === "brief" ? <StepBrief state={state} dispatch={dispatch} /> : null}
+          {stepId === "shape" ? <StepShape state={state} dispatch={dispatch} /> : null}
+          {stepId === "estimate" ? (
+            <StepEstimate state={state} dispatch={dispatch} onQuote={setQuoteSummary} />
+          ) : null}
+
+          {error ? (
+            <p
+              role="alert"
+              className="mt-5 border border-destructive/35 bg-destructive/5 px-4 py-3 text-sm text-destructive"
             >
-              Next
-              <ArrowRight aria-hidden="true" data-icon="inline-end" />
+              {error}
+            </p>
+          ) : null}
+        </div>
+
+        <footer className="sticky bottom-0 z-10 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-5 py-4 supports-[backdrop-filter]:backdrop-blur-md sm:px-8">
+          <Button
+            variant="ghost"
+            onClick={() => goToStep({ type: "back" })}
+            disabled={state.step === 0 || pending}
+            className="rounded-sm"
+          >
+            <ArrowLeft aria-hidden="true" data-icon="inline-start" />
+            Back
+          </Button>
+          {lastStep ? (
+            <Button
+              onClick={handleSubmit}
+              disabled={pending}
+              focusableWhenDisabled
+              className="rounded-sm aria-disabled:opacity-50"
+            >
+              {pending ? (
+                <Spinner data-icon="inline-start" />
+              ) : (
+                <Feather aria-hidden="true" data-icon="inline-start" />
+              )}
+              {pending ? "Starting the book…" : "Start the book"}
             </Button>
-          </>
-        )}
-      </footer>
+          ) : (
+            <>
+              <p id="wizard-next-hint" className="sr-only">
+                {canAdvance ? "" : blockedReason}
+              </p>
+              <Button
+                onClick={() => goToStep({ type: "next" })}
+                disabled={!canAdvance}
+                focusableWhenDisabled
+                aria-describedby={canAdvance ? undefined : "wizard-next-hint"}
+                className="rounded-sm aria-disabled:opacity-50"
+              >
+                Next
+                <ArrowRight aria-hidden="true" data-icon="inline-end" />
+              </Button>
+            </>
+          )}
+        </footer>
+      </div>
     </div>
   );
 }

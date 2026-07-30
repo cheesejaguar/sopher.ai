@@ -35,7 +35,7 @@ const AI_CRAWLERS = [
   "Amazonbot",
 ];
 
-const DISALLOW = ["/studio", "/admin", "/api/", "/sign-in", "/sign-up"];
+const DISALLOW = ["/studio", "/projects", "/admin", "/api/", "/sign-in", "/sign-up"];
 
 export default function robots(): MetadataRoute.Robots {
   return {

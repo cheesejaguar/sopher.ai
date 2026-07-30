@@ -38,8 +38,9 @@ export function CoverButton({ projectId, hasCover }: { projectId: string; hasCov
         ) : (
           <ImagePlus aria-hidden="true" className="size-3.5" />
         )}
-        {busy ? "Painting…" : hasCover ? "New cover · $0.067" : "Generate cover · $0.067"}
+        {busy ? "Painting…" : hasCover ? "New cover · 0.2 credits" : "Generate cover · 0.2 credits"}
       </Button>
+      <span className="sr-only">Cover generation meters approximately $0.067.</span>
       {error ? (
         <p role="alert" className="text-xs text-destructive">
           {error}

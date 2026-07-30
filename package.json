@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "lighthouse": "lhci autorun",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "drizzle-kit generate",
@@ -17,6 +18,7 @@
     "check:migrations": "node scripts/check-migrations.mjs",
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
     "vercel-build": "drizzle-kit migrate && next build",
+    "e2e:seed": "tsx scripts/seed-e2e.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "@ai-sdk/react": "^4.0.40",
     "@base-ui/react": "^1.6.0",
     "@clerk/nextjs": "^7.6.1",
+    "@clerk/ui": "^1.27.0",
     "@neondatabase/serverless": "^1.1.0",
     "@tiptap/extension-character-count": "^3.29.1",
     "@tiptap/pm": "^3.29.1",
@@ -65,6 +68,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.62.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.0",

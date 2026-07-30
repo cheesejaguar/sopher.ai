@@ -24,10 +24,7 @@ export function AgentFeed({
   const newestFirst = [...items].reverse();
 
   return (
-    <section
-      aria-label="Agent activity"
-      className="flex flex-col rounded-xl bg-card ring-1 ring-foreground/10"
-    >
+    <section aria-label="Agent activity" className="instrument-surface flex flex-col rounded-sm">
       <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <span
           aria-hidden="true"

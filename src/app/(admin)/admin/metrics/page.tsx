@@ -18,6 +18,7 @@ import {
   getWeeklyEconomics,
   getWizardFunnel,
 } from "@/db/queries/metrics";
+import { AsyncState, PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Metrics — admin" };
 
@@ -52,7 +53,7 @@ async function Funnel() {
       title="Acquisition funnel"
       hint="Counted per person, not per book — one author with nine drafts is one conversion. Admin accounts excluded."
     >
-      <Table aria-label="Acquisition funnel">
+      <Table aria-label="Acquisition funnel" scrollLabel="Acquisition funnel">
         <TableHeader>
           <TableRow>
             <TableHead scope="col">Stage</TableHead>
@@ -93,7 +94,7 @@ async function Economics() {
       title="Weekly economics"
       hint="Revenue is what Stripe collected, net of refunds — not credits, which the bonus tiers inflate. COGS is metered model spend."
     >
-      <Table aria-label="Weekly economics">
+      <Table aria-label="Weekly economics" scrollLabel="Weekly economics">
         <TableHeader>
           <TableRow>
             <TableHead scope="col">Week of</TableHead>
@@ -155,11 +156,14 @@ async function Channels() {
       hint="First touch, captured on the landing request and stamped once at signup. Rows appear as attributed users arrive — existing accounts predate this and show as unattributed."
     >
       {channels.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card px-6 py-8 text-center text-sm text-muted-foreground">
-          No attributed users yet.
-        </p>
+        <AsyncState
+          status="empty"
+          compact
+          title="No attributed users yet"
+          description="Channel rows will appear as newly attributed accounts arrive."
+        />
       ) : (
-        <Table aria-label="Acquisition channels">
+        <Table aria-label="Acquisition channels" scrollLabel="Acquisition channels">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">Channel</TableHead>
@@ -209,11 +213,14 @@ async function Wizard() {
       hint="Last 30 days. The one thing Postgres could not already answer — the draft lives in the browser until submit, so this is the only trace of an author who gave up partway."
     >
       {steps.length === 0 ? (
-        <p className="rounded-xl border border-border bg-card px-6 py-8 text-center text-sm text-muted-foreground">
-          No wizard events yet.
-        </p>
+        <AsyncState
+          status="empty"
+          compact
+          title="No wizard events yet"
+          description="Funnel activity will appear after authors begin the setup flow."
+        />
       ) : (
-        <Table aria-label="Wizard drop-off">
+        <Table aria-label="Wizard drop-off" scrollLabel="Wizard drop-off">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">Step</TableHead>
@@ -313,7 +320,7 @@ async function Product() {
       </div>
 
       <Section title="Genres" hint="What people actually ask for, and how often they finish it.">
-        <Table aria-label="Books by genre">
+        <Table aria-label="Books by genre" scrollLabel="Books by genre">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">Genre</TableHead>
@@ -349,7 +356,7 @@ async function Product() {
 }
 
 function Loading() {
-  return <Skeleton className="h-48 w-full rounded-xl" />;
+  return <Skeleton className="h-48 w-full rounded-sm" />;
 }
 
 /**
@@ -360,7 +367,11 @@ function Loading() {
 export default function AdminMetrics() {
   return (
     <div className="space-y-10">
-      <h1 className="font-display text-2xl font-semibold tracking-tight">Metrics</h1>
+      <PageHeader
+        label="Admin / Intelligence"
+        title="Metrics"
+        description="Acquisition, economics, product behavior, and wizard completion."
+      />
       <Suspense fallback={<Loading />}>
         <Funnel />
       </Suspense>
