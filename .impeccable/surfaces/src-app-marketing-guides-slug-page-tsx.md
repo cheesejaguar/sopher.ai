@@ -16,7 +16,7 @@ Readers need strong wayfinding, legible long-form content, honest examples, and 
 
 ## Direction and memorable moment
 
-The Future Proof recedes around the text. The dark college-ruled notebook is an entry motif, not a repeated container: one page or folio may orient the reader, then calm dark surfaces, sticky desktop contents, mobile contents disclosures, and restrained rules carry the article. Manuscripts use Source Serif 4 within a luminous measured proof surface; surrounding chrome remains Archivo. Contextual actions connect the reader's decision back to the book they want to make, while verified product behavior remains the proof.
+The Future Proof recedes around the text. Guide and legal headers sit on uninterrupted deep-space and graphite fields; folios, sticky desktop contents, mobile disclosures, and restrained structural rules orient the reader. College ruling is reserved for the homepage's five-stage notebook artifact and never sits behind reading surfaces. Manuscripts use Source Serif 4 within a luminous measured proof surface; surrounding chrome remains Archivo. Contextual actions connect the reader's decision back to the book they want to make, while verified product behavior remains the proof.
 
 ## Constraints
 

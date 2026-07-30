@@ -20,9 +20,6 @@ export default function OpengraphImage() {
         justifyContent: "space-between",
         padding: "64px 72px",
         backgroundColor: "#09090d",
-        backgroundImage:
-          "linear-gradient(90deg, transparent 0, transparent 104px, rgba(198,72,91,.16) 104px, rgba(198,72,91,.16) 105px, transparent 105px), repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(101,220,246,.075) 27px, rgba(101,220,246,.075) 28px)",
-        backgroundSize: "100% 100%, 100% 28px",
         color: "#f4f2f8",
       }}
     >

@@ -372,39 +372,9 @@
     0 18px 48px -28px oklch(0.02 0.02 274 / 85%);
 }
 
-.instrument-canvas {
+.instrument-canvas,
+.marketing-canvas {
   background-color: var(--background);
-  background-image:
-    linear-gradient(color-mix(in oklch, var(--border) 42%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklch, var(--border) 32%, transparent) 1px, transparent 1px);
-  background-size:
-    100% 4rem,
-    4rem 100%;
-  background-position: center;
-}
-
-.story-notebook-canvas {
-  background-color: var(--background);
-  background-image:
-    linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 27px,
-      color-mix(in oklch, var(--notebook-rule) 16%, transparent) 27px,
-      color-mix(in oklch, var(--notebook-rule) 16%, transparent) 28px
-    ),
-    linear-gradient(
-      to right,
-      color-mix(in oklch, var(--notebook-margin) 22%, transparent),
-      color-mix(in oklch, var(--notebook-margin) 22%, transparent)
-    );
-  background-repeat: repeat, no-repeat;
-  background-size:
-    100% 28px,
-    1px 100%;
-  background-position:
-    0 0,
-    max(1rem, calc((100vw - 80rem) / 2 + 1rem)) 0;
 }
 
 .story-notebook-panel {
@@ -433,22 +403,6 @@
 
 .marketing-proof-depth-plane {
   background-color: color-mix(in oklch, var(--instrument-high) 74%, transparent);
-  background-image:
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0,
-      transparent 27px,
-      color-mix(in oklch, var(--notebook-rule) 24%, transparent) 27px,
-      color-mix(in oklch, var(--notebook-rule) 24%, transparent) 28px
-    ),
-    linear-gradient(
-      to right,
-      transparent 0,
-      transparent 4.25rem,
-      color-mix(in oklch, var(--notebook-margin) 30%, transparent) 4.25rem,
-      color-mix(in oklch, var(--notebook-margin) 30%, transparent) calc(4.25rem + 1px),
-      transparent calc(4.25rem + 1px)
-    );
   box-shadow: 0 32px 80px -52px color-mix(in oklch, var(--ion) 70%, transparent);
   transform: rotate(2deg);
 }
@@ -612,7 +566,6 @@
   rest of the design system degrades to system colors as intended.
 */
 @media (forced-colors: active) {
-  .story-notebook-canvas,
   .story-notebook-panel {
     background-image: none;
   }

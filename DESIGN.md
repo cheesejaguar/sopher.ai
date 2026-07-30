@@ -94,7 +94,7 @@ THESIS: “The book in your head, finally on the page.” A familiar dark colleg
 OWN-WORLD: Near-black writing surfaces, one luminous college-ruled notebook, restrained ultraviolet and ion-blue machine light, a quiet margin rule, precise folios, and stacked finished pages.
 STORY: Everyday storytellers first recognize their unwritten book, then see the five-stage system turn their direction into pages while preserving author control.
 FIRST VIEWPORT: One oversized notebook artifact dominates the composition. An author's plain-language brief enters the page, the page visibly transforms through the five stages, and the final state resolves as a finished manuscript spread; promise and action support the artifact rather than competing with it.
-FORM: User-steered “Future Proof,” evolved into a dark college-ruled notebook world. Structural grids stay invisible; notebook ruling belongs to public story-entry canvases and the transforming page, never the operational workspace. Mobile preserves the same single-artifact story rather than compressing a desktop dashboard.
+FORM: User-steered “Future Proof,” evolved into a dark college-ruled notebook world. Structural grids and page-level ruling stay invisible; notebook ruling belongs only to the transforming five-stage artifact, never the surrounding canvas or operational workspace. Mobile preserves the same single-artifact story rather than compressing a desktop dashboard.
 -->
 
 # Design System: sopher.ai — The Future Proof
@@ -111,7 +111,7 @@ Persuade surfaces center one dominant dark college-ruled notebook that transform
 
 - The author's book is the subject; the technology is the convincing mechanism.
 - One transforming notebook artifact carries the sequence from idea to finished pages.
-- College ruling and the margin rule identify public story-entry canvases and the page artifact, never operational product surfaces.
+- College ruling and the margin rule belong only to the transforming page artifact, never page backgrounds or operational product surfaces.
 - Light, fine rules, and precise page offsets create depth without neon card chrome.
 - Manuscript typography appears only where prose is genuinely being read.
 - Color fields own regions; accents are not sprinkled across generic neutral cards.
@@ -169,7 +169,7 @@ The default palette is overwhelmingly near-black, graphite, and luminous neutral
 
 ## Layout
 
-The system uses a 12-column desktop structure, a compact tablet structure, and one continuous reading column on phones. The alignment grid is structural, not decorative. On Persuade surfaces, restrained college ruling may establish the story-entry canvas while a dominant notebook page owns the composition and the promise, controls, and proof align around it. Product surfaces privilege the active task, with navigation and inspectors occupying stable edges rather than floating card islands.
+The system uses a 12-column desktop structure, a compact tablet structure, and one continuous reading column on phones. The alignment grid is structural, not decorative. Persuade surfaces use uninterrupted deep-space and graphite fields while a single ruled notebook artifact owns the composition and the promise, controls, and proof align around it. Product surfaces privilege the active task, with navigation and inspectors occupying stable edges rather than floating card islands.
 
 Desktop Studio and Admin use a persistent rail. Project navigation groups Plan, Produce, Refine, and Publish. On phones, global navigation moves into an app bar and drawer; editor tools replace global bottom navigation. Horizontal scrolling is allowed only inside explicitly labeled data-table or timeline regions, never at page level.
 
@@ -223,6 +223,7 @@ Manuscript surfaces maintain a readable measure, book paragraph rhythm, accessib
 ### Don't:
 
 - **Don't** use auroras, gradient text, generic glass cards, neon outlines on every surface, generic icon tiles, or stock AI imagery.
+- **Don't** use ruled or gridded page backgrounds; the line motif belongs only inside the five-stage notebook artifact.
 - **Don't** use a centered headline-plus-two-buttons hero as the first viewport.
 - **Don't** use two-axis grid texture, or carry notebook ruling into operational product surfaces.
 - **Don't** give every stage an equally dominant visual container; the transforming notebook is the hero artifact.

@@ -25,9 +25,6 @@ export default function OpengraphImage() {
         display: "flex",
         position: "relative",
         backgroundColor: "#080910",
-        backgroundImage:
-          "linear-gradient(90deg, transparent 0, transparent 104px, rgba(198,72,91,.14) 104px, rgba(198,72,91,.14) 105px, transparent 105px), repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(101,220,246,.065) 27px, rgba(101,220,246,.065) 28px)",
-        backgroundSize: "100% 100%, 100% 28px",
         color: "#f2f1f6",
         padding: "68px",
       }}

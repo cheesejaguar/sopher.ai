@@ -16,7 +16,7 @@ export default function GenresIndex() {
     <>
       <BreadcrumbJsonLd trail={[{ name: "Genres", path: "/genres" }]} />
 
-      <header className="story-notebook-canvas border-b border-black/10 dark:border-white/10">
+      <header className="marketing-canvas border-b border-black/10 dark:border-white/10">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-28">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Structural library / 07 genres</p>

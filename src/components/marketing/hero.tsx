@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 export function Hero() {
   return (
-    <section className="marketing-hero-stage story-notebook-canvas relative overflow-hidden border-b border-black/10 dark:border-white/10">
+    <section className="marketing-canvas marketing-hero-stage relative overflow-hidden border-b border-black/10 dark:border-white/10">
       <span
         aria-hidden="true"
         className="marketing-proof-depth-plane pointer-events-none absolute -top-20 -right-20 hidden h-[38rem] w-[28rem] border border-ion/15 opacity-55 lg:block"
