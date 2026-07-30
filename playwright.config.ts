@@ -30,6 +30,8 @@ import type { ThemeOptions } from "./e2e/helpers";
 const runDbTests = process.env.E2E_DB === "1";
 const runEditorMutationTests = runDbTests && process.env.E2E_EDITOR_MUTATIONS === "1";
 const e2eDatabaseUrl = process.env.E2E_DATABASE_URL;
+const e2ePort = process.env.E2E_PORT ?? "4321";
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 
 if (runDbTests && (!e2eDatabaseUrl || process.env.E2E_DATABASE_ISOLATED !== "1")) {
   throw new Error(
@@ -38,7 +40,7 @@ if (runDbTests && (!e2eDatabaseUrl || process.env.E2E_DATABASE_ISOLATED !== "1")
 }
 
 /** Specs that require a reachable (Neon) database. */
-const DB_DESKTOP_SPEC = /[/\\](studio|wizard)\.spec\.ts$/;
+const DB_DESKTOP_SPEC = /[/\\]studio\.spec\.ts$/;
 const DB_RESPONSIVE_SPEC = /[/\\]studio-responsive\.spec\.ts$/;
 const DB_SPEC = /(studio|studio-responsive)\.spec\.ts$/;
 const WIZARD_SPEC = /[/\\]wizard\.spec\.ts$/;
@@ -63,7 +65,7 @@ export default defineConfig<ThemeOptions>({
   expect: { timeout: 15_000 },
   reporter: [["list"], ["html", { open: "never" }]],
   use: {
-    baseURL: "http://127.0.0.1:4321",
+    baseURL: e2eBaseUrl,
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     // Kills marketing/typewriter animations so waits and screenshots are stable.
@@ -139,6 +141,26 @@ export default defineConfig<ThemeOptions>({
               appTheme: "dark" as const,
             },
           },
+          {
+            name: "dbWizard-light",
+            testMatch: WIZARD_SPEC,
+            // Wizard submission creates durable projects and runs. Keep those
+            // mutations after every shared-fixture surface (and, when
+            // enabled, after the mobile editor mutation pass) so Studio card
+            // ordering cannot make another test select a newly queued stub.
+            dependencies: runEditorMutationTests
+              ? ["dbEditor-mobile"]
+              : ["dbDependent-light", "dbDependent-dark", "dbMobile-light", "dbMobile-dark"],
+            use: { ...devices["Desktop Chrome"], appTheme: "light" as const },
+          },
+          {
+            name: "dbWizard-dark",
+            testMatch: WIZARD_SPEC,
+            // Serialize the two themed wizard projects as well: both exercise
+            // the same dev identity and intentionally write durable rows.
+            dependencies: ["dbWizard-light"],
+            use: { ...devices["Desktop Chrome"], appTheme: "dark" as const },
+          },
         ]
       : []),
     ...(runEditorMutationTests
@@ -178,10 +200,10 @@ export default defineConfig<ThemeOptions>({
       ...process.env,
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
       CLERK_SECRET_KEY: "",
-      PORT: "4321",
+      PORT: e2ePort,
       ...(e2eDatabaseUrl ? { DATABASE_URL: e2eDatabaseUrl } : {}),
     },
-    url: "http://127.0.0.1:4321",
+    url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
   },

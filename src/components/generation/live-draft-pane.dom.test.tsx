@@ -19,6 +19,21 @@ function chapters(count: number): Map<number, ChapterProgress> {
 }
 
 describe("LiveDraftPane focus retention", () => {
+  it("describes the included story's real one-chapter writing wave", () => {
+    render(
+      <LiveDraftPane
+        chapters={new Map()}
+        titles={{}}
+        stage="queued"
+        experience="trial_short_story"
+        subscribeChapterProse={vi.fn(() => () => undefined)}
+      />,
+    );
+
+    expect(screen.getByText(/one chapter at a time/i)).toBeVisible();
+    expect(screen.queryByText(/several chapters at a time/i)).not.toBeInTheDocument();
+  });
+
   it("keeps an initially active focused tab mounted when a seventh chapter arrives", () => {
     const subscribe = vi.fn(() => () => undefined);
     const { rerender } = render(

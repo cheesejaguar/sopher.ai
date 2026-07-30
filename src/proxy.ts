@@ -1,6 +1,7 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
 import { devAuthAllowed } from "@/lib/clerk";
+import { hasCompleteClerkConfiguration, isProtectedPath } from "@/lib/auth-route-policy";
 import {
   ANON_COOKIE,
   ATTRIBUTION_COOKIE,
@@ -18,14 +19,10 @@ import {
 // Carve-outs: webhooks authenticate by signature (Stripe, svix), estimates
 // quotes prices before sign-in, and events records the pre-signup funnel —
 // which is most of the funnel.
-const isProtected = createRouteMatcher([
-  "/admin(.*)",
-  "/studio(.*)",
-  "/projects(.*)",
-  "/api/((?!webhooks|estimates|events).*)",
-]);
-
-const hasClerkKeys = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const hasClerkKeys = hasCompleteClerkConfiguration(
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  process.env.CLERK_SECRET_KEY,
+);
 
 /**
  * Stamps the first-touch attribution and anonymous id cookies.
@@ -74,7 +71,7 @@ function stampAttribution(req: NextRequest, res: NextResponse): NextResponse {
 // (development or ALLOW_DEV_AUTH=1); otherwise fail closed on protected routes.
 export default hasClerkKeys
   ? clerkMiddleware(async (auth, req) => {
-      if (isProtected(req)) {
+      if (isProtectedPath(req.nextUrl.pathname)) {
         // Returning the redirect/404 unmodified — a visitor being sent to
         // sign-in has not landed yet, and their utm parameters survive on the
         // redirect_url for the page they eventually reach.
@@ -87,7 +84,9 @@ export default hasClerkKeys
         return stampAttribution(req, NextResponse.next());
       }
     : function proxy(req: NextRequest) {
-        if (isProtected(req)) return new Response("Auth misconfigured", { status: 503 });
+        if (isProtectedPath(req.nextUrl.pathname)) {
+          return new Response("Auth misconfigured", { status: 503 });
+        }
         return stampAttribution(req, NextResponse.next());
       };
 

@@ -41,11 +41,14 @@ describe("buildConceptUserPrompt", () => {
   it("includes the brief and optional sections", () => {
     const prompt = buildConceptUserPrompt({
       brief: "A lighthouse keeper discovers a message in a bottle.",
+      workingTitle: "The Last Light",
       genre: "mystery",
       targetAudience: "adult readers",
       contentGuidelines: "## Content Guidelines\nNo profanity.",
     });
     expect(prompt).toContain("A lighthouse keeper discovers a message in a bottle.");
+    expect(prompt).toContain("## Working Title\n\nThe Last Light");
+    expect(prompt).toContain("Preserve this title exactly");
     expect(prompt).toContain("## Genre\n\nmystery");
     expect(prompt).toContain("## Target Audience\n\nadult readers");
     expect(prompt).toContain("## Content Guidelines");

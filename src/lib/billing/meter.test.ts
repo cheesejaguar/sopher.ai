@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   transaction: vi.fn(),
   cacheDelete: vi.fn(),
+  assertProjectSpendAccess: vi.fn(),
 }));
 
 vi.mock("@/db", async (importOriginal) => {
@@ -19,11 +20,16 @@ vi.mock("@vercel/functions", () => ({
   }),
 }));
 
+vi.mock("@/lib/project-spend-access", () => ({
+  assertProjectSpendAccess: mocks.assertProjectSpendAccess,
+}));
+
 import {
   abortMeteredCallIntent,
   beginMeteredCallIntent,
   reconcileMeteredCallAsCharged,
   reconcileMeteredCallAsUncharged,
+  releaseReplayedOptionalOperationLeases,
   refundSettledLogicalUsageForRedo,
   ReservationSettlementError,
   recordLlmCallsAndDebit,
@@ -67,6 +73,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getSqlClient.mockReturnValue({ transaction: mocks.transaction });
   mocks.cacheDelete.mockResolvedValue(undefined);
+  mocks.assertProjectSpendAccess.mockResolvedValue({
+    experience: "full_book",
+    fullBookUnlocked: true,
+    allowCreditFloor: true,
+  });
 });
 
 describe("recordLlmCallsAndDebit", () => {
@@ -305,6 +316,11 @@ describe("metered intent authorization", () => {
       }),
     ).resolves.toMatchObject({ status: "started", reservationRef: debit.reservationRef });
 
+    expect(mocks.assertProjectSpendAccess).toHaveBeenCalledWith({
+      userId: "user-1",
+      projectId: firstRecord.projectId,
+      operationKind: "authoring",
+    });
     expect(queries).toHaveLength(2);
     expect(queries[0].strings.join("?")).toContain("pg_advisory_xact_lock");
     const authorizationSql = queries[1].strings.join("?");
@@ -319,6 +335,100 @@ describe("metered intent authorization", () => {
     );
     expect(queries[1].values.map(String).join("\n")).toContain("reservation-close-request:");
     expect(authorizationSql).toContain("wallet.balance >=");
+    expect(authorizationSql).toContain("project_access");
+    expect(authorizationSql).toContain("trial_spend");
+    expect(authorizationSql).toContain("credits_used");
+    expect(authorizationSql).toContain("credits_held");
+    expect(authorizationSql).toContain("purchase.kind = 'purchase'");
+    expect(authorizationSql).toContain("author.role = 'admin'");
+  });
+
+  it("atomically excludes optional trial work from active generation and the shared cap", async () => {
+    let queries: Array<{ strings: TemplateStringsArray; values: unknown[] }> = [];
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      queries = build(tx);
+      return [[], [], [{ status: "trial_cap", balance: "100", required: "4" }]];
+    });
+
+    await expect(
+      beginMeteredCallIntent({
+        userId: "user-1",
+        projectId: firstRecord.projectId,
+        runId: null,
+        intentRef: debit.intentRef,
+        intentPrefix: "metering-intent:interactive:user-1:key:tool:attempt:",
+        usagePrefix: "llm:interactive:user-1:key:tool:",
+        maxCredits: 4,
+        description: "Metering intent for an optional tool",
+      }),
+    ).resolves.toMatchObject({ status: "trial_cap", balance: 100 });
+
+    expect(mocks.assertProjectSpendAccess).toHaveBeenCalledWith({
+      userId: "user-1",
+      projectId: firstRecord.projectId,
+      operationKind: "optional",
+    });
+    const sqlText = queries[2].strings.join("?");
+    expect(sqlText).toContain("competing_run.status in ('queued', 'running', 'awaiting_input')");
+    expect(sqlText).toContain("competing_run.kind <> 'export'");
+    expect(sqlText).toContain("spent.credits_used");
+    expect(sqlText).toContain("spent.credits_held");
+    expect(sqlText).toContain("trial_cap_blocked");
+    expect(sqlText).toContain("optional_lease");
+    expect(queries[2].values.map(String).join("\n")).toContain("optional-operation-lease:");
+    expect(sqlText).toContain("> ?");
+    expect(queries[2].values.map(String)).toContain("10");
+  });
+
+  it("rechecks suspension inside the wallet-locked authorization transaction", async () => {
+    let authorizationSql = "";
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      authorizationSql = queries.at(-1)!.strings.join("?");
+      return [[], [{ status: "suspended", balance: "10", required: "1" }]];
+    });
+
+    await expect(
+      beginMeteredCallIntent({
+        userId: "user-1",
+        projectId: firstRecord.projectId,
+        runId: firstRecord.runId,
+        intentRef: debit.intentRef,
+        intentPrefix: "metering-intent:generation:run-1:chapter:1:writer.draft:attempt:",
+        usagePrefix: debit.externalRefPrefix,
+        maxCredits: 1,
+        description: "Metering intent for writer.draft",
+      }),
+    ).resolves.toMatchObject({ status: "suspended" });
+
+    expect(authorizationSql).toContain("author.suspended");
+    expect(authorizationSql).toContain("where not access.suspended");
+    expect(authorizationSql).toContain("then 'suspended'");
+  });
+
+  it("repairs an optional delivery lease only for the exact replay key", async () => {
+    let repairSql = "";
+    let repairValues: unknown[] = [];
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      repairSql = queries[1].strings.join("?");
+      repairValues = queries[1].values;
+      return [[], []];
+    });
+
+    await releaseReplayedOptionalOperationLeases({
+      userId: "user-1",
+      projectId: firstRecord.projectId,
+      idempotencyKey: "33333333-3333-4333-8333-333333333333",
+    });
+
+    expect(repairSql).toContain("'release:' || lease.external_ref");
+    expect(repairSql).toContain("optional-operation-lease:%");
+    expect(repairSql).toContain("on conflict (external_ref) do nothing");
+    expect(repairValues.map(String)).toContain("%:33333333-3333-4333-8333-333333333333:%");
   });
 
   it("requires an aged unresolved intent and explicit terminal/release checks for operator recovery", async () => {

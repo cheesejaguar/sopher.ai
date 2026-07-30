@@ -9,6 +9,12 @@ import { RelativeTime } from "@/components/relative-time";
 import { genreLabel } from "@/lib/genres";
 import { ProjectMenu } from "@/components/studio/project-menu";
 import { CREDIT_MARKUP } from "@/lib/billing/credits-shared";
+import {
+  FULL_BOOK_UNLOCK_DESCRIPTION,
+  FULL_BOOK_UNLOCK_HREF,
+  fullBookUnlockHref,
+  INCLUDED_STORY_NO_CARD_NOTE,
+} from "@/lib/marketing/trial-offer";
 
 export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete" | "archived";
 
@@ -239,22 +245,44 @@ export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
   );
 }
 
-export function NewBookCard() {
+export function NewBookCard({
+  unlockFullBooks = false,
+  sourceProjectId,
+}: {
+  unlockFullBooks?: boolean;
+  sourceProjectId?: string;
+}) {
+  const href = unlockFullBooks
+    ? sourceProjectId
+      ? fullBookUnlockHref(sourceProjectId)
+      : FULL_BOOK_UNLOCK_HREF
+    : "/studio/new";
+
   return (
     <Link
-      href="/studio/new"
+      href={href}
       className="group relative flex h-full min-h-64 flex-col justify-between overflow-hidden rounded-sm border border-border border-l-primary bg-instrument p-5 text-foreground transition-colors hover:border-primary/55 hover:bg-instrument-high"
     >
       <span aria-hidden="true" className="absolute inset-y-0 right-10 w-px bg-primary/12" />
       <span aria-hidden="true" className="absolute right-0 bottom-12 left-0 h-px bg-primary/12" />
-      <span className="folio-label text-primary">New production</span>
+      <span className="folio-label text-primary">
+        {unlockFullBooks ? "Full-length production" : "New production"}
+      </span>
       <span className="relative grid size-11 place-items-center border border-primary/35 bg-primary/10 text-primary">
-        <Plus aria-hidden="true" className="size-4" />
+        {unlockFullBooks ? (
+          <ArrowUpRight aria-hidden="true" className="size-4" />
+        ) : (
+          <Plus aria-hidden="true" className="size-4" />
+        )}
       </span>
       <span className="relative">
-        <span className="block text-xl font-semibold tracking-[-0.02em]">Start a new book</span>
+        <span className="block text-xl font-semibold tracking-[-0.02em]">
+          {unlockFullBooks ? "Take your story to full length" : "Start a new book"}
+        </span>
         <span className="mt-2 block max-w-sm text-sm leading-relaxed text-muted-foreground">
-          Four clear steps from your idea to a credit quote. Nothing runs until you approve it.
+          {unlockFullBooks
+            ? `${INCLUDED_STORY_NO_CARD_NOTE} ${FULL_BOOK_UNLOCK_DESCRIPTION} Its title, genre, and brief will carry into the new full-length setup.`
+            : "Four clear steps from your idea to a credit quote. Nothing runs until you approve it."}
         </span>
       </span>
     </Link>

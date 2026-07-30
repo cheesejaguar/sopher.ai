@@ -83,10 +83,7 @@ function StageMark({ label, state, note }: { label: string; state: StepState; no
         {state === "done" ? (
           <Check aria-hidden="true" className="size-3" />
         ) : state === "active" ? (
-          <span
-            aria-hidden="true"
-            className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
-          />
+          <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
         ) : null}
       </span>
       <span className="flex min-w-0 flex-col">
@@ -113,6 +110,7 @@ function StageMark({ label, state, note }: { label: string; state: StepState; no
 
 export function StageTimeline({
   stage,
+  pct,
   detail,
   pausedStage,
   tier,
@@ -140,19 +138,15 @@ export function StageTimeline({
   const activeIndex = activeStep ? steps.indexOf(activeStep) : -1;
   const pipelineFinished = stage === "done";
   const pipelineStopped = stage === "failed" || stage === "cancelled";
-  const pipelineValue = pipelineFinished
-    ? 100
-    : activeIndex >= 0
-      ? Math.round(((activeIndex + 1) / steps.length) * 100)
-      : 0;
+  const pipelineValue = pipelineFinished ? 100 : Math.min(100, Math.max(0, Math.round(pct)));
   const pipelinePosition =
     activeIndex >= 0
-      ? `Stage ${activeIndex + 1} of ${steps.length}: ${activeStep?.label}`
+      ? `${pipelineValue}% complete · Stage ${activeIndex + 1} of ${steps.length}: ${activeStep?.label}`
       : pipelineFinished
-        ? "Pipeline finished"
+        ? "100% complete · Pipeline finished"
         : pipelineStopped
-          ? "Pipeline stopped"
-          : "Pipeline preparing";
+          ? `${pipelineValue}% complete · Pipeline stopped`
+          : `${pipelineValue}% complete · Pipeline preparing`;
 
   return (
     <section aria-label="Generation progress" className="space-y-3">
@@ -192,16 +186,12 @@ export function StageTimeline({
       <div className="flex items-center gap-3">
         <Progress
           value={pipelineValue}
-          aria-label="Pipeline position"
+          aria-label="Production progress"
           aria-valuetext={pipelinePosition}
           className="min-w-0 flex-1"
         />
         <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
-          {activeIndex >= 0
-            ? `${activeIndex + 1}/${steps.length}`
-            : pipelineFinished
-              ? "Done"
-              : "—"}
+          {pipelineFinished ? "Done" : `${pipelineValue}%`}
         </span>
       </div>
       {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}

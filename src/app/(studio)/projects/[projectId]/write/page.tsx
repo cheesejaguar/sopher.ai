@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
@@ -14,11 +14,16 @@ import type { QualityTier } from "@/ai/models";
 import type { GenerationConfig } from "@/lib/run-events";
 import { WriteExperience } from "@/components/generation/write-experience";
 import type { RunSnapshot, RunStatus } from "@/hooks/use-run-stream";
+import { getStudioAccess } from "@/lib/studio-access";
+import { getRunHealth } from "@/lib/run-health";
 
 export default async function WritePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const { userId } = await requireUser();
-  const data = await getProjectWithBook(userId, projectId);
+  const [data, access] = await Promise.all([
+    getProjectWithBook(userId, projectId),
+    getStudioAccess(userId),
+  ]);
   if (!data) notFound();
   const { project, book } = data;
 
@@ -48,25 +53,44 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
   let snapshot: RunSnapshot | null = null;
   if (run) {
     const db = getDb();
-    const [events, [spend], [usageDebits]] = await Promise.all([
+    const [events, health] = await Promise.all([
       db
-        .select({ payload: schema.generationEvents.payload })
+        .select({
+          payload: schema.generationEvents.payload,
+          createdAt: schema.generationEvents.createdAt,
+        })
         .from(schema.generationEvents)
         .where(eq(schema.generationEvents.runId, run.id))
         .orderBy(schema.generationEvents.seq),
-      db
-        .select({ total: sql<string>`coalesce(sum(${schema.llmCalls.usd}), 0)` })
-        .from(schema.llmCalls)
-        .where(eq(schema.llmCalls.runId, run.id)),
-      db
-        .select({ total: sql<string>`coalesce(-sum(${schema.creditLedger.amount}), 0)` })
-        .from(schema.creditLedger)
-        .where(
-          sql`${schema.creditLedger.runId} = ${run.id} and ${schema.creditLedger.kind} = 'usage'`,
-        ),
+      getRunHealth(run),
     ]);
     snapshot = {
-      run: { id: run.id, status: run.status as RunStatus, error: run.error, kind: run.kind },
+      run: {
+        id: run.id,
+        status: run.status as RunStatus,
+        error: run.error,
+        kind: run.kind,
+        workflowRunId: run.workflowRunId,
+        createdAt: run.createdAt.toISOString(),
+        startedAt: run.startedAt?.toISOString() ?? null,
+        completedAt: run.completedAt?.toISOString() ?? null,
+      },
+      health: {
+        databaseStatus: health.databaseStatus,
+        workflowStatus: health.workflowStatus,
+        effectiveStatus: health.effectiveStatus,
+        acceptedAt: health.acceptedAt,
+        ...(health.startedAt ? { startedAt: health.startedAt } : {}),
+        ...(health.completedAt ? { completedAt: health.completedAt } : {}),
+        ...(health.lastEventAt ? { lastEventAt: health.lastEventAt } : {}),
+        noWorkStarted: health.noWorkStarted,
+        acceptanceUncertain: health.acceptanceUncertain,
+        safeToRetry: health.safeToRetry,
+        handoffConfirmed: Boolean(run.workflowRunId),
+        elapsedMs: health.elapsedMs,
+        ...(health.estimatedMinutes !== null ? { estimatedMinutes: health.estimatedMinutes } : {}),
+        chapters: health.chapters,
+      },
       events: events.map((event) => event.payload),
       chapters: chapters
         .filter((chapter) => chapter.chapterNumber <= runTargetChapters)
@@ -76,8 +100,9 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
           wordCount: chapter.wordCount || undefined,
           qualityScore: chapter.qualityScore !== null ? Number(chapter.qualityScore) : undefined,
         })),
-      totalUsd: Number(spend?.total ?? 0),
-      totalCredits: Number(usageDebits?.total ?? 0),
+      totalUsd: health.spend.meteredUsd,
+      totalCredits: health.spend.creditsUsed,
+      estimatedMinutes: runEstimate.estimatedMinutes,
     };
   }
 
@@ -95,11 +120,16 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
       <WriteExperience
         projectId={project.id}
         projectTitle={project.title}
+        userId={userId}
+        recoveryRequestKey={project.creationKey}
+        experience={project.experience}
+        fullBookUnlocked={access.fullBookUnlocked}
         tier={launchTier}
         requireOutlineApproval={launchRequireOutlineApproval}
         targetChapters={project.targetChapters}
         targetWordsPerChapter={project.targetWordsPerChapter}
         estimateUsd={launchEstimate.totalUsd}
+        estimatedMinutes={launchEstimate.estimatedMinutes}
         initialRunShape={
           run
             ? {
@@ -107,6 +137,7 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
                 chapters: runTargetChapters,
                 wordsPerChapter: runTargetWordsPerChapter,
                 estimateUsd: runEstimate.totalUsd,
+                estimatedMinutes: runEstimate.estimatedMinutes,
               }
             : undefined
         }

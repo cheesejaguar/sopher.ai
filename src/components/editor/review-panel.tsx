@@ -67,10 +67,7 @@ function ReviewingState({ chapterNumber }: { chapterNumber: number }) {
   return (
     <div className="space-y-3 p-4" aria-busy="true">
       <p className="flex items-center gap-2 text-xs text-ai">
-        <span
-          aria-hidden="true"
-          className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
-        />
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
         The editor is reading chapter {chapterNumber}…
       </p>
       {Array.from({ length: 3 }).map((_, i) => (

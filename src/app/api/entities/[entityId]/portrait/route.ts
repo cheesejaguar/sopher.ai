@@ -4,14 +4,17 @@ import { and, eq, sql } from "drizzle-orm";
 
 import {
   gatewayOptions,
+  healReplayedMeteredDelivery,
   metered,
   meteredCallAuthorizationUsd,
+  completeMeteredDelivery,
   refundMeteredDelivery,
   type MeterCtx,
 } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction } from "@/db";
+import { replacePortraitAssetTransaction } from "@/db/transaction-operations";
 import { getEntityForPortrait } from "@/db/queries/entities";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
@@ -24,6 +27,7 @@ import {
   compensateUnreferencedBlobUpload,
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
+import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
 
 /**
  * Generates one entity portrait on demand. Never called automatically — the
@@ -98,7 +102,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
       ),
     )
     .limit(1);
-  if (replayed) return Response.json({ url: replayed.url });
+  if (replayed) {
+    await healReplayedMeteredDelivery({
+      userId,
+      projectId: entity.projectId,
+      idempotencyKey,
+    });
+    return Response.json({ url: replayed.url });
+  }
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId: entity.projectId,
+    operationKind: "optional",
+  });
+  if (spendDenied) return spendDenied;
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
   const model = MODELS[tier].image;
   const meter: MeterCtx = {
@@ -190,53 +207,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     let displacedPortrait: { id: string; pathname: string } | undefined;
     let displacedCandidate: { id: string; pathname: string } | undefined;
     try {
-      displacedPortrait = await db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(
-            hashtextextended('sopher:project-authoring:' || ${entity.projectId}, 0)
-          )`,
-        );
-        const [lockedEntity] = await tx
-          .select({ portraitAssetId: schema.entities.portraitAssetId })
-          .from(schema.entities)
-          .where(eq(schema.entities.id, entityId))
-          .limit(1);
-        if (!lockedEntity) throw new Error("Entity disappeared while storing its portrait");
-
-        const [displaced] = lockedEntity.portraitAssetId
-          ? await tx
-              .select({
-                id: schema.assets.id,
-                pathname: schema.assets.blobPathname,
-              })
-              .from(schema.assets)
-              .where(eq(schema.assets.id, lockedEntity.portraitAssetId))
-              .limit(1)
-          : [];
-        displacedCandidate = displaced;
-
-        const [asset] = await tx
-          .insert(schema.assets)
-          .values({
-            projectId: entity.projectId,
-            kind: "portrait",
-            blobUrl: blob.url,
-            blobPathname: blob.pathname,
-            contentType,
-            sizeBytes: file.uint8Array.byteLength,
-            meta: { entityId, prompt, operationKey: idempotencyKey },
-          })
-          .returning({ id: schema.assets.id });
-        if (!asset) throw new Error("Could not record portrait asset");
-
-        const [updated] = await tx
-          .update(schema.entities)
-          .set({ portraitAssetId: asset.id, updatedAt: new Date() })
-          .where(eq(schema.entities.id, entityId))
-          .returning({ id: schema.entities.id });
-        if (!updated) throw new Error("Entity disappeared while storing its portrait");
-        return displaced;
-      });
+      displacedPortrait = await withDbTransaction((tx) =>
+        replacePortraitAssetTransaction(tx, {
+          projectId: entity.projectId,
+          entityId,
+          url: blob.url,
+          pathname: blob.pathname,
+          contentType,
+          sizeBytes: file.uint8Array.byteLength,
+          meta: { entityId, prompt, operationKey: idempotencyKey },
+          onDisplacedCandidate: (candidate) => {
+            displacedCandidate = candidate;
+          },
+        }),
+      );
     } catch (error) {
       let committedAsset: { id: string } | undefined;
       try {
@@ -271,6 +255,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
       displacedPortrait = displacedCandidate;
     }
 
+    await completeMeteredDelivery(meter);
     await scheduleReplacedAssetCleanup({
       projectId: entity.projectId,
       assetId: displacedPortrait?.id,
@@ -278,6 +263,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     });
     return Response.json({ url: blob.url });
   } catch (error) {
+    const spendResponse = projectSpendAccessErrorResponse(error);
+    if (spendResponse) return spendResponse;
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: "Not enough credits" }, { status: 402 });
     }

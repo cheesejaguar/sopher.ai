@@ -78,4 +78,44 @@ describe("CompletionMoment", () => {
     fireEvent.click(pending);
     expect(onWriteAgain).toHaveBeenCalledOnce();
   });
+
+  it("turns an included-story completion into an optional full-book next step", () => {
+    render(
+      <CompletionMoment
+        projectId="trial-project"
+        projectTitle="The River Door"
+        chapterCount={3}
+        experience="trial_short_story"
+        onWriteAgain={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Your short story is written." })).toBeVisible();
+    expect(screen.getByText(/does not require a card/i)).toBeVisible();
+    expect(screen.getByText(/one settled credit purchase permanently unlocks/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Unlock the full-length version" })).toHaveAttribute(
+      "href",
+      "/studio/credits?return=%2Fstudio%2Fnew%3Ffrom%3Dtrial-project",
+    );
+    expect(screen.queryByRole("button", { name: "Write again" })).not.toBeInTheDocument();
+  });
+
+  it("sends an already-unlocked trial author straight to a new full-length setup", () => {
+    render(
+      <CompletionMoment
+        projectId="trial-project"
+        projectTitle="The River Door"
+        chapterCount={3}
+        experience="trial_short_story"
+        fullBookUnlocked
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Take this story to full length." })).toBeVisible();
+    expect(screen.getByText(/title, genre, and brief are ready/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Continue at full length" })).toHaveAttribute(
+      "href",
+      "/studio/new?from=trial-project",
+    );
+  });
 });

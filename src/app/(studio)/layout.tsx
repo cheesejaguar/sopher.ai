@@ -7,6 +7,7 @@ import { ClerkRouteProvider } from "@/components/auth/clerk-route-provider";
 import { ProductShell } from "@/components/studio/product-shell";
 import { getBalance } from "@/lib/billing/credits";
 import { requireUser } from "@/lib/auth";
+import { getStudioAccess } from "@/lib/studio-access";
 
 export const metadata: Metadata = {
   robots: { index: false, follow: false, noarchive: true },
@@ -18,11 +19,18 @@ export default async function StudioLayout({ children }: { children: React.React
   // streaming boundaries for the shell and page content.
   await connection();
   const { userId } = await requireUser();
-  const credits = await getBalance(userId);
+  const [credits, access] = await Promise.all([getBalance(userId), getStudioAccess(userId)]);
+  const publicCredits = access.fullBookUnlocked ? credits : undefined;
+  const creditLabel =
+    access.trialProjectId || access.creationExperience === "trial_short_story"
+      ? "Story included"
+      : access.reason === "verify_email"
+        ? "Verify first"
+        : "Unlock";
 
   return (
     <ClerkRouteProvider>
-      <ProductShell credits={credits}>
+      <ProductShell credits={publicCredits} creditLabel={creditLabel}>
         <Suspense fallback={<StudioLoading />}>{children}</Suspense>
       </ProductShell>
     </ClerkRouteProvider>

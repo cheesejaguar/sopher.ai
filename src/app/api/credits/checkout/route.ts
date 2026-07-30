@@ -34,11 +34,46 @@ const bodySchema = z.object({
 
 function originFrom(req: Request): string {
   const explicit = process.env.NEXT_PUBLIC_APP_URL;
-  if (explicit) return explicit.replace(/\/$/, "");
-  // Vercel sets this per-deployment; fall back to the request origin locally.
-  const host = req.headers.get("host");
-  const proto = host?.startsWith("localhost") ? "http" : "https";
-  return host ? `${proto}://${host}` : "https://sopher.ai";
+  if (explicit) {
+    try {
+      const configured = new URL(explicit);
+      if (configured.protocol === "https:" || configured.hostname === "localhost") {
+        return configured.origin;
+      }
+    } catch {
+      // Fall through to Vercel's system value or the canonical origin.
+    }
+  }
+
+  // VERCEL_URL is a trusted system environment value. Never build payment
+  // return URLs from the request Host header: a poisoned Host would turn a
+  // legitimate Stripe checkout into an off-site success/cancel redirect.
+  const vercelHost = process.env.VERCEL_URL;
+  if (vercelHost) {
+    try {
+      return new URL(`https://${vercelHost}`).origin;
+    } catch {
+      // A malformed deployment value must fail back to the canonical origin.
+    }
+  }
+
+  // Preserve zero-config loopback development. In production even a loopback
+  // request URL can be derived from a forged Host header, so no request origin
+  // is trusted there.
+  try {
+    const requestOrigin = new URL(req.url);
+    if (
+      process.env.NODE_ENV !== "production" &&
+      (requestOrigin.hostname === "localhost" ||
+        requestOrigin.hostname === "127.0.0.1" ||
+        requestOrigin.hostname === "[::1]")
+    ) {
+      return requestOrigin.origin;
+    }
+  } catch {
+    // The Request constructor normally guarantees a URL; canonical is safe.
+  }
+  return "https://sopher.ai";
 }
 
 export async function POST(req: Request) {
@@ -111,7 +146,7 @@ export async function POST(req: Request) {
       },
     ],
     success_url: `${origin}/studio/credits?purchase=complete${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`,
-    cancel_url: `${origin}/studio/credits?purchase=cancelled`,
+    cancel_url: `${origin}/studio/credits?purchase=cancelled${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`,
   });
 
   if (!session.url) {

@@ -36,6 +36,35 @@ export type AgentFeedItem = {
 
 export type RunConnection = "connecting" | "live" | "ended" | "reconnecting";
 
+export type WorkflowStatus =
+  "pending" | "running" | "completed" | "failed" | "cancelled" | "missing" | "unavailable";
+
+export type RunHealth = {
+  databaseStatus: RunStatus;
+  workflowStatus?: WorkflowStatus;
+  effectiveStatus: RunStatus;
+  acceptedAt?: string;
+  startedAt?: string;
+  completedAt?: string;
+  lastEventAt?: string;
+  noWorkStarted: boolean;
+  /** `start()` acceptance is ambiguous and this exact durable run may be retried safely. */
+  acceptanceUncertain?: boolean;
+  safeToRetry?: boolean;
+  /** A Workflow id has been durably linked to this run. */
+  handoffConfirmed?: boolean;
+  elapsedMs?: number;
+  estimatedMinutes?: number;
+  chapters?: {
+    total: number;
+    planned: number;
+    drafting: number;
+    drafted: number;
+    edited: number;
+    final: number;
+  };
+};
+
 export type RunStreamState = {
   stage: Stage;
   pct: number;
@@ -48,6 +77,9 @@ export type RunStreamState = {
   review?: { score: number; recommendation: string; issueCount: number };
   error?: { message: string; fatal: boolean };
   connection: RunConnection;
+  health: RunHealth;
+  connectionAttempt: number;
+  lastConnectionError?: string;
 };
 
 export type RunStatus =
@@ -60,7 +92,12 @@ export type RunSnapshot = {
     status: RunStatus;
     error: string | null;
     kind?: "full_book" | "chapter" | "edit_pass" | "continuity" | "export";
+    workflowRunId?: string | null;
+    createdAt?: string;
+    startedAt?: string | null;
+    completedAt?: string | null;
   };
+  health?: Partial<RunHealth>;
   /** Persisted event payloads in seq order (validated here; invalid ones dropped). */
   events: unknown[];
   /** Chapter statuses read from the DB at render time. */
@@ -69,10 +106,29 @@ export type RunSnapshot = {
   totalUsd?: number;
   /** Actual usage debits for this run, in retail credits. */
   totalCredits?: number;
+  /** Configuration-derived range, never a countdown or completion promise. */
+  estimatedMinutes?: number;
 };
 
 const TERMINAL_STAGES: ReadonlySet<Stage> = new Set(["done", "failed", "cancelled"]);
 const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(["completed", "failed", "cancelled"]);
+const RUN_STATUSES: ReadonlySet<string> = new Set([
+  "queued",
+  "running",
+  "awaiting_input",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+const WORKFLOW_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "cancelled",
+  "missing",
+  "unavailable",
+]);
 
 /** Stages only move forward within a run; replay merges are upgrade-only. */
 const STAGE_ORDER: Record<Stage, number> = {
@@ -117,6 +173,11 @@ type Acc = {
   totalCredits: number;
   review?: { score: number; recommendation: string; issueCount: number };
   error?: { message: string; fatal: boolean };
+};
+
+type HealthAcc = RunHealth & {
+  connectionAttempt: number;
+  lastConnectionError?: string;
 };
 
 function applyEvent(acc: Acc, event: RunEvent): void {
@@ -216,6 +277,187 @@ function applyRunStatus(acc: Acc, status: RunStatus, error: string | null): void
   }
 }
 
+function runStatus(value: unknown): RunStatus | undefined {
+  return typeof value === "string" && RUN_STATUSES.has(value) ? (value as RunStatus) : undefined;
+}
+
+function workflowStatus(value: unknown): WorkflowStatus | undefined {
+  return typeof value === "string" && WORKFLOW_STATUSES.has(value)
+    ? (value as WorkflowStatus)
+    : undefined;
+}
+
+function dateString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
+}
+
+function chapterCounts(value: unknown): RunHealth["chapters"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const counts = value as Record<string, unknown>;
+  const fields = ["total", "planned", "drafting", "drafted", "edited", "final"] as const;
+  if (
+    !fields.every(
+      (field) =>
+        typeof counts[field] === "number" &&
+        Number.isInteger(counts[field]) &&
+        (counts[field] as number) >= 0,
+    )
+  ) {
+    return undefined;
+  }
+  return Object.fromEntries(fields.map((field) => [field, counts[field]])) as NonNullable<
+    RunHealth["chapters"]
+  >;
+}
+
+/**
+ * Defensive adapter for the enriched run endpoint. During rollout the page
+ * snapshot and API may not gain every health field in the same deployment.
+ */
+export function parseRunHealthResponse(
+  value: unknown,
+  previous: RunHealth,
+): {
+  health: RunHealth;
+  error: string | null;
+  stage?: Stage;
+  pct?: number;
+  detail?: string;
+  totalUsd?: number;
+  totalCredits?: number;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const root = value as Record<string, unknown>;
+  const run =
+    root.run && typeof root.run === "object" ? (root.run as Record<string, unknown>) : undefined;
+  const rawHealth =
+    root.health && typeof root.health === "object"
+      ? (root.health as Record<string, unknown>)
+      : undefined;
+  const databaseStatus =
+    runStatus(rawHealth?.databaseStatus) ?? runStatus(run?.status) ?? previous.databaseStatus;
+  const effectiveStatus =
+    runStatus(rawHealth?.effectiveStatus) ?? runStatus(run?.status) ?? previous.effectiveStatus;
+
+  const next: RunHealth = {
+    databaseStatus,
+    effectiveStatus,
+    noWorkStarted:
+      typeof rawHealth?.noWorkStarted === "boolean"
+        ? rawHealth.noWorkStarted
+        : previous.noWorkStarted,
+    acceptanceUncertain:
+      typeof rawHealth?.acceptanceUncertain === "boolean"
+        ? rawHealth.acceptanceUncertain
+        : previous.acceptanceUncertain,
+    safeToRetry:
+      typeof rawHealth?.safeToRetry === "boolean" ? rawHealth.safeToRetry : previous.safeToRetry,
+    handoffConfirmed:
+      (typeof run?.workflowRunId === "string" && run.workflowRunId.length > 0) ||
+      Boolean(previous.handoffConfirmed),
+    ...((workflowStatus(rawHealth?.workflowStatus) ?? previous.workflowStatus)
+      ? { workflowStatus: workflowStatus(rawHealth?.workflowStatus) ?? previous.workflowStatus }
+      : {}),
+    ...((dateString(rawHealth?.acceptedAt) ?? dateString(run?.createdAt) ?? previous.acceptedAt)
+      ? {
+          acceptedAt:
+            dateString(rawHealth?.acceptedAt) ?? dateString(run?.createdAt) ?? previous.acceptedAt,
+        }
+      : {}),
+    ...((dateString(rawHealth?.startedAt) ?? dateString(run?.startedAt) ?? previous.startedAt)
+      ? {
+          startedAt:
+            dateString(rawHealth?.startedAt) ?? dateString(run?.startedAt) ?? previous.startedAt,
+        }
+      : {}),
+    ...((dateString(rawHealth?.completedAt) ?? dateString(run?.completedAt) ?? previous.completedAt)
+      ? {
+          completedAt:
+            dateString(rawHealth?.completedAt) ??
+            dateString(run?.completedAt) ??
+            previous.completedAt,
+        }
+      : {}),
+    ...((dateString(rawHealth?.lastEventAt) ??
+    dateString(rawHealth?.lastUpdateAt) ??
+    previous.lastEventAt)
+      ? {
+          lastEventAt:
+            dateString(rawHealth?.lastEventAt) ??
+            dateString(rawHealth?.lastUpdateAt) ??
+            previous.lastEventAt,
+        }
+      : {}),
+    ...(typeof rawHealth?.elapsedMs === "number" &&
+    Number.isFinite(rawHealth.elapsedMs) &&
+    rawHealth.elapsedMs >= 0
+      ? { elapsedMs: rawHealth.elapsedMs }
+      : previous.elapsedMs !== undefined
+        ? { elapsedMs: previous.elapsedMs }
+        : {}),
+    ...(typeof rawHealth?.estimatedMinutes === "number" &&
+    Number.isFinite(rawHealth.estimatedMinutes) &&
+    rawHealth.estimatedMinutes > 0
+      ? { estimatedMinutes: rawHealth.estimatedMinutes }
+      : previous.estimatedMinutes !== undefined
+        ? { estimatedMinutes: previous.estimatedMinutes }
+        : {}),
+    ...((chapterCounts(rawHealth?.chapters) ?? previous.chapters)
+      ? { chapters: chapterCounts(rawHealth?.chapters) ?? previous.chapters }
+      : {}),
+  };
+
+  const spend =
+    rawHealth?.spend && typeof rawHealth.spend === "object"
+      ? (rawHealth.spend as Record<string, unknown>)
+      : undefined;
+  const rootTotalUsd =
+    typeof root.totalUsd === "number" && Number.isFinite(root.totalUsd)
+      ? root.totalUsd
+      : typeof spend?.totalUsd === "number" && Number.isFinite(spend.totalUsd)
+        ? spend.totalUsd
+        : typeof spend?.meteredUsd === "number" && Number.isFinite(spend.meteredUsd)
+          ? spend.meteredUsd
+          : undefined;
+  const rootTotalCredits =
+    typeof root.totalCredits === "number" && Number.isFinite(root.totalCredits)
+      ? root.totalCredits
+      : typeof spend?.totalCredits === "number" && Number.isFinite(spend.totalCredits)
+        ? spend.totalCredits
+        : typeof spend?.creditsUsed === "number" && Number.isFinite(spend.creditsUsed)
+          ? spend.creditsUsed
+          : undefined;
+  const polledStage =
+    typeof rawHealth?.stage === "string" && rawHealth.stage in STAGE_ORDER
+      ? (rawHealth.stage as Stage)
+      : undefined;
+  const progressPct =
+    typeof rawHealth?.progressPct === "number" &&
+    Number.isFinite(rawHealth.progressPct) &&
+    rawHealth.progressPct >= 0
+      ? Math.min(100, rawHealth.progressPct)
+      : undefined;
+
+  return {
+    health: next,
+    error: typeof run?.error === "string" ? run.error : null,
+    ...(polledStage ? { stage: polledStage } : {}),
+    ...(progressPct !== undefined ? { pct: progressPct } : {}),
+    ...(typeof rawHealth?.stageDescription === "string"
+      ? { detail: rawHealth.stageDescription }
+      : {}),
+    ...(rootTotalUsd !== undefined ? { totalUsd: rootTotalUsd } : {}),
+    ...(rootTotalCredits !== undefined ? { totalCredits: rootTotalCredits } : {}),
+  };
+}
+
+function eventShowsWork(event: RunEvent): boolean {
+  if (event.type === "stage") return event.stage !== "queued";
+  if (event.type === "cost") return event.totalUsd > 0;
+  return event.type === "agent" || event.type === "chapter" || event.type === "review";
+}
+
 function initFromSnapshot(snapshot: RunSnapshot): Acc {
   const acc: Acc = {
     stage: "queued",
@@ -239,7 +481,52 @@ function initFromSnapshot(snapshot: RunSnapshot): Acc {
   return acc;
 }
 
-function materialize(acc: Acc, connection: RunConnection): RunStreamState {
+function initHealthFromSnapshot(snapshot: RunSnapshot): HealthAcc {
+  const persistedEvents = snapshot.events
+    .map((payload) => runEventSchema.safeParse(payload))
+    .filter((result) => result.success)
+    .map((result) => result.data);
+  const noWorkStarted =
+    snapshot.health?.noWorkStarted ??
+    !(
+      persistedEvents.some(eventShowsWork) ||
+      (snapshot.totalUsd ?? 0) > 0 ||
+      (snapshot.chapters ?? []).some((chapter) => chapter.status !== "planned")
+    );
+  const databaseStatus = snapshot.health?.databaseStatus ?? snapshot.run.status;
+  const effectiveStatus = snapshot.health?.effectiveStatus ?? snapshot.run.status;
+
+  return {
+    databaseStatus,
+    effectiveStatus,
+    noWorkStarted,
+    acceptanceUncertain: snapshot.health?.acceptanceUncertain,
+    safeToRetry: snapshot.health?.safeToRetry,
+    handoffConfirmed:
+      Boolean(snapshot.run.workflowRunId) || snapshot.health?.handoffConfirmed === true,
+    connectionAttempt: 0,
+    ...(snapshot.health?.workflowStatus ? { workflowStatus: snapshot.health.workflowStatus } : {}),
+    ...((snapshot.health?.acceptedAt ?? snapshot.run.createdAt)
+      ? { acceptedAt: snapshot.health?.acceptedAt ?? snapshot.run.createdAt }
+      : {}),
+    ...((snapshot.health?.startedAt ?? snapshot.run.startedAt)
+      ? { startedAt: snapshot.health?.startedAt ?? snapshot.run.startedAt ?? undefined }
+      : {}),
+    ...((snapshot.health?.completedAt ?? snapshot.run.completedAt)
+      ? { completedAt: snapshot.health?.completedAt ?? snapshot.run.completedAt ?? undefined }
+      : {}),
+    ...(snapshot.health?.lastEventAt ? { lastEventAt: snapshot.health.lastEventAt } : {}),
+    ...(snapshot.health?.elapsedMs !== undefined ? { elapsedMs: snapshot.health.elapsedMs } : {}),
+    ...((snapshot.health?.estimatedMinutes ?? snapshot.estimatedMinutes)
+      ? {
+          estimatedMinutes: snapshot.health?.estimatedMinutes ?? snapshot.estimatedMinutes,
+        }
+      : {}),
+    ...(snapshot.health?.chapters ? { chapters: snapshot.health.chapters } : {}),
+  };
+}
+
+function materialize(acc: Acc, connection: RunConnection, health: HealthAcc): RunStreamState {
   return {
     stage: acc.stage,
     pct: acc.pct,
@@ -252,6 +539,30 @@ function materialize(acc: Acc, connection: RunConnection): RunStreamState {
     review: acc.review,
     error: acc.error,
     connection,
+    health: {
+      databaseStatus: health.databaseStatus,
+      effectiveStatus: health.effectiveStatus,
+      noWorkStarted: health.noWorkStarted,
+      ...(health.acceptanceUncertain !== undefined
+        ? { acceptanceUncertain: health.acceptanceUncertain }
+        : {}),
+      ...(health.safeToRetry !== undefined ? { safeToRetry: health.safeToRetry } : {}),
+      ...(health.handoffConfirmed !== undefined
+        ? { handoffConfirmed: health.handoffConfirmed }
+        : {}),
+      ...(health.workflowStatus ? { workflowStatus: health.workflowStatus } : {}),
+      ...(health.acceptedAt ? { acceptedAt: health.acceptedAt } : {}),
+      ...(health.startedAt ? { startedAt: health.startedAt } : {}),
+      ...(health.completedAt ? { completedAt: health.completedAt } : {}),
+      ...(health.lastEventAt ? { lastEventAt: health.lastEventAt } : {}),
+      ...(health.elapsedMs !== undefined ? { elapsedMs: health.elapsedMs } : {}),
+      ...(health.estimatedMinutes !== undefined
+        ? { estimatedMinutes: health.estimatedMinutes }
+        : {}),
+      ...(health.chapters ? { chapters: { ...health.chapters } } : {}),
+    },
+    connectionAttempt: health.connectionAttempt,
+    lastConnectionError: health.lastConnectionError,
   };
 }
 
@@ -309,23 +620,28 @@ export type UseRunStreamResult = {
 };
 
 export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStreamResult {
-  const terminalAtMount = TERMINAL_STATUSES.has(snapshot.run.status);
+  const terminalAtMount = TERMINAL_STATUSES.has(
+    snapshot.health?.effectiveStatus ?? snapshot.run.status,
+  );
 
   // Computed once per mount (consumers key by runId): the mutable accumulator
   // and the state materialized from the server snapshot.
   const [initial] = React.useState<{
     acc: Acc;
+    health: HealthAcc;
     connection: RunConnection;
     state: RunStreamState;
   }>(() => {
     const acc = initFromSnapshot(snapshot);
-    const connection: RunConnection = TERMINAL_STATUSES.has(snapshot.run.status)
+    const health = initHealthFromSnapshot(snapshot);
+    const connection: RunConnection = TERMINAL_STATUSES.has(health.effectiveStatus)
       ? "ended"
       : "connecting";
-    return { acc, connection, state: materialize(acc, connection) };
+    return { acc, health, connection, state: materialize(acc, connection, health) };
   });
 
   const accRef = React.useRef(initial.acc);
+  const healthRef = React.useRef(initial.health);
   const connRef = React.useRef(initial.connection);
   const stoppedRef = React.useRef(false);
   const abortRef = React.useRef<(() => void) | null>(null);
@@ -334,7 +650,7 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
 
   const publish = React.useCallback((connection?: RunConnection) => {
     if (connection) connRef.current = connection;
-    setState(materialize(accRef.current, connRef.current));
+    setState(materialize(accRef.current, connRef.current, healthRef.current));
   }, []);
 
   React.useEffect(() => {
@@ -346,15 +662,51 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
     let received = 0;
     let attempt = 0;
 
-    async function fetchRunStatus(): Promise<{ status: RunStatus; error: string | null } | null> {
+    async function fetchRunHealth(): Promise<boolean> {
       try {
         const res = await fetch(`/api/runs/${runId}`, { cache: "no-store", signal });
-        if (!res.ok) return null;
+        if (!res.ok) return false;
         const json: unknown = await res.json();
-        const run = (json as { run?: { status?: RunStatus; error?: string | null } }).run;
-        return run?.status ? { status: run.status, error: run.error ?? null } : null;
+        const parsed = parseRunHealthResponse(json, healthRef.current);
+        if (!parsed) return false;
+        healthRef.current = {
+          ...healthRef.current,
+          ...parsed.health,
+        };
+        if (parsed.totalUsd !== undefined) {
+          accRef.current.totalUsd = Math.max(accRef.current.totalUsd, parsed.totalUsd);
+        }
+        if (parsed.totalCredits !== undefined) {
+          accRef.current.totalCredits = Math.max(accRef.current.totalCredits, parsed.totalCredits);
+        }
+        if (parsed.stage) {
+          applyEvent(accRef.current, {
+            type: "stage",
+            stage: parsed.stage,
+            pct: parsed.pct ?? accRef.current.pct,
+            ...(parsed.detail ? { detail: parsed.detail } : {}),
+          });
+        } else if (parsed.pct !== undefined) {
+          accRef.current.pct = Math.max(accRef.current.pct, parsed.pct);
+        }
+        applyRunStatus(accRef.current, parsed.health.effectiveStatus, parsed.error);
+        if (TERMINAL_STATUSES.has(parsed.health.effectiveStatus)) {
+          stoppedRef.current = true;
+          publish("ended");
+          controller.abort();
+          return true;
+        }
+        publish();
+        return false;
       } catch {
-        return null;
+        return false;
+      }
+    }
+
+    async function pollHealth() {
+      while (!signal.aborted && !stoppedRef.current) {
+        if (await fetchRunHealth()) return;
+        await sleep(5_000, signal);
       }
     }
 
@@ -369,6 +721,8 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
           });
           if (!res.ok || !res.body) throw new Error(`Stream responded ${res.status}`);
           attempt = 0;
+          healthRef.current.connectionAttempt = 0;
+          healthRef.current.lastConnectionError = undefined;
           if (received === 0) {
             // Full replay is about to arrive; rebuild the append-only feed from
             // events so snapshot-seeded entries are not duplicated.
@@ -385,6 +739,8 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
               const event = runEventSchema.safeParse(parsed);
               if (event.success) {
                 applyEvent(acc, event.data);
+                healthRef.current.lastEventAt = new Date().toISOString();
+                if (eventShowsWork(event.data)) healthRef.current.noWorkStarted = false;
                 dirty = true;
               }
             } catch {
@@ -402,23 +758,23 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
             publish("ended");
             return;
           }
-          const runRow = await fetchRunStatus();
-          if (runRow && TERMINAL_STATUSES.has(runRow.status)) {
-            applyRunStatus(acc, runRow.status, runRow.error);
-            publish("ended");
-            return;
-          }
+          if (await fetchRunHealth()) return;
           throw new Error("Stream ended while the run was still active");
-        } catch {
+        } catch (cause) {
           if (signal.aborted || stoppedRef.current) return;
           attempt += 1;
+          healthRef.current.connectionAttempt = attempt;
+          healthRef.current.lastConnectionError =
+            cause instanceof Error ? cause.message : "The live connection was interrupted";
           publish("reconnecting");
+          if (await fetchRunHealth()) return;
           await sleep(backoffMs(attempt), signal);
         }
       }
     }
 
     void run();
+    void pollHealth();
     return () => {
       controller.abort();
       abortRef.current = null;
@@ -481,6 +837,9 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
     stoppedRef.current = true;
     abortRef.current?.();
     accRef.current.stage = "cancelled";
+    healthRef.current.databaseStatus = "cancelled";
+    healthRef.current.effectiveStatus = "cancelled";
+    healthRef.current.completedAt = new Date().toISOString();
     publish("ended");
   }, [publish]);
 

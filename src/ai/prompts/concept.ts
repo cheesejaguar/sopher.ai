@@ -60,6 +60,8 @@ Always respond with a valid JSON object containing:
 Be specific and actionable in your concepts. Avoid vague generalities.`;
 
 export interface ConceptPromptInput {
+  /** Author-owned working title. The model may not replace it. */
+  workingTitle?: string;
   /** The author's original book idea / brief. */
   brief: string;
   /** Genre the author selected, if any. */
@@ -73,6 +75,11 @@ export interface ConceptPromptInput {
 /** Build the user message for a concept-generation call. */
 export function buildConceptUserPrompt(input: ConceptPromptInput): string {
   const parts: string[] = [`## Author Brief\n\n${input.brief}`];
+  if (input.workingTitle) {
+    parts.push(
+      `## Working Title\n\n${input.workingTitle}\n\nPreserve this title exactly in the response.`,
+    );
+  }
   if (input.genre) {
     parts.push(`## Genre\n\n${input.genre}`);
   }

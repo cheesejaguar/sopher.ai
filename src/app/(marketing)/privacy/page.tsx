@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 
 import { LegalPage } from "../legal-page";
+import { publicPageMetadata } from "@/lib/marketing/public-metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
   title: "Privacy Policy",
   description:
     "What sopher.ai collects and why, who processes it, how long it is kept, and what happens to the manuscripts you write.",
-  alternates: { canonical: "/privacy" },
-};
+  path: "/privacy",
+});
 
 export default function PrivacyPage() {
   return (

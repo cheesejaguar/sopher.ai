@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   verifyWebhook: vi.fn(),
   getDb: vi.fn(),
+  withDbTransaction: vi.fn(),
   grantCredits: vi.fn(),
   reconcileCreditReservations: vi.fn(),
   start: vi.fn(),
@@ -14,7 +15,11 @@ vi.mock("@clerk/nextjs/webhooks", () => ({
 }));
 vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
-  return { ...actual, getDb: mocks.getDb };
+  return {
+    ...actual,
+    getDb: mocks.getDb,
+    withDbTransaction: mocks.withDbTransaction,
+  };
 });
 vi.mock("@/lib/billing/credits", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/billing/credits")>();
@@ -60,13 +65,10 @@ function deletionDb(selectResults: Row[][], deleted = true) {
     execute: vi.fn().mockResolvedValue(undefined),
     delete: vi.fn(() => deleteChain),
   };
-  const db = {
-    transaction: vi.fn(async (callback: (transaction: typeof tx) => Promise<unknown>) =>
-      callback(tx),
-    ),
-  };
-  mocks.getDb.mockReturnValue(db);
-  return { db, tx, deleteChain };
+  mocks.withDbTransaction.mockImplementation(
+    async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+  );
+  return { tx, deleteChain };
 }
 
 function request() {
@@ -100,6 +102,7 @@ describe("Clerk user deletion", () => {
 
     expect(response.status).toBe(400);
     expect(mocks.getDb).not.toHaveBeenCalled();
+    expect(mocks.withDbTransaction).not.toHaveBeenCalled();
   });
 
   it("is idempotent when a retried delivery finds no local user", async () => {

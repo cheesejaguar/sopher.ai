@@ -73,7 +73,7 @@ import {
 import type { MeterCtx } from "@/ai/metering";
 import type { ToolCtx } from "@/ai/tools";
 import { buildFrozenAuthoringContract } from "@/ai/authoring-guidelines";
-import { transitionAuthoringRunState } from "@/lib/generation-runs";
+import { linkAuthoringRunWorkflow, transitionAuthoringRunState } from "@/lib/generation-runs";
 
 type RunRef = {
   dbRunId: string;
@@ -399,6 +399,16 @@ export async function markRunStatus(
     if (status === "failed" || status === "cancelled") return;
     throw new FatalError("Generation run is no longer active");
   }
+}
+
+export async function linkWorkflowRunStep(ref: RunRef, workflowRunId: string) {
+  "use step";
+  return linkAuthoringRunWorkflow({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    workflowRunId,
+  });
 }
 
 /**
@@ -1111,6 +1121,7 @@ export async function conceptStep(
         tools,
         tier: config.tier,
         brief: config.inputSnapshot.brief,
+        workingTitle: config.inputSnapshot.workingTitle,
         genre: config.inputSnapshot.genre ?? undefined,
         contentGuidelines,
       },
@@ -1185,6 +1196,7 @@ export async function outlineStep(
         tools,
         tier: config.tier,
         concept,
+        workingTitle: config.inputSnapshot.workingTitle,
         brief: config.inputSnapshot.brief || undefined,
         genre: config.inputSnapshot.genre ?? undefined,
         chapterCount: config.targetChapters,

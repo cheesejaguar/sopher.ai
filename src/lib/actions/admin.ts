@@ -1,10 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { grantCredits } from "@/lib/billing/credits";
 import {
@@ -46,11 +46,15 @@ export async function adminSetSuspended(userId: string, suspended: boolean): Pro
   // An admin cannot suspend themselves — trivially reversible otherwise, but
   // locking the only key in the car is not a state worth allowing.
   if (userId === adminId && suspended) throw new Error("You cannot suspend your own account");
-  const db = getDb();
-  await db
-    .update(schema.users)
-    .set({ suspended, updatedAt: new Date() })
-    .where(eq(schema.users.id, userId));
+  await withDbTransaction(async (tx) => {
+    // Shared with provider authorization: once suspension commits, no later
+    // metered call can race a stale precheck into the Gateway.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`);
+    await tx
+      .update(schema.users)
+      .set({ suspended, updatedAt: new Date() })
+      .where(eq(schema.users.id, userId));
+  });
   revalidatePath(`/admin/users/${userId}`);
   revalidatePath("/admin/users");
 }

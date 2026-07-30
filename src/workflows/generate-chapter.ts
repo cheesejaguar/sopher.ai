@@ -1,8 +1,9 @@
-import { FatalError } from "workflow";
+import { FatalError, getWorkflowMetadata } from "workflow";
 import type { GenerationConfig } from "@/lib/run-events";
 import {
   emitCost,
   emitProgress,
+  linkWorkflowRunStep,
   markRunStatus,
   releaseCreditsStep,
   resetChapterStep,
@@ -25,6 +26,12 @@ export async function generateChapter(
 ) {
   "use workflow";
   const ref = { dbRunId, projectId, userId };
+  const { workflowRunId } = getWorkflowMetadata();
+
+  // The first Workflow to link owns both the DB run and its shared credit
+  // reservation. A duplicate response-loss retry must exit before `finally`
+  // can release the winner's reservation.
+  if (!(await linkWorkflowRunStep(ref, workflowRunId))) return;
 
   try {
     await markRunStatus(ref, "running");

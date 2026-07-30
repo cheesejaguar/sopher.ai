@@ -1,7 +1,12 @@
 import { PIPELINE_STEPS } from "@/components/marketing/content";
 import { REVIEW_PHASES } from "@/ai/prompts/review-rubric";
-import { CREDIT_PACKS, SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
+import { CREDIT_PACKS } from "@/lib/billing/credits-shared";
 import { PUBLIC_TIER_COSTS } from "@/lib/billing/public-pricing";
+import {
+  INCLUDED_STORY_DESCRIPTION,
+  INCLUDED_STORY_OFFER,
+  INCLUDED_STORY_WAVE_DESCRIPTION,
+} from "@/lib/marketing/trial-offer";
 
 /**
  * Guides.
@@ -76,7 +81,7 @@ const tierGuide: Guide = {
     { kind: "h2", text: "What the difference costs", id: "cost" },
     {
       kind: "p",
-      text: `The gap between the cheapest and most expensive tier is about 15 credits on a novella — roughly the price of a coffee, against a book you might reread. New accounts start with ${SIGNUP_GRANT_CREDITS} free credits, which is enough to watch a real book begin and decide for yourself.`,
+      text: `The gap between the cheapest and most expensive tier is about 15 credits on a novella. ${INCLUDED_STORY_OFFER}. ${INCLUDED_STORY_DESCRIPTION}`,
     },
     {
       kind: "note",
@@ -134,10 +139,10 @@ const pipelineGuide: Guide = {
         "Export to EPUB, PDF, DOCX, or Markdown at any point.",
       ],
     },
-    { kind: "h2", text: "Why chapters are written four at a time", id: "waves" },
+    { kind: "h2", text: "How chapter waves change with the project", id: "waves" },
     {
       kind: "p",
-      text: "Chapters are drafted in parallel waves of four. Every writer follows the same outline, story bible, voice settings, and continuity record so the separate chapters still form one manuscript.",
+      text: `${INCLUDED_STORY_WAVE_DESCRIPTION} Every writer follows the same outline, story bible, voice settings, and continuity record so the separate chapters still form one manuscript.`,
     },
     {
       kind: "p",
@@ -145,7 +150,7 @@ const pipelineGuide: Guide = {
     },
     {
       kind: "note",
-      text: "If your balance runs out mid-book, the run pauses at a chapter boundary rather than failing. Every chapter already written is kept, and adding credits resumes it.",
+      text: "On paid full-length production, a run pauses at a chapter boundary rather than failing if the balance runs out. Every chapter already written is kept, and adding credits resumes it. The included story does not require a purchase.",
     },
   ],
   faqs: [

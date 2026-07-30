@@ -47,5 +47,8 @@ export function canonicalizeCreditRequirement(credits: number): number {
   return Math.ceil(Math.max(0, credits) * 10_000 - 1e-9) / 10_000;
 }
 
-/** New-user welcome grant, in credits. Enough to watch a real book begin. */
+/**
+ * Internal allowance behind the included short story. This number is never a
+ * public offer; the product promise is the complete fixed-shape story.
+ */
 export const SIGNUP_GRANT_CREDITS = 10;

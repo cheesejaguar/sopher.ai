@@ -13,9 +13,27 @@ import { TIER_LABELS, type QualityTier } from "@/ai/models";
 import { creditsForUsd } from "@/lib/billing/credits-shared";
 import { estimateBookCost } from "@/ai/estimate";
 import type { GenerationConfig } from "@/lib/run-events";
+import type { ProjectExperience } from "@/lib/trial-story";
+import { INCLUDED_STORY_NO_CARD_NOTE } from "@/lib/marketing/trial-offer";
+import { wizardDraftKey, wizardRequestKey } from "@/components/wizard/wizard-state";
 
 function words(value: number): string {
   return new Intl.NumberFormat("en-US").format(value);
+}
+
+const GENERATION_REQUEST_KEY = "sopher.generation-request.v1";
+
+export function generationRequestStorageKey(projectId: string): string {
+  return `${GENERATION_REQUEST_KEY}:${projectId}`;
+}
+
+function createRequestKey(): string {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 export function canAttachToWholeBookRun(
@@ -26,6 +44,20 @@ export function canAttachToWholeBookRun(
   return Boolean(runId && (status === 202 || (status === 409 && kind === "full_book")));
 }
 
+export function clearRecoveredWizardStorage(
+  storage: Pick<Storage, "getItem" | "removeItem">,
+  userId: string,
+  experience: ProjectExperience,
+  recoveryRequestKey: string | null,
+): boolean {
+  if (!recoveryRequestKey) return false;
+  const requestStorageKey = wizardRequestKey(userId, experience);
+  if (storage.getItem(requestStorageKey) !== recoveryRequestKey) return false;
+  storage.removeItem(requestStorageKey);
+  storage.removeItem(wizardDraftKey(userId, experience));
+  return true;
+}
+
 /**
  * Client island for the write stage: pre-flight when the project has never
  * run, the live run viewer otherwise. Starting a run swaps straight into the
@@ -34,27 +66,38 @@ export function canAttachToWholeBookRun(
 export function WriteExperience({
   projectId,
   projectTitle,
+  userId,
+  recoveryRequestKey,
+  experience,
+  fullBookUnlocked,
   tier,
   requireOutlineApproval,
   targetChapters,
   targetWordsPerChapter,
   estimateUsd,
+  estimatedMinutes,
   initialRunShape,
   initialSnapshot,
   titles,
 }: {
   projectId: string;
   projectTitle: string;
+  userId: string;
+  recoveryRequestKey: string | null;
+  experience: ProjectExperience;
+  fullBookUnlocked: boolean;
   tier: QualityTier;
   requireOutlineApproval: boolean;
   targetChapters: number;
   targetWordsPerChapter: number;
   estimateUsd: number;
+  estimatedMinutes?: number;
   initialRunShape?: {
     tier: QualityTier;
     chapters: number;
     wordsPerChapter: number;
     estimateUsd: number;
+    estimatedMinutes?: number;
   };
   initialSnapshot: RunSnapshot | null;
   titles: Record<number, string | null>;
@@ -62,14 +105,17 @@ export function WriteExperience({
   const [snapshot, setSnapshot] = React.useState<RunSnapshot | null>(initialSnapshot);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [runShape, setRunShape] = React.useState(
-    initialRunShape ?? {
+  const [runShape, setRunShape] = React.useState(() => {
+    if (initialRunShape) return initialRunShape;
+    const estimate = estimateBookCost(tier, targetChapters, targetWordsPerChapter);
+    return {
       tier,
       chapters: targetChapters,
       wordsPerChapter: targetWordsPerChapter,
       estimateUsd,
-    },
-  );
+      estimatedMinutes: estimatedMinutes ?? estimate.estimatedMinutes,
+    };
+  });
   const { publishProgress } = useProjectProgress();
   const activeRunId = snapshot?.run.id ?? null;
   const handleProgress = React.useCallback(
@@ -93,6 +139,10 @@ export function WriteExperience({
   // instead so the tab order continues from where the user was. — WCAG 2.4.3
   const runRef = React.useRef<HTMLDivElement | null>(null);
   const moveFocusToRun = React.useRef(false);
+  const requestKeyRef = React.useRef<string | null>(null);
+  const clearRecoveredWizardState = React.useCallback(() => {
+    clearRecoveredWizardStorage(window.localStorage, userId, experience, recoveryRequestKey);
+  }, [experience, recoveryRequestKey, userId]);
 
   React.useEffect(() => {
     if (snapshot && moveFocusToRun.current) {
@@ -106,10 +156,15 @@ export function WriteExperience({
     setPending(true);
     setError(null);
     try {
+      const storageKey = generationRequestStorageKey(projectId);
+      const requestKey =
+        requestKeyRef.current ?? window.localStorage.getItem(storageKey) ?? createRequestKey();
+      requestKeyRef.current = requestKey;
+      window.localStorage.setItem(storageKey, requestKey);
       const res = await fetch(`/api/projects/${projectId}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, requireOutlineApproval }),
+        body: JSON.stringify({ tier, requireOutlineApproval, requestKey }),
       });
       const json: unknown = await res.json().catch(() => null);
       const responseBody = json as {
@@ -119,15 +174,20 @@ export function WriteExperience({
       } | null;
       const runId = responseBody?.runId;
       if (canAttachToWholeBookRun(res.status, runId, responseBody?.kind)) {
+        window.localStorage.removeItem(storageKey);
+        requestKeyRef.current = null;
+        clearRecoveredWizardState();
         const returnedConfig = responseBody?.config;
         const runTier = returnedConfig?.tier ?? tier;
         const chapters = returnedConfig?.targetChapters ?? targetChapters;
         const wordsPerChapter = returnedConfig?.targetWordsPerChapter ?? targetWordsPerChapter;
+        const nextEstimate = estimateBookCost(runTier, chapters, wordsPerChapter);
         setRunShape({
           tier: runTier,
           chapters,
           wordsPerChapter,
-          estimateUsd: estimateBookCost(runTier, chapters, wordsPerChapter).totalUsd,
+          estimateUsd: nextEstimate.totalUsd,
+          estimatedMinutes: nextEstimate.estimatedMinutes,
         });
         // A duplicate full-book request attaches to its existing run. Scoped
         // chapter/edit jobs deliberately stay a busy error: their event shape
@@ -162,6 +222,7 @@ export function WriteExperience({
         targetChapters={targetChapters}
         targetWordsPerChapter={targetWordsPerChapter}
         estimateUsd={estimateUsd}
+        experience={experience}
         onStart={startRun}
         pending={pending}
         error={error}
@@ -183,16 +244,20 @@ export function WriteExperience({
         runKind={snapshot.run.kind ?? "full_book"}
         projectId={projectId}
         projectTitle={projectTitle}
+        experience={experience}
+        fullBookUnlocked={fullBookUnlocked}
         snapshot={snapshot}
         titles={titles}
         tier={runShape.tier}
         estimateUsd={runShape.estimateUsd}
+        estimatedMinutes={runShape.estimatedMinutes}
         plannedChapters={runShape.chapters}
         targetWordsPerChapter={runShape.wordsPerChapter}
         onRestart={startRun}
         restartPending={pending}
         restartError={error}
         onProgress={handleProgress}
+        onStartConfirmed={clearRecoveredWizardState}
       />
     </div>
   );
@@ -204,6 +269,7 @@ function PreFlight({
   targetChapters,
   targetWordsPerChapter,
   estimateUsd,
+  experience,
   onStart,
   pending,
   error,
@@ -213,10 +279,12 @@ function PreFlight({
   targetChapters: number;
   targetWordsPerChapter: number;
   estimateUsd: number;
+  experience: ProjectExperience;
   onStart: () => void;
   pending: boolean;
   error: string | null;
 }) {
+  const includedStory = experience === "trial_short_story";
   const tierLabel = TIER_LABELS[tier];
   const facts = [
     { label: "Chapters", value: String(targetChapters) },
@@ -231,9 +299,12 @@ function PreFlight({
         <span aria-hidden="true" className="spectral-rule absolute inset-y-0 left-0 w-px" />
         <p className="folio-label text-primary">Production ready</p>
         <h3 className="mt-3 text-xl font-semibold tracking-[-0.02em] text-balance sm:text-2xl">
-          Everything&apos;s set. The writers are waiting on you.
+          {includedStory
+            ? "Your included story is ready."
+            : "Everything’s set. The writers are waiting on you."}
         </h3>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+          {includedStory ? `${INCLUDED_STORY_NO_CARD_NOTE} ` : null}
           {tierLabel.name} tier — {tierLabel.blurb.toLowerCase()}.{" "}
           {requireOutlineApproval
             ? "The run pauses after the outline so you can approve it before any chapters are written."
@@ -265,7 +336,7 @@ function PreFlight({
             ) : (
               <PenLine aria-hidden="true" data-icon="inline-start" />
             )}
-            Start writing this book
+            {includedStory ? "Start my included story" : "Start writing this book"}
           </Button>
           {error ? (
             <p role="alert" className="text-sm text-destructive">
@@ -275,17 +346,31 @@ function PreFlight({
         </div>
       </section>
 
-      <section aria-label="Cost estimate" className="instrument-surface rounded-sm p-5">
+      <section
+        aria-label={includedStory ? "Included production" : "Cost estimate"}
+        className="instrument-surface rounded-sm p-5"
+      >
         <div className="flex items-center gap-2 border-b border-border pb-3">
           <BookOpenText aria-hidden="true" className="size-3.5 text-primary" />
-          <h4 className="folio-label text-muted-foreground">Credit quote</h4>
+          <h4 className="folio-label text-muted-foreground">
+            {includedStory ? "Included production" : "Credit quote"}
+          </h4>
         </div>
-        <CostDisplay
-          className="mt-5"
-          credits={creditsForUsd(estimateUsd)}
-          usd={estimateUsd}
-          note="±30%, metered as the agents work"
-        />
+        {includedStory ? (
+          <div className="mt-5">
+            <p className="text-2xl font-semibold tracking-[-0.025em]">Included</p>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              3 chapters × about 1,000 words, Standard quality, with outline approval.
+            </p>
+          </div>
+        ) : (
+          <CostDisplay
+            className="mt-5"
+            credits={creditsForUsd(estimateUsd)}
+            usd={estimateUsd}
+            note="±30%, metered as the agents work"
+          />
+        )}
       </section>
     </div>
   );

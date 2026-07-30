@@ -2,7 +2,8 @@ import { put } from "@vercel/blob";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction } from "@/db";
+import { persistDiagramAssetsTransaction } from "@/db/transaction-operations";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { resolveBlobUploads } from "@/lib/blob/lifecycle";
@@ -141,35 +142,24 @@ export async function POST(req: Request) {
   }
 
   try {
-    await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(
-          hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
-        )`,
-      );
-      await tx.insert(schema.assets).values([
-        {
-          projectId: ownership.projectId,
-          chapterId,
-          kind: "diagram" as const,
-          blobUrl: svgBlob.url,
-          blobPathname: svgBlob.pathname,
-          contentType: "image/svg+xml",
+    await withDbTransaction((tx) =>
+      persistDiagramAssetsTransaction(tx, {
+        projectId: ownership.projectId,
+        chapterId,
+        sourceHash,
+        alt: meta.alt,
+        svg: {
+          url: svgBlob.url,
+          pathname: svgBlob.pathname,
           sizeBytes: Buffer.byteLength(safeSvg),
-          meta,
         },
-        {
-          projectId: ownership.projectId,
-          chapterId,
-          kind: "diagram" as const,
-          blobUrl: pngBlob.url,
-          blobPathname: pngBlob.pathname,
-          contentType: "image/png",
+        png: {
+          url: pngBlob.url,
+          pathname: pngBlob.pathname,
           sizeBytes: png.length,
-          meta,
         },
-      ]);
-    });
+      }),
+    );
   } catch (error) {
     // A rejected COMMIT acknowledgement is ambiguous. Verify the exact rows;
     // deleting first could break a successfully committed diagram.

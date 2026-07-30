@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/app/api/runs/*/stream/route.ts": {
+      "supportsCancellation": true
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/internal/reconcile-runs",
+      "schedule": "*/5 * * * *"
+    }
+  ]
+}

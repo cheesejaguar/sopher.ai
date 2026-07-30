@@ -98,6 +98,10 @@ jobs:
       E2E_DB: "1"
       E2E_EDITOR_MUTATIONS: "1"
       E2E_DATABASE_ISOLATED: "1"
+      # Lets wizard/browser acceptance create durable runs without invoking a
+      # paid model or Vercel Workflow. The application additionally requires
+      # non-production NODE_ENV and the isolated-database gate above.
+      E2E_STUB_WORKFLOW: "1"
       E2E_FIXTURES_REQUIRED: "1"
       # Exact allowlist consumed by scripts/seed-e2e.ts. The password remains
       # only in E2E_DATABASE_URL.
@@ -111,8 +115,22 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install chromium firefox webkit --with-deps
+      - name: Validate the isolated Neon target before migration
+        run: pnpm e2e:seed -- --dry-run
+        env:
+          E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+      - name: Apply the current migration journal to isolated Neon
+        run: pnpm exec drizzle-kit migrate
+        env:
+          # The preceding guard validates this same secret against the exact
+          # disposable-host allowlist before it is ever assigned as DATABASE_URL.
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
       - name: Seed the isolated Neon acceptance branch
         run: pnpm e2e:seed
+        env:
+          E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+      - name: Real Neon transaction acceptance
+        run: pnpm test:db-integration
         env:
           E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
       - name: Authenticated database acceptance

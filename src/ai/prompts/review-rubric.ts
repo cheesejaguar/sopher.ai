@@ -186,6 +186,17 @@ export const REVIEW_PHASES_BY_KEY: Record<ReviewPhaseKey, ReviewPhase> = Object.
 ) as Record<ReviewPhaseKey, ReviewPhase>;
 
 /**
+ * Rubric phases selected for a generation tier.
+ *
+ * Keep this selector with the pure rubric data so sandboxed workflow
+ * orchestration does not need to import the AI-, database-, and Node-backed
+ * continuity agent module just to choose phase keys.
+ */
+export function continuityPhaseKeys(tier: "draft" | "standard" | "premium"): ReviewPhaseKey[] {
+  return tier === "draft" ? ["technical_consistency"] : REVIEW_PHASES.map((phase) => phase.key);
+}
+
+/**
  * Full system prompt for a review phase — the reviewer prompt followed by the
  * JSON output instruction, exactly as the original REVIEW_PROMPTS entries.
  */

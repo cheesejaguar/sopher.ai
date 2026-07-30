@@ -23,6 +23,10 @@ describe("StageTimeline", () => {
     const active = screen.getByText("Chapters").closest('[aria-current="step"]');
     expect(active).toHaveAttribute("data-state", "active");
     expect(active?.querySelector(".forced-colors\\:underline")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Production progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "42",
+    );
   });
 
   it("keeps a credit pause attached to its actual review phase", () => {
@@ -42,9 +46,9 @@ describe("StageTimeline", () => {
       "data-state",
       "active",
     );
-    expect(screen.getByRole("progressbar", { name: "Pipeline position" })).toHaveAttribute(
+    expect(screen.getByRole("progressbar", { name: "Production progress" })).toHaveAttribute(
       "aria-valuetext",
-      "Stage 6 of 7: Continuity",
+      "85% complete · Stage 6 of 7: Continuity",
     );
   });
 
@@ -61,9 +65,9 @@ describe("StageTimeline", () => {
     );
 
     expect(document.querySelector('[aria-current="step"]')).not.toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "Pipeline position" })).toHaveAttribute(
+    expect(screen.getByRole("progressbar", { name: "Production progress" })).toHaveAttribute(
       "aria-valuetext",
-      "Pipeline preparing",
+      "92% complete · Pipeline preparing",
     );
   });
 });

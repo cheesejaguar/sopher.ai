@@ -60,6 +60,8 @@ Respond with a valid JSON object containing:
 Create outlines that are specific enough to guide writing but flexible enough to allow creative expansion.`;
 
 export interface OutlinePromptInput {
+  /** Author-owned working title. The model may not replace it. */
+  workingTitle?: string;
   /** The expanded book concept (output of the concept phase). */
   concept: string;
   /** The author's original brief, for grounding intent. */
@@ -79,6 +81,11 @@ export interface OutlinePromptInput {
 /** Build the user message for an outline-generation call. */
 export function buildOutlineUserPrompt(input: OutlinePromptInput): string {
   const parts: string[] = [`## Book Concept\n\n${input.concept}`];
+  if (input.workingTitle) {
+    parts.push(
+      `## Working Title\n\n${input.workingTitle}\n\nUse this exact title for the book outline.`,
+    );
+  }
   if (input.brief) {
     parts.push(`## Original Author Brief\n\n${input.brief}`);
   }

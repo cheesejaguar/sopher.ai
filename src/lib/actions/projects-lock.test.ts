@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
+  withDbTransaction: vi.fn(),
   requireUser: vi.fn(),
+  reconcileBeforeAuthoringRunConflict: vi.fn(),
   revalidatePath: vi.fn(),
   redirect: vi.fn(),
   start: vi.fn(),
@@ -10,11 +12,22 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
-  return { ...actual, getDb: mocks.getDb };
+  return {
+    ...actual,
+    getDb: mocks.getDb,
+    withDbTransaction: mocks.withDbTransaction,
+  };
 });
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   return { ...actual, requireUser: mocks.requireUser };
+});
+vi.mock("@/lib/generation-runs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/generation-runs")>();
+  return {
+    ...actual,
+    reconcileBeforeAuthoringRunConflict: mocks.reconcileBeforeAuthoringRunConflict,
+  };
 });
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
@@ -69,12 +82,16 @@ function transactionDb(input: {
   const transaction = vi.fn(async (work: (transactionClient: typeof tx) => Promise<unknown>) =>
     work(tx),
   );
+  mocks.withDbTransaction.mockImplementation(
+    async (work: (transactionClient: typeof tx) => Promise<unknown>) => work(tx),
+  );
   return { db: { transaction }, tx };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireUser.mockResolvedValue({ userId: "user-1" });
+  mocks.reconcileBeforeAuthoringRunConflict.mockResolvedValue(undefined);
   mocks.start.mockResolvedValue({ runId: "cleanup-1" });
 });
 

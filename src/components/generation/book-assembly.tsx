@@ -103,6 +103,12 @@ export function BookAssembly({
   const drafted = counts.assembled + counts.reviewed + counts.final;
   const reviewActive = isReviewStage(stage);
   const draftingActive = counts.drafting > 0;
+  const productionActive =
+    stage !== "awaiting_approval" &&
+    stage !== "awaiting_credits" &&
+    stage !== "done" &&
+    stage !== "failed" &&
+    stage !== "cancelled";
 
   return (
     <section
@@ -117,7 +123,7 @@ export function BookAssembly({
           <div
             className={cn(
               "production-book-page absolute h-36 w-28 translate-x-4 translate-y-3 border border-border/80 bg-card/80",
-              draftingActive && "production-book-page-active",
+              productionActive && "production-book-page-active",
             )}
           />
           <div className="production-book-page absolute h-36 w-28 translate-x-2 translate-y-1.5 border border-border bg-card" />
@@ -194,8 +200,7 @@ export function BookAssembly({
                 className={cn(
                   "relative flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-[2px] border font-mono text-[9px] tabular-nums",
                   status === "planned" && "border-border text-muted-foreground",
-                  status === "drafting" &&
-                    "border-ai/70 bg-ai/10 text-ai motion-safe:animate-pulse",
+                  status === "drafting" && "border-ai/70 bg-ai/10 text-ai",
                   status === "assembled" && "border-primary/60 bg-primary/15 text-primary",
                   status === "reviewed" && "border-ai bg-ai/20 text-foreground",
                   status === "final" && "border-success/70 bg-success/15 text-success",

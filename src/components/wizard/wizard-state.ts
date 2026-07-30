@@ -1,7 +1,7 @@
 import type { GenreId } from "@/ai/knowledge/genres";
 import type { VoiceProfileId } from "@/ai/knowledge/voice-profiles";
 import type { QualityTier } from "@/ai/models";
-import { genreLabel } from "@/lib/genres";
+import { TRIAL_STORY_CONFIG, type ProjectExperience } from "@/lib/trial-story";
 
 export type Pov = "first" | "third_limited" | "third_omniscient";
 export type Tense = "past" | "present";
@@ -23,12 +23,20 @@ export const MAX_CHAPTERS = 40;
 export const MIN_WORDS_PER_CHAPTER = 1_000;
 export const MAX_WORDS_PER_CHAPTER = 6_000;
 export const MIN_BRIEF_LENGTH = 20;
+export const MIN_TITLE_LENGTH = 1;
 
 /** Paperback pages per word — used for the page-count readout on the shape step. */
 export const WORDS_PER_PAGE = 275;
 
-/** localStorage keys shared between the wizard and studio settings. */
-export const WIZARD_DRAFT_KEY = "sopher.new-book-draft.v1";
+/**
+ * Experience-scoped localStorage keys shared between the wizard and recovery
+ * surface. A retained included-story start must never become the creation key
+ * for a paid full-book project after the account unlocks.
+ */
+export const WIZARD_DRAFT_KEY = "sopher.new-book-draft.v2";
+export const WIZARD_REQUEST_KEY = "sopher.new-book-request.v2";
+export const LEGACY_WIZARD_DRAFT_KEY = "sopher.new-book-draft.v1";
+export const LEGACY_WIZARD_REQUEST_KEY = "sopher.new-book-request.v1";
 export const DEFAULT_TIER_KEY = "sopher.default-tier.v1";
 
 export interface WizardState {
@@ -88,7 +96,10 @@ export function stepComplete(state: WizardState, step: number): boolean {
     case "genre":
       return state.genre !== null;
     case "brief":
-      return state.brief.trim().length >= MIN_BRIEF_LENGTH;
+      return (
+        state.title.trim().length >= MIN_TITLE_LENGTH &&
+        state.brief.trim().length >= MIN_BRIEF_LENGTH
+      );
     case "shape":
     case "estimate":
       return true;
@@ -138,25 +149,37 @@ export function composeBrief(state: WizardState): string {
   return extras.length > 0 ? `${brief}\n\n${extras.join("\n")}` : brief;
 }
 
-/** Working title — the concept agent replaces placeholders with a real one. */
+/** The author-supplied working title remains the project's identity. */
 export function composeTitle(state: WizardState): string {
-  const title = state.title.trim();
-  if (title) return title;
-  return `Untitled ${genreLabel(state.genre)}`.slice(0, 200);
+  return state.title.trim().slice(0, 200);
 }
 
-/** Restores a persisted draft, tolerating missing or extra fields. */
-export function restoreDraft(raw: string | null): WizardState | null {
+/** Restores a persisted draft only for the production experience that saved it. */
+export function restoreDraft(
+  raw: string | null,
+  expectedExperience: ProjectExperience,
+): WizardState | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
-    const candidate = parsed as { v?: number; state?: Partial<WizardState> };
-    if (candidate.v !== 1 || typeof candidate.state !== "object" || candidate.state === null) {
+    const candidate = parsed as {
+      v?: number;
+      experience?: ProjectExperience;
+      state?: Partial<WizardState>;
+    };
+    if (
+      candidate.v !== 2 ||
+      candidate.experience !== expectedExperience ||
+      typeof candidate.state !== "object" ||
+      candidate.state === null
+    ) {
       return null;
     }
     const merged: WizardState = { ...initialWizardState, ...candidate.state };
-    merged.step = clampStep(Math.min(merged.step, maxReachableStep(merged)));
+    // Resuming restores answers, never position. Every visit begins at Step 1
+    // so the author can confirm the setup before moving forward.
+    merged.step = 0;
     merged.chapters = Math.min(Math.max(merged.chapters, MIN_CHAPTERS), MAX_CHAPTERS);
     merged.wordsPerChapter = Math.min(
       Math.max(merged.wordsPerChapter, MIN_WORDS_PER_CHAPTER),
@@ -168,6 +191,37 @@ export function restoreDraft(raw: string | null): WizardState | null {
   }
 }
 
-export function serializeDraft(state: WizardState): string {
-  return JSON.stringify({ v: 1, state });
+export function serializeDraft(state: WizardState, experience: ProjectExperience): string {
+  return JSON.stringify({ v: 2, experience, state: { ...state, step: 0 } });
+}
+
+export function wizardDraftKey(userId: string, experience: ProjectExperience): string {
+  return `${WIZARD_DRAFT_KEY}:${userId}:${experience}`;
+}
+
+export function wizardRequestKey(userId: string, experience: ProjectExperience): string {
+  return `${WIZARD_REQUEST_KEY}:${userId}:${experience}`;
+}
+
+/** Remove both browser-global and account-scoped identities from the v1 wizard. */
+export function clearLegacyWizardStorage(
+  storage: Pick<Storage, "removeItem">,
+  userId?: string,
+): void {
+  storage.removeItem(LEGACY_WIZARD_DRAFT_KEY);
+  storage.removeItem(LEGACY_WIZARD_REQUEST_KEY);
+  if (userId) {
+    storage.removeItem(`${LEGACY_WIZARD_DRAFT_KEY}:${userId}`);
+    storage.removeItem(`${LEGACY_WIZARD_REQUEST_KEY}:${userId}`);
+  }
+}
+
+export function applyTrialStoryShape(state: WizardState): WizardState {
+  return {
+    ...state,
+    chapters: TRIAL_STORY_CONFIG.targetChapters,
+    wordsPerChapter: TRIAL_STORY_CONFIG.targetWordsPerChapter,
+    tier: TRIAL_STORY_CONFIG.tier,
+    requireOutlineApproval: TRIAL_STORY_CONFIG.requireOutlineApproval,
+  };
 }

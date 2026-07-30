@@ -2,12 +2,24 @@
 
 import * as React from "react";
 import { ArrowLeft, ArrowRight, Feather } from "lucide-react";
+import { useClerk } from "@clerk/nextjs";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import type { Route } from "next";
 
 import { cn } from "@/lib/utils";
 import { startBook } from "@/lib/actions/projects";
 import { track } from "@/lib/analytics/track";
 import type { GenreId } from "@/ai/knowledge/genres";
-import { Button } from "@/components/ui/button";
+import type { StudioAccess } from "@/lib/studio-access";
+import type { ProjectExperience } from "@/lib/trial-story";
+import {
+  FULL_BOOK_UNLOCK_HREF,
+  FULL_BOOK_UNLOCK_DESCRIPTION,
+  fullBookUnlockHref,
+  INCLUDED_STORY_NO_CARD_NOTE,
+} from "@/lib/marketing/trial-offer";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StepBrief } from "@/components/wizard/step-brief";
 import { StepEstimate, type WizardQuoteSummary } from "@/components/wizard/step-estimate";
@@ -17,12 +29,15 @@ import {
   composeBrief,
   composeTitle,
   DEFAULT_TIER_KEY,
+  applyTrialStoryShape,
+  clearLegacyWizardStorage,
   initialWizardState,
   maxReachableStep,
   restoreDraft,
   serializeDraft,
   stepComplete,
-  WIZARD_DRAFT_KEY,
+  wizardDraftKey,
+  wizardRequestKey,
   WIZARD_STEPS,
   wizardReducer,
   type WizardActionEvent,
@@ -121,7 +136,9 @@ function FolioProgress({ state, onGoto }: { state: WizardState; onGoto: (step: n
 type WizardUiState = { wizard: WizardState; resumed: boolean };
 
 type WizardUiEvent =
-  WizardActionEvent | { type: "resume"; state: WizardState } | { type: "start-over" };
+  | WizardActionEvent
+  | { type: "resume"; state: WizardState }
+  | { type: "start-over"; state: WizardState };
 
 function uiReducer(state: WizardUiState, action: WizardUiEvent): WizardUiState {
   switch (action.type) {
@@ -131,7 +148,7 @@ function uiReducer(state: WizardUiState, action: WizardUiEvent): WizardUiState {
         resumed: true,
       };
     case "start-over":
-      return { wizard: initialWizardState, resumed: false };
+      return { wizard: action.state, resumed: false };
     default:
       return { ...state, wizard: wizardReducer(state.wizard, action) };
   }
@@ -144,8 +161,18 @@ function draftHasContent(draft: WizardState): boolean {
 
 function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuoteSummary | null }) {
   const brief = state.brief.trim();
+  const currentQuote =
+    quote?.chapters === state.chapters &&
+    quote.wordsPerChapter === state.wordsPerChapter &&
+    quote.tier === state.tier
+      ? quote
+      : null;
   return (
     <dl className="space-y-3 text-xs">
+      <div>
+        <dt className="folio-label text-muted-foreground">Working title</dt>
+        <dd className="mt-1 line-clamp-2 font-medium">{state.title.trim() || "Not named yet"}</dd>
+      </div>
       <div>
         <dt className="folio-label text-muted-foreground">Shelf</dt>
         <dd className="mt-1 font-medium capitalize">{state.genre ?? "Not chosen"}</dd>
@@ -171,32 +198,257 @@ function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuote
       <div className="border-t border-border pt-3">
         <dt className="folio-label text-muted-foreground">Current quote</dt>
         <dd className="mt-1 font-mono font-semibold tabular-nums">
-          {quote ? `${quote.credits.toFixed(1)} credits` : "Pending step 4"}
+          {currentQuote
+            ? (currentQuote.label ?? `${currentQuote.credits.toFixed(1)} credits`)
+            : "Pending step 4"}
         </dd>
       </div>
     </dl>
   );
 }
 
-export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {}) {
+type NewBookWizardProps = {
+  initialGenre?: GenreId;
+  /** Owned trial-story values carried into a new, independent full-book setup. */
+  initialSetup?: Partial<WizardState>;
+  /** Authenticated owner id; drafts are never stored under a shared browser key. */
+  userId?: string;
+  access?: StudioAccess;
+  /** True only when this route is mounted beneath an active ClerkProvider. */
+  accountManagementEnabled?: boolean;
+  /**
+   * Isolated browser-test failure injection. The server page passes this only
+   * when the non-production, disposable-DB Workflow stub gate is active.
+   */
+  e2eStartMode?: "fail_before_work";
+};
+
+function ClerkEmailVerificationActions() {
+  const { openUserProfile } = useClerk();
+  const router = useRouter();
+
+  return (
+    <>
+      <Button type="button" onClick={() => openUserProfile()} className="rounded-sm">
+        Open email settings
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => router.refresh()}
+        className="rounded-sm"
+      >
+        Check verification again
+      </Button>
+    </>
+  );
+}
+
+function NewBookAccessGate({
+  access,
+  accountManagementEnabled,
+}: {
+  access: StudioAccess;
+  accountManagementEnabled: boolean;
+}) {
+  const existingTrialHref = access.trialProjectId
+    ? (`/projects/${access.trialProjectId}/write` as Route)
+    : null;
+  const verificationRequired = access.reason === "verify_email";
+
+  return (
+    <section
+      aria-labelledby="new-book-access-title"
+      className="instrument-surface-raised rounded-sm px-5 py-8 sm:px-8"
+    >
+      <p className="folio-label text-primary">New production</p>
+      <h2
+        id="new-book-access-title"
+        className="mt-3 text-xl font-semibold tracking-[-0.02em] sm:text-2xl"
+      >
+        {verificationRequired
+          ? "Verify your email to begin"
+          : existingTrialHref
+            ? "Your included story is already in Studio"
+            : "Unlock your next full-length book"}
+      </h2>
+      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+        {verificationRequired
+          ? "Your included short story is ready. Verify the email on your account, then return here to start it—no purchase required."
+          : existingTrialHref
+            ? `Continue that project with every writing, editing, story-bible, manuscript, and export tool. ${INCLUDED_STORY_NO_CARD_NOTE}`
+            : `Your included experience has been used. ${FULL_BOOK_UNLOCK_DESCRIPTION}`}
+      </p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        {verificationRequired ? (
+          accountManagementEnabled ? (
+            <ClerkEmailVerificationActions />
+          ) : (
+            <div className="space-y-3">
+              <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                This local preview cannot open hosted email settings. Verify the account in the
+                configured identity provider, then check this page again.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => window.location.reload()}
+                className="rounded-sm"
+              >
+                Check verification again
+              </Button>
+            </div>
+          )
+        ) : existingTrialHref ? (
+          <>
+            <Link href={existingTrialHref} className={buttonVariants({ className: "rounded-sm" })}>
+              Open my included story
+            </Link>
+            <Link
+              href={fullBookUnlockHref(access.trialProjectId!)}
+              className={buttonVariants({ variant: "outline", className: "rounded-sm" })}
+            >
+              Take this story to full length
+            </Link>
+          </>
+        ) : (
+          <Link
+            href={FULL_BOOK_UNLOCK_HREF}
+            className={buttonVariants({ className: "rounded-sm" })}
+          >
+            View credit packs
+          </Link>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function newRequestKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function initialStateFor(
+  experience: ProjectExperience,
+  initialGenre?: GenreId,
+  initialSetup?: Partial<WizardState>,
+): WizardState {
+  const initial = {
+    ...initialWizardState,
+    ...(initialGenre ? { genre: initialGenre } : {}),
+    ...initialSetup,
+    step: 0,
+  };
+  return experience === "trial_short_story" ? applyTrialStoryShape(initial) : initial;
+}
+
+type ClientStartResult =
+  | { status: "accepted" | "reattached"; projectId: string; runId: string }
+  | { status: "start_failed"; projectId: string; runId?: string; message: string }
+  | {
+      status: "validation_error" | "insufficient_credits" | "rate_limited" | "suspended";
+      message: string;
+    };
+
+function parseStartResult(value: unknown): ClientStartResult | null {
+  if (!value || typeof value !== "object") return null;
+  const result = value as Record<string, unknown>;
+  const status = result.status;
+  if (
+    (status === "accepted" || status === "reattached") &&
+    typeof result.projectId === "string" &&
+    typeof result.runId === "string"
+  ) {
+    return { status, projectId: result.projectId, runId: result.runId };
+  }
+  if (
+    status === "start_failed" &&
+    typeof result.projectId === "string" &&
+    typeof result.message === "string"
+  ) {
+    return {
+      status,
+      projectId: result.projectId,
+      ...(typeof result.runId === "string" ? { runId: result.runId } : {}),
+      message: result.message,
+    };
+  }
+  if (
+    (status === "validation_error" ||
+      status === "insufficient_credits" ||
+      status === "rate_limited" ||
+      status === "suspended") &&
+    typeof result.message === "string"
+  ) {
+    return { status, message: result.message };
+  }
+  // Transitional compatibility while every caller moves to StartBookResult.
+  return typeof result.error === "string"
+    ? { status: "validation_error", message: result.error }
+    : null;
+}
+
+export function NewBookWizard(props: NewBookWizardProps = {}) {
+  const { access, accountManagementEnabled = false, ...setupProps } = props;
+  if (access?.creationExperience === null) {
+    return (
+      <NewBookAccessGate access={access} accountManagementEnabled={accountManagementEnabled} />
+    );
+  }
+  return (
+    <NewBookSetupWizard {...setupProps} experience={access?.creationExperience ?? "full_book"} />
+  );
+}
+
+function NewBookSetupWizard({
+  initialGenre,
+  initialSetup,
+  userId,
+  experience,
+  e2eStartMode,
+}: Omit<NewBookWizardProps, "access"> & { experience: ProjectExperience }) {
+  const router = useRouter();
+  const freshState = React.useMemo(
+    () => initialStateFor(experience, initialGenre, initialSetup),
+    [experience, initialGenre, initialSetup],
+  );
+  const carriedFromIncludedStory = experience === "full_book" && Boolean(initialSetup);
   const [ui, dispatch] = React.useReducer(uiReducer, {
-    wizard: initialWizardState,
+    wizard: freshState,
     resumed: false,
   });
   const state = ui.wizard;
   const [error, setError] = React.useState<string | null>(null);
   const [quoteSummary, setQuoteSummary] = React.useState<WizardQuoteSummary | null>(null);
+  const [availableDraft, setAvailableDraft] = React.useState<WizardState | null>(null);
+  const [draftChecked, setDraftChecked] = React.useState(false);
   const [pending, startTransition] = React.useTransition();
   const hydrated = React.useRef(false);
+  const persistenceEnabled = React.useRef(false);
+  const requestKeyRef = React.useRef<string | null>(null);
   // Set only by the step controls, so the heading is never focused on mount
   // or when a saved draft is restored.
   const stepChanged = React.useRef(false);
   const headingRef = React.useRef<HTMLHeadingElement>(null);
 
   function goToStep(action: WizardActionEvent) {
+    setError(null);
     stepChanged.current = true;
     dispatch(action);
   }
+
+  const updateWizard = React.useCallback((action: WizardActionEvent) => {
+    setError(null);
+    dispatch(action);
+  }, []);
 
   // A wizard step is a view change: move focus to the new step's heading so
   // screen reader and keyboard users land in the content that just replaced.
@@ -244,46 +496,102 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
     return () => window.removeEventListener("pagehide", onLeave);
   }, []);
 
-  // Resume a saved draft (or apply the device's default tier) once, on mount.
+  // Discover a saved draft once, but never move the author into it without an
+  // explicit choice. Draft keys are scoped to the authenticated account.
   React.useEffect(() => {
-    const draft = restoreDraft(window.localStorage.getItem(WIZARD_DRAFT_KEY));
-    if (draft && draftHasContent(draft)) {
-      // A saved draft wins over the link's genre — the work they already did
-      // beats a hint from the URL.
-      dispatch({ type: "resume", state: draft });
-    } else {
-      const tier = window.localStorage.getItem(DEFAULT_TIER_KEY);
-      const patch: Partial<WizardState> = {};
-      if (tier === "draft" || tier === "standard" || tier === "premium") patch.tier = tier;
-      // Arriving from a genre landing page: skip the question they answered by
-      // clicking, and open on the brief step.
-      if (initialGenre) {
-        patch.genre = initialGenre;
-        patch.step = 1;
+    const timer = window.setTimeout(() => {
+      // v1 originally used one browser-global key. Never surface that draft
+      // across accounts; scoped keys below are the only supported storage.
+      clearLegacyWizardStorage(window.localStorage, userId);
+      const key = userId ? wizardDraftKey(userId, experience) : null;
+      const draft = key ? restoreDraft(window.localStorage.getItem(key), experience) : null;
+      if (draft && draftHasContent(draft)) {
+        setAvailableDraft(experience === "trial_short_story" ? applyTrialStoryShape(draft) : draft);
+        persistenceEnabled.current = false;
+      } else {
+        const tier = window.localStorage.getItem(DEFAULT_TIER_KEY);
+        if (
+          experience === "full_book" &&
+          (tier === "draft" || tier === "standard" || tier === "premium")
+        ) {
+          dispatch({ type: "patch", patch: { tier } });
+        }
+        persistenceEnabled.current = Boolean(key);
       }
-      if (Object.keys(patch).length > 0) dispatch({ type: "patch", patch });
-    }
-    hydrated.current = true;
-  }, [initialGenre]);
+      hydrated.current = true;
+      setDraftChecked(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [experience, userId]);
 
   // Persist the draft, debounced, so a closed tab costs nothing.
   React.useEffect(() => {
-    if (!hydrated.current) return;
+    if (!hydrated.current || !persistenceEnabled.current || !userId) return;
     const timer = setTimeout(() => {
-      window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
+      if (persistenceEnabled.current) {
+        window.localStorage.setItem(
+          wizardDraftKey(userId, experience),
+          serializeDraft(state, experience),
+        );
+      }
     }, 300);
     return () => clearTimeout(timer);
-  }, [state]);
+  }, [experience, state, userId]);
+
+  function handleResume() {
+    if (!availableDraft) return;
+    setError(null);
+    persistenceEnabled.current = Boolean(userId);
+    dispatch({
+      type: "resume",
+      state:
+        experience === "trial_short_story"
+          ? applyTrialStoryShape(availableDraft)
+          : { ...availableDraft, step: 0 },
+    });
+    setAvailableDraft(null);
+  }
+
+  function handleStartFresh() {
+    setError(null);
+    if (userId) {
+      window.localStorage.removeItem(wizardDraftKey(userId, experience));
+      window.localStorage.removeItem(wizardRequestKey(userId, experience));
+    }
+    requestKeyRef.current = null;
+    persistenceEnabled.current = Boolean(userId);
+    setAvailableDraft(null);
+    dispatch({ type: "start-over", state: freshState });
+  }
 
   function handleStartOver() {
-    window.localStorage.removeItem(WIZARD_DRAFT_KEY);
-    dispatch({ type: "start-over" });
+    handleStartFresh();
   }
 
   function handleSubmit() {
-    if (!state.genre) return;
+    if (!state.genre || !stepComplete(state, 1)) return;
+    if (
+      quoteSummary?.chapters !== state.chapters ||
+      quoteSummary.wordsPerChapter !== state.wordsPerChapter ||
+      quoteSummary.tier !== state.tier
+    ) {
+      return;
+    }
+    const genre = state.genre;
     setError(null);
+    let requestKey = requestKeyRef.current;
+    if (!requestKey && userId) {
+      requestKey = window.localStorage.getItem(wizardRequestKey(userId, experience));
+    }
+    requestKey ??= newRequestKey();
+    requestKeyRef.current = requestKey;
+    if (userId) {
+      window.localStorage.setItem(wizardRequestKey(userId, experience), requestKey);
+    }
+
     const payload = {
+      requestKey,
+      ...(e2eStartMode ? { e2eStartMode } : {}),
       title: composeTitle(state),
       brief: composeBrief(state),
       genre: state.genre,
@@ -303,41 +611,130 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
         ...(state.voiceProfile !== "none" ? { voiceProfile: state.voiceProfile } : {}),
       },
     };
-    submitted.current = true;
-    track("book_started", {
-      genre: state.genre,
-      tier: state.tier,
-      chapters: state.chapters,
-      wordsPerChapter: state.wordsPerChapter,
-      outlineApproval: state.requireOutlineApproval,
-    });
     startTransition(async () => {
-      // Clear the draft first — a successful action redirects away immediately.
-      window.localStorage.removeItem(WIZARD_DRAFT_KEY);
       try {
-        const result = await startBook(payload);
-        if (result?.error) {
-          window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
-          submitted.current = false;
-          setError(result.error);
+        const result = parseStartResult((await startBook(payload)) as unknown);
+        if (result?.status === "accepted" || result?.status === "reattached") {
+          submitted.current = true;
+          persistenceEnabled.current = false;
+          track("book_started", {
+            genre,
+            tier: state.tier,
+            chapters: state.chapters,
+            wordsPerChapter: state.wordsPerChapter,
+            outlineApproval: state.requireOutlineApproval,
+            experience,
+            reattached: result.status === "reattached",
+          });
+          if (userId) {
+            window.localStorage.removeItem(wizardDraftKey(userId, experience));
+            window.localStorage.removeItem(wizardRequestKey(userId, experience));
+          }
+          router.replace(`/projects/${result.projectId}/write`);
+          return;
         }
-      } catch {
-        window.localStorage.setItem(WIZARD_DRAFT_KEY, serializeDraft(state));
+        if (result?.status === "start_failed") {
+          // The project exists, so its Write surface owns the recovery. Keep
+          // the draft and idempotency key until a run is actually accepted.
+          submitted.current = false;
+          router.replace(`/projects/${result.projectId}/write`);
+          return;
+        }
         submitted.current = false;
-        setError("The book could not be started. Your brief is saved — please try again.");
+        if (result && "message" in result) {
+          setError(result.message);
+          return;
+        }
+        setError("The Studio returned an unexpected response. Your setup is saved; try again.");
+      } catch {
+        submitted.current = false;
+        setError(
+          "The Studio could not be reached. Your setup is saved; check your connection and try again.",
+        );
       }
     });
   }
 
   const stepId = WIZARD_STEPS[state.step].id;
-  const heading = STEP_HEADINGS[stepId];
+  const heading =
+    experience === "trial_short_story" && stepId === "shape"
+      ? {
+          title: "Shape your short story",
+          hint: "The included length is fixed; voice, perspective, and content limits remain yours.",
+        }
+      : experience === "trial_short_story" && stepId === "estimate"
+        ? {
+            title: "Review your included production",
+            hint: "One complete short story, with outline approval and the full Studio toolset.",
+          }
+        : STEP_HEADINGS[stepId];
   const lastStep = state.step === WIZARD_STEPS.length - 1;
   const canAdvance = stepComplete(state, state.step);
+  const quoteReady =
+    quoteSummary?.chapters === state.chapters &&
+    quoteSummary.wordsPerChapter === state.wordsPerChapter &&
+    quoteSummary.tier === state.tier;
   // Why "Next" is unavailable — the button alone does not make this obvious.
   const blockedReason =
     stepId === "genre"
       ? "Choose a genre to continue."
-      : "Describe the story in a few sentences to continue.";
+      : !state.title.trim()
+        ? "Add a working title to continue."
+        : "Describe the story in a few sentences to continue.";
+
+  if (!draftChecked) {
+    return (
+      <div
+        role="status"
+        aria-busy="true"
+        aria-label="Loading your book setup"
+        className="instrument-surface-raised min-h-72 rounded-sm"
+      />
+    );
+  }
+
+  if (availableDraft) {
+    return (
+      <section
+        aria-labelledby="saved-setup-title"
+        className="instrument-surface-raised grid overflow-hidden rounded-sm lg:grid-cols-[14rem_minmax(0,1fr)]"
+      >
+        <div className="border-b border-border bg-background/35 p-5 lg:border-r lg:border-b-0">
+          <p className="folio-label text-primary">Saved setup</p>
+          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+            Your answers are kept separate for this account on this device.
+          </p>
+        </div>
+        <div className="px-5 py-8 sm:px-8 sm:py-10">
+          <h2
+            id="saved-setup-title"
+            className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl"
+          >
+            Continue where you left off?
+          </h2>
+          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Resume{" "}
+            <span className="font-medium text-foreground">
+              {availableDraft.title.trim() || "your saved story"}
+            </span>{" "}
+            with its answers restored, or{" "}
+            {carriedFromIncludedStory
+              ? "use the included story carried into this full-length setup"
+              : "begin with a clean setup"}
+            . Either choice opens on Step 1.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Button onClick={handleResume} className="rounded-sm">
+              Resume saved setup
+            </Button>
+            <Button variant="outline" onClick={handleStartFresh} className="rounded-sm">
+              {carriedFromIncludedStory ? "Use included story" : "Start fresh"}
+            </Button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="instrument-surface-raised overflow-hidden rounded-sm lg:grid lg:grid-cols-[14rem_minmax(0,1fr)]">
@@ -373,6 +770,15 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
       </aside>
 
       <div className="min-w-0">
+        {carriedFromIncludedStory ? (
+          <div className="border-b border-ai/30 bg-ai-soft px-5 py-3 text-sm sm:px-8">
+            <p className="font-medium text-ai">Your included story is carried forward.</p>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Its title, genre, and brief are ready to review. This creates a separate full-length
+              production, so the completed short story remains unchanged.
+            </p>
+          </div>
+        ) : null}
         <header className="border-b border-border px-5 py-6 sm:px-8">
           <p className="folio-label text-primary">
             Step {String(state.step + 1).padStart(2, "0")} /{" "}
@@ -392,11 +798,18 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
         </header>
 
         <div className="min-w-0 px-5 py-6 sm:px-8 sm:py-8">
-          {stepId === "genre" ? <StepGenre state={state} dispatch={dispatch} /> : null}
-          {stepId === "brief" ? <StepBrief state={state} dispatch={dispatch} /> : null}
-          {stepId === "shape" ? <StepShape state={state} dispatch={dispatch} /> : null}
+          {stepId === "genre" ? <StepGenre state={state} dispatch={updateWizard} /> : null}
+          {stepId === "brief" ? <StepBrief state={state} dispatch={updateWizard} /> : null}
+          {stepId === "shape" ? (
+            <StepShape state={state} dispatch={updateWizard} experience={experience} />
+          ) : null}
           {stepId === "estimate" ? (
-            <StepEstimate state={state} dispatch={dispatch} onQuote={setQuoteSummary} />
+            <StepEstimate
+              state={state}
+              dispatch={updateWizard}
+              onQuote={setQuoteSummary}
+              experience={experience}
+            />
           ) : null}
 
           {error ? (
@@ -420,19 +833,29 @@ export function NewBookWizard({ initialGenre }: { initialGenre?: GenreId } = {})
             Back
           </Button>
           {lastStep ? (
-            <Button
-              onClick={handleSubmit}
-              disabled={pending}
-              focusableWhenDisabled
-              className="rounded-sm aria-disabled:opacity-50"
-            >
-              {pending ? (
-                <Spinner data-icon="inline-start" />
-              ) : (
-                <Feather aria-hidden="true" data-icon="inline-start" />
-              )}
-              {pending ? "Starting the book…" : "Start the book"}
-            </Button>
+            <>
+              <p id="wizard-quote-hint" className="sr-only" aria-live="polite">
+                {quoteReady ? "" : "Wait for the current production estimate before starting."}
+              </p>
+              <Button
+                onClick={handleSubmit}
+                disabled={pending || !quoteReady}
+                focusableWhenDisabled
+                aria-describedby={quoteReady ? undefined : "wizard-quote-hint"}
+                className="rounded-sm aria-disabled:opacity-50"
+              >
+                {pending ? (
+                  <Spinner data-icon="inline-start" />
+                ) : (
+                  <Feather aria-hidden="true" data-icon="inline-start" />
+                )}
+                {pending
+                  ? "Starting the story…"
+                  : experience === "trial_short_story"
+                    ? "Create my short story"
+                    : "Start the book"}
+              </Button>
+            </>
           ) : (
             <>
               <p id="wizard-next-hint" className="sr-only">

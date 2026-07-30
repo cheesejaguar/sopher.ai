@@ -1,8 +1,9 @@
-import { createHook, FatalError } from "workflow";
+import { createHook, FatalError, getWorkflowMetadata } from "workflow";
 import { OUTLINE_REVISION_RESERVATION_KEY, type GenerationConfig } from "@/lib/run-events";
 import type { Stage } from "@/lib/run-events";
 import type { BookConcept, BookOutline } from "@/ai/schemas";
-import { continuityPhaseKeys, type ContinuityOutcome } from "@/ai/agents/continuity";
+import type { ContinuityOutcome } from "@/ai/agents/continuity";
+import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 import {
   conceptStep,
   chapterNumbersNeedingWorkStep,
@@ -17,6 +18,7 @@ import {
   entityBibleStep,
   emitProgress,
   finalizeStep,
+  linkWorkflowRunStep,
   markRunStatus,
   notifyCreditsPausedStep,
   openingCreditCheckStep,
@@ -46,6 +48,7 @@ export async function generateBook(
 ) {
   "use workflow";
   const ref = { dbRunId, projectId, userId };
+  const { workflowRunId } = getWorkflowMetadata();
 
   // One top-up hook for the entire run: tokens belong to a single active hook,
   // and both the pre-flight and the per-wave checks may need to wait on it —
@@ -100,13 +103,18 @@ export async function generateBook(
     }
   };
 
+  // A response-loss retry may dispatch the same durable DB run more than
+  // once. Exactly one Workflow owns it; a linkage loser exits before the
+  // failure handler can terminalize the winner's row.
+  if (!(await linkWorkflowRunStep(ref, workflowRunId))) return;
+
   try {
     await markRunStatus(ref, "running");
 
     // Pre-flight: suspend BEFORE any metered work unless the wallet covers the
     // opening stretch (concept/outline/bible + the first wave). Deliberately
-    // not the whole book — the welcome grant is sized to let a book begin and
-    // pause at a natural seam, and zero-balance runs must burn nothing.
+    // not the whole book: each wave is authorized independently, and a
+    // zero-balance run must burn nothing.
     // Loop, not if: a resume only proves the user clicked the button, so the
     // balance is re-checked until it actually covers the opening stretch.
     const openingAuthorization = await requireCreditGate(

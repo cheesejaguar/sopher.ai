@@ -4,14 +4,17 @@ import { and, eq, sql } from "drizzle-orm";
 
 import {
   gatewayOptions,
+  healReplayedMeteredDelivery,
   metered,
   meteredCallAuthorizationUsd,
+  completeMeteredDelivery,
   refundMeteredDelivery,
   type MeterCtx,
 } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction } from "@/db";
+import { replaceCoverAssetTransaction } from "@/db/transaction-operations";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
@@ -22,6 +25,7 @@ import {
   compensateUnreferencedBlobUpload,
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
+import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
 
 /**
  * Generates a book cover from the book's own identity — title, synopsis,
@@ -105,7 +109,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       ),
     )
     .limit(1);
-  if (replayed) return Response.json({ url: replayed.url });
+  if (replayed) {
+    await healReplayedMeteredDelivery({ userId, projectId, idempotencyKey });
+    return Response.json({ url: replayed.url });
+  }
+
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId,
+    operationKind: "optional",
+  });
+  if (spendDenied) return spendDenied;
 
   const tier: QualityTier = row.settings.qualityTier ?? "standard";
   const model = MODELS[tier].image;
@@ -130,6 +144,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       }),
     );
   } catch (error) {
+    const spendResponse = projectSpendAccessErrorResponse(error);
+    if (spendResponse) return spendResponse;
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: "Not enough credits" }, { status: 402 });
     }
@@ -193,65 +209,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   let displacedCover: { id: string; pathname: string } | undefined;
   let displacedCandidate: { id: string; pathname: string } | undefined;
   try {
-    displacedCover = await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(
-          hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
-        )`,
-      );
-      const [lockedBook] = await tx
-        .select({ frontMatter: schema.books.frontMatter })
-        .from(schema.books)
-        .where(and(eq(schema.books.id, row.bookId), eq(schema.books.projectId, projectId)))
-        .limit(1);
-      if (!lockedBook) throw new Error("Book disappeared while storing its cover");
-
-      const currentCoverUrl = (lockedBook.frontMatter as Record<string, unknown>).coverUrl;
-      const [displaced] =
-        typeof currentCoverUrl === "string"
-          ? await tx
-              .select({
-                id: schema.assets.id,
-                pathname: schema.assets.blobPathname,
-              })
-              .from(schema.assets)
-              .where(
-                and(
-                  eq(schema.assets.projectId, projectId),
-                  eq(schema.assets.kind, "cover"),
-                  eq(schema.assets.blobUrl, currentCoverUrl),
-                ),
-              )
-              .limit(1)
-          : [];
-      displacedCandidate = displaced;
-
-      await tx.insert(schema.assets).values({
+    displacedCover = await withDbTransaction((tx) =>
+      replaceCoverAssetTransaction(tx, {
         projectId,
-        kind: "cover",
-        blobUrl: blob.url,
-        blobPathname: blob.pathname,
+        bookId: row.bookId,
+        title: row.title,
+        operationKey: idempotencyKey,
+        url: blob.url,
+        pathname: blob.pathname,
         contentType,
         sizeBytes: file.uint8Array.byteLength,
-        meta: { title: row.title, operationKey: idempotencyKey },
-      });
-
-      // The cover URL rides in front_matter next to the author byline, so the
-      // exports and reading view read one place for the book's identity.
-      const [updated] = await tx
-        .update(schema.books)
-        .set({
-          frontMatter: {
-            ...(lockedBook.frontMatter as Record<string, unknown>),
-            coverUrl: blob.url,
-          },
-          updatedAt: new Date(),
-        })
-        .where(and(eq(schema.books.id, row.bookId), eq(schema.books.projectId, projectId)))
-        .returning({ id: schema.books.id });
-      if (!updated) throw new Error("Book disappeared while storing its cover");
-      return displaced;
-    });
+        onDisplacedCandidate: (candidate) => {
+          displacedCandidate = candidate;
+        },
+      }),
+    );
   } catch (error) {
     // COMMIT acknowledgement is ambiguous. Only refund when the exact asset
     // is proven absent.
@@ -286,6 +258,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     displacedCover = displacedCandidate;
   }
 
+  await completeMeteredDelivery(meter);
   await scheduleReplacedAssetCleanup({
     projectId,
     assetId: displacedCover?.id,

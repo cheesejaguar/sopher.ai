@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ChapterProgress } from "@/hooks/use-run-stream";
 import type { Stage } from "@/lib/run-events";
+import type { ProjectExperience } from "@/lib/trial-story";
 
 export function visibleDraftTabs(
   started: number[],
@@ -32,11 +33,13 @@ export function LiveDraftPane({
   chapters,
   titles,
   stage,
+  experience = "full_book",
   subscribeChapterProse,
 }: {
   chapters: Map<number, ChapterProgress>;
   titles: Record<number, string | null>;
   stage: Stage;
+  experience?: ProjectExperience;
   subscribeChapterProse: (chapterNumber: number, onText: (fullText: string) => void) => () => void;
 }) {
   const [selected, setSelected] = React.useState<string | undefined>(undefined);
@@ -81,8 +84,10 @@ export function LiveDraftPane({
               : "Waiting for the next chapter to begin."}
         </p>
         <p className="max-w-sm font-sans text-xs text-paper-muted">
-          Chapter drafts arrive word by word, several chapters at a time. Everything you see here is
-          saved as it lands.
+          {experience === "trial_short_story"
+            ? "Chapter drafts arrive word by word, one chapter at a time."
+            : "Chapter drafts arrive word by word as each coordinated writing wave begins."}{" "}
+          Everything you see here is saved as it lands.
         </p>
       </div>
     );
@@ -109,7 +114,7 @@ export function LiveDraftPane({
                 <span
                   aria-hidden="true"
                   data-icon="inline-start"
-                  className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
+                  className="size-1.5 rounded-full bg-ai"
                 />
               ) : null}
               Chapter {n}

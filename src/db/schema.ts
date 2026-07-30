@@ -66,6 +66,8 @@ export type ProjectSettings = {
   requireOutlineApproval?: boolean;
 };
 
+export type ProjectExperience = "trial_short_story" | "full_book";
+
 export const projects = pgTable(
   "projects",
   {
@@ -86,6 +88,21 @@ export const projects = pgTable(
     subgenre: text("subgenre"),
     protagonist: text("protagonist"),
     setting: text("setting"),
+    /**
+     * Frozen product entitlement for this manuscript. Existing projects are
+     * full books; the included-story path opts into its smaller server-owned
+     * production shape explicitly.
+     */
+    experience: text("experience", {
+      enum: ["trial_short_story", "full_book"],
+    })
+      .default("full_book")
+      .notNull(),
+    /**
+     * Browser-generated idempotency key for the wizard submit. It is scoped to
+     * the owner so replaying an uncertain response returns the same project.
+     */
+    creationKey: uuid("creation_key"),
     targetChapters: integer("target_chapters").default(10).notNull(),
     targetWordsPerChapter: integer("target_words_per_chapter").default(3000).notNull(),
     styleGuide: text("style_guide"),
@@ -103,7 +120,13 @@ export const projects = pgTable(
     completedAt: timestamp("completed_at", { withTimezone: true }),
     ...timestamps,
   },
-  (t) => [index("idx_projects_user").on(t.userId, t.updatedAt)],
+  (t) => [
+    index("idx_projects_user").on(t.userId, t.updatedAt),
+    uniqueIndex("uq_projects_user_creation_key").on(t.userId, t.creationKey),
+    uniqueIndex("uq_projects_one_trial_per_user")
+      .on(t.userId)
+      .where(sql`${t.experience} = 'trial_short_story'`),
+  ],
 );
 
 export const books = pgTable(
@@ -251,6 +274,8 @@ export const generationRuns = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** Idempotency key for one deliberate authoring-run request. */
+    requestKey: uuid("request_key"),
     workflowRunId: text("workflow_run_id"),
     kind: text("kind", {
       enum: ["full_book", "chapter", "edit_pass", "continuity", "export"],
@@ -271,16 +296,30 @@ export const generationRuns = pgTable(
     error: text("error"),
     startedAt: timestamp("started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    /**
+     * `start()` was invoked but its response was lost. The row stays active
+     * until the Workflow self-links or one rate-limited same-run retry claims
+     * this marker.
+     */
+    acceptanceUncertainAt: timestamp("acceptance_uncertain_at", { withTimezone: true }),
+    /** Lease for one external Workflow dispatch attempt; stale claims are retryable. */
+    acceptanceDispatchClaimedAt: timestamp("acceptance_dispatch_claimed_at", {
+      withTimezone: true,
+    }),
+    /** Last time the Workflow-aware watchdog attempted to reconcile this run. */
+    healthCheckedAt: timestamp("health_checked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index("idx_runs_project").on(t.projectId, t.createdAt),
     index("idx_runs_status").on(t.status),
+    index("idx_runs_health_check").on(t.status, t.healthCheckedAt, t.createdAt),
     // Race-proof backstop for the "one active generation per project" rule.
     // Export runs are excluded so exports stay independent of generation.
     uniqueIndex("uq_runs_active_per_project")
       .on(t.projectId)
       .where(sql`status in ('queued','running','awaiting_input') and kind <> 'export'`),
+    uniqueIndex("uq_runs_project_request_key").on(t.projectId, t.requestKey),
   ],
 );
 

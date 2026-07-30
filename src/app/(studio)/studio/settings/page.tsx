@@ -9,6 +9,8 @@ import Link from "next/link";
 
 import { AppearanceCard, DefaultsCard } from "./settings-cards";
 import { CostDisplay, PageHeader } from "@/components/studio/product-primitives";
+import { getStudioAccess } from "@/lib/studio-access";
+import { FULL_BOOK_UNLOCK_HREF } from "@/lib/marketing/trial-offer";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -16,20 +18,33 @@ export const metadata: Metadata = {
 
 async function CreditsSection() {
   const { userId } = await requireUser();
-  const balance = await getBalance(userId);
+  const [balance, access] = await Promise.all([getBalance(userId), getStudioAccess(userId)]);
   return (
     <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <h2 className="font-sans text-base font-semibold">Credits</h2>
         <p className="text-sm text-muted-foreground">
-          Your prepaid balance is the spending limit — work stops (and can be resumed) when it runs
-          out, so there is no separate monthly cap to manage.
+          {access.fullBookUnlocked
+            ? "Your prepaid balance is the spending limit — work stops (and can be resumed) when it runs out, so there is no separate monthly cap to manage."
+            : "The included story uses a private production allowance rather than a public credit balance. One purchase unlocks full-length production."}
         </p>
       </CardHeader>
       <CardContent className="flex flex-wrap items-end justify-between gap-4">
-        <CostDisplay credits={balance} label="Available balance" />
-        <Link href="/studio/credits" className="text-sm font-medium text-primary hover:underline">
-          Buy credits
+        {access.fullBookUnlocked ? (
+          <CostDisplay credits={balance} label="Available balance" />
+        ) : (
+          <div>
+            <p className="folio-label text-muted-foreground">Included experience</p>
+            <p className="mt-1 text-lg font-semibold">
+              {access.trialProjectId ? "Short story covered" : "Full-length books locked"}
+            </p>
+          </div>
+        )}
+        <Link
+          href={access.fullBookUnlocked ? "/studio/credits" : FULL_BOOK_UNLOCK_HREF}
+          className="text-sm font-medium text-primary hover:underline"
+        >
+          {access.fullBookUnlocked ? "Buy credits" : "Unlock full-length books"}
         </Link>
       </CardContent>
     </Card>

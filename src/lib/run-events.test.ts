@@ -99,6 +99,22 @@ describe("generation retry boundaries", () => {
     }
   });
 
+  it("never reuses full-book artifacts for an included story", () => {
+    expect(
+      resumableRunId(
+        { ...next, productionMode: "trial_short_story" },
+        {
+          id: "full-book-run",
+          status: "failed",
+          config: { ...matchingConfig, productionMode: "full_book" },
+        },
+      ),
+    ).toBeUndefined();
+    expect(sameGenerationShape({ ...next, productionMode: "full_book" }, matchingConfig)).toBe(
+      true,
+    );
+  });
+
   it("starts fresh when chapter add, delete, or move changes the prepared topology", () => {
     const withTopology = {
       ...next,
@@ -117,6 +133,7 @@ describe("generation retry boundaries", () => {
   });
 
   it.each([
+    ["workingTitle", "A Different Working Title"],
     ["brief", "A diver discovers a city beneath the ice."],
     ["genre", "Mystery"],
     ["styleGuide", "Short declarative sentences."],

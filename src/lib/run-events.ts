@@ -89,6 +89,8 @@ export const PROGRESS_NS = "progress";
 export const chapterNs = (n: number) => `chapter:${n}`;
 
 export type GenerationInputSnapshot = {
+  /** Author-owned identity. Agents may refine the story, never silently rename it. */
+  workingTitle?: string;
   brief: string;
   genre: string | null;
   styleGuide: string | null;
@@ -229,6 +231,14 @@ export type GenerationWorkState = {
 };
 
 export type GenerationConfig = {
+  /**
+   * Set only after the post-insert, project-locked snapshot has been frozen.
+   * An uncertain Workflow retry must never dispatch a config without this
+   * durable readiness proof.
+   */
+  dispatchReady?: true;
+  /** Absent on historical runs, which are treated as full books. */
+  productionMode?: "trial_short_story" | "full_book";
   tier: "draft" | "standard" | "premium";
   requireOutlineApproval: boolean;
   waveSize: number;
@@ -344,6 +354,7 @@ export function sameGenerationShape(
   const priorInput = prior?.inputSnapshot;
   if (!priorInput) return false;
   return (
+    (prior?.productionMode ?? "full_book") === (next.productionMode ?? "full_book") &&
     prior?.tier === next.tier &&
     prior.requireOutlineApproval === next.requireOutlineApproval &&
     prior.waveSize === next.waveSize &&
