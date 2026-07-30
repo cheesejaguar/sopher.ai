@@ -113,7 +113,7 @@ export function StepEstimate({
   // and never per keystroke (the quote itself is debounced).
   const announcement =
     selected && !loading
-      ? `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}.`
+      ? `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}, about ${selected.estimatedMinutes} minutes.`
       : "";
 
   React.useEffect(() => {
@@ -184,9 +184,16 @@ export function StepEstimate({
 
       {/* The receipt — itemized, honest, mono */}
       <div className="manuscript-sheet p-5 sm:p-6">
-        <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
-          Estimate — {TIER_LABELS[state.tier].name}
-        </p>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+          <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
+            Estimate — {TIER_LABELS[state.tier].name}
+          </p>
+          {selected && !loading ? (
+            <p className="font-mono text-xs text-paper-muted">
+              Estimated production time: ~{selected.estimatedMinutes} min
+            </p>
+          ) : null}
+        </div>
         <div className="mt-4 font-mono text-sm text-paper-foreground" aria-busy={loading}>
           {selected && !loading ? (
             <>
