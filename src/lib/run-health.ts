@@ -97,6 +97,8 @@ type ChapterHealthRow = {
   contentReady: boolean;
 };
 
+type TimestampValue = Date | string | number | null | undefined;
+
 const TERMINAL_DATABASE_STATUSES = new Set<AuthoringRunStatus>([
   "completed",
   "failed",
@@ -135,9 +137,22 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   });
 }
 
-function latestDate(...dates: Array<Date | null | undefined>): Date | null {
+/**
+ * Raw SQL aggregates are not passed through Drizzle's column decoder. Neon
+ * therefore returns max(timestamp) as an ISO string even when the sql template
+ * is annotated as Date. Normalize every mixed timestamp boundary before date
+ * arithmetic so a health probe can never crash the production page.
+ */
+export function normalizeRunTimestamp(value: TimestampValue): Date | null {
+  if (value == null) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestDate(...timestamps: TimestampValue[]): Date | null {
   let latest: Date | null = null;
-  for (const date of dates) {
+  for (const timestamp of timestamps) {
+    const date = normalizeRunTimestamp(timestamp);
     if (date && (!latest || date.getTime() > latest.getTime())) latest = date;
   }
   return latest;
@@ -383,7 +398,8 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
               and ${schema.generationEvents.payload}->>'stage' <> 'queued'
             )
         )::int`,
-        lastAt: sql<Date | null>`max(${schema.generationEvents.createdAt})`,
+        // Raw timestamp aggregates are returned as strings by neon-http.
+        lastAt: sql<Date | string | null>`max(${schema.generationEvents.createdAt})`,
       })
       .from(schema.generationEvents)
       .where(eq(schema.generationEvents.runId, run.id)),
@@ -455,7 +471,7 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
 
   return {
     authoringEventCount: eventFacts?.authoringCount ?? 0,
-    lastEventAt: eventFacts?.lastAt ?? null,
+    lastEventAt: normalizeRunTimestamp(eventFacts?.lastAt),
     stage: latestStage,
     progressPct,
     stageDescription,

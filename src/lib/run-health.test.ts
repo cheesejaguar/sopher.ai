@@ -3,10 +3,22 @@ import { describe, expect, it } from "vitest";
 import {
   completionArtifactsAreReady,
   deriveEffectiveRunStatus,
+  normalizeRunTimestamp,
   runCompletionArtifactsAreReady,
   summarizeChapterRowsForRun,
   workflowCompletionRequiresArtifacts,
 } from "@/lib/run-health";
+
+describe("normalizeRunTimestamp", () => {
+  it("decodes Neon raw aggregate timestamps before health date arithmetic", () => {
+    const iso = "2026-07-30T19:29:00.000Z";
+
+    expect(normalizeRunTimestamp(iso)?.toISOString()).toBe(iso);
+    expect(normalizeRunTimestamp(new Date(iso))?.toISOString()).toBe(iso);
+    expect(normalizeRunTimestamp(null)).toBeNull();
+    expect(normalizeRunTimestamp("not-a-timestamp")).toBeNull();
+  });
+});
 
 describe("deriveEffectiveRunStatus", () => {
   it.each(["pending", "missing", "unavailable"] as const)(
