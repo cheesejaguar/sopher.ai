@@ -93,5 +93,25 @@
   "packageManager": "pnpm@10.28.2",
   "engines": {
     "node": ">=24"
+  },
+  "pnpm": {
+    "overrides": {
+      "@esbuild-kit/core-utils>esbuild": "0.25.0",
+      "@lhci/cli>chrome-launcher": "1.2.1",
+      "@lhci/cli>tmp": "0.2.7",
+      "@lhci/cli>uuid": "11.1.1",
+      "@swc/cli>minimatch": "10.2.6",
+      "ejs>jake": "12.10.1",
+      "external-editor>tmp": "0.2.7",
+      "jayson>uuid": "11.1.1",
+      "minimatch@3.1.5>brace-expansion": "1.1.17",
+      "next>postcss": "8.5.18",
+      "next>sharp": "0.35.0"
+    },
+    "auditConfig": {
+      "ignoreCves": [
+        "CVE-2026-14257"
+      ]
+    }
   }
 }
