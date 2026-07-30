@@ -13,6 +13,8 @@ import { requireUser } from "@/lib/auth";
 import { getMonthToDateSpend } from "@/lib/billing/meter";
 import { CREDIT_MARKUP, getBalance } from "@/lib/billing/credits";
 import { getSpendByProject, getSpendByRole } from "@/db/queries/books";
+import { getStudioAccess } from "@/lib/studio-access";
+import { FULL_BOOK_UNLOCK_HREF } from "@/lib/marketing/trial-offer";
 
 export const metadata: Metadata = {
   title: "Usage",
@@ -25,7 +27,11 @@ function monthStartUtc(): Date {
 
 async function WalletCard() {
   const { userId } = await requireUser();
-  const [spentUsd, balance] = await Promise.all([getMonthToDateSpend(userId), getBalance(userId)]);
+  const [spentUsd, balance, access] = await Promise.all([
+    getMonthToDateSpend(userId),
+    getBalance(userId),
+    getStudioAccess(userId),
+  ]);
   const spentCredits = spentUsd * CREDIT_MARKUP;
   const monthName = new Intl.DateTimeFormat("en-US", { month: "long" }).format(new Date());
 
@@ -36,24 +42,34 @@ async function WalletCard() {
           Credits
         </CardTitle>
         <CardDescription>
-          Your prepaid balance is the spending limit — writing pauses when it runs out and resumes
-          after a top-up.
+          {access.fullBookUnlocked
+            ? "Your prepaid balance is the spending limit — writing pauses when it runs out and resumes after a top-up."
+            : "The included story uses a private production allowance rather than a public credit balance. One purchase unlocks full-length production."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <CostDisplay
-          credits={balance}
-          label="Available balance"
-          valueClassName={balance <= 0 ? "text-ember" : undefined}
-        />
+        {access.fullBookUnlocked ? (
+          <CostDisplay
+            credits={balance}
+            label="Available balance"
+            valueClassName={balance <= 0 ? "text-ember" : undefined}
+          />
+        ) : (
+          <div>
+            <p className="folio-label text-muted-foreground">Included experience</p>
+            <p className="mt-1 text-lg font-semibold">
+              {access.trialProjectId ? "Short story covered" : "Full-length books locked"}
+            </p>
+          </div>
+        )}
         <p className="font-mono text-xs text-muted-foreground tabular-nums">
           {formatCredits(spentCredits)} used in {monthName} ({formatUsd(spentUsd)} metered)
         </p>
         <Link
-          href="/studio/credits"
+          href={access.fullBookUnlocked ? "/studio/credits" : FULL_BOOK_UNLOCK_HREF}
           className="inline-block text-sm font-medium text-primary hover:underline"
         >
-          Buy credits or view the ledger
+          {access.fullBookUnlocked ? "Buy credits or view the ledger" : "Unlock full-length books"}
         </Link>
       </CardContent>
     </Card>

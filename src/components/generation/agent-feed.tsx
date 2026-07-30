@@ -30,7 +30,7 @@ export function AgentFeed({
           aria-hidden="true"
           className={cn(
             "size-1.5 rounded-full",
-            connection === "live" ? "bg-ai motion-safe:animate-pulse" : "bg-muted-foreground/40",
+            connection === "live" ? "bg-ai" : "bg-muted-foreground/40",
           )}
         />
         <h3 className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
@@ -41,7 +41,10 @@ export function AgentFeed({
           the agents post far too often to announce. */}
       <ol tabIndex={0} className="max-h-72 space-y-2.5 overflow-y-auto px-4 py-3">
         {newestFirst.length === 0 ? (
-          <li className="text-xs text-muted-foreground">Nothing yet — the room is quiet.</li>
+          <li className="text-xs leading-relaxed text-muted-foreground">
+            Waiting for the first production note. Status checks continue even if live notes
+            reconnect.
+          </li>
         ) : (
           newestFirst.map((item) => (
             <li key={item.id} className="text-sm">

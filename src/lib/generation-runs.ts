@@ -1,9 +1,48 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 
-import { getDb, getSqlClient, schema } from "@/db";
+import { getDb, getSqlClient, schema, withDbTransaction } from "@/db";
 import { releaseRunCreditReservations } from "@/lib/billing/credits";
+import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 
 export const ACTIVE_AUTHORING_RUN_STATUSES = ["queued", "running", "awaiting_input"] as const;
+export const AUTHORING_DISPATCH_CLAIM_TTL_MS = 2 * 60_000;
+
+/**
+ * Cross-cutting lock order invariant: acquire the project-authoring advisory
+ * lock first, then the user-wallet advisory lock. Run insertion, transition,
+ * terminalization, and billing settlement must never acquire these in reverse
+ * order or concurrent authoring and metering can deadlock.
+ */
+
+/**
+ * Keeps the normal initial-dispatch lease distinct from an actually ambiguous
+ * Workflow response. A fresh lease means the original caller is still allowed
+ * to finish; an expired unlinked lease means that caller disappeared and the
+ * same durable run may be reclaimed without creating a duplicate.
+ */
+export function deriveAuthoringRunAcceptanceState(
+  input: {
+    acceptanceUncertainAt: Date | null;
+    acceptanceDispatchClaimedAt: Date | null;
+  },
+  now = new Date(),
+): {
+  acceptanceUncertain: boolean;
+  dispatchClaimIsFresh: boolean;
+  safeToRetry: boolean;
+} {
+  const dispatchClaimIsFresh = Boolean(
+    input.acceptanceDispatchClaimedAt &&
+    input.acceptanceDispatchClaimedAt.getTime() > now.getTime() - AUTHORING_DISPATCH_CLAIM_TTL_MS,
+  );
+  const dispatchClaimIsStale = Boolean(input.acceptanceDispatchClaimedAt && !dispatchClaimIsFresh);
+  const acceptanceUncertain = Boolean(input.acceptanceUncertainAt) || dispatchClaimIsStale;
+  return {
+    acceptanceUncertain,
+    dispatchClaimIsFresh,
+    safeToRetry: acceptanceUncertain && !dispatchClaimIsFresh,
+  };
+}
 
 /**
  * Authoring runs own manuscript, outline, and canon mutations until they stop.
@@ -22,7 +61,33 @@ export async function hasActiveAuthoringRun(projectId: string): Promise<boolean>
       ),
     )
     .limit(1);
-  return Boolean(active);
+  if (!active) return false;
+
+  try {
+    const { reconcileActiveAuthoringRuns } = await import("@/lib/run-health");
+    await reconcileActiveAuthoringRuns({ projectId });
+  } catch (error) {
+    // A transient Workflow API error must never make an active database row
+    // disappear from conflict checks.
+    console.error("Could not reconcile authoring run before conflict check", {
+      projectId,
+      error,
+    });
+    return true;
+  }
+
+  const [remaining] = await getDb()
+    .select({ id: schema.generationRuns.id })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
+        ne(schema.generationRuns.kind, "export"),
+      ),
+    )
+    .limit(1);
+  return Boolean(remaining);
 }
 
 export async function assertNoActiveAuthoringRun(
@@ -30,6 +95,41 @@ export async function assertNoActiveAuthoringRun(
   message = "Finish or stop the current run before changing the manuscript",
 ): Promise<void> {
   if (await hasActiveAuthoringRun(projectId)) throw new Error(message);
+}
+
+/**
+ * Integration seam for Workflow-aware reconciliation. The run-health layer
+ * replaces this no-op with a terminal-state check before conflict decisions;
+ * callers deliberately await it so a dead remote workflow cannot block a
+ * project forever.
+ */
+export async function reconcileBeforeAuthoringRunConflict(_input: {
+  projectId: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    const [active] = await getDb()
+      .select({ id: schema.generationRuns.id })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.projectId, _input.projectId),
+          inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
+          ne(schema.generationRuns.kind, "export"),
+        ),
+      )
+      .limit(1);
+    if (!active) return;
+
+    const { reconcileActiveAuthoringRuns } = await import("@/lib/run-health");
+    await reconcileActiveAuthoringRuns({ projectId: _input.projectId });
+  } catch (error) {
+    // Preserve the database conflict when Workflow is unavailable.
+    console.error("Could not reconcile authoring run before start", {
+      projectId: _input.projectId,
+      error,
+    });
+  }
 }
 
 /**
@@ -47,33 +147,180 @@ export function noActiveAuthoringRunSql(projectId: string) {
   )`;
 }
 
+export class RunRequestKeyMismatchError extends Error {
+  constructor(
+    readonly requestedKind: "full_book" | "chapter" | "edit_pass" | "continuity",
+    readonly persistedKind: "full_book" | "chapter" | "edit_pass" | "continuity",
+  ) {
+    super(
+      `Generation request key belongs to ${persistedKind}, not the requested ${requestedKind} operation`,
+    );
+    this.name = "RunRequestKeyMismatchError";
+  }
+}
+
+export class TrialOptionalWorkInProgressError extends Error {
+  constructor() {
+    super("Finish the current optional AI tool before starting production");
+    this.name = "TrialOptionalWorkInProgressError";
+  }
+}
+
 export async function insertQueuedAuthoringRun(input: {
   projectId: string;
   userId: string;
   kind: "full_book" | "chapter" | "edit_pass" | "continuity";
   config: unknown;
-}): Promise<{ id: string }> {
+  requestKey?: string;
+}): Promise<{
+  id: string;
+  inserted: boolean;
+  status: AuthoringRunStatus;
+  workflowRunId: string | null;
+  kind: "full_book" | "chapter" | "edit_pass" | "continuity";
+  config: unknown;
+}> {
   const client = getSqlClient();
   const configJson = JSON.stringify(input.config);
-  const [, inserted] = await client.transaction((tx) => [
+  // `xmax = 0` below distinguishes INSERT from the idempotent no-op UPDATE.
+  // The table is intentionally non-partitioned and has no BEFORE UPDATE trigger;
+  // a migration changing either property must replace this detection and its
+  // concurrent insertion regression coverage at the same time.
+  const [, , inserted] = await client.transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
     )`,
     tx`
-      insert into generation_runs (project_id, user_id, kind, status, config)
-      values (
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      select
+        optional_lease.user_id,
+        0,
+        'adjustment',
+        'Repair optional operation lease from durable project output',
+        optional_lease.project_id,
+        null,
+        'release:' || optional_lease.external_ref
+      from credit_ledger optional_lease
+      where optional_lease.project_id = ${input.projectId}
+        and optional_lease.external_ref like 'optional-operation-lease:%'
+        and not exists (
+          select 1
+          from credit_ledger released
+          where released.external_ref = 'release:' || optional_lease.external_ref
+        )
+        and exists (
+          select 1
+          from (
+            select asset.meta->>'operationKey' as operation_key
+            from assets asset
+            where asset.project_id = ${input.projectId}
+            union all
+            select tool_run.input->>'operationKey' as operation_key
+            from content_tool_runs tool_run
+            where tool_run.project_id = ${input.projectId}
+            union all
+            select suggestion.anchor->>'operationKey' as operation_key
+            from suggestions suggestion
+            inner join chapters chapter on chapter.id = suggestion.chapter_id
+            inner join books book on book.id = chapter.book_id
+            where book.project_id = ${input.projectId}
+          ) delivered
+          where delivered.operation_key is not null
+            and optional_lease.external_ref like
+              ('%:' || delivered.operation_key || ':%')
+        )
+      on conflict (external_ref) do nothing
+    `,
+    tx`
+      insert into generation_runs (
+        project_id,
+        user_id,
+        request_key,
+        kind,
+        status,
+        config,
+        acceptance_uncertain_at,
+        acceptance_dispatch_claimed_at
+      )
+      select
         ${input.projectId},
         ${input.userId},
+        ${input.requestKey ?? null},
         ${input.kind},
         'queued',
-        ${configJson}::jsonb
+        ${configJson}::jsonb,
+        null,
+        now()
+      where not exists (
+        select 1
+        from credit_ledger optional_lease
+        where optional_lease.project_id = ${input.projectId}
+          and optional_lease.external_ref like 'optional-operation-lease:%'
+          and not exists (
+            select 1
+            from credit_ledger released_lease
+            where released_lease.external_ref = 'release:' || optional_lease.external_ref
+          )
       )
-      returning id
+      and not exists (
+        select 1
+        from projects project
+        where project.id = ${input.projectId}
+          and project.user_id = ${input.userId}
+          and project.experience = 'trial_short_story'
+          and exists (
+            select 1
+            from credit_ledger optional_intent
+            where optional_intent.project_id = project.id
+              and optional_intent.user_id = ${input.userId}
+              and optional_intent.run_id is null
+              and optional_intent.amount = 0
+              and coalesce(optional_intent.external_ref, '') like 'metering-intent:%'
+              and not exists (
+                select 1
+                from credit_ledger terminal_intent
+                where terminal_intent.external_ref in (
+                  'intent-settled:' || optional_intent.external_ref,
+                  'intent-aborted:' || optional_intent.external_ref
+                )
+              )
+          )
+      )
+      on conflict (project_id, request_key) do update
+        set request_key = excluded.request_key
+      returning
+        id,
+        kind,
+        config,
+        status,
+        workflow_run_id,
+        (xmax = 0) as inserted
     `,
   ]);
-  const run = (inserted as Array<{ id: string }>)[0];
-  if (!run) throw new Error("Could not create generation run");
-  return run;
+  const run = (
+    inserted as Array<{
+      id: string;
+      inserted: boolean;
+      kind: "full_book" | "chapter" | "edit_pass" | "continuity";
+      config: unknown;
+      status: AuthoringRunStatus;
+      workflow_run_id: string | null;
+    }>
+  )[0];
+  if (!run) throw new TrialOptionalWorkInProgressError();
+  if (run.kind !== input.kind) {
+    throw new RunRequestKeyMismatchError(input.kind, run.kind);
+  }
+  return {
+    id: run.id,
+    inserted: run.inserted,
+    kind: run.kind,
+    config: run.config,
+    status: run.status,
+    workflowRunId: run.workflow_run_id,
+  };
 }
 
 export type AuthoringRunStatus =
@@ -92,7 +339,7 @@ export async function transitionAuthoringRunState(input: {
   error?: string;
 }): Promise<{ status: AuthoringRunStatus | null; transitioned: boolean }> {
   const terminal = ["completed", "failed", "cancelled"].includes(input.status);
-  return getDb().transaction(async (tx) => {
+  return withDbTransaction(async (tx) => {
     // Keep one global order anywhere both locks are needed: project, then
     // wallet. Metering takes only the wallet lock and asset writes only the
     // project lock, so neither can observe a half-terminal transition.
@@ -134,7 +381,13 @@ export async function transitionAuthoringRunState(input: {
         status: input.status,
         error: input.error ?? null,
         ...(input.status === "running" ? { startedAt: new Date() } : {}),
-        ...(terminal ? { completedAt: new Date() } : {}),
+        ...(terminal
+          ? {
+              completedAt: new Date(),
+              acceptanceUncertainAt: null,
+              acceptanceDispatchClaimedAt: null,
+            }
+          : {}),
       })
       .where(
         and(
@@ -193,6 +446,180 @@ export async function transitionAuthoringRunState(input: {
     }
 
     return { status: currentStatus ?? null, transitioned: Boolean(updated) };
+  });
+}
+
+/**
+ * The workflow records its own durable identifier before doing any paid work.
+ * This closes the crash window where start() succeeded but the caller died
+ * before persisting the returned Workflow run id.
+ */
+export async function linkAuthoringRunWorkflow(input: {
+  runId: string;
+  projectId: string;
+  userId: string;
+  workflowRunId: string;
+}): Promise<boolean> {
+  const [linked] = await getDb()
+    .update(schema.generationRuns)
+    .set({
+      workflowRunId: input.workflowRunId,
+      acceptanceUncertainAt: null,
+      acceptanceDispatchClaimedAt: null,
+    })
+    .where(
+      and(
+        eq(schema.generationRuns.id, input.runId),
+        eq(schema.generationRuns.projectId, input.projectId),
+        eq(schema.generationRuns.userId, input.userId),
+        inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
+        or(
+          isNull(schema.generationRuns.workflowRunId),
+          eq(schema.generationRuns.workflowRunId, input.workflowRunId),
+        ),
+      ),
+    )
+    .returning({ id: schema.generationRuns.id });
+  return Boolean(linked);
+}
+
+/**
+ * Records the one response-loss state that may be retried safely. The CAS
+ * deliberately refuses running/terminal or already-linked rows.
+ */
+export async function markAuthoringRunAcceptanceUncertain(input: {
+  runId: string;
+  projectId: string;
+  userId: string;
+}): Promise<boolean> {
+  const [marked] = await getDb()
+    .update(schema.generationRuns)
+    .set({
+      acceptanceUncertainAt: new Date(),
+      acceptanceDispatchClaimedAt: null,
+    })
+    .where(
+      and(
+        eq(schema.generationRuns.id, input.runId),
+        eq(schema.generationRuns.projectId, input.projectId),
+        eq(schema.generationRuns.userId, input.userId),
+        eq(schema.generationRuns.status, "queued"),
+        isNull(schema.generationRuns.workflowRunId),
+      ),
+    )
+    .returning({ id: schema.generationRuns.id });
+  return Boolean(marked);
+}
+
+/**
+ * Isolated browser tests intentionally do not create a remote Workflow. Clear
+ * the real dispatch markers only behind the explicit local stub gate so the
+ * accepted fixture does not masquerade as an ambiguous production handoff.
+ */
+export async function settleStubbedAuthoringRunHandoff(input: {
+  runId: string;
+  projectId: string;
+  userId: string;
+}): Promise<boolean> {
+  if (!isE2EWorkflowStubEnabled()) {
+    throw new Error("Stubbed authoring handoff is unavailable outside isolated E2E");
+  }
+  const [settled] = await getDb()
+    .update(schema.generationRuns)
+    .set({
+      acceptanceUncertainAt: null,
+      acceptanceDispatchClaimedAt: null,
+    })
+    .where(
+      and(
+        eq(schema.generationRuns.id, input.runId),
+        eq(schema.generationRuns.projectId, input.projectId),
+        eq(schema.generationRuns.userId, input.userId),
+        eq(schema.generationRuns.status, "queued"),
+        isNull(schema.generationRuns.workflowRunId),
+      ),
+    )
+    .returning({ id: schema.generationRuns.id });
+  return Boolean(settled);
+}
+
+export type ClaimedUncertainAuthoringRun = {
+  id: string;
+  projectId: string;
+  userId: string;
+  kind: "full_book" | "chapter" | "edit_pass" | "continuity";
+  config: unknown;
+};
+
+/**
+ * Claims one same-run Workflow redispatch under the same project lock used by
+ * generation creation. An explicit ambiguity marker remains durable, while an
+ * expired initial-dispatch lease is promoted to that marker. The renewed
+ * short-lived claim keeps concurrent clicks from dispatching twice and becomes
+ * retryable if a process dies before it can release or self-link.
+ */
+export async function claimUncertainAuthoringRun(input: {
+  runId: string;
+  projectId: string;
+  userId: string;
+}): Promise<ClaimedUncertainAuthoringRun | null> {
+  return withDbTransaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+      )`,
+    );
+    const claimedAt = new Date();
+    const staleBefore = new Date(claimedAt.getTime() - AUTHORING_DISPATCH_CLAIM_TTL_MS);
+    const [run] = await tx
+      .update(schema.generationRuns)
+      .set({
+        // Promote an expired initial-dispatch lease to explicit ambiguity so
+        // another lost response remains recoverable after this claim expires.
+        acceptanceUncertainAt: claimedAt,
+        acceptanceDispatchClaimedAt: claimedAt,
+      })
+      .where(
+        and(
+          eq(schema.generationRuns.id, input.runId),
+          eq(schema.generationRuns.projectId, input.projectId),
+          eq(schema.generationRuns.userId, input.userId),
+          eq(schema.generationRuns.status, "queued"),
+          isNull(schema.generationRuns.workflowRunId),
+          or(
+            isNotNull(schema.generationRuns.acceptanceUncertainAt),
+            lte(schema.generationRuns.acceptanceDispatchClaimedAt, staleBefore),
+          ),
+          sql`${schema.generationRuns.config}->>'dispatchReady' = 'true'`,
+          or(
+            isNull(schema.generationRuns.acceptanceDispatchClaimedAt),
+            lte(schema.generationRuns.acceptanceDispatchClaimedAt, staleBefore),
+          ),
+        ),
+      )
+      .returning({
+        id: schema.generationRuns.id,
+        projectId: schema.generationRuns.projectId,
+        userId: schema.generationRuns.userId,
+        kind: schema.generationRuns.kind,
+        config: schema.generationRuns.config,
+      });
+    if (!run) return null;
+    if (
+      run.kind !== "full_book" &&
+      run.kind !== "chapter" &&
+      run.kind !== "edit_pass" &&
+      run.kind !== "continuity"
+    ) {
+      return null;
+    }
+    return {
+      id: run.id,
+      projectId: run.projectId,
+      userId: run.userId,
+      kind: run.kind,
+      config: run.config,
+    };
   });
 }
 

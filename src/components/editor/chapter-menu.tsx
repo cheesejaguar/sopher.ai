@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addChapter, deleteChapter, moveChapter, renameChapter } from "@/lib/actions/chapters";
+import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
 
 /**
  * Structural chapter actions: rename, reorder, insert, delete. Content is the
@@ -186,15 +187,17 @@ export function ChapterMenu({
               onClick={() =>
                 run(
                   async () => {
-                    const response = await fetch(`/api/chapters/${chapterId}/regenerate`, {
-                      method: "POST",
-                    });
+                    const response = await idempotentPaidFetch(
+                      `/api/chapters/${chapterId}/regenerate`,
+                      { method: "POST" },
+                    );
                     if (!response.ok) {
                       const body = (await response.json().catch(() => ({}))) as {
                         error?: string;
                       };
                       throw new Error(body.error ?? "Could not start");
                     }
+                    acknowledgePaidResponse(response);
                   },
                   () => {
                     setRegenOpen(false);

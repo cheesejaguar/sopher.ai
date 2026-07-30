@@ -167,7 +167,7 @@ test.describe("pricing page", () => {
     await expect(pricing.getByText("$300")).toBeVisible();
 
     // The welcome grant and the honest per-book cost table.
-    await expect(pricing.getByText(/free credits/)).toBeVisible();
+    await expect(pricing.getByText(/complete short story—no card required/i)).toBeVisible();
     await expect(pricing.getByRole("heading", { name: "What does a book cost?" })).toBeVisible();
 
     await axeCheck(page);

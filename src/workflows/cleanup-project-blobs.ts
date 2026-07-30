@@ -1,8 +1,8 @@
 import { del } from "@vercel/blob";
 import { sleep } from "workflow";
-import { eq, sql } from "drizzle-orm";
 
-import { getDb, schema } from "@/db";
+import { withDbTransaction } from "@/db";
+import { projectExistsUnderAuthoringLock } from "@/db/transaction-operations";
 
 const PROJECT_DELETE_COMMIT_GRACE = "1 minute";
 
@@ -16,19 +16,10 @@ export async function deleteProjectBlobsIfCommittedStep(
   pathnames: string[],
 ): Promise<void> {
   "use step";
-  const [project] = await getDb().transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(
-        hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
-      )`,
-    );
-    return tx
-      .select({ id: schema.projects.id })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, projectId))
-      .limit(1);
-  });
-  if (project || pathnames.length === 0) return;
+  const projectExists = await withDbTransaction((tx) =>
+    projectExistsUnderAuthoringLock(tx, projectId),
+  );
+  if (projectExists || pathnames.length === 0) return;
   // Vercel Workflow retries a failed step, while the pathnames remain durable
   // workflow input even though their asset rows were cascade-deleted.
   await del(pathnames);

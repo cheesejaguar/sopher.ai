@@ -1,4 +1,4 @@
-import { getRun, start } from "workflow/api";
+import { start } from "workflow/api";
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 
@@ -15,15 +15,25 @@ import {
 import { generateChapter } from "@/workflows/generate-chapter";
 import { singleChapterRequiredUsd } from "@/workflows/opening-credit-plan";
 import { isActiveRunConflict } from "@/lib/run-conflict";
-import type { GenerationConfig } from "@/lib/run-events";
-import type { QualityTier } from "@/ai/models";
+import { buildChapterRegenerationConfig, type BookGenerationSnapshot } from "@/lib/book-start";
 import {
   insertQueuedAuthoringRun,
-  scheduleRunReservationCleanup,
+  linkAuthoringRunWorkflow,
+  markAuthoringRunAcceptanceUncertain,
+  reconcileBeforeAuthoringRunConflict,
+  RunRequestKeyMismatchError,
   terminalizeAuthoringRun,
+  TrialOptionalWorkInProgressError,
 } from "@/lib/generation-runs";
+import { authorizeProjectSpend } from "@/lib/project-spend-http";
+import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
+import { markAuthoringRunDispatchReady } from "@/lib/authoring-dispatch";
 
 export const maxDuration = 60;
+
+type ChapterProjectSnapshot = BookGenerationSnapshot & {
+  chapterNumber: number;
+};
 
 /**
  * Regenerates one chapter through the full writing pipeline. The current
@@ -49,9 +59,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  // Bound repeated paid-work requests before the serialized workflow hold.
-  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
-  if (limited.limited) return limited.response;
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {
     return Response.json({ error: "Chapter not found" }, { status: 404 });
@@ -61,12 +68,68 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "Chapter not found" }, { status: 404 });
   }
 
+  let requestKey: string;
+  try {
+    requestKey = requireIdempotencyKey(req);
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    throw error;
+  }
+
   const db = getDb();
+  const [requestedRun] = await db
+    .select({
+      id: schema.generationRuns.id,
+      kind: schema.generationRuns.kind,
+      status: schema.generationRuns.status,
+    })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, ownership.projectId),
+        eq(schema.generationRuns.userId, userId),
+        eq(schema.generationRuns.requestKey, requestKey),
+      ),
+    )
+    .limit(1);
+  if (requestedRun) {
+    if (requestedRun.kind !== "chapter") {
+      return Response.json(
+        { error: "This request key already belongs to a different generation operation" },
+        { status: 409 },
+      );
+    }
+    return Response.json(
+      {
+        runId: requestedRun.id,
+        requestKey,
+        status: requestedRun.status,
+        reattached: true,
+      },
+      { status: 202 },
+    );
+  }
+
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId: ownership.projectId,
+    operationKind: "authoring",
+  });
+  if (spendDenied) return spendDenied;
+
+  // Replays above are read-only and do not consume the paid-work limit.
+  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
+  if (limited.limited) return limited.response;
+
   const [row] = await db
     .select({
       chapterNumber: schema.chapters.chapterNumber,
-      chapters: schema.projects.targetChapters,
-      words: schema.projects.targetWordsPerChapter,
+      title: schema.projects.title,
+      experience: schema.projects.experience,
+      targetChapters: schema.projects.targetChapters,
+      targetWordsPerChapter: schema.projects.targetWordsPerChapter,
       brief: schema.projects.brief,
       genre: schema.projects.genre,
       styleGuide: schema.projects.styleGuide,
@@ -81,6 +144,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
 
   // One run per project at a time — same rule as full-book generation, backed
   // by the same partial unique index.
+  await reconcileBeforeAuthoringRunConflict({
+    projectId: ownership.projectId,
+    userId,
+  });
   const [active] = await db
     .select({ id: schema.generationRuns.id })
     .from(schema.generationRuns)
@@ -96,29 +163,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "A run is already in progress" }, { status: 409 });
   }
 
-  const tier: QualityTier = row.settings.qualityTier ?? "standard";
-  let config: GenerationConfig = {
-    tier,
-    requireOutlineApproval: false,
-    waveSize: 1,
-    targetChapters: row.chapters,
-    targetWordsPerChapter: row.words,
-    chapterRegeneration: true,
-    inputSnapshot: {
-      brief: row.brief ?? "",
-      genre: row.genre ?? null,
-      styleGuide: row.styleGuide ?? null,
-      voiceProfile: row.settings.voiceProfile ?? null,
-      pov: row.settings.pov ?? null,
-      tense: row.settings.tense ?? null,
-      tone: row.settings.tone ?? null,
-      styleProfile: row.settings.styleProfile ?? null,
-      heatLevel: row.settings.heatLevel ?? null,
-      violenceLevel: row.settings.violenceLevel ?? null,
-      profanity: row.settings.profanity ?? null,
-      avoidTopics: [...(row.settings.avoidTopics ?? [])],
-    },
-  };
+  let config = buildChapterRegenerationConfig(row);
 
   const optimisticRequiredUsd = singleChapterRequiredUsd(config);
   try {
@@ -131,15 +176,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  let run: { id: string };
+  let run: Awaited<ReturnType<typeof insertQueuedAuthoringRun>>;
   try {
     run = await insertQueuedAuthoringRun({
       projectId: ownership.projectId,
       userId,
       kind: "chapter",
       config,
+      requestKey,
     });
+    if (!run.inserted) {
+      return Response.json(
+        {
+          runId: run.id,
+          requestKey,
+          status: run.status,
+          reattached: true,
+        },
+        { status: 202 },
+      );
+    }
   } catch (error) {
+    if (error instanceof RunRequestKeyMismatchError) {
+      return Response.json(
+        { error: "This request key already belongs to a different generation operation" },
+        { status: 409 },
+      );
+    }
+    if (error instanceof TrialOptionalWorkInProgressError) {
+      return Response.json({ error: error.message, code: "trial_busy" }, { status: 409 });
+    }
     // Concurrent request won the race past the pre-check; the partial unique
     // index is the backstop, and it deserves a 409 rather than a 500.
     if (isActiveRunConflict(error)) {
@@ -148,23 +214,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  let lockedChapter:
-    | {
-        chapterNumber: number;
-        chapters: number;
-        words: number;
-        brief: string | null;
-        genre: string | null;
-        styleGuide: string | null;
-        settings: typeof schema.projects.$inferSelect.settings;
-      }
-    | undefined;
+  let lockedChapter: ChapterProjectSnapshot | undefined;
   try {
     [lockedChapter] = await db
       .select({
         chapterNumber: schema.chapters.chapterNumber,
-        chapters: schema.projects.targetChapters,
-        words: schema.projects.targetWordsPerChapter,
+        title: schema.projects.title,
+        experience: schema.projects.experience,
+        targetChapters: schema.projects.targetChapters,
+        targetWordsPerChapter: schema.projects.targetWordsPerChapter,
         brief: schema.projects.brief,
         genre: schema.projects.genre,
         styleGuide: schema.projects.styleGuide,
@@ -207,29 +265,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     );
   }
   const lockedChapterNumber = lockedChapter.chapterNumber;
-  const lockedTier: QualityTier = lockedChapter.settings.qualityTier ?? "standard";
-  config = {
-    tier: lockedTier,
-    requireOutlineApproval: false,
-    waveSize: 1,
-    targetChapters: lockedChapter.chapters,
-    targetWordsPerChapter: lockedChapter.words,
-    chapterRegeneration: true,
-    inputSnapshot: {
-      brief: lockedChapter.brief ?? "",
-      genre: lockedChapter.genre ?? null,
-      styleGuide: lockedChapter.styleGuide ?? null,
-      voiceProfile: lockedChapter.settings.voiceProfile ?? null,
-      pov: lockedChapter.settings.pov ?? null,
-      tense: lockedChapter.settings.tense ?? null,
-      tone: lockedChapter.settings.tone ?? null,
-      styleProfile: lockedChapter.settings.styleProfile ?? null,
-      heatLevel: lockedChapter.settings.heatLevel ?? null,
-      violenceLevel: lockedChapter.settings.violenceLevel ?? null,
-      profanity: lockedChapter.settings.profanity ?? null,
-      avoidTopics: [...(lockedChapter.settings.avoidTopics ?? [])],
-    },
-  };
+  config = buildChapterRegenerationConfig(lockedChapter);
   try {
     const [updatedRun] = await db
       .update(schema.generationRuns)
@@ -293,9 +329,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "Not enough credits" }, { status: 402 });
   }
 
-  let workflowRun: Awaited<ReturnType<typeof start>> | undefined;
+  const dispatchConfig = await markAuthoringRunDispatchReady({
+    runId: run.id,
+    projectId: ownership.projectId,
+    userId,
+    config,
+  });
+  if (!dispatchConfig) {
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: ownership.projectId,
+      userId,
+      status: "failed",
+      error: "Chapter settings could not be frozen before Workflow dispatch",
+      releaseImmediately: true,
+    });
+    return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
+  }
+  config = dispatchConfig;
+
   try {
-    workflowRun = await start(generateChapter, [
+    const workflowRun = await start(generateChapter, [
       run.id,
       ownership.projectId,
       userId,
@@ -303,28 +357,38 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       config,
       reservationRef,
     ]);
-    await db
-      .update(schema.generationRuns)
-      .set({ workflowRunId: workflowRun.runId })
-      .where(eq(schema.generationRuns.id, run.id));
-  } catch (error) {
-    if (workflowRun) {
-      try {
-        await getRun(workflowRun.runId).cancel();
-      } catch {
-        // The terminal DB state and delayed reservation cleanup still run.
-      }
+    try {
+      await linkAuthoringRunWorkflow({
+        runId: run.id,
+        projectId: ownership.projectId,
+        userId,
+        workflowRunId: workflowRun.runId,
+      });
+    } catch (error) {
+      // generateChapter self-links from Workflow metadata before paid work.
+      // A failed redundant write must not cancel an accepted workflow.
+      console.error("Chapter workflow accepted before caller-side linkage persisted", {
+        runId: run.id,
+        workflowRunId: workflowRun.runId,
+        error,
+      });
     }
-    await terminalizeAuthoringRun({
+  } catch {
+    const uncertain = await markAuthoringRunAcceptanceUncertain({
       runId: run.id,
       projectId: ownership.projectId,
       userId,
-      status: "failed",
-      error: error instanceof Error ? error.message : "Could not start chapter regeneration",
     });
-    await scheduleRunReservationCleanup({ userId, runId: run.id });
-    return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
+    return Response.json(
+      {
+        runId: run.id,
+        requestKey,
+        status: "queued",
+        confirmationPending: uncertain,
+      },
+      { status: 202 },
+    );
   }
 
-  return Response.json({ runId: run.id });
+  return Response.json({ runId: run.id, requestKey, status: "queued" }, { status: 202 });
 }

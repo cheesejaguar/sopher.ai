@@ -69,6 +69,10 @@ test.describe("sitemap and robots", () => {
     // Derived from CREDIT_PACKS — catches the file drifting from checkout.
     expect(txt).toContain("Starter: $25 for 25 credits");
     expect(txt).toContain("Press: $300 for 360 credits");
+    expect(txt).toContain("Create one complete short story—no card required");
+    expect(txt).toContain("3-chapter, 1,000-word-per-chapter story");
+    expect(txt).toContain("The included story drafts 1 chapter at a time");
+    expect(txt).not.toMatch(/\b10 free credits\b|welcome credits/i);
   });
 });
 
@@ -103,6 +107,25 @@ test.describe("page metadata", () => {
       );
 
       await expect(page.locator("h1")).toHaveCount(1);
+
+      const expectedSocialTitle = await page.title();
+      await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+        "content",
+        expectedSocialTitle,
+      );
+      await expect(page.locator('meta[property="og:url"]')).toHaveAttribute("content", expected);
+      await expect(page.locator('meta[property="og:description"]')).toHaveAttribute(
+        "content",
+        description!,
+      );
+      await expect(page.locator('meta[name="twitter:title"]')).toHaveAttribute(
+        "content",
+        expectedSocialTitle,
+      );
+      await expect(page.locator('meta[name="twitter:description"]')).toHaveAttribute(
+        "content",
+        description!,
+      );
     });
   }
 
@@ -133,7 +156,9 @@ test.describe("structured data", () => {
     }
   });
 
-  test("offers match the credit packs the site actually sells", async ({ page }) => {
+  test("offers match the included story and credit packs the site actually offers", async ({
+    page,
+  }) => {
     await page.goto("/pricing");
     const blocks = await page.locator('script[type="application/ld+json"]').allTextContents();
     const product = blocks
@@ -142,7 +167,12 @@ test.describe("structured data", () => {
 
     expect(product).toBeTruthy();
     const prices = product.offers.map((offer: { price: string }) => offer.price);
-    expect(prices).toEqual(["25.00", "60.00", "120.00", "300.00"]);
+    expect(prices).toEqual(["0.00", "25.00", "60.00", "120.00", "300.00"]);
+    expect(product.offers[0]).toMatchObject({
+      name: "Create one complete short story—no card required",
+      category: "Included short story",
+      description: expect.stringContaining("3-chapter, 1,000-word-per-chapter story"),
+    });
   });
 
   test("every genre page has a canonical, one h1, and FAQ structured data", async ({ page }) => {

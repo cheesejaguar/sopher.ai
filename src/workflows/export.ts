@@ -1,7 +1,8 @@
 import { FatalError, getWritable } from "workflow";
 import { put } from "@vercel/blob";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction } from "@/db";
+import { persistExportAssetTransaction } from "@/db/transaction-operations";
 import { compensateBlobPersistenceFailure } from "@/lib/blob/lifecycle";
 import {
   compensateUnreferencedBlobUpload,
@@ -180,38 +181,19 @@ async function assembleAndUploadStep(
 
   let asset: { id: string; meta: unknown } | undefined;
   try {
-    asset = await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(
-          hashtextextended('sopher:project-authoring:' || ${ref.projectId}, 0)
-        )`,
-      );
-      const [alreadyStored] = await tx
-        .select({ id: schema.assets.id, meta: schema.assets.meta })
-        .from(schema.assets)
-        .where(
-          and(
-            eq(schema.assets.projectId, ref.projectId),
-            eq(schema.assets.kind, meta.assetKind),
-            sql`${schema.assets.meta}->>'runId' = ${ref.dbRunId}`,
-          ),
-        )
-        .limit(1);
-      if (alreadyStored) return alreadyStored;
-      const [stored] = await tx
-        .insert(schema.assets)
-        .values({
-          projectId: ref.projectId,
-          kind: meta.assetKind,
-          blobUrl: blob.url,
-          blobPathname: blob.pathname,
-          contentType: result.contentType,
-          sizeBytes: result.buffer.byteLength,
-          meta: { runId: ref.dbRunId, format, filename: result.filename },
-        })
-        .returning({ id: schema.assets.id, meta: schema.assets.meta });
-      return stored;
-    });
+    asset = await withDbTransaction((tx) =>
+      persistExportAssetTransaction(tx, {
+        projectId: ref.projectId,
+        runId: ref.dbRunId,
+        kind: meta.assetKind,
+        url: blob.url,
+        pathname: blob.pathname,
+        contentType: result.contentType,
+        sizeBytes: result.buffer.byteLength,
+        format,
+        filename: result.filename,
+      }),
+    );
     if (!asset) throw new Error("Could not record the export asset");
   } catch (error) {
     // A rejected database response can be ambiguous. Verify the row before

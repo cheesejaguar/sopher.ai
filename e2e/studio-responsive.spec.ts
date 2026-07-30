@@ -34,6 +34,22 @@ async function expectNoPageOverflow(page: import("@playwright/test").Page, surfa
   expect(overflow, `${surface} has page-level overflow`).toBeLessThanOrEqual(1);
 }
 
+test("private Studio, project, and Admin surfaces remain noindex", async ({ page }) => {
+  const href = await firstProjectHref(page);
+  const projectBase = href.replace(
+    /\/(brief|outline|bible|write|editor|manuscript|usage|settings)$/,
+    "",
+  );
+
+  for (const route of ["/studio", `${projectBase}/write`, "/admin"]) {
+    await page.goto(route);
+    await expect(page.locator('meta[name="robots"]'), `${route} must stay private`).toHaveAttribute(
+      "content",
+      /noindex/,
+    );
+  }
+});
+
 for (const viewport of PRODUCT_VIEWPORTS) {
   test(`Studio, project, manuscript, and Admin reflow at ${viewport.width}px`, async ({
     page,

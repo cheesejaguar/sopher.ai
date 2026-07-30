@@ -4,6 +4,8 @@ import {
   attachGatewayGenerationIds,
   beginMeteredCallIntent,
   recordLlmCallsAndDebit,
+  releaseOptionalOperationLeases,
+  releaseReplayedOptionalOperationLeases,
   refundSettledLogicalUsageForRedo,
 } from "@/lib/billing/meter";
 import { grantCredits, InsufficientCreditsError } from "@/lib/billing/credits";
@@ -12,6 +14,7 @@ import {
   meteredOperationCeilingCredits,
   meteredOperationCeilingUsd,
 } from "./metering-limits";
+import { ProjectSpendAccessError } from "@/lib/project-spend-access";
 import { PROSE_FALLBACK_MODELS } from "./models";
 
 /**
@@ -55,6 +58,8 @@ export type MeterCtx = {
     credits: number;
     externalRefPrefix: string;
   }>;
+  /** Project mutation leases held until optional output is delivered/refunded. */
+  optionalOperationLeaseRefs?: string[];
 };
 
 /**
@@ -181,13 +186,15 @@ export async function refundMeteredDelivery(ctx: MeterCtx, description: string):
   if (!settlement) {
     throw new Error("Cannot refund provider work before its metered settlement commits");
   }
-  return grantCredits({
+  const refunded = await grantCredits({
     userId: ctx.userId,
     credits: settlement.credits,
     description,
     externalRef: `delivery-refund:${settlement.externalRefPrefix}`,
     kind: "adjustment",
   });
+  await completeMeteredDelivery(ctx);
+  return refunded;
 }
 
 export async function refundMeteredDeliveries(ctx: MeterCtx, description: string): Promise<number> {
@@ -204,7 +211,39 @@ export async function refundMeteredDeliveries(ctx: MeterCtx, description: string
       }),
     ),
   );
+  await completeMeteredDelivery(ctx);
   return results.filter(Boolean).length;
+}
+
+/** Marks optional AI output durably delivered and releases its project lease. */
+export async function completeMeteredDelivery(ctx: MeterCtx): Promise<void> {
+  const leaseRefs = ctx.optionalOperationLeaseRefs ?? [];
+  if (leaseRefs.length === 0) return;
+  await releaseOptionalOperationLeases({
+    userId: ctx.userId,
+    projectId: ctx.projectId,
+    leaseRefs,
+  });
+  ctx.optionalOperationLeaseRefs = [];
+}
+
+export async function healReplayedMeteredDelivery(input: {
+  userId: string;
+  projectId: string;
+  idempotencyKey: string;
+}): Promise<void> {
+  try {
+    await releaseReplayedOptionalOperationLeases(input);
+  } catch (error) {
+    // The generation-start reconciliation performs the same proof under the
+    // project lock, so a transient replay repair failure must not hide output
+    // already delivered to the author.
+    console.error("Could not repair optional operation lease during replay", {
+      projectId: input.projectId,
+      idempotencyKey: input.idempotencyKey,
+      error,
+    });
+  }
 }
 
 /**
@@ -246,16 +285,38 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   if (intent.status === "insufficient") {
     throw new InsufficientCreditsError(intent.balance, intent.required);
   }
+  if (intent.status === "trial_cap") {
+    throw new ProjectSpendAccessError(
+      "purchase_required",
+      "Purchase credits to keep using AI tools on this story",
+    );
+  }
+  if (intent.status === "project_busy") {
+    throw new ProjectSpendAccessError(
+      "trial_busy",
+      "Finish the current authoring run before using optional AI tools",
+    );
+  }
+  if (intent.status === "suspended") {
+    throw new ProjectSpendAccessError(
+      "suspended",
+      "This account is suspended and cannot use authoring tools",
+    );
+  }
   if (intent.status === "settled") {
     const compensated = await refundSettledLogicalUsageForRedo({
       userId: ctx.userId,
       usagePrefix,
+      projectId: ctx.projectId,
     });
     if (compensated) return metered(ctx, info, fn);
     throw new MeteringReconciliationRequiredError(intentRef, "settled");
   }
   if (intent.status !== "started") {
     throw new MeteringReconciliationRequiredError(intentRef, intent.status);
+  }
+  if (intent.optionalLeaseRef) {
+    (ctx.optionalOperationLeaseRefs ??= []).push(intent.optionalLeaseRef);
   }
 
   const abortKnownUnsent = async () => {

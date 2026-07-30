@@ -40,6 +40,7 @@ describe("buildOutlineUserPrompt", () => {
   it("includes concept, constraints, and optional context", () => {
     const prompt = buildOutlineUserPrompt({
       concept: "A heist novel set on a generation ship.",
+      workingTitle: "The Long Theft",
       brief: "Space heist",
       genre: "science fiction",
       chapterCount: 24,
@@ -48,6 +49,8 @@ describe("buildOutlineUserPrompt", () => {
       worldBuilding: "The ship is 300 years into a 500-year voyage.",
     });
     expect(prompt).toContain("A heist novel set on a generation ship.");
+    expect(prompt).toContain("## Working Title\n\nThe Long Theft");
+    expect(prompt).toContain("Use this exact title");
     expect(prompt).toContain("## Original Author Brief\n\nSpace heist");
     expect(prompt).toContain("- Number of chapters: 24");
     expect(prompt).toContain("- Target words per chapter: 4000");

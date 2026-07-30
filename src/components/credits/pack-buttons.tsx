@@ -5,10 +5,19 @@ import { Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import type { CreditPack } from "@/lib/billing/credits-shared";
+import { PUBLIC_BOOK_WORDS, PUBLIC_TIER_COSTS } from "@/lib/billing/public-pricing";
 import { track } from "@/lib/analytics/track";
 
 /** Starts Stripe Checkout. Credits are granted by the webhook, never here. */
-export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo?: string }) {
+export function PackButtons({
+  packs,
+  returnTo,
+  unlockingFullBook = false,
+}: {
+  packs: CreditPack[];
+  returnTo?: string;
+  unlockingFullBook?: boolean;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,8 +56,15 @@ export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo
       <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {packs.map((pack) => (
           <li key={pack.id}>
-            <div className="instrument-surface flex h-full flex-col rounded-sm p-5">
-              <p className="folio-label text-muted-foreground">{pack.name}</p>
+            <div className="instrument-surface relative flex h-full flex-col rounded-sm p-5">
+              <div className="flex min-h-5 items-start justify-between gap-3">
+                <p className="folio-label text-muted-foreground">{pack.name}</p>
+                {unlockingFullBook && pack.id === "author" ? (
+                  <span className="rounded-full border border-ai/35 bg-ai-soft px-2 py-0.5 text-[0.6875rem] font-semibold text-ai">
+                    Recommended
+                  </span>
+                ) : null}
+              </div>
               <p className="mt-4 font-mono text-3xl font-semibold tracking-[-0.03em] tabular-nums">
                 {pack.credits}
                 <span className="ml-2 text-sm font-medium tracking-normal text-muted-foreground">
@@ -61,12 +77,27 @@ export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo
                   <span className="text-ai"> · {Math.round(pack.bonus * 100)}% bonus</span>
                 ) : null}
               </p>
+              {unlockingFullBook ? (
+                <p className="mt-4 flex-1 border-t border-border pt-4 text-xs leading-relaxed text-muted-foreground">
+                  {pack.id === "starter"
+                    ? `Sized for the illustrative ${PUBLIC_BOOK_WORDS.toLocaleString("en-US")}-word Draft tier at about ${PUBLIC_TIER_COSTS.draft.credits} credits; Standard is about ${PUBLIC_TIER_COSTS.standard.credits}.`
+                    : pack.id === "author"
+                      ? `Covers the illustrative ${PUBLIC_BOOK_WORDS.toLocaleString("en-US")}-word Standard book at about ${PUBLIC_TIER_COSTS.standard.credits} credits, with room for editing tools.`
+                      : "For more than one production or a longer editing runway."}{" "}
+                  Your setup shows the exact quote before anything runs.
+                </p>
+              ) : null}
               <Button
                 type="button"
                 className="mt-4 w-full"
                 variant={pack.id === "author" ? "default" : "outline"}
                 onClick={() => buy(pack.id)}
                 disabled={busy !== null}
+                aria-label={
+                  busy === pack.id
+                    ? `Opening checkout for ${pack.name}`
+                    : `Buy ${pack.name}: ${pack.credits} credits for $${pack.usd}`
+                }
               >
                 {busy === pack.id ? (
                   <>
@@ -74,7 +105,7 @@ export function PackButtons({ packs, returnTo }: { packs: CreditPack[]; returnTo
                     Opening checkout…
                   </>
                 ) : (
-                  "Buy credits"
+                  `${unlockingFullBook ? "Choose" : "Buy"} ${pack.name}`
                 )}
               </Button>
             </div>

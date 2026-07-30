@@ -6,21 +6,28 @@ import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } fr
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
-import {
-  latestResumableRunId,
-  rebaseGenerationStartState,
-  type GenerationConfig,
-} from "@/lib/run-events";
+import { latestResumableRunId, type GenerationConfig } from "@/lib/run-events";
 import { chapterTopologyFingerprint, outlineStateFingerprint } from "@/lib/manuscript-state";
 import {
   insertQueuedAuthoringRun,
+  linkAuthoringRunWorkflow,
+  markAuthoringRunAcceptanceUncertain,
+  reconcileBeforeAuthoringRunConflict,
+  RunRequestKeyMismatchError,
   scheduleRunReservationCleanup,
+  settleStubbedAuthoringRunHandoff,
   terminalizeAuthoringRun,
+  TrialOptionalWorkInProgressError,
 } from "@/lib/generation-runs";
+import { authorizeProjectSpend } from "@/lib/project-spend-http";
+import { TRIAL_STORY_CONFIG } from "@/lib/trial-story";
+import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
+import { prepareFullBookRunDispatch } from "@/lib/authoring-dispatch";
 
 export const maxDuration = 60;
 
 const bodySchema = z.object({
+  requestKey: z.uuid().optional(),
   tier: z.enum(["draft", "standard", "premium"]).default("standard"),
   requireOutlineApproval: z.boolean().default(false),
 });
@@ -33,13 +40,20 @@ function buildBaseGenerationConfig(input: {
   latestOutline: Parameters<typeof outlineStateFingerprint>[0];
 }): GenerationConfig {
   const { project } = input;
+  const trial = project.experience === "trial_short_story";
   return {
-    tier: input.tier,
-    requireOutlineApproval: input.requireOutlineApproval,
-    waveSize: 4,
-    targetChapters: project.targetChapters,
-    targetWordsPerChapter: project.targetWordsPerChapter,
+    productionMode: project.experience,
+    tier: trial ? TRIAL_STORY_CONFIG.tier : input.tier,
+    requireOutlineApproval: trial
+      ? TRIAL_STORY_CONFIG.requireOutlineApproval
+      : input.requireOutlineApproval,
+    waveSize: trial ? TRIAL_STORY_CONFIG.waveSize : 4,
+    targetChapters: trial ? TRIAL_STORY_CONFIG.targetChapters : project.targetChapters,
+    targetWordsPerChapter: trial
+      ? TRIAL_STORY_CONFIG.targetWordsPerChapter
+      : project.targetWordsPerChapter,
     inputSnapshot: {
+      workingTitle: project.title,
       brief: project.brief ?? "",
       genre: project.genre ?? null,
       styleGuide: project.styleGuide ?? null,
@@ -86,9 +100,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     throw error;
   }
 
-  // Bound repeated paid-work requests before the workflow's serialized holds.
-  const limited = await rateLimit(LIMITS.bookStart, req, userId);
-  if (limited.limited) return limited.response;
   const { projectId } = await ctx.params;
   if (!z.uuid().safeParse(projectId).success) {
     return Response.json({ error: "Not found" }, { status: 404 });
@@ -106,6 +117,53 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     .limit(1);
   if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
 
+  const requestKey = parsed.data.requestKey ?? crypto.randomUUID();
+  const [requestedRun] = await db
+    .select({
+      id: schema.generationRuns.id,
+      kind: schema.generationRuns.kind,
+      status: schema.generationRuns.status,
+      config: schema.generationRuns.config,
+    })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        eq(schema.generationRuns.userId, userId),
+        eq(schema.generationRuns.requestKey, requestKey),
+      ),
+    )
+    .limit(1);
+  if (requestedRun) {
+    if (requestedRun.kind !== "full_book") {
+      return Response.json(
+        {
+          error: "This request key already belongs to a different generation operation",
+        },
+        { status: 409 },
+      );
+    }
+    return Response.json(
+      {
+        runId: requestedRun.id,
+        kind: requestedRun.kind,
+        status: requestedRun.status,
+        reattached: true,
+        requestKey,
+        config: requestedRun.config,
+      },
+      { status: 202 },
+    );
+  }
+
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId,
+    operationKind: "whole_story_start",
+  });
+  if (spendDenied) return spendDenied;
+
+  await reconcileBeforeAuthoringRunConflict({ projectId, userId });
   const [activeRun] = await db
     .select({
       id: schema.generationRuns.id,
@@ -134,6 +192,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       { status: 409 },
     );
   }
+
+  // Replays above are never rate limited: returning an already-created durable
+  // run is read-only. Only a genuinely new paid-work request consumes this
+  // rate-limit slot.
+  const limited = await rateLimit(LIMITS.bookStart, req, userId);
+  if (limited.limited) return limited.response;
 
   const book = await getOrCreateBook(project.id, project.title);
   const chapterRows = await db
@@ -203,15 +267,40 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       : {}),
   };
 
-  let run: { id: string };
+  let run: Awaited<ReturnType<typeof insertQueuedAuthoringRun>>;
   try {
     run = await insertQueuedAuthoringRun({
       projectId,
       userId,
       kind: "full_book",
       config,
+      requestKey,
     });
+    if (!run.inserted) {
+      return Response.json(
+        {
+          runId: run.id,
+          kind: "full_book",
+          status: run.status,
+          reattached: true,
+          requestKey,
+          config: run.config,
+        },
+        { status: 202 },
+      );
+    }
   } catch (error) {
+    if (error instanceof RunRequestKeyMismatchError) {
+      return Response.json(
+        {
+          error: "This request key already belongs to a different generation operation",
+        },
+        { status: 409 },
+      );
+    }
+    if (error instanceof TrialOptionalWorkInProgressError) {
+      return Response.json({ error: error.message, code: "trial_busy" }, { status: 409 });
+    }
     // The partial unique index is the race-proof backstop behind the pre-check above.
     if (!isActiveRunConflict(error)) throw error;
     const [raced] = await db
@@ -242,90 +331,68 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     );
   }
 
-  let workflowRun: Awaited<ReturnType<typeof start>> | undefined;
-  let startAttempted = false;
   try {
-    const [[lockedProject], lockedChapterRows, [lockedLatestOutline]] = await Promise.all([
-      db
-        .select()
-        .from(schema.projects)
-        .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
-        .limit(1),
-      db
-        .select({
-          id: schema.chapters.id,
-          chapterNumber: schema.chapters.chapterNumber,
-          title: schema.chapters.title,
-          summary: schema.chapters.summary,
-          content: schema.chapters.content,
-          status: schema.chapters.status,
-          wordCount: schema.chapters.wordCount,
-        })
-        .from(schema.chapters)
-        .where(eq(schema.chapters.bookId, book.id)),
-      db
-        .select({
-          id: schema.outlines.id,
-          version: schema.outlines.version,
-          source: schema.outlines.source,
-          content: schema.outlines.content,
-        })
-        .from(schema.outlines)
-        .where(eq(schema.outlines.bookId, book.id))
-        .orderBy(desc(schema.outlines.version))
-        .limit(1),
-    ]);
-    if (!lockedProject) {
-      throw new Error("Project disappeared while generation was starting");
-    }
-    const lockedBaseConfig = buildBaseGenerationConfig({
-      project: lockedProject,
-      tier: parsed.data.tier,
-      requireOutlineApproval: parsed.data.requireOutlineApproval,
-      chapterRows: lockedChapterRows,
-      latestOutline: lockedLatestOutline,
-    });
-    const rebasedConfig = rebaseGenerationStartState(config, lockedBaseConfig);
-    if (rebasedConfig !== config) {
-      // A structural edit committed after the optimistic snapshot but before
-      // the advisory-locked run insert. The queued run now blocks more edits;
-      // rebase it to the exact live state and deliberately drop stale lineage.
-      config = rebasedConfig;
-      await db
-        .update(schema.generationRuns)
-        .set({ config })
-        .where(eq(schema.generationRuns.id, run.id));
-    }
+    const prepared = await prepareFullBookRunDispatch({ runId: run.id, projectId, userId });
+    if (!prepared) throw new Error("Generation settings could not be frozen");
+    config = prepared;
 
-    startAttempted = true;
-    workflowRun = await start(generateBook, [run.id, projectId, userId, config]);
-    await db
-      .update(schema.generationRuns)
-      .set({ workflowRunId: workflowRun.runId })
-      .where(eq(schema.generationRuns.id, run.id));
-  } catch (error) {
-    if (workflowRun) {
-      try {
-        await getRun(workflowRun.runId).cancel();
-      } catch {
-        // Terminal DB state and delayed reservation reconciliation still run.
-      }
+    if (isE2EWorkflowStubEnabled()) {
+      await settleStubbedAuthoringRunHandoff({ runId: run.id, projectId, userId });
+      return Response.json({ runId: run.id, requestKey, config, stubbed: true }, { status: 202 });
     }
+  } catch (error) {
+    // No Workflow invocation has happened yet, so this failure is proven
+    // local and can safely terminalize the queued row.
     await terminalizeAuthoringRun({
       runId: run.id,
       projectId,
       userId,
       status: "failed",
       error: error instanceof Error ? error.message : "Could not start generation",
-      releaseImmediately: !startAttempted,
+      releaseImmediately: true,
     });
-    if (startAttempted) {
-      await scheduleRunReservationCleanup({ userId, runId: run.id });
-    }
     return Response.json({ error: "Could not start generation" }, { status: 503 });
   }
 
-  return Response.json({ runId: run.id, config }, { status: 202 });
+  try {
+    const workflowRun = await start(generateBook, [run.id, projectId, userId, config]);
+    try {
+      await linkAuthoringRunWorkflow({
+        runId: run.id,
+        projectId,
+        userId,
+        workflowRunId: workflowRun.runId,
+      });
+    } catch (error) {
+      // generateBook self-links from getWorkflowMetadata() before paid work.
+      // A failed redundant write must not cancel an accepted workflow.
+      console.error("Workflow accepted before caller-side linkage persisted", {
+        runId: run.id,
+        workflowRunId: workflowRun.runId,
+        error,
+      });
+    }
+  } catch {
+    // `start()` may have accepted the Workflow before its response was lost.
+    // Keep the DB run active and let self-link/reconciliation prove the
+    // outcome; terminalizing here could kill paid work already in flight.
+    const uncertain = await markAuthoringRunAcceptanceUncertain({
+      runId: run.id,
+      projectId,
+      userId,
+    });
+    return Response.json(
+      {
+        runId: run.id,
+        requestKey,
+        config,
+        confirmationPending: uncertain,
+      },
+      { status: 202 },
+    );
+  }
+
+  return Response.json({ runId: run.id, requestKey, config }, { status: 202 });
 }
 
 export async function DELETE(_req: Request, ctx: { params: Promise<{ projectId: string }> }) {

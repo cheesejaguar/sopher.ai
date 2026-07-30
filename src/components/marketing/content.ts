@@ -1,3 +1,6 @@
+import { PUBLIC_BOOK_COST_RANGE } from "@/lib/billing/public-pricing";
+import { INCLUDED_STORY_DESCRIPTION, INCLUDED_STORY_OFFER } from "@/lib/marketing/trial-offer";
+
 /**
  * Marketing copy that more than one surface needs: the visible components and
  * the JSON-LD that describes them to search engines and answer engines.
@@ -29,6 +32,10 @@ export const FAQS: FaqItem[] = [
     question: "What exactly am I paying for?",
     answer: `Credits, spent only on work that actually runs — the models that draft, edit, and check your book. One credit is one dollar of writing; a finished novella runs about ${PUBLIC_BOOK_COST_RANGE} credits, and every book includes a report of where they went.`,
   },
+  {
+    question: "Can I try sopher.ai without a card?",
+    answer: `${INCLUDED_STORY_OFFER}. ${INCLUDED_STORY_DESCRIPTION}`,
+  },
 ];
 
 export type PipelineStep = {
@@ -54,9 +61,9 @@ export const PIPELINE_STEPS: PipelineStep[] = [
   {
     num: "03",
     name: "Chapters",
-    note: "four at a time",
+    note: "coordinated waves",
     description:
-      "A team of writers drafts every chapter in parallel, each following the outline and your style guide.",
+      "A team of writers drafts every chapter in coordinated waves, each following the outline and your style guide.",
   },
   {
     num: "04",
@@ -70,4 +77,3 @@ export const PIPELINE_STEPS: PipelineStep[] = [
       "Checks names, timelines, and details across the whole manuscript before it ships.",
   },
 ];
-import { PUBLIC_BOOK_COST_RANGE } from "@/lib/billing/public-pricing";

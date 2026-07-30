@@ -111,10 +111,7 @@ function DesktopStageTabs({
         >
           <span className="mr-1 flex items-center gap-1.5 font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
             {progress.runId && productionPhase === group.label ? (
-              <span
-                aria-hidden="true"
-                className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
-              />
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
             ) : null}
             <span className="text-primary">{String(index + 1).padStart(2, "0")}</span>
             {group.label}
@@ -192,7 +189,10 @@ function MobileStageMenu({
               : "Choose a stage"}
           </span>
           <span className="mt-1 block truncate text-xs text-ai">
-            Production now: {progress.runId ? describeProductionProgress(progress) : "Not started"}
+            Production now:{" "}
+            {progress.runId
+              ? `${describeProductionProgress(progress)} · ${Math.round(progress.pct)}%`
+              : "Not started"}
           </span>
         </span>
         <ChevronDown
@@ -258,6 +258,7 @@ export function StageNav({ projectId }: { projectId: string }) {
         <StageNavigationWithPathname projectId={projectId} progress={progress} />
       </Suspense>
       <div
+        role="region"
         aria-label="Book production status"
         className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-4 py-2 text-xs"
       >
@@ -266,9 +267,26 @@ export function StageNav({ projectId }: { projectId: string }) {
           {progress.runId ? describeProductionProgress(progress) : "Not started"}
         </span>
         {progress.runId ? (
-          <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
-            {productionPhase}
-          </span>
+          <>
+            <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
+              {productionPhase}
+            </span>
+            <span
+              aria-label={`${Math.round(progress.pct)} percent complete`}
+              className="font-mono text-[0.6875rem] text-muted-foreground tabular-nums"
+            >
+              {Math.round(progress.pct)}%
+            </span>
+            <span
+              aria-hidden="true"
+              className="h-0.5 min-w-20 flex-1 overflow-hidden bg-border lg:max-w-52"
+            >
+              <span
+                className="block h-full bg-ai transition-[width] duration-300 motion-reduce:transition-none"
+                style={{ width: `${Math.min(100, Math.max(0, progress.pct))}%` }}
+              />
+            </span>
+          </>
         ) : null}
       </div>
     </nav>

@@ -4,12 +4,14 @@ import { Faq } from "@/components/marketing/faq";
 import { Pricing } from "@/components/marketing/pricing";
 import { BreadcrumbJsonLd, FaqJsonLd, ProductJsonLd } from "@/components/seo/json-ld";
 import { PUBLIC_BOOK_COST_RANGE } from "@/lib/billing/public-pricing";
+import { publicPageMetadata } from "@/lib/marketing/public-metadata";
+import { INCLUDED_STORY_OFFER } from "@/lib/marketing/trial-offer";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
   title: "Pricing",
-  description: `Prepaid credits, no subscription. A finished book runs about ${PUBLIC_BOOK_COST_RANGE} credits, new accounts start with free credits, and every manuscript comes with a full cost report.`,
-  alternates: { canonical: "/pricing" },
-};
+  description: `${INCLUDED_STORY_OFFER}. Full books use prepaid credits, typically ${PUBLIC_BOOK_COST_RANGE} for a novella, with no subscription.`,
+  path: "/pricing",
+});
 
 export default function PricingPage() {
   return (

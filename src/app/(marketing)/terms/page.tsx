@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 
 import { LegalPage } from "../legal-page";
+import { publicPageMetadata } from "@/lib/marketing/public-metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
   title: "Terms of Service",
   description:
     "The terms that govern your use of sopher.ai — who owns the manuscripts you generate, how credits work, and what we do and do not permit.",
-  alternates: { canonical: "/terms" },
-};
+  path: "/terms",
+});
 
 export default function TermsPage() {
   return (

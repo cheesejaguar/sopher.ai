@@ -2,14 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   del: vi.fn(),
-  getDb: vi.fn(),
+  withDbTransaction: vi.fn(),
 }));
 
 vi.mock("@vercel/blob", () => ({ del: mocks.del }));
 vi.mock("workflow", () => ({ sleep: vi.fn() }));
 vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
-  return { ...actual, getDb: mocks.getDb };
+  return { ...actual, withDbTransaction: mocks.withDbTransaction };
 });
 
 import { deleteUnreferencedBlobsStep } from "./cleanup-unreferenced-blobs";
@@ -25,9 +25,9 @@ function cleanupDb(referenced: string[]) {
     execute: vi.fn().mockResolvedValue([]),
     select: vi.fn().mockReturnValue(query),
   };
-  mocks.getDb.mockReturnValue({
-    transaction: vi.fn(async (work: (client: typeof tx) => Promise<unknown>) => work(tx)),
-  });
+  mocks.withDbTransaction.mockImplementation(
+    async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+  );
   return tx;
 }
 

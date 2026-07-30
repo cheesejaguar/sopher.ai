@@ -3,13 +3,14 @@ import Link from "next/link";
 
 import { BreadcrumbJsonLd } from "@/components/seo/json-ld";
 import { GENRE_PAGES } from "@/lib/marketing/genre-pages";
+import { publicPageMetadata } from "@/lib/marketing/public-metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
   title: "Genres",
   description:
     "Romance, mystery, fantasy, thriller, literary fiction, science fiction, horror — what each genre needs structurally, and how sopher.ai plans for it.",
-  alternates: { canonical: "/genres" },
-};
+  path: "/genres",
+});
 
 export default function GenresIndex() {
   return (

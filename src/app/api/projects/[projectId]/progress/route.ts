@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { getProjectProductionProgress } from "@/db/queries/project-progress";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { reconcileBeforeAuthoringRunConflict } from "@/lib/generation-runs";
 
 export const maxDuration = 30;
 
@@ -38,6 +39,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ projectId: str
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
     .limit(1);
   if (!project) return Response.json({ error: "Project not found" }, { status: 404 });
+
+  // The persistent lifecycle rail polls this endpoint every five seconds.
+  // Reconcile the database with Workflow first so the rail does not remain
+  // stuck on a remotely terminal run merely because its event stream stopped.
+  await reconcileBeforeAuthoringRunConflict({ projectId, userId });
 
   const chapters = project.bookId
     ? await db

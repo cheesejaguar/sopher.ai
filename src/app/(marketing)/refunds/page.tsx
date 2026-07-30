@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 
 import { LegalPage } from "../legal-page";
+import { publicPageMetadata } from "@/lib/marketing/public-metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
   title: "Refund Policy",
   description:
     "How refunds work for sopher.ai credits: unspent credits are not refundable, and what to do if a charge or a generation run went wrong.",
-  alternates: { canonical: "/refunds" },
-};
+  path: "/refunds",
+});
 
 export default function RefundsPage() {
   return (
@@ -20,9 +21,9 @@ export default function RefundsPage() {
       <h2>All sales are final</h2>
       <p>
         Credits — spent or unspent — are not refundable. Before you buy, the pricing page shows
-        exactly what a book costs, every account starts with free credits to try the product first,
-        and every run shows its estimate before anything is charged. Where local consumer law grants
-        you a mandatory withdrawal right, that law prevails.
+        exactly what a book costs, eligible verified accounts can create one complete included short
+        story without a card, and every paid run shows its estimate before anything is charged.
+        Where local consumer law grants you a mandatory withdrawal right, that law prevails.
       </p>
 
       <h2>Spent credits</h2>
@@ -39,8 +40,11 @@ export default function RefundsPage() {
         the run resumes where it stopped after a top-up.
       </p>
 
-      <h2>The welcome grant</h2>
-      <p>Free welcome credits have no cash value and are not refundable or transferable.</p>
+      <h2>The included story</h2>
+      <p>
+        The included short story and its internal generation allowance have no cash value and are
+        not refundable or transferable.
+      </p>
 
       <h2>Chargebacks</h2>
       <p>

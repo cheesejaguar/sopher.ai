@@ -3,13 +3,14 @@ import Link from "next/link";
 
 import { BreadcrumbJsonLd } from "@/components/seo/json-ld";
 import { GUIDES } from "@/lib/marketing/guides";
+import { publicPageMetadata } from "@/lib/marketing/public-metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
   title: "Guides",
   description:
     "How book generation works, choosing a quality tier, point of view and tense, content settings, and what the editorial pass checks.",
-  alternates: { canonical: "/guides" },
-};
+  path: "/guides",
+});
 
 export default function GuidesIndex() {
   return (

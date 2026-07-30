@@ -7,9 +7,9 @@ import { assertMeteredInputWithinBudget, meteredMaxOutputTokens } from "@/ai/met
 import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { CONTINUITY_SYSTEM_PROMPT } from "@/ai/prompts/continuity";
 import {
-  REVIEW_PHASES,
   REVIEW_PHASES_BY_KEY,
   buildReviewPhasePrompt,
+  continuityPhaseKeys,
   scoreToRecommendation,
   type ReviewPhaseKey,
 } from "@/ai/prompts/review-rubric";
@@ -38,10 +38,7 @@ const SEVERITY_RANK: Record<ContinuityIssue["severity"], number> = {
   minor: 1,
 };
 
-/** The rubric phases a tier runs: draft gets the cheap sanity phase only. */
-export function continuityPhaseKeys(tier: QualityTier): ReviewPhaseKey[] {
-  return tier === "draft" ? ["technical_consistency"] : REVIEW_PHASES.map((phase) => phase.key);
-}
+export { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 
 /** Chapter summaries corpus, rendered once and reused verbatim by every phase call. */
 function summariesCorpus(

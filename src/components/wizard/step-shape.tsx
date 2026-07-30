@@ -113,9 +113,11 @@ function SettingSelect<T extends string>({
 export function StepShape({
   state,
   dispatch,
+  experience = "full_book",
 }: {
   state: WizardState;
   dispatch: React.Dispatch<WizardActionEvent>;
+  experience?: "trial_short_story" | "full_book";
 }) {
   const totalWords = state.chapters * state.wordsPerChapter;
   const pages = Math.round(totalWords / WORDS_PER_PAGE);
@@ -125,44 +127,66 @@ export function StepShape({
     <div className="space-y-6">
       <div className="instrument-surface grid gap-6 rounded-sm p-5 sm:grid-cols-[1fr_auto]">
         <div className="space-y-6">
-          <div className="space-y-2.5">
-            <div className="flex items-baseline justify-between gap-3">
-              {/* Base UI renders the real control as an <input type="range"> nested
-                  inside the thumb, so `htmlFor` cannot reach it. `aria-labelledby`
-                  on the root is forwarded to that input and names it correctly. */}
-              <Label id="wizard-chapters-label">Chapters</Label>
-              <span className="font-mono text-sm tabular-nums">{state.chapters}</span>
+          {experience === "trial_short_story" ? (
+            <div>
+              <p className="text-sm font-semibold">Your included short story</p>
+              <p className="mt-1 max-w-xl text-sm leading-relaxed text-muted-foreground">
+                Three chapters of about 1,000 words each—enough room for a complete arc while you
+                experience the full writing, editing, and publishing studio.
+              </p>
+              <dl className="mt-4 grid grid-cols-2 border-y border-border">
+                <div className="border-r border-border py-3 pr-4">
+                  <dt className="folio-label text-muted-foreground">Chapters</dt>
+                  <dd className="mt-1 font-mono text-sm tabular-nums">3</dd>
+                </div>
+                <div className="py-3 pl-4">
+                  <dt className="folio-label text-muted-foreground">Chapter length</dt>
+                  <dd className="mt-1 font-mono text-sm tabular-nums">~1,000 words</dd>
+                </div>
+              </dl>
             </div>
-            <Slider
-              aria-labelledby="wizard-chapters-label"
-              min={MIN_CHAPTERS}
-              max={MAX_CHAPTERS}
-              step={1}
-              value={[state.chapters]}
-              onValueChange={(value) =>
-                dispatch({ type: "patch", patch: { chapters: sliderValue(value) } })
-              }
-            />
-          </div>
+          ) : (
+            <>
+              <div className="space-y-2.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  {/* Base UI renders the real control as an <input type="range"> nested
+                      inside the thumb, so `htmlFor` cannot reach it. `aria-labelledby`
+                      on the root is forwarded to that input and names it correctly. */}
+                  <Label id="wizard-chapters-label">Chapters</Label>
+                  <span className="font-mono text-sm tabular-nums">{state.chapters}</span>
+                </div>
+                <Slider
+                  aria-labelledby="wizard-chapters-label"
+                  min={MIN_CHAPTERS}
+                  max={MAX_CHAPTERS}
+                  step={1}
+                  value={[state.chapters]}
+                  onValueChange={(value) =>
+                    dispatch({ type: "patch", patch: { chapters: sliderValue(value) } })
+                  }
+                />
+              </div>
 
-          <div className="space-y-2.5">
-            <div className="flex items-baseline justify-between gap-3">
-              <Label id="wizard-words-label">Words per chapter</Label>
-              <span className="font-mono text-sm tabular-nums">
-                {state.wordsPerChapter.toLocaleString("en-US")}
-              </span>
-            </div>
-            <Slider
-              aria-labelledby="wizard-words-label"
-              min={MIN_WORDS_PER_CHAPTER}
-              max={MAX_WORDS_PER_CHAPTER}
-              step={250}
-              value={[state.wordsPerChapter]}
-              onValueChange={(value) =>
-                dispatch({ type: "patch", patch: { wordsPerChapter: sliderValue(value) } })
-              }
-            />
-          </div>
+              <div className="space-y-2.5">
+                <div className="flex items-baseline justify-between gap-3">
+                  <Label id="wizard-words-label">Words per chapter</Label>
+                  <span className="font-mono text-sm tabular-nums">
+                    {state.wordsPerChapter.toLocaleString("en-US")}
+                  </span>
+                </div>
+                <Slider
+                  aria-labelledby="wizard-words-label"
+                  min={MIN_WORDS_PER_CHAPTER}
+                  max={MAX_WORDS_PER_CHAPTER}
+                  step={250}
+                  value={[state.wordsPerChapter]}
+                  onValueChange={(value) =>
+                    dispatch({ type: "patch", patch: { wordsPerChapter: sliderValue(value) } })
+                  }
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Spine + page-count readout */}

@@ -7,6 +7,7 @@ import { clerkEnabled, devAdminAllowed, devAuthAllowed } from "@/lib/clerk";
 import { ATTRIBUTION_COOKIE, parseAttributionCookie } from "@/lib/analytics/attribution";
 import { grantCredits } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
+import { isE2ETrialUserId, isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -30,6 +31,33 @@ export class SuspendedError extends Error {
 }
 
 const DEV_USER_ID = "dev-user";
+const E2E_USER_HEADER = "x-sopher-e2e-user";
+
+async function isolatedE2EUser(): Promise<{ userId: string } | null> {
+  if (!isE2EWorkflowStubEnabled()) return null;
+  const { headers } = await import("next/headers");
+  const userId = (await headers()).get(E2E_USER_HEADER);
+  if (!isE2ETrialUserId(userId)) return null;
+
+  const db = getDb();
+  await db
+    .insert(schema.users)
+    .values({
+      id: userId,
+      email: `${userId}@example.invalid`,
+      name: "Included Story Tester",
+      role: "user",
+    })
+    .onConflictDoNothing();
+  await grantCredits({
+    userId,
+    credits: SIGNUP_GRANT_CREDITS,
+    description: "Included story test allowance",
+    externalRef: `signup:${userId}`,
+    kind: "grant",
+  });
+  return { userId };
+}
 
 async function devFallbackUser(): Promise<{ userId: string }> {
   const db = getDb();
@@ -52,8 +80,8 @@ async function devFallbackUser(): Promise<{ userId: string }> {
       // before that boundary's own request read is rejected by Next.js.
       set: { role: devRole },
     });
-  // Same welcome grant real users get, so local dev exercises the same
-  // credit-gated paths instead of instantly suspending on a zero balance.
+  // Same internal included-story allowance real users get, so local dev
+  // exercises the credit-gated paths instead of starting at zero.
   await grantCredits({
     userId: DEV_USER_ID,
     credits: SIGNUP_GRANT_CREDITS,
@@ -88,6 +116,8 @@ async function firstTouch(): Promise<Acquisition | null> {
 export async function requireUser(): Promise<{ userId: string }> {
   if (!clerkEnabled) {
     if (devAuthAllowed) {
+      const isolatedIdentity = await isolatedE2EUser();
+      if (isolatedIdentity) return isolatedIdentity;
       console.warn(
         "[auth] Clerk keys absent — serving shared dev fallback identity (dev/ALLOW_DEV_AUTH opt-in)",
       );
@@ -137,18 +167,19 @@ export async function requireUser(): Promise<{ userId: string }> {
         acquisition: await firstTouch(),
       })
       .onConflictDoNothing();
-
-    // Welcome grant — enough to watch a real book begin. Keyed on the user id
-    // behind the ledger's unique external_ref index, so the webhook path and
-    // this lazy path cannot double-grant however they race.
-    await grantCredits({
-      userId,
-      credits: SIGNUP_GRANT_CREDITS,
-      description: "Welcome credits",
-      externalRef: `signup:${userId}`,
-      kind: "grant",
-    });
   }
+
+  // Self-healing internal allowance. This is intentionally outside the user
+  // insert branch: an out-of-order webhook or partial prior request can leave
+  // the user row present while its grant is absent. The unique external ref
+  // makes this safe and idempotent on every authenticated provisioning pass.
+  await grantCredits({
+    userId,
+    credits: SIGNUP_GRANT_CREDITS,
+    description: "Welcome credits",
+    externalRef: `signup:${userId}`,
+    kind: "grant",
+  });
 
   return { userId };
 }

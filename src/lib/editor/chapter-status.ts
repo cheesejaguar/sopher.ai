@@ -13,7 +13,7 @@ export const chapterStatusLabels: Record<ChapterStatus, string> = {
 /** Status dot classes — primary marks author-owned progress, teal marks live AI work. */
 export const chapterStatusDotClasses: Record<ChapterStatus, string> = {
   planned: "border border-border bg-transparent",
-  drafting: "bg-ai motion-safe:animate-pulse",
+  drafting: "bg-ai",
   drafted: "bg-primary/60",
   edited: "bg-primary",
   final: "bg-success",

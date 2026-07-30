@@ -1,9 +1,17 @@
+import type { Route } from "next";
+
 import { PackButtons } from "@/components/credits/pack-buttons";
+import { PurchaseReturnStatus } from "@/components/credits/purchase-return-status";
 import { RelativeTime } from "@/components/relative-time";
 import { PageHeader } from "@/components/studio/product-primitives";
 import { requireUser } from "@/lib/auth";
 import { CREDIT_PACKS, getBalance, listLedger } from "@/lib/billing/credits";
+import {
+  FULL_BOOK_UNLOCK_DESCRIPTION,
+  INCLUDED_STORY_NO_CARD_NOTE,
+} from "@/lib/marketing/trial-offer";
 import { safeInternalPath } from "@/lib/security/url";
+import { getStudioAccess } from "@/lib/studio-access";
 
 export const metadata = { title: "Credits" };
 
@@ -26,7 +34,16 @@ export default async function CreditsPage({
   // rendered on a signed-in page right after a payment.
   const safeReturn = safeInternalPath(returnTo);
   const { userId } = await requireUser();
-  const [balance, ledger] = await Promise.all([getBalance(userId), listLedger(userId)]);
+  const [balance, ledger, access] = await Promise.all([
+    getBalance(userId),
+    listLedger(userId),
+    getStudioAccess(userId),
+  ]);
+  const showFullBookUnlock = !access.fullBookUnlocked;
+  const continueTo = (safeReturn ?? "/studio/new") as Route;
+  const visibleLedger = access.fullBookUnlocked
+    ? ledger
+    : ledger.filter((entry) => entry.kind !== "grant");
 
   return (
     <div className="space-y-8">
@@ -37,21 +54,7 @@ export default async function CreditsPage({
       />
 
       {purchase === "complete" ? (
-        <p
-          role="status"
-          className="rounded-md border border-ai/40 bg-ai-soft px-4 py-3 text-sm text-ai"
-        >
-          Payment received. Credits appear here once Stripe confirms the charge — usually within a
-          few seconds. Refresh if the balance below looks unchanged.
-          {safeReturn ? (
-            <>
-              {" "}
-              <a href={safeReturn} className="font-medium underline">
-                Back to your book
-              </a>
-            </>
-          ) : null}
-        </p>
+        <PurchaseReturnStatus unlocked={access.fullBookUnlocked} continueTo={continueTo} />
       ) : null}
       {purchase === "cancelled" ? (
         <p role="status" className="rounded-md border border-border px-4 py-3 text-sm">
@@ -64,26 +67,56 @@ export default async function CreditsPage({
           id="balance-heading"
           className="font-mono text-xs tracking-[0.16em] text-paper-muted uppercase"
         >
-          Balance
+          {access.fullBookUnlocked ? "Balance" : "Included experience"}
         </h2>
-        <p className="mt-1 font-display text-4xl font-semibold tabular-nums text-paper-foreground">
-          {balance.toFixed(2)}
-          <span className="ml-2 font-sans text-base font-normal text-paper-muted">credits</span>
-        </p>
+        {access.fullBookUnlocked ? (
+          <p className="mt-1 font-display text-4xl font-semibold tabular-nums text-paper-foreground">
+            {balance.toFixed(2)}
+            <span className="ml-2 font-sans text-base font-normal text-paper-muted">credits</span>
+          </p>
+        ) : (
+          <>
+            <p className="mt-2 font-display text-2xl font-semibold text-paper-foreground">
+              {access.trialProjectId ? "Your short story is covered." : "Full-length books locked"}
+            </p>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-paper-muted">
+              {access.trialProjectId
+                ? "The included story uses an internal allowance, not a public credit balance. No card is required to complete it."
+                : "Choose a credit pack below to permanently unlock full-length production."}
+            </p>
+          </>
+        )}
       </section>
 
       <section aria-labelledby="packs-heading" className="space-y-4">
-        <h2 id="packs-heading" className="font-sans font-semibold">
-          Add credits
-        </h2>
-        <PackButtons packs={CREDIT_PACKS} returnTo={safeReturn ?? undefined} />
+        <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 id="packs-heading" className="font-sans font-semibold">
+              {showFullBookUnlock ? "Unlock full-length books" : "Add credits"}
+            </h2>
+            {showFullBookUnlock ? (
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                {INCLUDED_STORY_NO_CARD_NOTE} {FULL_BOOK_UNLOCK_DESCRIPTION} Credits never expire
+                and are used only for work that actually runs.
+              </p>
+            ) : null}
+          </div>
+          {showFullBookUnlock ? (
+            <p className="folio-label shrink-0 text-ai">The included story stays included</p>
+          ) : null}
+        </div>
+        <PackButtons
+          packs={CREDIT_PACKS}
+          returnTo={safeReturn ?? undefined}
+          unlockingFullBook={showFullBookUnlock}
+        />
       </section>
 
       <section aria-labelledby="ledger-heading" className="space-y-3">
         <h2 id="ledger-heading" className="font-sans font-semibold">
           Activity
         </h2>
-        {ledger.length === 0 ? (
+        {visibleLedger.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing yet.</p>
         ) : (
           <div
@@ -111,7 +144,7 @@ export default async function CreditsPage({
                 </tr>
               </thead>
               <tbody>
-                {ledger.map((entry) => {
+                {visibleLedger.map((entry) => {
                   const amount = Number(entry.amount);
                   return (
                     <tr key={entry.id} className="border-b border-border/60 last:border-0">

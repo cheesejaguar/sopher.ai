@@ -1,6 +1,7 @@
 import { getCache } from "@vercel/functions";
 import { and, eq, gte, sum } from "drizzle-orm";
 import { getDb, getSqlClient, schema } from "@/db";
+import { assertProjectSpendAccess } from "@/lib/project-spend-access";
 import { calculateUsd, type UsageTokens } from "./pricing";
 import { canonicalizeCreditRequirement, creditsForUsd } from "./credits-shared";
 
@@ -116,12 +117,17 @@ async function invalidateSpendCache(userId: string): Promise<void> {
  * Known provider failures delete the marker so a normal retry is still safe.
  */
 export type MeteredCallIntentResult = {
-  status: "started" | "pending" | "settled" | "insufficient";
+  status:
+    "started" | "pending" | "settled" | "insufficient" | "trial_cap" | "project_busy" | "suspended";
   balance: number;
   required: number;
   intentRef: string;
   reservationRef: string;
+  optionalLeaseRef: string | null;
 };
+
+/** Internal lifetime ceiling for the one included story. Never shown as product copy. */
+const TRIAL_STORY_CREDIT_CAP = 10;
 
 export async function beginMeteredCallIntent(input: {
   userId: string;
@@ -134,16 +140,41 @@ export async function beginMeteredCallIntent(input: {
   maxCredits: number;
   description: string;
 }): Promise<MeteredCallIntentResult> {
+  if (input.projectId) {
+    await assertProjectSpendAccess({
+      userId: input.userId,
+      projectId: input.projectId,
+      operationKind: input.runId ? "authoring" : "optional",
+    });
+  }
   // Holds are numeric(12,4). Round the authorization upward so column
   // quantization can never make the persisted ceiling smaller than the one
   // checked before provider dispatch.
   const maxCredits = canonicalizeCreditRequirement(input.maxCredits);
   const reservationRef = `metering-claim:${input.intentRef}`;
+  const optionalLeaseRef =
+    input.projectId && !input.runId ? `optional-operation-lease:${input.intentRef}` : null;
   const claimReleaseRef = input.parentReservationRef
     ? `reservation-claim-release:${input.parentReservationRef}:${input.intentRef}`
     : null;
   const client = getSqlClient();
-  const [, result] = await client.transaction((tx) => [
+  /**
+   * This is one wallet-locked statement by design: replay gates come first;
+   * project entitlement, trial spend, parent capacity, and wallet balance form
+   * one authorization snapshot; then the child claim, parent transfer, durable
+   * intent, and optional project lease are inserted in dependency order. A
+   * provider call therefore cannot observe a partial authorization. Real-Neon
+   * tests cover the exact trial cap, a concurrent same-intent replay, and
+   * sibling claims competing for a partially consumed parent reservation.
+   */
+  const transactionResults = await client.transaction((tx) => [
+    ...(optionalLeaseRef
+      ? [
+          tx`select pg_advisory_xact_lock(
+            hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+          )`,
+        ]
+      : []),
     tx`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`,
     tx`
     with existing_usage as materialized (
@@ -175,6 +206,71 @@ export async function beginMeteredCallIntent(input: {
             'intent-aborted:' || pending.external_ref
           )
         )
+      limit 1
+    ),
+    project_access as materialized (
+      select
+        project.experience,
+        author.suspended,
+        (
+          author.role = 'admin'
+          or exists (
+            select 1
+            from credit_ledger purchase
+            where purchase.user_id = ${input.userId}
+              and purchase.kind = 'purchase'
+              and purchase.amount > 0
+          )
+        ) as full_book_unlocked
+      from projects project
+      inner join users author on author.id = project.user_id
+      where ${input.projectId ?? null}::uuid is not null
+        and project.id = ${input.projectId ?? null}
+        and project.user_id = ${input.userId}
+      limit 1
+    ),
+    trial_spend as materialized (
+      select
+        coalesce(
+          -sum(entry.amount) filter (where entry.kind = 'usage'),
+          0
+        ) as credits_used,
+        coalesce(
+          -sum(entry.amount) filter (
+            where entry.kind = 'adjustment'
+              and entry.amount < 0
+              and coalesce(entry.external_ref, '') like 'metering-claim:%'
+              and not exists (
+                select 1
+                from credit_ledger released_claim
+                where released_claim.external_ref = 'release:' || entry.external_ref
+              )
+          ),
+          0
+        ) as credits_held
+      from credit_ledger entry
+      where entry.user_id = ${input.userId}
+    ),
+    trial_cap_blocked as materialized (
+      select 1
+      from project_access access
+      cross join trial_spend spent
+      where access.experience = 'trial_short_story'
+        and not access.full_book_unlocked
+        and (
+          spent.credits_used
+          + spent.credits_held
+          + ${String(maxCredits)}::numeric
+        ) > ${String(TRIAL_STORY_CREDIT_CAP)}::numeric
+    ),
+    project_busy_blocked as materialized (
+      select 1
+      from generation_runs competing_run
+      where ${input.projectId ?? null}::uuid is not null
+        and ${input.runId ?? null}::uuid is null
+        and competing_run.project_id = ${input.projectId ?? null}
+        and competing_run.status in ('queued', 'running', 'awaiting_input')
+        and competing_run.kind <> 'export'
       limit 1
     ),
     parent as materialized (
@@ -209,7 +305,7 @@ export async function beginMeteredCallIntent(input: {
       from credit_ledger
       where user_id = ${input.userId}
     ),
-    authorization as materialized (
+    authorized_start as materialized (
       select
         wallet.balance,
         coalesce((select remaining from parent), 0) as parent_remaining,
@@ -220,6 +316,20 @@ export async function beginMeteredCallIntent(input: {
       from wallet
       where not exists (select 1 from existing_usage)
         and not exists (select 1 from pending_intent)
+        and (
+          ${input.projectId ?? null}::uuid is null
+          or exists (
+            select 1
+            from project_access access
+            where not access.suspended
+              and (
+                access.experience = 'trial_short_story'
+                or access.full_book_unlocked
+              )
+          )
+        )
+        and not exists (select 1 from project_busy_blocked)
+        and not exists (select 1 from trial_cap_blocked)
         and not exists (
           select 1
           from credit_ledger
@@ -258,7 +368,7 @@ export async function beginMeteredCallIntent(input: {
         ${input.projectId ?? null},
         ${input.runId ?? null},
         ${reservationRef}
-      from authorization
+      from authorized_start
       on conflict (external_ref) do nothing
       returning id
     ),
@@ -268,13 +378,13 @@ export async function beginMeteredCallIntent(input: {
       )
       select
         ${input.userId},
-        least(${String(maxCredits)}::numeric, authorization.parent_remaining),
+        least(${String(maxCredits)}::numeric, authorized_start.parent_remaining),
         'adjustment',
         'Transfer phase capacity to provider-call claim',
         ${input.projectId ?? null},
         ${input.runId ?? null},
         ${claimReleaseRef}
-      from authorization, claim_insert
+      from authorized_start, claim_insert
       where ${claimReleaseRef}::text is not null
       on conflict (external_ref) do nothing
       returning id
@@ -291,28 +401,56 @@ export async function beginMeteredCallIntent(input: {
         ${input.projectId ?? null},
         ${input.runId ?? null},
         ${input.intentRef}
-      from authorization, claim_insert
+      from authorized_start, claim_insert
       where
         ${claimReleaseRef}::text is null
         or exists (select 1 from parent_claim)
       on conflict (external_ref) do nothing
       returning id
+    ),
+    optional_lease as (
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      select
+        ${input.userId},
+        0,
+        'adjustment',
+        'Hold project mutation boundary through optional AI delivery',
+        ${input.projectId ?? null},
+        null,
+        ${optionalLeaseRef}
+      from intent_insert
+      where ${optionalLeaseRef}::text is not null
+      on conflict (external_ref) do nothing
+      returning id
     )
     select
       case
+        when exists (
+          select 1 from project_access access where access.suspended
+        ) then 'suspended'
         when exists (select 1 from existing_usage) then 'settled'
         when exists (select 1 from pending_intent) then 'pending'
-        when exists (select 1 from intent_insert) then 'started'
+        when exists (select 1 from intent_insert)
+          and (
+            ${optionalLeaseRef}::text is null
+            or exists (select 1 from optional_lease)
+          )
+          then 'started'
+        when exists (select 1 from project_busy_blocked) then 'project_busy'
+        when exists (select 1 from trial_cap_blocked) then 'trial_cap'
         else 'insufficient'
       end as status,
       wallet.balance::text as balance,
       coalesce(
-        (select additional_required::text from authorization),
+        (select additional_required::text from authorized_start),
         ${String(maxCredits)}
       ) as required
     from wallet
   `,
   ]);
+  const result = transactionResults.at(-1);
   const row = (
     result as Array<{
       status: MeteredCallIntentResult["status"];
@@ -326,6 +464,7 @@ export async function beginMeteredCallIntent(input: {
     required: Number(row?.required ?? maxCredits),
     intentRef: input.intentRef,
     reservationRef,
+    optionalLeaseRef,
   };
 }
 
@@ -337,8 +476,17 @@ export async function abortMeteredCallIntent(input: {
   runId?: string | null;
 }): Promise<void> {
   const releaseRef = `release:${input.reservationRef}`;
+  const optionalLeaseRef =
+    input.projectId && !input.runId ? `optional-operation-lease:${input.intentRef}` : null;
   const client = getSqlClient();
   await client.transaction((tx) => [
+    ...(optionalLeaseRef
+      ? [
+          tx`select pg_advisory_xact_lock(
+            hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+          )`,
+        ]
+      : []),
     tx`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`,
     tx`
     with intent as materialized (
@@ -440,11 +588,109 @@ export async function abortMeteredCallIntent(input: {
       from parent_claim, aborted
       on conflict (external_ref) do nothing
       returning id
+    ),
+    optional_lease_released as (
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      select
+        ${input.userId},
+        0,
+        'adjustment',
+        'Release optional operation after pre-dispatch abort',
+        ${input.projectId ?? null},
+        null,
+        ${optionalLeaseRef ? `release:${optionalLeaseRef}` : null}
+      from aborted
+      where ${optionalLeaseRef}::text is not null
+      on conflict (external_ref) do nothing
+      returning id
     )
     select
       exists (select 1 from released) as released,
       exists (select 1 from parent_restored) as parent_restored
   `,
+  ]);
+}
+
+/**
+ * Releases project mutation leases only after optional provider output has
+ * either been delivered durably or refunded. The project advisory lock makes
+ * release and authoring-run insertion mutually exclusive.
+ */
+export async function releaseOptionalOperationLeases(input: {
+  userId: string;
+  projectId?: string | null;
+  leaseRefs: string[];
+}): Promise<void> {
+  const refs = [
+    ...new Set(input.leaseRefs.filter((ref) => ref.startsWith("optional-operation-lease:"))),
+  ];
+  if (!input.projectId || refs.length === 0) return;
+  const client = getSqlClient();
+  await client.transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+    )`,
+    ...refs.map(
+      (ref) => tx`
+        insert into credit_ledger (
+          user_id, amount, kind, description, project_id, run_id, external_ref
+        )
+        values (
+          ${input.userId},
+          0,
+          'adjustment',
+          'Release optional operation after durable delivery',
+          ${input.projectId},
+          null,
+          ${`release:${ref}`}
+        )
+        on conflict (external_ref) do nothing
+      `,
+    ),
+  ]);
+}
+
+/**
+ * Repairs the narrow crash window where durable output committed but the
+ * response died before its lease-release statement. Callers invoke this only
+ * after an exact idempotency-key replay proves delivery.
+ */
+export async function releaseReplayedOptionalOperationLeases(input: {
+  userId: string;
+  projectId: string;
+  idempotencyKey: string;
+}): Promise<void> {
+  const client = getSqlClient();
+  await client.transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+    )`,
+    tx`
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      select
+        lease.user_id,
+        0,
+        'adjustment',
+        'Repair optional operation lease after durable replay',
+        lease.project_id,
+        null,
+        'release:' || lease.external_ref
+      from credit_ledger lease
+      where lease.user_id = ${input.userId}
+        and lease.project_id = ${input.projectId}
+        and lease.external_ref like 'optional-operation-lease:%'
+        and lease.external_ref like ${`%:${input.idempotencyKey}:%`}
+        and not exists (
+          select 1
+          from credit_ledger released
+          where released.external_ref = 'release:' || lease.external_ref
+        )
+      on conflict (external_ref) do nothing
+    `,
   ]);
 }
 
@@ -795,7 +1041,7 @@ export async function reconcileMeteredCallAsCharged(input: {
         select coalesce(sum(-cast(amount as numeric(12, 4))), 0) as credits
         from usage_values
       ),
-      authorization as materialized (
+      authorized_reconciliation as materialized (
         select target.*
         from target
         where not exists (
@@ -822,16 +1068,16 @@ export async function reconcileMeteredCallAsCharged(input: {
           external_ref, metered_usd
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           usage_values.amount,
           usage_values.kind,
           usage_values.description,
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           usage_values.external_ref,
           usage_values.metered_usd
         from usage_values
-        cross join authorization
+        cross join authorized_reconciliation
         on conflict (external_ref) do nothing
         returning id, amount
       ),
@@ -842,9 +1088,9 @@ export async function reconcileMeteredCallAsCharged(input: {
           usd, latency_ms
         )
         select
-          authorization.user_id,
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.user_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           call_values.agent_role,
           call_values.operation,
           call_values.model,
@@ -855,7 +1101,7 @@ export async function reconcileMeteredCallAsCharged(input: {
           call_values.usd,
           call_values.latency_ms
         from call_values
-        cross join authorization
+        cross join authorized_reconciliation
         where (select count(*) from usage_insert) = ${costed.length}
         returning id
       ),
@@ -864,14 +1110,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
-          authorization.authorized,
+          authorized_reconciliation.user_id,
+          authorized_reconciliation.authorized,
           'adjustment',
           'Release reconciled provider-call claim',
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           ${releaseRef}
-        from authorization
+        from authorized_reconciliation
         where (select count(*) from usage_insert) = ${costed.length}
           and (select count(*) from call_insert) = ${costed.length}
         on conflict (external_ref) do nothing
@@ -882,14 +1128,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           0,
           'adjustment',
           'Provider result settled by administrator',
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           ${settledIntentRef}
-        from authorization, release_insert
+        from authorized_reconciliation, release_insert
         on conflict (external_ref) do nothing
         returning id
       ),
@@ -898,14 +1144,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           (select sum(-amount) from usage_insert),
           'adjustment',
           ${refundDescription},
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           ${deliveryRefundRef}
-        from authorization, settled_intent
+        from authorized_reconciliation, settled_intent
         where exists (select 1 from usage_insert)
         on conflict (external_ref) do nothing
         returning id
@@ -939,14 +1185,14 @@ export async function reconcileMeteredCallAsCharged(input: {
           user_id, amount, kind, description, project_id, run_id, external_ref
         )
         select
-          authorization.user_id,
+          authorized_reconciliation.user_id,
           -parent_transfer.amount,
           'adjustment',
           'Restore open phase capacity after reconciled delivery refund',
-          authorization.project_id,
-          authorization.run_id,
+          authorized_reconciliation.project_id,
+          authorized_reconciliation.run_id,
           parent_transfer.external_ref || ':delivery-restore'
-        from authorization, parent_transfer, delivery_refund
+        from authorized_reconciliation, parent_transfer, delivery_refund
         on conflict (external_ref) do nothing
         returning id
       )
@@ -963,7 +1209,7 @@ export async function reconcileMeteredCallAsCharged(input: {
           )
         ) as recorded,
         coalesce(
-          (select authorized::text from authorization),
+          (select authorized::text from authorized_reconciliation),
           (select authorized::text from target),
           '0'
         ) as authorized,
@@ -1013,9 +1259,17 @@ export async function reconcileMeteredCallAsCharged(input: {
 export async function refundSettledLogicalUsageForRedo(input: {
   userId: string;
   usagePrefix: string;
+  projectId?: string | null;
 }): Promise<boolean> {
   const client = getSqlClient();
-  const [, result] = await client.transaction((tx) => [
+  const results = await client.transaction((tx) => [
+    ...(input.projectId
+      ? [
+          tx`select pg_advisory_xact_lock(
+            hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+          )`,
+        ]
+      : []),
     tx`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`,
     tx`
       with attempts as materialized (
@@ -1097,10 +1351,30 @@ export async function refundSettledLogicalUsageForRedo(input: {
         from parent_claim, attempts, refunded
         on conflict (external_ref) do nothing
         returning id
+      ),
+      optional_lease_released as (
+        insert into credit_ledger (
+          user_id, amount, kind, description, project_id, run_id, external_ref
+        )
+        select
+          ${input.userId},
+          0,
+          'adjustment',
+          'Release optional operation lease after compensated redo',
+          attempts.project_id,
+          null,
+          'release:optional-operation-lease:' ||
+            regexp_replace(attempts.prefix, '^llm:', 'metering-intent:')
+        from attempts, refunded
+        where attempts.project_id is not null
+          and attempts.run_id is null
+        on conflict (external_ref) do nothing
+        returning id
       )
       select exists (select 1 from refunded) as refunded
     `,
   ]);
+  const result = results.at(-1);
   return (result as Array<{ refunded: boolean }>)[0]?.refunded ?? false;
 }
 
@@ -1279,7 +1553,7 @@ export async function recordLlmCallsAndDebit(
         )
       limit 1
     ),
-    authorization as materialized (
+    authorized_settlement as materialized (
       select claim.authorized
       from claim
       where exists (
@@ -1311,7 +1585,7 @@ export async function recordLlmCallsAndDebit(
       )
       select usage_values.*
       from usage_values
-      cross join authorization
+      cross join authorized_settlement
       where not exists (select 1 from existing_usage)
       on conflict (external_ref) do nothing
       returning id, amount
@@ -1324,7 +1598,7 @@ export async function recordLlmCallsAndDebit(
       )
       select call_values.*
       from call_values
-      cross join authorization
+      cross join authorized_settlement
       where (select count(*) from usage_insert) = ${records.length}
       returning id
     ),
@@ -1334,13 +1608,13 @@ export async function recordLlmCallsAndDebit(
       )
       select
         ${userId},
-        authorization.authorized,
+        authorized_settlement.authorized,
         'adjustment',
         'Release settled provider-call claim',
         ${records[0].projectId ?? null},
         ${records[0].runId ?? null},
         ${releaseRef}
-      from authorization
+      from authorized_settlement
       where (select count(*) from usage_insert) = ${records.length}
         and (select count(*) from call_insert) = ${records.length}
       on conflict (external_ref) do nothing

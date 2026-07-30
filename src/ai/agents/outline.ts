@@ -27,6 +27,7 @@ export type OutlineInput = {
   tools: ToolCtx;
   tier: QualityTier;
   concept: BookConcept;
+  workingTitle?: string;
   brief?: string;
   genre?: string;
   chapterCount: number;
@@ -181,6 +182,7 @@ function resolveStructureId(chosen: string, requested?: string): string {
 function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: string): string {
   const base = buildOutlineUserPrompt({
     concept: conceptText(input.concept),
+    workingTitle: input.workingTitle,
     brief: input.brief,
     genre: input.genre,
     chapterCount: input.chapterCount,
@@ -202,6 +204,9 @@ function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: st
     [
       `## Hard requirements`,
       `- Exactly ${input.chapterCount} chapters, numbered 1 through ${input.chapterCount}.`,
+      ...(input.workingTitle
+        ? [`- Preserve the book title exactly as "${input.workingTitle}".`]
+        : []),
       `- Every chapter's targetWords within 20% of ${input.targetWordsPerChapter}.`,
       `- Set plotStructure to "${structureId}".`,
       `- Place structure beats according to the act plan above.`,
@@ -322,9 +327,14 @@ function selfCheckPrompt(
     .join("\n\n");
 }
 
-function normalizeOutline(outline: BookOutline, structureId: string): BookOutline {
+function normalizeOutline(
+  outline: BookOutline,
+  structureId: string,
+  workingTitle?: string,
+): BookOutline {
   return {
     ...outline,
+    ...(workingTitle ? { title: workingTitle } : {}),
     plotStructure: getPlotTemplate(structureId) ? structureId : outline.plotStructure,
   };
 }
@@ -430,7 +440,7 @@ export async function generateOutline(
   // Never trust a repair merely because the model returned an object. This
   // explicit boundary also protects tests/mocks and future provider changes
   // that may bypass Output.object's schema enforcement.
-  const final = normalizeOutline(runSchema.parse(outline), structureId);
+  const final = normalizeOutline(runSchema.parse(outline), structureId, input.workingTitle);
   await options.onFinal?.(final);
   return final;
 }
@@ -445,17 +455,25 @@ export async function persistOutline(
   outline: BookOutline,
 ): Promise<{ outlineId: string; version: number }> {
   const db = getDb();
-  const [prior] = await db
-    .select({ version: schema.outlines.version })
-    .from(schema.outlines)
-    .where(eq(schema.outlines.bookId, bookId))
-    .orderBy(desc(schema.outlines.version))
-    .limit(1);
+  const [[book], [prior]] = await Promise.all([
+    db
+      .select({ title: schema.books.title })
+      .from(schema.books)
+      .where(eq(schema.books.id, bookId))
+      .limit(1),
+    db
+      .select({ version: schema.outlines.version })
+      .from(schema.outlines)
+      .where(eq(schema.outlines.bookId, bookId))
+      .orderBy(desc(schema.outlines.version))
+      .limit(1),
+  ]);
   const version = (prior?.version ?? 0) + 1;
+  const authorOutline = book ? { ...outline, title: book.title } : outline;
 
   const [row] = await db
     .insert(schema.outlines)
-    .values({ bookId, version, content: outline, source: "ai" })
+    .values({ bookId, version, content: authorOutline, source: "ai" })
     .returning({ id: schema.outlines.id });
 
   if (outline.chapters.length > 0) {

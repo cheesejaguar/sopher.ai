@@ -75,9 +75,9 @@ export function RunControls({
           aria-hidden="true"
           className={cn(
             "size-1.5 rounded-full",
-            connection === "live" && "bg-ai motion-safe:animate-pulse",
-            connection === "reconnecting" && "bg-ember motion-safe:animate-pulse",
-            connection === "connecting" && "bg-muted-foreground motion-safe:animate-pulse",
+            connection === "live" && "bg-ai",
+            connection === "reconnecting" && "bg-ember",
+            connection === "connecting" && "bg-muted-foreground",
             connection === "ended" && "bg-muted-foreground/50",
           )}
         />

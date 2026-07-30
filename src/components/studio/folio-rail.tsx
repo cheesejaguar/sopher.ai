@@ -118,10 +118,7 @@ export function FolioRail({
                 </span>
               ) : null}
               {chapter.status === "drafting" ? (
-                <span
-                  aria-hidden="true"
-                  className="absolute inset-x-0 bottom-0 h-[55%] bg-ai motion-safe:animate-pulse"
-                />
+                <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-[55%] bg-ai" />
               ) : null}
             </>
           );

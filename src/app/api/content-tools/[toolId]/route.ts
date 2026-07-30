@@ -2,10 +2,16 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { ContentToolError, getContentTool } from "@/ai/content-tools/registry";
-import { refundMeteredDeliveries, type MeterCtx } from "@/ai/metering";
+import {
+  completeMeteredDelivery,
+  healReplayedMeteredDelivery,
+  refundMeteredDeliveries,
+  type MeterCtx,
+} from "@/ai/metering";
 import { meteredOperationCeilingUsd } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction } from "@/db";
+import { persistContentToolDeliveryTransaction } from "@/db/transaction-operations";
 import { getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
@@ -20,6 +26,7 @@ import {
   compensateUnreferencedBlobUpload,
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
+import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
 
 export const maxDuration = 120;
 
@@ -115,7 +122,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
       ),
     )
     .limit(1);
-  if (replayed) return Response.json({ output: replayed.output, replayed: true });
+  if (replayed) {
+    await healReplayedMeteredDelivery({
+      userId,
+      projectId: ownership.projectId,
+      idempotencyKey,
+    });
+    return Response.json({ output: replayed.output, replayed: true });
+  }
+
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId: ownership.projectId,
+    operationKind: "optional",
+  });
+  if (spendDenied) return spendDenied;
 
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
   const models = MODELS[tier];
@@ -198,63 +219,31 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     let deliveredOutput = output;
     let replayedDelivery = false;
     try {
-      const delivery = await db.transaction(async (tx) => {
-        // Project deletion and every asset-producing path take this same lock.
-        // The transaction is therefore either fully visible to deletion or
-        // finishes after deletion and rolls back on the foreign key.
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(
-            hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
-          )`,
-        );
-
-        // Concurrent replays can pass the request-level lookup together. Once
-        // serialized by the project lock, reuse the first durable delivery.
-        const [alreadyDelivered] = await tx
-          .select({ output: schema.contentToolRuns.output })
-          .from(schema.contentToolRuns)
-          .where(
-            and(
-              eq(schema.contentToolRuns.userId, userId),
-              eq(schema.contentToolRuns.projectId, ownership.projectId),
-              eq(schema.contentToolRuns.chapterId, chapterId),
-              eq(schema.contentToolRuns.toolId, tool.id),
-              sql`${schema.contentToolRuns.input}->>'operationKey' = ${idempotencyKey}`,
-            ),
-          )
-          .limit(1);
-        if (alreadyDelivered) {
-          return { output: alreadyDelivered.output as typeof output, replayed: true };
-        }
-
-        if (rawOutput.kind === "image") {
-          await tx.insert(schema.assets).values({
-            projectId: ownership.projectId,
-            chapterId,
-            kind: "illustration",
-            blobUrl: rawOutput.url,
-            blobPathname: rawOutput.asset.blobPathname,
-            contentType: rawOutput.asset.contentType,
-            sizeBytes: rawOutput.asset.sizeBytes,
-            meta: {
-              prompt: rawOutput.asset.prompt,
-              operationKey: idempotencyKey,
-            },
-          });
-        }
-        await tx.insert(schema.contentToolRuns).values({
+      const delivery = await withDbTransaction((tx) =>
+        persistContentToolDeliveryTransaction(tx, {
           userId,
           projectId: ownership.projectId,
           chapterId,
           toolId: tool.id,
-          input: { text, options: options ?? {}, operationKey: idempotencyKey },
+          operationKey: idempotencyKey,
+          text,
+          options: options ?? {},
           output,
           usd: (meter.settlements ?? [])
             .reduce((total, settlement) => total + settlement.meteredUsd, 0)
             .toFixed(6),
-        });
-        return { output, replayed: false };
-      });
+          asset:
+            rawOutput.kind === "image"
+              ? {
+                  url: rawOutput.url,
+                  pathname: rawOutput.asset.blobPathname,
+                  contentType: rawOutput.asset.contentType,
+                  sizeBytes: rawOutput.asset.sizeBytes,
+                  prompt: rawOutput.asset.prompt,
+                }
+              : undefined,
+        }),
+      );
       deliveredOutput = delivery.output;
       replayedDelivery = delivery.replayed;
     } catch (persistenceError) {
@@ -314,8 +303,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
       }
     }
 
+    await completeMeteredDelivery(meter);
     return Response.json({ output: deliveredOutput, replayed: replayedDelivery });
   } catch (error) {
+    const spendResponse = projectSpendAccessErrorResponse(error);
+    if (spendResponse) return spendResponse;
     if (
       !(error instanceof AmbiguousContentToolDeliveryError) &&
       (meter.settlements?.length ?? 0) > 0

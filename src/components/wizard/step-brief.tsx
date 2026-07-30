@@ -44,6 +44,26 @@ export function StepBrief({
 
   return (
     <div className="space-y-4">
+      <div className="instrument-surface rounded-sm p-4 sm:p-5">
+        <div className="space-y-1.5">
+          <Label htmlFor="wizard-title">Working title</Label>
+          <Input
+            id="wizard-title"
+            value={state.title}
+            maxLength={200}
+            required
+            aria-describedby="wizard-title-hint"
+            autoComplete="off"
+            placeholder="The title you want to see on the cover"
+            onChange={(event) => dispatch({ type: "patch", patch: { title: event.target.value } })}
+          />
+          <p id="wizard-title-hint" className="text-xs leading-relaxed text-muted-foreground">
+            This stays with the project from first outline to finished manuscript. You can rename it
+            later.
+          </p>
+        </div>
+      </div>
+
       <div className="paper-surface px-6 py-8 sm:px-10 sm:py-10">
         <p className="text-center font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
           {genreLabel(state.genre)}
@@ -79,27 +99,15 @@ export function StepBrief({
       </div>
 
       <Collapsible>
-        <CollapsibleTrigger className="group flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring rounded-md">
+        <CollapsibleTrigger className="group flex min-h-11 items-center gap-1.5 rounded-sm text-sm font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
           <ChevronDown
             aria-hidden="true"
             className="size-3.5 transition-transform group-data-panel-open:rotate-180"
           />
-          Add details — title, protagonist, setting (optional)
+          Add protagonist and setting (optional)
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="instrument-surface mt-3 grid gap-4 rounded-sm p-4 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="wizard-title">Working title</Label>
-              <Input
-                id="wizard-title"
-                value={state.title}
-                maxLength={200}
-                placeholder="The agents will suggest one"
-                onChange={(event) =>
-                  dispatch({ type: "patch", patch: { title: event.target.value } })
-                }
-              />
-            </div>
+          <div className="instrument-surface mt-3 grid gap-4 rounded-sm p-4 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="wizard-protagonist">Protagonist</Label>
               <Input

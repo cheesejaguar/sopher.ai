@@ -40,26 +40,35 @@ function formatCredits(value: number): string {
 type QuotedEstimate = BookEstimate & { credits: number; balance: number | null };
 
 type EstimateMap = Partial<Record<QualityTier, QuotedEstimate>>;
+type QuoteError = { shapeKey: string; message: string };
 
 export type WizardQuoteSummary = {
   credits: number;
+  label?: string;
+  chapters: number;
+  wordsPerChapter: number;
+  tier: QualityTier;
 };
 
 export function StepEstimate({
   state,
   dispatch,
   onQuote,
+  experience = "full_book",
 }: {
   state: WizardState;
   dispatch: React.Dispatch<WizardActionEvent>;
   onQuote?: (quote: WizardQuoteSummary | null) => void;
+  experience?: "trial_short_story" | "full_book";
 }) {
   const [estimates, setEstimates] = React.useState<EstimateMap>({});
+  const [quotedShape, setQuotedShape] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [quoteError, setQuoteError] = React.useState<string | null>(null);
+  const [quoteError, setQuoteError] = React.useState<QuoteError | null>(null);
   const [quoteRevision, retryQuote] = React.useReducer((value: number) => value + 1, 0);
 
   const { chapters, wordsPerChapter } = state;
+  const shapeKey = `${chapters}:${wordsPerChapter}`;
 
   // Debounced re-quote whenever the book's shape changes.
   React.useEffect(() => {
@@ -88,13 +97,16 @@ export function StepEstimate({
           next[estimate.tier] = estimate;
         }
         setEstimates(next);
+        setQuotedShape(shapeKey);
       } catch (cause) {
         if (controller.signal.aborted) return;
-        setQuoteError(
-          cause instanceof Error && cause.message
-            ? cause.message
-            : "The estimate could not be refreshed. Check your connection and try again.",
-        );
+        setQuoteError({
+          shapeKey,
+          message:
+            cause instanceof Error && cause.message
+              ? cause.message
+              : "The estimate could not be refreshed. Check your connection and try again.",
+        });
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -103,84 +115,123 @@ export function StepEstimate({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [chapters, wordsPerChapter, quoteRevision]);
+  }, [chapters, quoteRevision, shapeKey, wordsPerChapter]);
 
-  const selected = estimates[state.tier];
+  const selected = quotedShape === shapeKey ? estimates[state.tier] : undefined;
+  const currentQuoteError = quoteError?.shapeKey === shapeKey ? quoteError.message : null;
+  const quotePending = loading || (quotedShape !== shapeKey && currentQuoteError === null);
   const balance = selected?.balance ?? null;
   const short = selected !== undefined && balance !== null && balance < selected.credits;
 
   // Announced once the quote has settled — never while it is still being fetched,
   // and never per keystroke (the quote itself is debounced).
   const announcement =
-    selected && !loading
-      ? `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}, about ${selected.estimatedMinutes} minutes.`
+    selected && !quotePending
+      ? experience === "trial_short_story"
+        ? `Included short story estimate: about ${selected.estimatedMinutes} minutes.`
+        : `${TIER_LABELS[state.tier].name} estimate: ${formatCredits(selected.credits)}, about ${selected.estimatedMinutes} minutes.`
       : "";
 
   React.useEffect(() => {
-    onQuote?.(selected && !loading ? { credits: selected.credits } : null);
-  }, [loading, onQuote, selected]);
+    onQuote?.(
+      selected && !quotePending
+        ? {
+            credits: selected.credits,
+            chapters,
+            wordsPerChapter,
+            tier: state.tier,
+            ...(experience === "trial_short_story" ? { label: "Included" } : {}),
+          }
+        : null,
+    );
+  }, [chapters, experience, onQuote, quotePending, selected, state.tier, wordsPerChapter]);
 
   return (
     <div className="space-y-5">
-      {quoteError ? (
+      {currentQuoteError ? (
         <div
           role="alert"
           className="flex flex-wrap items-center justify-between gap-3 border border-destructive/35 bg-destructive/5 px-4 py-3 text-sm"
         >
-          <span className="text-destructive">{quoteError}</span>
+          <span className="text-destructive">{currentQuoteError}</span>
           <button
             type="button"
-            onClick={retryQuote}
+            onClick={() => {
+              setEstimates({});
+              setQuotedShape(null);
+              setLoading(true);
+              setQuoteError(null);
+              retryQuote();
+            }}
             className="min-h-11 rounded-sm font-medium text-foreground underline underline-offset-4 sm:min-h-9"
           >
             Try the quote again
           </button>
         </div>
       ) : null}
-      <RadioGroup
-        aria-label="Quality tier"
-        value={state.tier}
-        onValueChange={(value) => {
-          if (typeof value === "string") {
-            dispatch({ type: "patch", patch: { tier: value as QualityTier } });
-          }
-        }}
-        className="grid gap-3 sm:grid-cols-3"
-      >
-        {TIERS.map((tier) => {
-          const estimate = estimates[tier];
-          const active = state.tier === tier;
-          const optionLabel =
-            estimate && !loading
-              ? `${TIER_LABELS[tier].name} — ${formatCredits(estimate.credits)}`
-              : `${TIER_LABELS[tier].name} — estimate still loading`;
-          return (
-            <label
-              key={tier}
-              className={cn(
-                "flex cursor-pointer flex-col gap-1.5 rounded-sm border bg-card p-4 transition-colors",
-                active ? "border-primary ring-1 ring-primary" : "hover:border-foreground/25",
-              )}
-            >
-              <span className="flex items-center justify-between gap-2">
-                <span className="font-display text-sm font-semibold tracking-tight">
-                  {TIER_LABELS[tier].name}
-                </span>
-                <RadioGroupItem value={tier} aria-label={optionLabel} />
-              </span>
-              <span className="text-xs text-muted-foreground">{TIER_LABELS[tier].blurb}</span>
-              <span className="text-xs text-ai">{modelMix(tier)}</span>
-              <span className="mt-auto pt-1.5 font-mono text-sm tabular-nums">
-                {estimate && !loading ? (
-                  formatCredits(estimate.credits)
-                ) : (
-                  <Skeleton className="h-4 w-24" />
+      {experience === "trial_short_story" ? (
+        <section
+          aria-label="Included production quality"
+          className="instrument-surface flex flex-col gap-1.5 rounded-sm border-primary/45 p-4"
+        >
+          <span className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="font-display text-sm font-semibold tracking-tight">
+              Standard production
+            </span>
+            <span className="folio-label text-primary">Included</span>
+          </span>
+          <span className="text-xs leading-relaxed text-muted-foreground">
+            Your story is planned, written, edited, and checked for continuity with the same Studio
+            tools available to full books.
+          </span>
+          <span className="text-xs text-ai">{modelMix("standard")}</span>
+        </section>
+      ) : (
+        <RadioGroup
+          aria-label="Quality tier"
+          value={state.tier}
+          onValueChange={(value) => {
+            if (typeof value === "string") {
+              dispatch({ type: "patch", patch: { tier: value as QualityTier } });
+            }
+          }}
+          className="grid gap-3 sm:grid-cols-3"
+        >
+          {TIERS.map((tier) => {
+            const estimate = estimates[tier];
+            const active = state.tier === tier;
+            const optionLabel =
+              estimate && !quotePending
+                ? `${TIER_LABELS[tier].name} — ${formatCredits(estimate.credits)}`
+                : `${TIER_LABELS[tier].name} — estimate still loading`;
+            return (
+              <label
+                key={tier}
+                className={cn(
+                  "flex cursor-pointer flex-col gap-1.5 rounded-sm border bg-card p-4 transition-colors",
+                  active ? "border-primary ring-1 ring-primary" : "hover:border-foreground/25",
                 )}
-              </span>
-            </label>
-          );
-        })}
-      </RadioGroup>
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="font-display text-sm font-semibold tracking-tight">
+                    {TIER_LABELS[tier].name}
+                  </span>
+                  <RadioGroupItem value={tier} aria-label={optionLabel} />
+                </span>
+                <span className="text-xs text-muted-foreground">{TIER_LABELS[tier].blurb}</span>
+                <span className="text-xs text-ai">{modelMix(tier)}</span>
+                <span className="mt-auto pt-1.5 font-mono text-sm tabular-nums">
+                  {estimate && !quotePending ? (
+                    formatCredits(estimate.credits)
+                  ) : (
+                    <Skeleton className="h-4 w-24" />
+                  )}
+                </span>
+              </label>
+            );
+          })}
+        </RadioGroup>
+      )}
 
       {/* The receipt — itemized, honest, mono */}
       <div className="manuscript-sheet p-5 sm:p-6">
@@ -188,14 +239,14 @@ export function StepEstimate({
           <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
             Estimate — {TIER_LABELS[state.tier].name}
           </p>
-          {selected && !loading ? (
+          {selected && !quotePending ? (
             <p className="font-mono text-xs text-paper-muted">
               Estimated production time: ~{selected.estimatedMinutes} min
             </p>
           ) : null}
         </div>
-        <div className="mt-4 font-mono text-sm text-paper-foreground" aria-busy={loading}>
-          {selected && !loading ? (
+        <div className="mt-4 font-mono text-sm text-paper-foreground" aria-busy={quotePending}>
+          {selected && !quotePending ? (
             <>
               <ul className="space-y-1.5">
                 {selected.stages.map((stage) => (
@@ -206,9 +257,11 @@ export function StepEstimate({
                       className="flex-1 border-b border-dotted border-paper-edge"
                     />
                     <span className="tabular-nums">
-                      {formatCredits(
-                        stage.usd * (selected.credits / Math.max(selected.totalUsd, 0.0001)),
-                      )}
+                      {experience === "trial_short_story"
+                        ? "Included"
+                        : formatCredits(
+                            stage.usd * (selected.credits / Math.max(selected.totalUsd, 0.0001)),
+                          )}
                     </span>
                   </li>
                 ))}
@@ -216,11 +269,16 @@ export function StepEstimate({
               <div className="mt-3 flex items-baseline gap-2 border-t border-paper-edge pt-3 font-semibold">
                 <span>Total</span>
                 <span aria-hidden="true" className="flex-1" />
-                <span className="tabular-nums">{formatCredits(selected.credits)}</span>
+                <span className="tabular-nums">
+                  {experience === "trial_short_story"
+                    ? "Included"
+                    : formatCredits(selected.credits)}
+                </span>
               </div>
               <p className="mt-3 text-xs text-paper-muted">
-                ±30% — credits are only debited for what actually runs, and writing pauses (not
-                fails) if your balance runs out.
+                {experience === "trial_short_story"
+                  ? "One complete short story is included with your account. Optional Studio tools use the remaining included allowance after writing finishes."
+                  : "±30% — credits are only debited for what actually runs, and writing pauses (not fails) if your balance runs out."}
               </p>
             </>
           ) : (
@@ -233,7 +291,7 @@ export function StepEstimate({
         </div>
       </div>
 
-      {selected && balance !== null ? (
+      {experience === "full_book" && selected && balance !== null ? (
         <p className={cn("text-xs", short ? "text-ember" : "text-muted-foreground")}>
           {short ? (
             <>
@@ -250,22 +308,32 @@ export function StepEstimate({
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between gap-4 rounded-sm border bg-card p-4">
-        <div className="space-y-0.5">
-          <Label htmlFor="wizard-approval">Pause for my outline approval</Label>
-          <p id="wizard-approval-hint" className="text-xs text-muted-foreground">
-            The run stops after the outline and waits for you before any chapters are drafted.
+      {experience === "trial_short_story" ? (
+        <div className="rounded-sm border bg-card p-4">
+          <p className="text-sm font-medium">You approve the outline before drafting begins</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Read the chapter plan, request changes, or approve it when you are ready. No chapter is
+            written before that decision.
           </p>
         </div>
-        <Switch
-          id="wizard-approval"
-          aria-describedby="wizard-approval-hint"
-          checked={state.requireOutlineApproval}
-          onCheckedChange={(checked) =>
-            dispatch({ type: "patch", patch: { requireOutlineApproval: checked === true } })
-          }
-        />
-      </div>
+      ) : (
+        <div className="flex items-center justify-between gap-4 rounded-sm border bg-card p-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="wizard-approval">Pause for my outline approval</Label>
+            <p id="wizard-approval-hint" className="text-xs text-muted-foreground">
+              The run stops after the outline and waits for you before any chapters are drafted.
+            </p>
+          </div>
+          <Switch
+            id="wizard-approval"
+            aria-describedby="wizard-approval-hint"
+            checked={state.requireOutlineApproval}
+            onCheckedChange={(checked) =>
+              dispatch({ type: "patch", patch: { requireOutlineApproval: checked === true } })
+            }
+          />
+        </div>
+      )}
 
       <p aria-live="polite" className="sr-only">
         {announcement}

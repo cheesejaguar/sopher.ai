@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 export const qualityTierSchema = z.enum(["draft", "standard", "premium"]);
+export const projectTitleSchema = z.string().trim().min(1).max(200);
+export const projectBriefSchema = z.string().trim().min(20).max(20_000);
+export const projectGenreSchema = z.string().min(1).max(60);
 
 export const projectSettingsSchema = z
   .object({
@@ -19,9 +22,9 @@ export const projectSettingsSchema = z
   .strict();
 
 export const createProjectSchema = z.object({
-  title: z.string().min(1).max(200),
-  brief: z.string().min(20).max(20_000),
-  genre: z.string().min(1).max(60),
+  title: projectTitleSchema,
+  brief: projectBriefSchema,
+  genre: projectGenreSchema,
   targetChapters: z.number().int().min(3).max(60).default(10),
   targetWordsPerChapter: z.number().int().min(800).max(8_000).default(3_000),
   styleGuide: z.string().max(10_000).optional(),

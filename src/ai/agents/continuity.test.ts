@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  aggregateContinuityOutcomes,
-  continuityPhaseKeys,
-  type ContinuityOutcome,
-} from "./continuity";
-import { REVIEW_PHASES } from "@/ai/prompts/review-rubric";
+import { aggregateContinuityOutcomes, type ContinuityOutcome } from "./continuity";
+import { REVIEW_PHASES, continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 import type { ReviewPhaseResult } from "@/ai/schemas";
 
 function outcome(

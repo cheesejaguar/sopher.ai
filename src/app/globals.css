@@ -36,7 +36,8 @@
   --input: oklch(0.84 0.015 275);
   --ring: oklch(0.5 0.2 276);
 
-  --ai: oklch(0.52 0.18 250);
+  /* 4.5:1 or better on both instrument and --ai-soft surfaces. */
+  --ai: oklch(0.49 0.18 250);
   --ai-foreground: oklch(0.99 0.004 275);
   --ai-soft: oklch(0.91 0.04 250);
   --ion: #00718b;
@@ -361,7 +362,7 @@
   margin-left: 0.1em;
   vertical-align: text-bottom;
   background: var(--ai);
-  animation: caret-blink 1.1s steps(1) infinite;
+  animation: caret-blink 1.1s steps(1) 4;
 }
 
 /* Paper surface — every manuscript container */
@@ -523,14 +524,14 @@
 }
 
 .production-book-page-active {
-  animation: production-page-assemble 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: production-page-assemble 2.4s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
 }
 
 .production-review-beam {
   top: 0;
   background: linear-gradient(90deg, transparent, var(--ai), transparent);
   box-shadow: 0 0.4rem 1.2rem color-mix(in oklch, var(--ai) 45%, transparent);
-  animation: production-review-scan 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: production-review-scan 2.2s cubic-bezier(0.22, 1, 0.36, 1) 1 both;
 }
 
 /*

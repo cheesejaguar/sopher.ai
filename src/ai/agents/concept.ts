@@ -20,6 +20,7 @@ export type ConceptCtx = {
   tools: ToolCtx;
   tier: QualityTier;
   brief: string;
+  workingTitle?: string;
   genre?: string;
   targetAudience?: string;
   contentGuidelines?: string;
@@ -36,6 +37,9 @@ function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
     `You previously expanded an author brief into the draft book concept below. Now critique and refine it in one pass.`,
     `## Draft concept\n${JSON.stringify(draft, null, 2)}`,
     `## Original author brief\n${ctx.brief}`,
+    ctx.workingTitle
+      ? `## Author-owned working title\n${ctx.workingTitle}\nPreserve this title exactly.`
+      : "",
     ctx.genre ? `## Genre\n${ctx.genre}` : "",
     ctx.targetAudience ? `## Target audience\n${ctx.targetAudience}` : "",
     ctx.contentGuidelines ? `## Authoring constraints\n${ctx.contentGuidelines}` : "",
@@ -59,7 +63,9 @@ export async function generateConcept(
 ): Promise<BookConcept> {
   const model = MODELS[input.tier].concept;
 
-  let expanded = checkpoint.expanded;
+  const preserveTitle = (concept: BookConcept): BookConcept =>
+    input.workingTitle ? { ...concept, title: input.workingTitle } : concept;
+  let expanded = checkpoint.expanded ? preserveTitle(checkpoint.expanded) : undefined;
   if (!expanded) {
     const result = await metered(
       input.meter,
@@ -70,6 +76,7 @@ export async function generateConcept(
           instructions: anthropicCachedSystem(CONCEPT_SYSTEM_PROMPT),
           prompt: buildConceptUserPrompt({
             brief: input.brief,
+            workingTitle: input.workingTitle,
             genre: input.genre,
             targetAudience: input.targetAudience,
             contentGuidelines: input.contentGuidelines,
@@ -92,7 +99,7 @@ export async function generateConcept(
           providerOptions: gatewayOptions(input.meter, "concept"),
         }),
     );
-    expanded = result.output;
+    expanded = preserveTitle(result.output);
     await checkpoint.onExpanded?.(expanded);
   }
 
@@ -111,8 +118,9 @@ export async function generateConcept(
       }),
   );
 
-  await checkpoint.onRefined?.(refined.output);
-  return refined.output;
+  const final = preserveTitle(refined.output);
+  await checkpoint.onRefined?.(final);
+  return final;
 }
 
 /**
@@ -122,14 +130,14 @@ export async function generateConcept(
  */
 export async function persistConcept(bookId: string, concept: BookConcept): Promise<void> {
   const db = getDb();
+  const [book] = await db
+    .select({ projectId: schema.books.projectId, title: schema.books.title })
+    .from(schema.books)
+    .where(eq(schema.books.id, bookId))
+    .limit(1);
 
   // Quiet brief-level moderation: the verdict rode the concept call itself.
   if (concept.moderation?.flagged) {
-    const [book] = await db
-      .select({ projectId: schema.books.projectId })
-      .from(schema.books)
-      .where(eq(schema.books.id, bookId))
-      .limit(1);
     if (book) {
       await recordModerationFlag({
         projectId: book.projectId,
@@ -143,12 +151,13 @@ export async function persistConcept(bookId: string, concept: BookConcept): Prom
   // (loaded by getProjectWithBook) must never carry it.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring strips the field
   const { moderation, ...persistableConcept } = concept;
+  const authorTitle = book?.title ?? concept.title;
   await db
     .update(schema.books)
     .set({
-      title: concept.title,
+      title: authorTitle,
       synopsis: concept.synopsis,
-      concept: persistableConcept,
+      concept: { ...persistableConcept, title: authorTitle },
       updatedAt: new Date(),
     })
     .where(eq(schema.books.id, bookId));

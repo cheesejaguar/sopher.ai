@@ -106,11 +106,13 @@ function Navigation({
   pathname,
   mobile = false,
   credits,
+  creditLabel,
 }: {
   variant: ShellVariant;
   pathname: string;
   mobile?: boolean;
   credits?: number;
+  creditLabel?: string;
 }) {
   const primary = variant === "admin" ? ADMIN_PRIMARY : STUDIO_PRIMARY;
   const secondary = variant === "studio" ? STUDIO_SECONDARY : [];
@@ -165,7 +167,7 @@ function Navigation({
               </span>
               {link.href === "/studio/credits" ? (
                 <span className="font-mono text-[0.6875rem] tracking-wider text-sidebar-foreground/75 uppercase">
-                  {credits === undefined ? "Top up" : `${credits.toFixed(1)} cr`}
+                  {credits === undefined ? (creditLabel ?? "Top up") : `${credits.toFixed(1)} cr`}
                 </span>
               ) : null}
             </Link>
@@ -275,6 +277,7 @@ type ProductShellProps = {
   children: React.ReactNode;
   variant?: ShellVariant;
   credits?: number;
+  creditLabel?: string;
 };
 
 function ProductShellFallback({ variant }: { variant: ShellVariant }) {
@@ -295,26 +298,36 @@ function ProductShellFallback({ variant }: { variant: ShellVariant }) {
           <BrandMark />
         </header>
         <div className="mx-auto w-full max-w-[92rem] space-y-4 px-4 py-6 sm:px-6 lg:px-8">
-          <div className="h-3 w-28 animate-pulse bg-muted motion-reduce:animate-none" />
-          <div className="h-10 w-full max-w-xl animate-pulse bg-muted motion-reduce:animate-none" />
-          <div className="h-72 w-full animate-pulse border border-border bg-card motion-reduce:animate-none" />
+          <div className="h-3 w-28 bg-muted" />
+          <div className="h-10 w-full max-w-xl bg-muted" />
+          <div className="h-72 w-full border border-border bg-card" />
         </div>
       </div>
     </div>
   );
 }
 
-export function ProductShell({ children, variant = "studio", credits }: ProductShellProps) {
+export function ProductShell({
+  children,
+  variant = "studio",
+  credits,
+  creditLabel,
+}: ProductShellProps) {
   return (
     <React.Suspense fallback={<ProductShellFallback variant={variant} />}>
-      <ProductShellWithPathname variant={variant} credits={credits}>
+      <ProductShellWithPathname variant={variant} credits={credits} creditLabel={creditLabel}>
         {children}
       </ProductShellWithPathname>
     </React.Suspense>
   );
 }
 
-function ProductShellWithPathname({ children, variant = "studio", credits }: ProductShellProps) {
+function ProductShellWithPathname({
+  children,
+  variant = "studio",
+  credits,
+  creditLabel,
+}: ProductShellProps) {
   const pathname = usePathname() ?? (variant === "admin" ? "/admin" : "/studio");
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
@@ -336,7 +349,12 @@ function ProductShellWithPathname({ children, variant = "studio", credits }: Pro
           </div>
         )}
         <div className="mt-7 min-h-0 flex-1 overflow-y-auto">
-          <Navigation variant={variant} pathname={pathname} credits={credits} />
+          <Navigation
+            variant={variant}
+            pathname={pathname}
+            credits={credits}
+            creditLabel={creditLabel}
+          />
         </div>
         <div className="border-t border-sidebar-border pt-4">
           <ShellUtilities variant={variant} />
@@ -381,7 +399,13 @@ function ProductShellWithPathname({ children, variant = "studio", credits }: Pro
                       <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
                     </div>
                   ) : null}
-                  <Navigation variant={variant} pathname={pathname} mobile credits={credits} />
+                  <Navigation
+                    variant={variant}
+                    pathname={pathname}
+                    mobile
+                    credits={credits}
+                    creditLabel={creditLabel}
+                  />
                 </div>
                 <div className="p-4">
                   <ShellUtilities variant={variant} mobile />

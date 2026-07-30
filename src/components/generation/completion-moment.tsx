@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
 import {
   AlertDialog,
@@ -13,6 +14,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import type { ProjectExperience } from "@/lib/trial-story";
+import {
+  FULL_BOOK_UNLOCK_DESCRIPTION,
+  fullBookSetupHref,
+  fullBookUnlockHref,
+  INCLUDED_STORY_NO_CARD_NOTE,
+} from "@/lib/marketing/trial-offer";
 
 const MAX_SEGMENTS = 24;
 /** Segment width (0.5rem) + gap (0.25rem) — used to slide segments to center. */
@@ -28,6 +36,8 @@ export function CompletionMoment({
   projectTitle,
   chapterCount,
   recommendation,
+  experience = "full_book",
+  fullBookUnlocked = false,
   review,
   onWriteAgain,
   writeAgainPending = false,
@@ -37,6 +47,8 @@ export function CompletionMoment({
   projectTitle: string;
   chapterCount: number;
   recommendation?: string;
+  experience?: ProjectExperience;
+  fullBookUnlocked?: boolean;
   review?: { score: number; issueCount: number };
   onWriteAgain?: () => void;
   writeAgainPending?: boolean;
@@ -59,10 +71,12 @@ export function CompletionMoment({
 
   const segments = Math.max(1, Math.min(chapterCount, MAX_SEGMENTS));
   const mid = (segments - 1) / 2;
+  const includedStory = experience === "trial_short_story";
+  const canWriteAgain = !includedStory && Boolean(onWriteAgain);
 
   return (
     <section
-      aria-label="Book complete"
+      aria-label={includedStory ? "Story complete" : "Book complete"}
       className="instrument-surface-raised flex flex-col items-center gap-8 rounded-sm px-6 py-12"
     >
       <div className="relative flex h-40 items-center justify-center">
@@ -104,7 +118,7 @@ export function CompletionMoment({
 
       <div className="space-y-2 text-center">
         <h2 className="font-display text-2xl font-semibold tracking-tight text-balance">
-          Your book is written.
+          {includedStory ? "Your short story is written." : "Your book is written."}
         </h2>
         {recommendation ? (
           <p className="mx-auto max-w-md text-sm text-muted-foreground">{recommendation}</p>
@@ -128,14 +142,52 @@ export function CompletionMoment({
         >
           Start editing
         </Button>
-        {onWriteAgain ? (
+        {canWriteAgain ? (
           <Button variant="ghost" onClick={() => setConfirmOpen(true)}>
             Write again
           </Button>
         ) : null}
       </div>
 
-      {onWriteAgain ? (
+      {includedStory ? (
+        <section
+          aria-labelledby="full-book-next-step-title"
+          className="mt-2 grid w-full max-w-3xl gap-5 border-t border-border pt-7 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+        >
+          <div>
+            <p className="folio-label text-ai">Next production</p>
+            <h3
+              id="full-book-next-step-title"
+              className="mt-2 text-lg font-semibold tracking-[-0.02em]"
+            >
+              {fullBookUnlocked
+                ? "Take this story to full length."
+                : "Ready to write a full-length book?"}
+            </h3>
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              {fullBookUnlocked
+                ? "This story stays intact. Its title, genre, and brief are ready in a new full-length setup with editable chapter count, length, and quality."
+                : `${INCLUDED_STORY_NO_CARD_NOTE} ${FULL_BOOK_UNLOCK_DESCRIPTION} After checkout, this title, genre, and brief will be ready in a new full-length setup.`}
+            </p>
+          </div>
+          <Button
+            render={
+              <Link
+                href={
+                  fullBookUnlocked ? fullBookSetupHref(projectId) : fullBookUnlockHref(projectId)
+                }
+              />
+            }
+            nativeButton={false}
+            className="w-fit"
+          >
+            {fullBookUnlocked ? "Continue at full length" : "Unlock the full-length version"}
+            <ArrowRight aria-hidden="true" data-icon="inline-end" />
+          </Button>
+        </section>
+      ) : null}
+
+      {canWriteAgain && onWriteAgain ? (
         <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
           <AlertDialogContent size="sm">
             <AlertDialogHeader>

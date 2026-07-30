@@ -23,10 +23,7 @@ export function StatusBadge({ status, className }: { status: ProjectStatus; clas
   return (
     <Badge variant="secondary" className={cn(statusClasses[status], className)}>
       {status === "generating" ? (
-        <span
-          aria-hidden="true"
-          className="size-1.5 rounded-full bg-ai motion-safe:animate-pulse"
-        />
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
       ) : null}
       {statusLabels[status]}
     </Badge>

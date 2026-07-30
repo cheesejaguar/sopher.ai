@@ -5,8 +5,10 @@ import { z } from "zod";
 import { anthropicCachedSystem } from "@/ai/cache";
 import {
   gatewayOptions,
+  healReplayedMeteredDelivery,
   metered,
   meteredCallAuthorizationUsd,
+  completeMeteredDelivery,
   refundMeteredDelivery,
   type MeterCtx,
 } from "@/ai/metering";
@@ -22,6 +24,7 @@ import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/cre
 import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
 import { contextWindow } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
+import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
 
 export const maxDuration = 60;
 
@@ -126,8 +129,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   // durable delivery before rate limiting or invoking another paid model call.
   const [replayed] = await findDeliveredSelection();
   if (replayed) {
+    await healReplayedMeteredDelivery({
+      userId,
+      projectId: ownership.projectId,
+      idempotencyKey,
+    });
     return Response.json({ suggestion: toSuggestionDTO(replayed) }, { status: 201 });
   }
+
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId: ownership.projectId,
+    operationKind: "optional",
+  });
+  if (spendDenied) return spendDenied;
 
   // Bound new paid work only after ruling out a free delivery replay.
   const limited = await rateLimit(LIMITS.llmEdit, req, userId);
@@ -177,6 +192,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     );
     output = result.output;
   } catch (error) {
+    const spendResponse = projectSpendAccessErrorResponse(error);
+    if (spendResponse) return spendResponse;
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: error.message }, { status: 402 });
     }
@@ -242,5 +259,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "Could not save the suggestion" }, { status: 503 });
   }
 
+  await completeMeteredDelivery(meter);
   return Response.json({ suggestion: toSuggestionDTO(row) }, { status: 201 });
 }

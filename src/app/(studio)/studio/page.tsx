@@ -13,6 +13,7 @@ import {
 } from "@/components/studio/project-card";
 import { listProjectsWithStats, type ProjectWithStats } from "@/db/queries/projects";
 import { requireUser } from "@/lib/auth";
+import { getStudioAccess } from "@/lib/studio-access";
 import { ProjectGridSkeleton } from "./loading";
 
 export const metadata: Metadata = {
@@ -41,14 +42,25 @@ function toCard(project: ProjectWithStats): ProjectCardData {
 
 async function ProjectGrid() {
   const { userId } = await requireUser();
-  const [projects, archived] = await Promise.all([
+  const [projects, archived, access] = await Promise.all([
     listProjectsWithStats(userId),
     listProjectsWithStats(userId, { archived: true }),
+    getStudioAccess(userId),
   ]);
 
   if (projects.length === 0 && archived.length === 0) {
-    return <EmptyLibrary />;
+    const mode =
+      access.creationExperience === "trial_short_story"
+        ? "included_story"
+        : access.fullBookUnlocked
+          ? "full_book"
+          : access.reason === "verify_email"
+            ? "verify_email"
+            : "purchase_required";
+    return <EmptyLibrary mode={mode} />;
   }
+
+  const offerFullBookUnlock = !access.fullBookUnlocked && access.trialProjectId !== null;
 
   return (
     <>
@@ -67,7 +79,10 @@ async function ProjectGrid() {
             {projects.slice(1).map((project) => (
               <ProjectCard key={project.id} project={toCard(project)} />
             ))}
-            <NewBookCard />
+            <NewBookCard
+              unlockFullBooks={offerFullBookUnlock}
+              sourceProjectId={access.trialProjectId ?? undefined}
+            />
           </div>
         </section>
       </div>

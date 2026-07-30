@@ -2,29 +2,79 @@ import Link from "next/link";
 import { ArrowRight, PenLine } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  FULL_BOOK_UNLOCK_DESCRIPTION,
+  FULL_BOOK_UNLOCK_HREF,
+  INCLUDED_STORY_NO_CARD_NOTE,
+} from "@/lib/marketing/trial-offer";
 
-export function EmptyLibrary() {
+type EmptyLibraryMode = "included_story" | "full_book" | "verify_email" | "purchase_required";
+
+const EMPTY_LIBRARY_COPY: Record<
+  EmptyLibraryMode,
+  {
+    label: string;
+    title: string;
+    description: string;
+    action: string;
+    href: "/studio/new" | typeof FULL_BOOK_UNLOCK_HREF;
+  }
+> = {
+  included_story: {
+    label: "Included story / no card",
+    title: "Turn one idea into a complete short story.",
+    description: `Write three chapters with the complete Studio, story bible, editor, manuscript, and export experience. ${INCLUDED_STORY_NO_CARD_NOTE} When you are ready to go full length, the next step is simple. ${FULL_BOOK_UNLOCK_DESCRIPTION}`,
+    action: "Create my included story",
+    href: "/studio/new",
+  },
+  full_book: {
+    label: "New production",
+    title: "Your next book starts with a brief.",
+    description:
+      "Describe the story in your own words, choose its length and quality, and review the credit quote before production begins.",
+    action: "Start a full-length book",
+    href: "/studio/new",
+  },
+  verify_email: {
+    label: "Included story / ready",
+    title: "Verify your email to begin.",
+    description:
+      "A verified account includes one complete short story with every Studio tool and no card required. Continue to see the verification reminder.",
+    action: "Continue",
+    href: "/studio/new",
+  },
+  purchase_required: {
+    label: "Full-length production",
+    title: "Unlock your next full-length book.",
+    description: `${FULL_BOOK_UNLOCK_DESCRIPTION} Credits are then used only for work that actually runs.`,
+    action: "View credit packs",
+    href: FULL_BOOK_UNLOCK_HREF,
+  },
+};
+
+export function EmptyLibrary({ mode }: { mode: EmptyLibraryMode }) {
+  const copy = EMPTY_LIBRARY_COPY[mode];
+
   return (
     <div className="instrument-surface-raised grid min-h-[28rem] overflow-hidden rounded-sm lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)]">
       <div className="flex flex-col justify-center p-6 sm:p-10">
-        <p className="folio-label text-primary">No manuscripts yet</p>
+        <p className="folio-label text-primary">{copy.label}</p>
         <div className="mt-5 max-w-lg space-y-3">
           <h2 className="text-2xl font-semibold tracking-[-0.025em] text-balance sm:text-3xl">
-            Your first book starts with a brief.
+            {copy.title}
           </h2>
           <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-            Describe the story in your own words. The production moves through concept, outline,
-            chapters, editing, and continuity—with credits quoted before anything begins.
+            {copy.description}
           </p>
         </div>
         <Button
-          render={<Link href="/studio/new" />}
+          render={<Link href={copy.href} />}
           nativeButton={false}
           size="lg"
           className="mt-7 w-fit rounded-sm"
         >
           <PenLine aria-hidden="true" data-icon="inline-start" />
-          Start a brief
+          {copy.action}
           <ArrowRight aria-hidden="true" data-icon="inline-end" />
         </Button>
       </div>

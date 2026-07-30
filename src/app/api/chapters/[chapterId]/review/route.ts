@@ -1,8 +1,14 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { reviewChapter } from "@/ai/agents/editor";
-import { meteredCallAuthorizationUsd, refundMeteredDelivery, type MeterCtx } from "@/ai/metering";
+import {
+  completeMeteredDelivery,
+  healReplayedMeteredDelivery,
+  meteredCallAuthorizationUsd,
+  refundMeteredDelivery,
+  type MeterCtx,
+} from "@/ai/metering";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getChapterById, getChapterOwnership } from "@/db/queries/books";
@@ -12,6 +18,7 @@ import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/cre
 import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
 import { resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
+import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
 
 export const maxDuration = 300;
 
@@ -43,10 +50,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  // Bound repeated paid-work requests before atomic provider authorization.
-  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
-  if (limited.limited) return limited.response;
-
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {
     return Response.json({ error: "Chapter not found" }, { status: 404 });
@@ -71,6 +74,30 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "Chapter not found" }, { status: 404 });
   }
 
+  const db = getDb();
+  const replayed = await db
+    .select()
+    .from(schema.suggestions)
+    .where(
+      and(
+        eq(schema.suggestions.chapterId, chapterId),
+        eq(schema.suggestions.passType, "review"),
+        sql`${schema.suggestions.anchor}->>'operationKey' = ${idempotencyKey}`,
+      ),
+    );
+  if (replayed.length > 0) {
+    await healReplayedMeteredDelivery({
+      userId,
+      projectId: ownership.projectId,
+      idempotencyKey,
+    });
+    return Response.json({ suggestions: replayed.map(toSuggestionDTO), skipped: 0 });
+  }
+
+  // Replays above are read-only; only a new paid review consumes the limit.
+  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
+  if (limited.limited) return limited.response;
+
   const chapter = await getChapterById(chapterId);
   if (!chapter) return Response.json({ error: "Chapter not found" }, { status: 404 });
   if (!chapter.content.trim()) {
@@ -83,7 +110,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     );
   }
 
-  const db = getDb();
+  const spendDenied = await authorizeProjectSpend({
+    userId,
+    projectId: ownership.projectId,
+    operationKind: "optional",
+  });
+  if (spendDenied) return spendDenied;
+
   const [project] = await db
     .select({ settings: schema.projects.settings })
     .from(schema.projects)
@@ -121,6 +154,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       instruction: parsed.data.instruction,
     });
   } catch (error) {
+    const spendResponse = projectSpendAccessErrorResponse(error);
+    if (spendResponse) return spendResponse;
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: error.message }, { status: 402 });
     }
@@ -146,7 +181,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       passType: "review",
       suggestionType: s.category,
       severity: s.severity,
-      anchor: { start: range.start, end: range.end, originalText: s.anchorText },
+      anchor: {
+        start: range.start,
+        end: range.end,
+        originalText: s.anchorText,
+        operationKey: idempotencyKey,
+      },
       suggestedText: s.replacement,
       explanation: s.rationale,
       // The focus the author asked for, if any — same reasoning as the
@@ -175,6 +215,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   // Order by anchor position so the panel reads top-to-bottom.
   rows.sort((a, b) => a.anchor.start - b.anchor.start);
 
+  await completeMeteredDelivery(meter);
   return Response.json({ suggestions: rows.map(toSuggestionDTO), skipped });
 }
 

@@ -1,5 +1,6 @@
 import { CREDIT_PACKS } from "@/lib/billing/credits-shared";
 import { FAQS, PIPELINE_STEPS } from "@/components/marketing/content";
+import { INCLUDED_STORY_DESCRIPTION, INCLUDED_STORY_OFFER } from "@/lib/marketing/trial-offer";
 
 /**
  * Structured data. Two audiences, one payload:
@@ -84,14 +85,25 @@ export function ProductJsonLd() {
         publisher: { "@id": `${SITE_URL}/#organization` },
         description:
           "Describe the book in your head and sopher.ai plans it, writes every chapter in parallel, edits the manuscript, and checks continuity across the whole book.",
-        offers: CREDIT_PACKS.map((pack) => ({
-          "@type": "Offer",
-          name: `${pack.name} — ${pack.credits} credits`,
-          price: pack.usd.toFixed(2),
-          priceCurrency: "USD",
-          category: "Prepaid credits",
-          url: `${SITE_URL}/pricing`,
-        })),
+        offers: [
+          {
+            "@type": "Offer",
+            name: INCLUDED_STORY_OFFER,
+            description: INCLUDED_STORY_DESCRIPTION,
+            price: "0.00",
+            priceCurrency: "USD",
+            category: "Included short story",
+            url: `${SITE_URL}/pricing`,
+          },
+          ...CREDIT_PACKS.map((pack) => ({
+            "@type": "Offer",
+            name: `${pack.name} — ${pack.credits} credits`,
+            price: pack.usd.toFixed(2),
+            priceCurrency: "USD",
+            category: "Prepaid credits",
+            url: `${SITE_URL}/pricing`,
+          })),
+        ],
         featureList: PIPELINE_STEPS.map((step) => `${step.name}: ${step.description}`),
       }}
     />

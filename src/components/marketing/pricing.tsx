@@ -1,8 +1,9 @@
 import { Check } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
-import { CREDIT_PACKS, SIGNUP_GRANT_CREDITS, type CreditPack } from "@/lib/billing/credits-shared";
+import { CREDIT_PACKS, type CreditPack } from "@/lib/billing/credits-shared";
 import { PUBLIC_BOOK_WORDS, PUBLIC_TIER_COST_ROWS } from "@/lib/billing/public-pricing";
+import { INCLUDED_STORY_DESCRIPTION, INCLUDED_STORY_OFFER } from "@/lib/marketing/trial-offer";
 import { cn } from "@/lib/utils";
 
 /**
@@ -115,9 +116,12 @@ export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
               — drafting, editing, diagrams, portraits — and every book comes with a full report of
               where they went.
             </p>
-            <p className="mt-7 border-l border-ion pl-4 text-sm font-medium text-ion">
-              New accounts start with {SIGNUP_GRANT_CREDITS} free credits.
-            </p>
+            <div className="mt-7 border-l border-ion pl-4">
+              <p className="text-sm font-semibold text-ion">{INCLUDED_STORY_OFFER}</p>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+                {INCLUDED_STORY_DESCRIPTION}
+              </p>
+            </div>
           </div>
 
           <div className="border-t border-black/10 pt-5 dark:border-white/10 lg:col-span-5">
@@ -143,7 +147,18 @@ export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
           </div>
         </div>
 
-        <ul aria-label="Credit packs" className="mt-14 grid gap-4 md:grid-cols-2">
+        <div className="mt-14 flex items-end justify-between gap-5 border-b border-black/10 pb-4 dark:border-white/10">
+          <div>
+            <p className="folio-label text-muted-foreground">After your included story</p>
+            <SubHeading className="mt-2 font-display text-2xl font-semibold tracking-[-0.03em]">
+              Choose a credit pack
+            </SubHeading>
+          </div>
+          <p className="hidden max-w-md text-right text-sm leading-6 text-muted-foreground md:block">
+            A settled purchase permanently unlocks full-length book controls. Credits never expire.
+          </p>
+        </div>
+        <ul aria-label="Credit packs" className="mt-5 grid gap-4 md:grid-cols-2">
           {CREDIT_PACKS.map((pack) => (
             <li key={pack.id}>
               <PackOffer pack={pack} featured={pack.id === "author"} headingLevel={headingLevel} />
