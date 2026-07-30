@@ -20,7 +20,7 @@ jobs:
             echo "Filesystem-sync duplicate files are tracked; remove them." >&2
             exit 1
           fi
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -59,7 +59,7 @@ jobs:
       E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -87,7 +87,7 @@ jobs:
     needs: check
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
           node-version: 24
