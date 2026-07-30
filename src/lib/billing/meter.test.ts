@@ -135,6 +135,46 @@ describe("recordLlmCallsAndDebit", () => {
     expect(mocks.cacheDelete).toHaveBeenCalledWith("spend:user-1");
   });
 
+  it("atomically refunds incomplete interactive output and releases its project lease", async () => {
+    let queries: Array<{ strings: TemplateStringsArray; values: unknown[] }> = [];
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      queries = build(tx);
+      return [
+        [],
+        [],
+        [{ recorded: true, authorized: "1", required: "0.0193", debited_credits: "0.0193" }],
+      ];
+    });
+    const interactiveRecord = {
+      ...firstRecord,
+      runId: null,
+    };
+    const interactiveDebit = {
+      ...debit,
+      compensateDelivery: {
+        description: "Provider output was incomplete and not delivered",
+      },
+    };
+
+    await expect(
+      recordLlmCallsAndDebit([interactiveRecord], interactiveDebit),
+    ).resolves.toMatchObject({
+      debitedCredits: 0.0193,
+    });
+
+    expect(queries).toHaveLength(3);
+    expect(queries[0].strings.join("?")).toContain("sopher:project-authoring:");
+    expect(queries[1].strings.join("?")).toContain("pg_advisory_xact_lock");
+    const settlementSql = queries[2].strings.join("?");
+    const settlementValues = queries[2].values.map(String).join("\n");
+    expect(settlementSql).toContain("delivery_refund");
+    expect(settlementSql).toContain("compensated_optional_lease_release");
+    expect(settlementValues).toContain(
+      `release:optional-operation-lease:${interactiveDebit.intentRef}`,
+    );
+  });
+
   it("fails closed without invalidating cache when the claim cannot authorize settlement", async () => {
     mocks.transaction.mockImplementation(async (build) => {
       const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
@@ -399,6 +439,44 @@ describe("metered intent authorization", () => {
     expect(queries[2].values.map(String).join("\n")).toContain("optional-operation-lease:");
     expect(sqlText).toContain("> ?");
     expect(queries[2].values.map(String)).toContain("10");
+  });
+
+  it("restores the trial cap only for an exact delivery refund, not unrelated adjustments", async () => {
+    let authorizationSql = "";
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      authorizationSql = queries.at(-1)!.strings.join("?");
+      return [[], [{ status: "started", balance: "10", required: "0" }]];
+    });
+
+    await beginMeteredCallIntent({
+      userId: "user-1",
+      projectId: firstRecord.projectId,
+      runId: firstRecord.runId,
+      intentRef: debit.intentRef,
+      intentPrefix: "metering-intent:generation:run-1:chapter:1:writer.draft:attempt:",
+      usagePrefix: debit.externalRefPrefix,
+      parentReservationRef: "generation-reservation:run-1:wave-1",
+      maxCredits: 1,
+      description: "Metering intent for writer.draft",
+    });
+
+    const trialSpendSql = authorizationSql.slice(
+      authorizationSql.indexOf("trial_spend as materialized"),
+      authorizationSql.indexOf("trial_cap_blocked as materialized"),
+    );
+    expect(trialSpendSql).toContain("where entry.kind = 'usage'");
+    expect(trialSpendSql).toContain("from credit_ledger compensated");
+    expect(trialSpendSql).toContain("compensated.user_id = entry.user_id");
+    expect(trialSpendSql).toContain("compensated.kind = 'adjustment'");
+    expect(trialSpendSql).toContain("compensated.amount > 0");
+    expect(trialSpendSql).toContain(
+      "'delivery-refund:' ||\n                    regexp_replace(entry.external_ref, ':step:[0-9]+$', '')",
+    );
+    expect(trialSpendSql).not.toMatch(
+      /sum\(entry\.amount\)\s+filter\s*\(\s*where entry\.kind = 'adjustment'\s+and entry\.amount > 0/i,
+    );
   });
 
   it("rechecks suspension inside the wallet-locked authorization transaction", async () => {

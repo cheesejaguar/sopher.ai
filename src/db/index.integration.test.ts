@@ -21,7 +21,7 @@ import {
   updateProjectTransaction,
 } from "@/lib/project-transaction-operations";
 import { deleteClerkUserTransaction } from "@/lib/account-deletion-transaction";
-import { beginMeteredCallIntent } from "@/lib/billing/meter";
+import { beginMeteredCallIntent, recordLlmCallsAndDebit } from "@/lib/billing/meter";
 
 function isolatedDatabaseUrl(): string | null {
   const isolated = process.env.E2E_DATABASE_ISOLATED;
@@ -406,6 +406,135 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
       expect(over.status).toBe("trial_cap");
     } finally {
       await observer`delete from users where id = ${fixture.userId}`;
+    }
+  });
+
+  it("atomically compensates incomplete interactive output and releases its project lease", async () => {
+    const userId = `e2e-metering-compensation-${suffix}`;
+    const projectId = randomUUID();
+    const intentRef = `metering-intent:interactive:${userId}:concept:attempt:one`;
+    const externalRefPrefix = `llm:interactive:${userId}:concept:attempt:one`;
+    try {
+      await observer`
+        insert into users (id, email)
+        values (${userId}, ${`${userId}@example.test`})
+      `;
+      await observer`
+        insert into projects (
+          id, user_id, title, brief, genre, experience,
+          target_chapters, target_words_per_chapter, settings
+        )
+        values (
+          ${projectId}, ${userId}, 'Compensation fixture',
+          'A disposable interactive metering fixture', 'fantasy',
+          'trial_short_story', 3, 1000, '{}'::jsonb
+        )
+      `;
+      await observer`
+        insert into credit_ledger (
+          user_id, amount, kind, description, project_id, external_ref
+        )
+        values (
+          ${userId}, 10, 'grant', 'Included story fixture',
+          ${projectId}, ${`metering-grant:compensation:${suffix}`}
+        )
+      `;
+
+      const intent = await beginMeteredCallIntent({
+        userId,
+        projectId,
+        intentRef,
+        intentPrefix: `metering-intent:interactive:${userId}:concept:attempt:`,
+        usagePrefix: `llm:interactive:${userId}:concept:`,
+        maxCredits: 1,
+        description: "Interactive compensated output",
+      });
+      expect(intent).toMatchObject({
+        status: "started",
+        optionalLeaseRef: `optional-operation-lease:${intentRef}`,
+      });
+      if (intent.status !== "started") throw new Error("Compensation fixture was not authorized");
+
+      const record = {
+        userId,
+        projectId,
+        runId: null,
+        agentRole: "concept",
+        operation: "concept.refine",
+        model: "anthropic/claude-sonnet-5",
+        usage: {
+          inputTokens: 1_000,
+          outputTokens: 500,
+          cachedInputTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      };
+      const debit = {
+        description: "concept.refine",
+        externalRefPrefix,
+        intentRef,
+        reservationRef: intent.reservationRef,
+        compensateDelivery: {
+          description: "Provider output was incomplete and not delivered",
+        },
+      };
+
+      const settled = await recordLlmCallsAndDebit([record], debit);
+      await expect(recordLlmCallsAndDebit([record], debit)).resolves.toEqual(settled);
+
+      const facts = firstRow<{
+        calls: number;
+        usages: number;
+        refunds: number;
+        claimReleases: number;
+        optionalLeaseReleases: number;
+        balance: string;
+      }>(
+        await observer`
+          select
+            (
+              select count(*)::int from llm_calls
+              where user_id = ${userId} and operation = 'concept.refine'
+            ) as calls,
+            count(*) filter (
+              where kind = 'usage'
+                and external_ref like ${`${externalRefPrefix}:%`}
+            )::int as usages,
+            count(*) filter (
+              where external_ref = ${`delivery-refund:${externalRefPrefix}`}
+            )::int as refunds,
+            count(*) filter (
+              where external_ref = ${`release:${intent.reservationRef}`}
+            )::int as "claimReleases",
+            count(*) filter (
+              where external_ref = ${`release:optional-operation-lease:${intentRef}`}
+            )::int as "optionalLeaseReleases",
+            coalesce(sum(amount), 0)::text as balance
+          from credit_ledger
+          where user_id = ${userId}
+        `,
+      );
+      expect(facts).toMatchObject({
+        calls: 1,
+        usages: 1,
+        refunds: 1,
+        claimReleases: 1,
+        optionalLeaseReleases: 1,
+      });
+      expect(Number(facts?.balance)).toBe(10);
+
+      const restoredCap = await beginMeteredCallIntent({
+        userId,
+        projectId,
+        intentRef: `metering-intent:interactive:${userId}:after-refund:attempt:one`,
+        intentPrefix: `metering-intent:interactive:${userId}:after-refund:attempt:`,
+        usagePrefix: `llm:interactive:${userId}:after-refund:`,
+        maxCredits: 10,
+        description: "Refund restored included-story capacity",
+      });
+      expect(restoredCap.status).toBe("started");
+    } finally {
+      await observer`delete from users where id = ${userId}`;
     }
   });
 

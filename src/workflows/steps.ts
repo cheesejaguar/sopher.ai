@@ -29,6 +29,7 @@ import {
   releaseCreditReservation,
   reserveCredits,
 } from "@/lib/billing/credits";
+import { netRunCreditsUsedSql } from "@/lib/billing/run-spend";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { listEntities, seedEntities } from "@/db/queries/entities";
 import { sendBookFinishedEmail, sendCreditsPausedEmail } from "@/lib/email/send";
@@ -116,12 +117,10 @@ export async function emitCost(ref: RunRef) {
       .where(eq(schema.llmCalls.runId, ref.dbRunId)),
     db
       .select({
-        total: sql<string>`coalesce(-sum(${schema.creditLedger.amount}), 0)`,
+        total: netRunCreditsUsedSql(),
       })
       .from(schema.creditLedger)
-      .where(
-        and(eq(schema.creditLedger.runId, ref.dbRunId), eq(schema.creditLedger.kind, "usage")),
-      ),
+      .where(eq(schema.creditLedger.runId, ref.dbRunId)),
   ]);
   const event = runCostEvent(Number(provider?.total ?? 0), Number(ledger?.total ?? 0));
   await writeEvent(PROGRESS_NS, event);
