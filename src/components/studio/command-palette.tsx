@@ -39,8 +39,15 @@ function CommandPaletteInner() {
         setOpen((prev) => !prev);
       }
     }
+    function onOpenRequest() {
+      setOpen(true);
+    }
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("sopher:open-command-palette", onOpenRequest);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("sopher:open-command-palette", onOpenRequest);
+    };
   }, []);
 
   const projectMatch = pathname?.match(/^\/projects\/([^/]+)/);
@@ -64,17 +71,34 @@ function CommandPaletteInner() {
           <CommandItem onSelect={() => go("/studio/settings")}>Settings</CommandItem>
         </CommandGroup>
         {projectId ? (
-          <CommandGroup heading="This book">
+          <CommandGroup heading="Plan">
             <CommandItem onSelect={() => go(`/projects/${projectId}/brief`)}>Brief</CommandItem>
             <CommandItem onSelect={() => go(`/projects/${projectId}/outline`)}>Outline</CommandItem>
+          </CommandGroup>
+        ) : null}
+        {projectId ? (
+          <CommandGroup heading="Produce">
             <CommandItem onSelect={() => go(`/projects/${projectId}/bible`)}>
               Story bible
             </CommandItem>
             <CommandItem onSelect={() => go(`/projects/${projectId}/write`)}>Write</CommandItem>
+          </CommandGroup>
+        ) : null}
+        {projectId ? (
+          <CommandGroup heading="Refine">
             <CommandItem onSelect={() => go(`/projects/${projectId}/editor`)}>Editor</CommandItem>
+          </CommandGroup>
+        ) : null}
+        {projectId ? (
+          <CommandGroup heading="Publish">
             <CommandItem onSelect={() => go(`/projects/${projectId}/manuscript`)}>
               Manuscript
             </CommandItem>
+          </CommandGroup>
+        ) : null}
+        {projectId ? (
+          <CommandGroup heading="Project">
+            <CommandItem onSelect={() => go(`/projects/${projectId}/usage`)}>Usage</CommandItem>
             <CommandItem onSelect={() => go(`/projects/${projectId}/settings`)}>
               Project settings
             </CommandItem>

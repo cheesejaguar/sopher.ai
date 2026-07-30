@@ -53,7 +53,7 @@ export function CreditsBanner({
   }
 
   return (
-    <div className="rounded-xl border border-ember/40 bg-ember/5 px-4 py-3">
+    <div className="rounded-sm border border-ember/40 bg-ember/5 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <Wallet aria-hidden="true" className="size-4 shrink-0 text-ember" />
@@ -65,7 +65,7 @@ export function CreditsBanner({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             render={

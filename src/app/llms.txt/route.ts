@@ -1,4 +1,5 @@
-import { CREDIT_PACKS } from "@/lib/billing/credits-shared";
+import { CREDIT_PACKS, SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
+import { PUBLIC_BOOK_COST_RANGE } from "@/lib/billing/public-pricing";
 import { FAQS, PIPELINE_STEPS } from "@/components/marketing/content";
 import { SITE_URL } from "@/components/seo/json-ld";
 import { GENRE_PAGES } from "@/lib/marketing/genre-pages";
@@ -36,7 +37,7 @@ function body(): string {
 
   return `# sopher.ai
 
-> Describe a book in a sentence and sopher.ai plans it, writes every chapter, and edits the whole manuscript. A brief becomes a finished, exportable book — usually in under an hour.
+> Describe a book in a sentence and sopher.ai plans it, writes every chapter, and edits the whole manuscript. A brief becomes a finished, editable, exportable book.
 
 ## What it is
 
@@ -54,8 +55,8 @@ passage, regenerate a chapter, or edit the prose directly.
 
 ${steps}
 
-Chapters are drafted four at a time, which is why a thirty-chapter novel does
-not take thirty times as long as one chapter.
+Chapters are drafted in parallel waves while the shared outline and story bible
+keep the manuscript coordinated.
 
 ## What it costs
 
@@ -65,8 +66,8 @@ where they went.
 
 ${packs}
 
-A finished novella typically runs about 21–36 credits depending on the quality
-tier chosen. New accounts start with 10 free credits. Purchased credits do not
+A finished novella typically runs about ${PUBLIC_BOOK_COST_RANGE} credits depending on the quality
+tier chosen. New accounts start with ${SIGNUP_GRANT_CREDITS} free credits. Purchased credits do not
 expire; unspent credits are not refundable.
 
 ## Who owns the output

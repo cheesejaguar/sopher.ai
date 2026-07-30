@@ -10,10 +10,19 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { listChapterRevisions, restoreChapterRevision } from "@/lib/actions/chapters";
 import { wordDiff } from "@/lib/editor/word-diff";
+import { cn } from "@/lib/utils";
+
+import { useMediaQuery } from "./use-media-query";
 
 type Revision = {
   id: string;
@@ -50,6 +59,7 @@ export function HistoryPanel({
   getCurrentContent,
   flush,
   onRestored,
+  compact = false,
 }: {
   chapterId: string;
   /** Called when the dialog opens; serializing the doc per keystroke would be waste. */
@@ -61,7 +71,10 @@ export function HistoryPanel({
    */
   flush: () => Promise<boolean>;
   onRestored: (content: string, version: number) => void;
+  /** Icon-only 44px trigger used by the phone editor toolbar. */
+  compact?: boolean;
 }) {
+  const isPhone = useMediaQuery("(max-width: 767px)");
   const [open, setOpen] = useState(false);
   const [currentContent, setCurrentContent] = useState("");
   const [revisions, setRevisions] = useState<Revision[] | null>(null);
@@ -91,13 +104,20 @@ export function HistoryPanel({
   function restore(revision: Revision) {
     setError(null);
     startTransition(async () => {
-      // Unsaved keystrokes must reach the server before the snapshot happens.
-      await flush();
-      const result = await restoreChapterRevision(chapterId, revision.id);
-      if (result.ok) {
-        onRestored(revision.content, result.version);
-        setOpen(false);
-      } else {
+      try {
+        // Unsaved keystrokes must reach the server before the snapshot happens.
+        if (!(await flush())) {
+          setError("Save the chapter or resolve its conflict before restoring a revision");
+          return;
+        }
+        const result = await restoreChapterRevision(chapterId, revision.id);
+        if (result.ok) {
+          onRestored(revision.content, result.version);
+          setOpen(false);
+        } else {
+          setError("Could not restore this revision");
+        }
+      } catch {
         setError("Could not restore this revision");
       }
     });
@@ -105,109 +125,150 @@ export function HistoryPanel({
 
   const diff = selected ? wordDiff(currentContent, selected.content) : [];
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        // Snapshot the doc at open time — an event handler, not an effect, so
-        // there is no render cascade and the diff base is stable for the visit.
-        if (next) setCurrentContent(getCurrentContent());
-        setOpen(next);
-        if (!next) {
-          setRevisions(null);
-          setSelected(null);
-          setError(null);
-        }
-      }}
-    >
-      <DialogTrigger render={<Button variant="ghost" size="sm" aria-label="Chapter history" />}>
-        <History aria-hidden="true" className="size-3.5" />
-        History
-      </DialogTrigger>
-      <DialogContent className="max-h-[80dvh] sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>Chapter history</DialogTitle>
-          <DialogDescription>
-            Saved snapshots of this chapter. Restoring keeps a copy of today&rsquo;s text, so
-            nothing is lost by looking around.
-          </DialogDescription>
-        </DialogHeader>
+  function changeOpen(next: boolean) {
+    // Snapshot the doc at open time — an event handler, not an effect, so
+    // there is no render cascade and the diff base is stable for the visit.
+    if (next) setCurrentContent(getCurrentContent());
+    setOpen(next);
+    if (!next) {
+      setRevisions(null);
+      setSelected(null);
+      setError(null);
+    }
+  }
 
-        {revisions === null && !error ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-            <Loader2 aria-hidden="true" className="size-4 animate-spin" /> Loading history…
-          </div>
-        ) : null}
-        {error ? (
-          <p role="alert" className="py-4 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        {revisions?.length === 0 ? (
-          <p className="py-6 text-sm text-muted-foreground">
-            No snapshots yet — the history fills in as you write and edit.
-          </p>
-        ) : null}
+  const historyBody = (
+    <>
+      {revisions === null && !error ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+          <Loader2 aria-hidden="true" className="size-4 animate-spin" /> Loading history…
+        </div>
+      ) : null}
+      {error ? (
+        <p role="alert" className="py-4 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {revisions?.length === 0 ? (
+        <p className="py-6 text-sm text-muted-foreground">
+          No snapshots yet — the history fills in as you write and edit.
+        </p>
+      ) : null}
 
-        {revisions && revisions.length > 0 ? (
-          <div className="grid min-h-0 gap-4 sm:grid-cols-[14rem_minmax(0,1fr)]">
-            <ul
-              aria-label="Revisions"
-              className="max-h-[50dvh] space-y-1 overflow-y-auto pr-1 text-sm"
+      {revisions && revisions.length > 0 ? (
+        <div className="grid min-h-0 gap-4 sm:grid-cols-[14rem_minmax(0,1fr)]">
+          <ul
+            aria-label="Revisions"
+            className="max-h-[32dvh] space-y-1 overflow-y-auto pr-1 text-sm sm:max-h-[50dvh]"
+          >
+            {revisions.map((revision) => (
+              <li key={revision.id}>
+                <button
+                  type="button"
+                  onClick={() => setSelected(revision)}
+                  aria-pressed={selected?.id === revision.id}
+                  className={cn(
+                    "min-h-11 w-full rounded-sm px-3 py-2 text-left transition-colors sm:min-h-0 sm:px-2 sm:py-1.5",
+                    selected?.id === revision.id
+                      ? "bg-accent text-accent-foreground"
+                      : "hover:bg-accent/60",
+                  )}
+                >
+                  <span className="block font-medium">
+                    {SOURCE_LABELS[revision.source] ?? revision.source}
+                  </span>
+                  <span className="block font-mono text-[11px] text-muted-foreground">
+                    {timestamp(revision.createdAt)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          <div className="flex min-h-0 flex-col gap-3">
+            <div
+              aria-label="Difference against the current text"
+              tabIndex={0}
+              className="max-h-[42dvh] overflow-y-auto rounded-sm border border-border bg-muted/30 p-3 font-serif text-sm leading-relaxed sm:max-h-[44dvh]"
             >
-              {revisions.map((revision) => (
-                <li key={revision.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(revision)}
-                    aria-pressed={selected?.id === revision.id}
-                    className={`w-full rounded-md px-2 py-1.5 text-left transition-colors ${
-                      selected?.id === revision.id
-                        ? "bg-accent text-accent-foreground"
-                        : "hover:bg-accent/60"
-                    }`}
-                  >
-                    <span className="block font-medium">
-                      {SOURCE_LABELS[revision.source] ?? revision.source}
-                    </span>
-                    <span className="block font-mono text-[11px] text-muted-foreground">
-                      {timestamp(revision.createdAt)}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-
-            <div className="flex min-h-0 flex-col gap-3">
-              <div
-                aria-label="Difference against the current text"
-                className="max-h-[44dvh] overflow-y-auto rounded-md border border-border bg-muted/30 p-3 font-serif text-sm leading-relaxed"
-              >
-                {diff.map((part, i) =>
-                  part.type === "same" ? (
-                    <span key={i}>{part.text}</span>
-                  ) : part.type === "del" ? (
-                    // Deleted relative to the revision = present today only.
-                    <del key={i} className="bg-destructive/15 text-destructive no-underline">
-                      {part.text}
-                    </del>
-                  ) : (
-                    <ins key={i} className="bg-ai-soft text-ai no-underline">
-                      {part.text}
-                    </ins>
-                  ),
-                )}
-              </div>
-              {selected ? (
-                <Button onClick={() => restore(selected)} disabled={pending} className="self-end">
-                  {pending ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
-                  {pending ? "Restoring…" : "Restore this version"}
-                </Button>
-              ) : null}
+              {diff.map((part, i) =>
+                part.type === "same" ? (
+                  <span key={i}>{part.text}</span>
+                ) : part.type === "del" ? (
+                  // Deleted relative to the revision = present today only.
+                  <del key={i} className="bg-destructive/15 text-destructive no-underline">
+                    {part.text}
+                  </del>
+                ) : (
+                  <ins key={i} className="bg-ai-soft text-ai no-underline">
+                    {part.text}
+                  </ins>
+                ),
+              )}
             </div>
+            {selected ? (
+              <Button
+                onClick={() => restore(selected)}
+                disabled={pending}
+                className="min-h-11 self-stretch sm:min-h-0 sm:self-end"
+              >
+                {pending ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
+                {pending ? "Restoring…" : "Restore this version"}
+              </Button>
+            ) : null}
           </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
+        </div>
+      ) : null}
+    </>
+  );
+
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size={compact ? "icon-lg" : "sm"}
+        aria-label="Chapter history"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        className={cn(compact && "size-11 rounded-sm text-muted-foreground hover:text-foreground")}
+        onClick={() => changeOpen(true)}
+      >
+        <History aria-hidden="true" className="size-3.5" />
+        {compact ? null : "History"}
+      </Button>
+
+      {isPhone ? (
+        <Sheet open={open} onOpenChange={changeOpen}>
+          <SheetContent
+            side="right"
+            className="h-dvh w-full max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
+          >
+            <SheetHeader className="safe-area-top shrink-0 border-b border-border px-4 pb-3 pr-14">
+              <SheetTitle>Chapter history</SheetTitle>
+              <SheetDescription>
+                Saved snapshots of this chapter. Restoring keeps a copy of today&rsquo;s text.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="safe-area-bottom min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {historyBody}
+            </div>
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <Dialog open={open} onOpenChange={changeOpen}>
+          <DialogContent className="max-h-[80dvh] sm:max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Chapter history</DialogTitle>
+              <DialogDescription>
+                Saved snapshots of this chapter. Restoring keeps a copy of today&rsquo;s text, so
+                nothing is lost by looking around.
+              </DialogDescription>
+            </DialogHeader>
+            {historyBody}
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

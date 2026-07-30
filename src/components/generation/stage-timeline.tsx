@@ -137,7 +137,9 @@ export function StageTimeline({
           keyboard — it holds no focusable children of its own. */}
       <ol
         tabIndex={0}
-        className="flex items-center gap-3 overflow-x-auto rounded-xl bg-card px-4 py-3 ring-1 ring-foreground/10"
+        role="region"
+        aria-label="Generation stage timeline"
+        className="instrument-surface flex items-center gap-3 overflow-x-auto rounded-sm px-4 py-3"
       >
         {steps.map((step, index) => {
           const state = stepState(step, stage);

@@ -69,7 +69,7 @@ export function OutlineEditor({ projectId, outline }: { projectId: string; outli
   }
 
   return (
-    <div className="space-y-4 rounded-xl border border-border bg-card p-4">
+    <div className="instrument-surface space-y-4 rounded-sm p-4">
       <p className="text-sm text-muted-foreground">
         Edits apply to future writing — regenerating a chapter follows the outline you leave here.
         The agents&rsquo; original version stays in the outline history.

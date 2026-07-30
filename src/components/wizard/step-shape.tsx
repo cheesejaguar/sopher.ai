@@ -123,7 +123,7 @@ export function StepShape({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 rounded-xl border bg-card p-5 sm:grid-cols-[1fr_auto]">
+      <div className="instrument-surface grid gap-6 rounded-sm p-5 sm:grid-cols-[1fr_auto]">
         <div className="space-y-6">
           <div className="space-y-2.5">
             <div className="flex items-baseline justify-between gap-3">
@@ -183,7 +183,7 @@ export function StepShape({
         </div>
       </div>
 
-      <div className="space-y-4 rounded-xl border bg-card p-5">
+      <div className="instrument-surface space-y-4 rounded-sm p-5">
         <p className="text-sm font-medium">Voice and perspective</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">

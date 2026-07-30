@@ -58,10 +58,10 @@ export function ProjectSettingsForm({
   }
 
   const selectClass =
-    "border-input bg-transparent focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-sm shadow-xs focus-visible:ring-[3px] outline-none";
+    "border-input bg-transparent focus-visible:border-ring focus-visible:ring-ring h-11 w-full rounded-sm border px-3 text-sm shadow-xs focus-visible:ring-[3px] outline-none sm:h-9";
 
   return (
-    <form action={submit} className="space-y-5">
+    <form action={submit} className="instrument-surface space-y-5 rounded-sm p-5 sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="ps-genre">Genre</Label>
@@ -161,7 +161,7 @@ export function ProjectSettingsForm({
         />
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={pending}>
           {pending ? "Saving…" : "Save settings"}
         </Button>

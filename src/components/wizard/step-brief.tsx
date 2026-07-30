@@ -2,7 +2,6 @@
 
 import { ChevronDown } from "lucide-react";
 
-import { cn } from "@/lib/utils";
 import { genreLabel, type GenreId } from "@/lib/genres";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
@@ -61,15 +60,12 @@ export function StepBrief({
           rows={10}
           required
           aria-describedby="wizard-brief-hint"
-          className="prose-manuscript mx-auto mt-6 block w-full resize-none bg-transparent outline-none placeholder:text-paper-muted/70"
+          className="prose-manuscript mx-auto mt-6 block w-full resize-none bg-transparent outline-none placeholder:text-paper-muted"
         />
         {/* Deliberately not a live region: it changes on every keystroke. */}
         <p
           id="wizard-brief-hint"
-          className={cn(
-            "mt-4 text-center font-mono text-xs tabular-nums",
-            briefLength >= MIN_BRIEF_LENGTH ? "text-paper-muted" : "text-paper-muted/70",
-          )}
+          className="mt-4 text-center font-mono text-xs text-paper-muted tabular-nums"
         >
           {briefLength >= MIN_BRIEF_LENGTH
             ? `${briefLength.toLocaleString("en-US")} characters`
@@ -91,7 +87,7 @@ export function StepBrief({
           Add details — title, protagonist, setting (optional)
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="mt-3 grid gap-4 rounded-xl border bg-card p-4 sm:grid-cols-3">
+          <div className="instrument-surface mt-3 grid gap-4 rounded-sm p-4 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="wizard-title">Working title</Label>
               <Input

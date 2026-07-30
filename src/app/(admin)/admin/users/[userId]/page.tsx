@@ -15,6 +15,7 @@ import { RelativeTime } from "@/components/relative-time";
 import { formatCredits, formatUsd } from "@/components/usage/format";
 import { getUserDetail } from "@/db/queries/admin";
 import { requireAdmin } from "@/lib/auth";
+import { PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "User — admin" };
 
@@ -27,32 +28,30 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ us
 
   return (
     <div className="space-y-8">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight">{user.email}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {user.name ?? "No name"} · joined <RelativeTime iso={user.createdAt.toISOString()} />
-            {user.role === "admin" ? " · admin" : ""}
-            {user.suspended ? " · SUSPENDED" : ""}
-          </p>
-          <p className="mt-1 font-mono text-sm tabular-nums">
-            {formatCredits(balance)} balance · {formatUsd(callStats.usd)} metered over{" "}
-            {callStats.calls} calls
-          </p>
-        </div>
-        <UserActions
-          userId={user.id}
-          email={user.email}
-          suspended={user.suspended}
-          isSelf={user.id === adminId}
-        />
-      </header>
+      <PageHeader
+        label="Admin / Account detail"
+        title={user.email}
+        description={`${user.name ?? "No name"} · ${user.role === "admin" ? "admin · " : ""}${
+          user.suspended ? "suspended · " : ""
+        }${formatCredits(balance)} balance · ${formatUsd(callStats.usd)} metered over ${callStats.calls} calls`}
+        actions={
+          <UserActions
+            userId={user.id}
+            email={user.email}
+            suspended={user.suspended}
+            isSelf={user.id === adminId}
+          />
+        }
+      />
+      <p className="-mt-5 text-xs text-muted-foreground">
+        Joined <RelativeTime iso={user.createdAt.toISOString()} />
+      </p>
 
       <section aria-labelledby="u-projects" className="space-y-2">
         <h2 id="u-projects" className="font-sans font-semibold">
           Books · {projects.length}
         </h2>
-        <Table aria-label="User's books">
+        <Table aria-label="User's books" scrollLabel="User's books">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">Title</TableHead>
@@ -95,7 +94,7 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ us
         <h2 id="u-runs" className="font-sans font-semibold">
           Recent runs
         </h2>
-        <Table aria-label="User's runs">
+        <Table aria-label="User's runs" scrollLabel="User's runs">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">When</TableHead>
@@ -134,7 +133,7 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ us
         <h2 id="u-ledger" className="font-sans font-semibold">
           Ledger
         </h2>
-        <Table aria-label="Credit ledger">
+        <Table aria-label="Credit ledger" scrollLabel="Credit ledger">
           <TableHeader>
             <TableRow>
               <TableHead scope="col">When</TableHead>

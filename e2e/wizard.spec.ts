@@ -1,10 +1,9 @@
 /**
  * New-book wizard (/studio/new) — Genre → Brief → Shape → Estimate.
  *
- * DB-free by design: the page and its layout render no server data, and the
- * estimate step's POST /api/estimates is pure computation (src/app/api/
- * estimates/route.ts → estimateBookCost, quoted in credits). Balance context
- * rides on the same response; an unauthenticated quote simply omits it.
+ * Runs only in the isolated DB-backed projects. The estimate endpoint itself
+ * is pure computation, but ProductShell resolves the signed-in development
+ * identity and credit balance before rendering the page.
  *
  * The wizard is never submitted — "Start the book" writes to the DB and
  * kicks off a paid generation run.

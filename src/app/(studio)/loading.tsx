@@ -1,10 +1,12 @@
-import { Spinner } from "@/components/ui/spinner";
+import { AsyncState } from "@/components/studio/product-primitives";
 
 export default function StudioLoading() {
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3">
-      <Spinner className="size-5 text-muted-foreground" />
-      <p className="text-sm text-muted-foreground">Opening the studio…</p>
-    </div>
+    <AsyncState
+      status="loading"
+      title="Opening the studio"
+      description="Preparing your library and current production state."
+      className="min-h-[50vh]"
+    />
   );
 }

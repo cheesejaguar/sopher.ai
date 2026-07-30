@@ -1,8 +1,10 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { SignIn } from "@clerk/nextjs";
 import { clerkEnabled } from "@/lib/clerk";
 import { AuthPending } from "@/components/auth-pending";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AuthShell } from "../../auth-shell";
 
 export const metadata = {
   title: "Sign in",
@@ -11,20 +13,31 @@ export const metadata = {
   robots: { index: false, follow: true },
 };
 
-export default function SignInPage() {
+export default async function SignInPage() {
+  // Clerk's optional catch-all route depends on the incoming auth request.
+  await connection();
+
   return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="flex min-h-dvh items-center justify-center p-6 outline-none"
+    <AuthShell
+      mode="Sign in"
+      title="Return to your manuscript."
+      description="Open your library, continue a draft, or review the latest editorial pass. Your projects stay private to your account."
     >
       {clerkEnabled ? (
-        <Suspense fallback={<Skeleton className="h-96 w-96 max-w-full rounded-xl" />}>
-          <SignIn />
+        <Suspense fallback={<Skeleton className="h-96 w-full rounded-sm" />}>
+          <SignIn
+            appearance={{
+              elements: {
+                rootBox: "w-full",
+                cardBox: "w-full shadow-none",
+                card: "w-full rounded-sm border border-border shadow-none",
+              },
+            }}
+          />
         </Suspense>
       ) : (
         <AuthPending />
       )}
-    </main>
+    </AuthShell>
   );
 }

@@ -43,7 +43,7 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
     return (
       <div className="space-y-4">
         <h2 className="font-display text-xl font-semibold tracking-tight">Outline</h2>
-        <div className="paper-surface flex flex-col items-center gap-3 px-6 py-16 text-center">
+        <div className="manuscript-sheet flex flex-col items-center gap-3 px-6 py-16 text-center">
           <p className="font-serif text-lg text-paper-muted">No outline yet.</p>
           <p className="max-w-sm font-sans text-xs text-paper-muted">
             The Outliner drafts a chapter-by-chapter structure at the start of a run. Start writing
@@ -77,10 +77,8 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
         </div>
       </header>
 
-      <article className="paper-surface px-6 py-8 sm:px-10 sm:py-10">
-        <p className="font-sans text-xs tracking-widest text-paper-muted uppercase">
-          The plan, chapter by chapter
-        </p>
+      <article className="manuscript-sheet px-6 py-8 sm:px-10 sm:py-10">
+        <p className="folio-label text-paper-muted">The plan, chapter by chapter</p>
         <h3 className="mt-4 font-display text-2xl font-semibold tracking-tight text-balance text-paper-foreground">
           {outline.title}
         </h3>

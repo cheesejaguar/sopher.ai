@@ -52,7 +52,7 @@ export function LiveDraftPane({
 
   if (openTabs.length === 0) {
     return (
-      <div className="paper-surface flex min-h-72 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+      <div className="manuscript-sheet flex min-h-72 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
         <p className="font-serif text-lg text-paper-muted">
           {stage === "queued" || stage === "concept" || stage === "outline"
             ? "The writers take over once the outline is set."
@@ -70,7 +70,7 @@ export function LiveDraftPane({
 
   return (
     <Tabs value={active} onValueChange={(value) => setSelected(String(value))}>
-      <TabsList className="max-w-full overflow-x-auto">
+      <TabsList aria-label="Drafting chapters" className="max-w-full overflow-x-auto">
         {openTabs.map((n) => {
           const status = chapters.get(n)?.status;
           const live = status === "drafting";
@@ -165,7 +165,7 @@ function ChapterProseView({
         role="region"
         tabIndex={0}
         aria-label={`Chapter ${chapterNumber} draft`}
-        className="paper-surface max-h-[32rem] min-h-72 overflow-y-auto px-6 py-8 sm:px-10"
+        className="manuscript-sheet max-h-[32rem] min-h-72 overflow-y-auto px-6 py-8 sm:px-10"
       >
         <p className="font-sans text-xs tracking-widest text-paper-muted uppercase">
           Chapter {chapterNumber}
@@ -201,7 +201,7 @@ function ChapterProseView({
         <button
           type="button"
           onClick={jumpToLive}
-          className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-ai px-3 py-1.5 text-xs font-medium text-ai-foreground shadow-md transition-colors hover:bg-ai/90"
+          className="absolute bottom-4 left-1/2 flex min-h-11 -translate-x-1/2 items-center gap-1.5 rounded-full bg-ai px-3 text-xs font-medium text-ai-foreground shadow-md transition-colors hover:bg-ai/90"
         >
           <ArrowDown aria-hidden="true" className="size-3.5" />
           Jump to live

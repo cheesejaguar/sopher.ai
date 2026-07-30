@@ -49,7 +49,7 @@ function DiffView({ before, after }: { before: string; after: string }) {
           return (
             <del
               key={i}
-              className="bg-destructive/10 text-destructive/80 line-through decoration-destructive/50"
+              className="bg-destructive/10 text-destructive line-through decoration-destructive/50"
             >
               {text}
             </del>
@@ -79,6 +79,7 @@ export function SuggestionCard({
   onAcceptEdited,
   onReject,
   onDismiss,
+  touchFriendly = false,
 }: {
   suggestion: SuggestionDTO;
   busy: boolean;
@@ -86,6 +87,8 @@ export function SuggestionCard({
   onAcceptEdited: (text: string) => void;
   onReject: () => void;
   onDismiss: () => void;
+  /** Enlarges controls and allows the action row to wrap in a phone sheet. */
+  touchFriendly?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(suggestion.suggestedText);
@@ -116,7 +119,7 @@ export function SuggestionCard({
           variant="ghost"
           size="icon-xs"
           aria-label="Close this suggestion without deciding"
-          className="ml-auto"
+          className={cn("ml-auto", touchFriendly && "size-11 rounded-sm")}
           onClick={onDismiss}
         >
           <X aria-hidden="true" />
@@ -141,11 +144,17 @@ export function SuggestionCard({
         </p>
       </div>
 
-      <div className="flex items-center gap-1.5 border-t border-border px-3 py-2">
+      <div
+        className={cn(
+          "flex items-center gap-1.5 border-t border-border px-3 py-2",
+          touchFriendly && "flex-wrap",
+        )}
+      >
         {editing ? (
           <>
             <Button
               size="sm"
+              className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
               disabled={busy || !draft.trim()}
               onClick={() => onAcceptEdited(draft)}
             >
@@ -154,6 +163,7 @@ export function SuggestionCard({
             <Button
               variant="ghost"
               size="sm"
+              className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
               disabled={busy}
               onClick={() => {
                 restoreFocusRef.current = true;
@@ -167,13 +177,24 @@ export function SuggestionCard({
           <>
             {/* The glyph hints are for the eye; the shortcuts are spelled out
                 in the editor's description, so keep them out of the name. */}
-            <Button size="sm" disabled={busy} onClick={onAccept}>
+            <Button
+              size="sm"
+              className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
+              disabled={busy}
+              onClick={onAccept}
+            >
               <Check aria-hidden="true" /> Accept
               <kbd aria-hidden="true" className="ml-0.5 font-mono text-[10px] opacity-70">
                 ⌘⏎
               </kbd>
             </Button>
-            <Button variant="ghost" size="sm" disabled={busy} onClick={onReject}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
+              disabled={busy}
+              onClick={onReject}
+            >
               <X aria-hidden="true" /> Reject
               <kbd aria-hidden="true" className="ml-0.5 font-mono text-[10px] opacity-70">
                 ⌘⌫
@@ -183,6 +204,7 @@ export function SuggestionCard({
               ref={editButtonRef}
               variant="ghost"
               size="sm"
+              className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
               disabled={busy}
               onClick={() => {
                 setDraft(suggestion.suggestedText);

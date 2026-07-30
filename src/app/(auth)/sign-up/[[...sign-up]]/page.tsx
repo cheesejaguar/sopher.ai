@@ -1,8 +1,10 @@
 import { Suspense } from "react";
+import { connection } from "next/server";
 import { SignUp } from "@clerk/nextjs";
 import { clerkEnabled } from "@/lib/clerk";
 import { AuthPending } from "@/components/auth-pending";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AuthShell } from "../../auth-shell";
 
 export const metadata = {
   title: "Create account",
@@ -11,20 +13,31 @@ export const metadata = {
   robots: { index: false, follow: true },
 };
 
-export default function SignUpPage() {
+export default async function SignUpPage() {
+  // Clerk's optional catch-all route depends on the incoming auth request.
+  await connection();
+
   return (
-    <main
-      id="main-content"
-      tabIndex={-1}
-      className="flex min-h-dvh items-center justify-center p-6 outline-none"
+    <AuthShell
+      mode="Create account"
+      title="Begin with one sentence."
+      description="Bring the idea, memory, or story you have been carrying. The five-stage workflow will make the path to a finished manuscript visible."
     >
       {clerkEnabled ? (
-        <Suspense fallback={<Skeleton className="h-96 w-96 max-w-full rounded-xl" />}>
-          <SignUp />
+        <Suspense fallback={<Skeleton className="h-96 w-full rounded-sm" />}>
+          <SignUp
+            appearance={{
+              elements: {
+                rootBox: "w-full",
+                cardBox: "w-full shadow-none",
+                card: "w-full rounded-sm border border-border shadow-none",
+              },
+            }}
+          />
         </Suspense>
       ) : (
         <AuthPending />
       )}
-    </main>
+    </AuthShell>
   );
 }

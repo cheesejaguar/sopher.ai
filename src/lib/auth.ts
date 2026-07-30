@@ -1,5 +1,6 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
+import { connection } from "next/server";
 import { getDb, schema } from "@/db";
 import type { Acquisition } from "@/db/schema";
 import { clerkEnabled, devAdminAllowed, devAuthAllowed } from "@/lib/clerk";
@@ -46,7 +47,10 @@ async function devFallbackUser(): Promise<{ userId: string }> {
     // forever, so setting DEV_ADMIN=0 looked like it worked and did not.
     .onConflictDoUpdate({
       target: schema.users.id,
-      set: { role: devRole, updatedAt: new Date() },
+      // Avoid request-time clock reads here. With Cache Components enabled,
+      // requireUser can run inside a streamed page boundary where new Date()
+      // before that boundary's own request read is rejected by Next.js.
+      set: { role: devRole },
     });
   // Same welcome grant real users get, so local dev exercises the same
   // credit-gated paths instead of instantly suspending on a zero balance.
@@ -89,6 +93,10 @@ export async function requireUser(): Promise<{ userId: string }> {
       );
       return devFallbackUser();
     }
+    // Preserve the fail-closed runtime behavior without trying to evaluate
+    // private routes during a public production build that intentionally has
+    // no Clerk credentials (for example Lighthouse CI).
+    await connection();
     throw new Error("Auth misconfigured: Clerk keys absent in a non-dev environment");
   }
 

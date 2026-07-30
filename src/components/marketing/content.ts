@@ -11,9 +11,9 @@ export type FaqItem = { question: string; answer: string };
 
 export const FAQS: FaqItem[] = [
   {
-    question: "How long does a book take?",
+    question: "What happens after I start?",
     answer:
-      "Usually under an hour. Chapter writers work in parallel, so a thirty-chapter novel doesn't take thirty times longer than one chapter.",
+      "Your brief moves through concept, outline, parallel chapter drafting, editing, and a whole-book continuity check. You can follow the run as it works and pause to approve the outline.",
   },
   {
     question: "Do I own the manuscript?",
@@ -27,8 +27,7 @@ export const FAQS: FaqItem[] = [
   },
   {
     question: "What exactly am I paying for?",
-    answer:
-      "Credits, spent only on work that actually runs — the models that draft, edit, and check your book. One credit is one dollar of writing; a finished novella runs about 21–36 credits, and every book includes a report of where they went.",
+    answer: `Credits, spent only on work that actually runs — the models that draft, edit, and check your book. One credit is one dollar of writing; a finished novella runs about ${PUBLIC_BOOK_COST_RANGE} credits, and every book includes a report of where they went.`,
   },
 ];
 
@@ -71,3 +70,4 @@ export const PIPELINE_STEPS: PipelineStep[] = [
       "Checks names, timelines, and details across the whole manuscript before it ships.",
   },
 ];
+import { PUBLIC_BOOK_COST_RANGE } from "@/lib/billing/public-pricing";

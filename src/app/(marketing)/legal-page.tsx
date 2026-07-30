@@ -14,11 +14,32 @@ export function LegalPage({
   children: ReactNode;
 }) {
   return (
-    <article className="mx-auto w-full max-w-3xl px-6 py-16 sm:py-20">
-      <h1 className="font-display text-3xl font-semibold tracking-tight text-balance">{title}</h1>
-      <p className="mt-2 text-sm text-muted-foreground">Last updated {updated}</p>
-      <div className="prose-legal mt-8 space-y-6 text-[0.95rem] leading-relaxed [&_h2]:mt-10 [&_h2]:font-display [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight [&_p]:text-muted-foreground [&_li]:text-muted-foreground [&_ul]:list-disc [&_ul]:space-y-1.5 [&_ul]:pl-5 [&_strong]:text-foreground">
-        {children}
+    <article className="instrument-canvas border-b border-black/10 dark:border-white/10">
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 py-16 lg:grid-cols-12 lg:px-8 lg:py-24">
+        <header className="lg:col-span-4">
+          <p className="folio-label text-primary">Legal record / published</p>
+          <h1 className="mt-5 max-w-sm font-display text-4xl font-semibold leading-[1.02] tracking-[-0.04em] text-balance sm:text-5xl">
+            {title}
+          </h1>
+          <p className="mt-5 font-mono text-[0.6875rem] tracking-[0.06em] text-muted-foreground uppercase">
+            Last updated {updated}
+          </p>
+          <div
+            aria-hidden="true"
+            className="mt-8 hidden h-px w-24 bg-gradient-to-r from-primary to-ion lg:block"
+          />
+        </header>
+
+        <div className="manuscript-sheet px-6 py-10 sm:px-10 sm:py-12 lg:col-span-8 lg:px-14 lg:py-16">
+          <span aria-hidden="true" className="absolute top-0 right-8 h-6 w-24 bg-primary/75" />
+          <div className="prose-legal mx-auto max-w-[72ch] space-y-6 font-serif text-[1rem] leading-7 text-[#57505a] [&_a]:text-[#4d34bd] [&_a]:underline-offset-4 hover:[&_a]:underline [&_code]:font-mono [&_code]:text-[0.86em] [&_h2]:mt-12 [&_h2]:font-sans [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:tracking-[-0.025em] [&_h2]:text-[#211d24] [&_li]:text-[#57505a] [&_p]:text-[#57505a] [&_strong]:font-semibold [&_strong]:text-[#211d24] [&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5">
+            {children}
+          </div>
+          <p className="mt-12 flex items-center justify-between border-t border-[#ddd7cc] pt-4 font-mono text-[0.6875rem] tracking-[0.08em] text-[#554f58] uppercase">
+            <span>sopher.ai / legal</span>
+            <span>01</span>
+          </p>
+        </div>
       </div>
     </article>
   );

@@ -1,5 +1,6 @@
 import { PackButtons } from "@/components/credits/pack-buttons";
 import { RelativeTime } from "@/components/relative-time";
+import { PageHeader } from "@/components/studio/product-primitives";
 import { requireUser } from "@/lib/auth";
 import { CREDIT_PACKS, getBalance, listLedger } from "@/lib/billing/credits";
 import { safeInternalPath } from "@/lib/security/url";
@@ -29,13 +30,11 @@ export default async function CreditsPage({
 
   return (
     <div className="space-y-8">
-      <header>
-        <h2 className="font-display text-xl font-semibold tracking-tight">Credits</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          One credit is one dollar of writing. A finished novella runs about 21–36 credits depending
-          on tier.
-        </p>
-      </header>
+      <PageHeader
+        label="Account / Credits"
+        title="Credits"
+        description="Credits are the studio’s working balance. See the quote before generation, then pay only for what actually runs."
+      />
 
       {purchase === "complete" ? (
         <p
@@ -60,13 +59,13 @@ export default async function CreditsPage({
         </p>
       ) : null}
 
-      <section aria-labelledby="balance-heading" className="paper-surface px-6 py-6">
-        <h3
+      <section aria-labelledby="balance-heading" className="manuscript-sheet px-6 py-6">
+        <h2
           id="balance-heading"
           className="font-mono text-xs tracking-[0.16em] text-paper-muted uppercase"
         >
           Balance
-        </h3>
+        </h2>
         <p className="mt-1 font-display text-4xl font-semibold tabular-nums text-paper-foreground">
           {balance.toFixed(2)}
           <span className="ml-2 font-sans text-base font-normal text-paper-muted">credits</span>
@@ -74,20 +73,25 @@ export default async function CreditsPage({
       </section>
 
       <section aria-labelledby="packs-heading" className="space-y-4">
-        <h3 id="packs-heading" className="font-sans font-semibold">
+        <h2 id="packs-heading" className="font-sans font-semibold">
           Add credits
-        </h3>
+        </h2>
         <PackButtons packs={CREDIT_PACKS} returnTo={safeReturn ?? undefined} />
       </section>
 
       <section aria-labelledby="ledger-heading" className="space-y-3">
-        <h3 id="ledger-heading" className="font-sans font-semibold">
+        <h2 id="ledger-heading" className="font-sans font-semibold">
           Activity
-        </h3>
+        </h2>
         {ledger.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div
+            role="region"
+            aria-label="Credit activity"
+            tabIndex={0}
+            className="max-w-full overflow-x-auto focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
             <table className="w-full text-sm">
               <caption className="sr-only">Credit purchases and usage, most recent first</caption>
               <thead>

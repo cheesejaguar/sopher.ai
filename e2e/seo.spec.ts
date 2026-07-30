@@ -55,7 +55,7 @@ test.describe("sitemap and robots", () => {
     for (const bot of ["GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"]) {
       expect(txt, `robots does not name ${bot}`).toContain(bot);
     }
-    for (const path of ["/studio", "/admin", "/sign-in"]) {
+    for (const path of ["/studio", "/projects", "/admin", "/sign-in"]) {
       expect(txt).toContain(`Disallow: ${path}`);
     }
     expect(txt).toContain("Sitemap: https://sopher.ai/sitemap.xml");
@@ -181,6 +181,6 @@ test.describe("structured data", () => {
   test("the FAQ is on the homepage, not only on /pricing", async ({ page }) => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "Common questions" })).toBeVisible();
-    await expect(page.getByText("How long does a book take?")).toBeVisible();
+    await expect(page.getByText("What happens after I start?")).toBeVisible();
   });
 });

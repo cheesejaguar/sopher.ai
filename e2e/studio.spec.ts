@@ -1,10 +1,9 @@
 /**
  * DB-backed studio pages — runs only in the dbDependent-* projects, which
- * playwright.config.ts includes when E2E_DB=1 (local runs against the real
- * Neon DATABASE_URL from .env.local; CI never sets E2E_DB because the
- * neon-http driver cannot talk to a plain postgres container).
+ * playwright.config.ts includes when E2E_DB=1. The config requires an explicit
+ * isolated E2E_DATABASE_URL before it will create these projects.
  */
-import { axeCheck, expect, fullPageScreenshot, test } from "./helpers";
+import { axeCheck, expect, fullPageScreenshot, missingE2EFixture, test } from "./helpers";
 
 test.describe("studio dashboard", () => {
   test("renders the project grid or the empty-state invitation", async ({ page }, testInfo) => {
@@ -29,7 +28,7 @@ test.describe("studio usage", () => {
 
     // Wallet card streams in from the ledger.
     await expect(page.getByRole("heading", { name: "Credits" })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText(/available/)).toBeVisible();
+    await expect(page.getByText("Available balance", { exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: /Buy credits/ })).toBeVisible();
 
     // Spend breakdowns. Queried by role: each card title is a heading, and the
@@ -46,6 +45,25 @@ test.describe("studio usage", () => {
   });
 });
 
+test.describe("studio account", () => {
+  test("credits and settings keep the same product shell", async ({ page }, testInfo) => {
+    await page.goto("/studio/credits");
+    await expect(page.getByRole("heading", { level: 1, name: "Credits" })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page.getByRole("heading", { name: "Add credits" })).toBeVisible();
+    await axeCheck(page);
+    await fullPageScreenshot(page, testInfo, "account-credits");
+
+    await page.goto("/studio/settings");
+    await expect(page.getByRole("heading", { level: 1, name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Appearance" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Generation defaults" })).toBeVisible();
+    await axeCheck(page);
+    await fullPageScreenshot(page, testInfo, "account-settings");
+  });
+});
+
 test.describe("project management", () => {
   /** These specs exercise real data; an empty library (fresh dev DB) skips. */
   async function firstProjectOrSkip(page: import("@playwright/test").Page) {
@@ -56,7 +74,7 @@ test.describe("project management", () => {
     try {
       await card.waitFor({ state: "attached", timeout: 10_000 });
     } catch {
-      test.skip(true, "no projects in this environment");
+      missingE2EFixture("no project card is available on the Studio dashboard");
     }
     return card;
   }
@@ -72,25 +90,84 @@ test.describe("project management", () => {
     await page.keyboard.press("Escape");
   });
 
-  test("project settings stage edits shape and voice", async ({ page }) => {
+  test("project settings stage edits shape and voice", async ({ page }, testInfo) => {
     const card = await firstProjectOrSkip(page);
-    await card.click();
-    await page.locator('a[href^="/projects/"][href$="/settings"]').click();
+    const href = await card.getAttribute("href");
+    if (!href) missingE2EFixture("the first Studio project card has no href");
+    const base = href.replace(
+      /\/(brief|outline|bible|write|editor|manuscript|usage|settings)$/,
+      "",
+    );
+    await page.goto(`${base}/settings`);
     await expect(page.getByRole("heading", { name: "Project settings" })).toBeVisible();
     await expect(page.getByLabel("Style guide")).toBeVisible();
     await expect(page.getByRole("button", { name: "Save settings" })).toBeVisible();
+    await fullPageScreenshot(page, testInfo, "project-settings");
   });
 
-  test("the manuscript page can edit the book's identity", async ({ page }) => {
+  test("the manuscript page can edit the book's identity", async ({ page }, testInfo) => {
     const card = await firstProjectOrSkip(page);
-    await card.click();
-    await page.locator('a[href^="/projects/"][href$="/manuscript"]').click();
+    const href = await card.getAttribute("href");
+    if (!href) missingE2EFixture("the first Studio project card has no href");
+    const base = href.replace(
+      /\/(brief|outline|bible|write|editor|manuscript|usage|settings)$/,
+      "",
+    );
+    await page.goto(`${base}/manuscript`);
     const edit = page.getByRole("button", { name: "Edit title, synopsis, and author" });
     await expect(edit).toBeVisible();
     await edit.click();
     await expect(page.getByRole("heading", { name: "Book details" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "Author" })).toBeVisible();
     await page.keyboard.press("Escape");
+    await fullPageScreenshot(page, testInfo, "project-manuscript");
+  });
+
+  test("lifecycle, generation, and editor surfaces retain manuscript context", async ({
+    page,
+  }, testInfo) => {
+    const card = await firstProjectOrSkip(page);
+    const href = await card.getAttribute("href");
+    if (!href) missingE2EFixture("the first Studio project card has no href");
+    const base = href.replace(
+      /\/(brief|outline|bible|write|editor|manuscript|usage|settings)$/,
+      "",
+    );
+
+    const surfaces = [
+      {
+        route: `${base}/brief`,
+        ready: () => page.getByText("The brief, as written", { exact: true }),
+        screenshot: "project-brief",
+      },
+      {
+        route: `${base}/outline`,
+        ready: () => page.getByRole("heading", { name: "Outline" }),
+        screenshot: "project-outline",
+      },
+      {
+        route: `${base}/bible`,
+        ready: () => page.getByRole("heading", { name: "Story bible" }),
+        screenshot: "project-bible",
+      },
+      {
+        route: `${base}/write`,
+        ready: () => page.getByRole("heading", { name: "Write" }),
+        screenshot: "project-generation",
+      },
+      {
+        route: `${base}/editor`,
+        ready: () => page.getByRole("heading", { name: "Editorial workbench" }),
+        screenshot: "project-editor-index",
+      },
+    ] as const;
+
+    for (const surface of surfaces) {
+      await page.goto(surface.route);
+      await expect(surface.ready()).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByRole("navigation", { name: "Project lifecycle" })).toBeVisible();
+      await fullPageScreenshot(page, testInfo, surface.screenshot);
+    }
   });
 });
 
@@ -109,15 +186,17 @@ test.describe("admin dashboard", () => {
     await fullPageScreenshot(page, testInfo, "admin-overview");
   });
 
-  test("users table lists accounts and links to detail", async ({ page }) => {
+  test("users table lists accounts and links to detail", async ({ page }, testInfo) => {
     await page.goto("/admin/users");
     const main = page.locator("#main-content");
     await expect(main.getByRole("heading", { name: "Users" })).toBeVisible({ timeout: 20_000 });
-    const devUser = main.getByRole("link", { name: "dev@sopher.ai" });
+    const devUser = main.getByRole("link", { name: "dev-author@example.invalid" });
     await expect(devUser).toBeVisible();
+    await fullPageScreenshot(page, testInfo, "admin-users");
     await devUser.click();
     await expect(page.getByRole("button", { name: "Adjust credits" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Suspend|Unsuspend/ })).toBeVisible();
+    await fullPageScreenshot(page, testInfo, "admin-user-detail");
   });
 
   test("flag queue renders its empty state", async ({ page }) => {

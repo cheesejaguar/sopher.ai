@@ -23,7 +23,7 @@ export function StepGenre({
             <div
               key={genre.id}
               className={cn(
-                "rounded-xl border bg-card transition-colors",
+                "rounded-sm border bg-card transition-colors",
                 selected ? "border-primary ring-1 ring-primary" : "hover:border-foreground/25",
               )}
             >
@@ -38,7 +38,7 @@ export function StepGenre({
                       : { genre: genre.id, subgenre: null },
                   })
                 }
-                className="flex w-full flex-col gap-1.5 rounded-xl p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex min-h-11 w-full flex-col gap-1.5 rounded-sm p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="flex items-center justify-between gap-2">
                   <span className="font-display text-base font-semibold tracking-tight">
@@ -82,7 +82,7 @@ export function StepGenre({
                             })
                           }
                           className={cn(
-                            "rounded-full border px-2.5 py-1 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                            "min-h-11 rounded-sm border px-3 py-2 text-xs transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-8 sm:py-1",
                             chipSelected
                               ? "border-primary bg-primary/10 text-primary"
                               : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground",

@@ -28,7 +28,7 @@ export function FlagActions({ flagId }: { flagId: string }) {
       <Button
         variant="outline"
         size="sm"
-        className="h-7 px-2 text-xs"
+        className="h-11 px-2 text-xs sm:h-7"
         disabled={pending}
         onClick={() => settle("dismissed")}
       >
@@ -37,7 +37,7 @@ export function FlagActions({ flagId }: { flagId: string }) {
       <Button
         variant="destructive"
         size="sm"
-        className="h-7 px-2 text-xs"
+        className="h-11 px-2 text-xs sm:h-7"
         disabled={pending}
         onClick={() => settle("actioned")}
       >

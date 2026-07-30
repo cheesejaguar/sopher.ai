@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/table";
 import { RelativeTime } from "@/components/relative-time";
 import { listPurchases } from "@/db/queries/admin";
+import { PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Purchases — admin" };
 
@@ -26,8 +27,15 @@ export default async function AdminPurchases() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-display text-2xl font-semibold tracking-tight">Purchases</h1>
-      <Table aria-label="Purchases, refunds and adjustments">
+      <PageHeader
+        label="Admin / Ledger"
+        title="Purchases"
+        description="Credit purchases, refunds, grants, and manual adjustments."
+      />
+      <Table
+        aria-label="Purchases, refunds and adjustments"
+        scrollLabel="Purchases, refunds and adjustments"
+      >
         <TableHeader>
           <TableRow>
             <TableHead scope="col">When</TableHead>

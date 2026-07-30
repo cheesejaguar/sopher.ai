@@ -147,7 +147,7 @@ export function ExportDialog({ projectId }: { projectId: string }) {
                   void beginExport(format.id);
                 }}
                 className={cn(
-                  "flex flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors",
+                  "flex min-h-11 flex-col items-start gap-1.5 rounded-sm border p-3 text-left transition-colors",
                   "hover:border-primary/50 hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring",
                   "aria-disabled:pointer-events-none aria-disabled:opacity-50",
                   isActive && "border-primary bg-accent",
@@ -183,7 +183,7 @@ export function ExportDialog({ projectId }: { projectId: string }) {
           ) : null}
 
           {phase.name === "done" ? (
-            <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-accent p-3">
+            <div className="flex items-center justify-between gap-3 rounded-sm border border-primary/30 bg-accent p-3">
               <p className="min-w-0 truncate font-mono text-xs">{phase.asset.filename}</p>
               <Button size="sm" render={<a href={`/api/exports/${phase.asset.id}`} />}>
                 <Download data-icon="inline-start" />
@@ -197,7 +197,7 @@ export function ExportDialog({ projectId }: { projectId: string }) {
           ) : null}
 
           {phase.name === "failed" ? (
-            <div className="space-y-2 rounded-lg bg-destructive/10 p-3">
+            <div className="space-y-2 rounded-sm bg-destructive/10 p-3">
               <p role="alert" className="text-xs text-destructive">
                 {phase.message}
               </p>

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { getRunEvents } from "@/db/queries/admin";
+import { AsyncState, PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata = { title: "Run — admin" };
 
@@ -19,15 +20,22 @@ export default async function AdminRunDetail({ params }: { params: Promise<{ run
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="font-display text-2xl font-semibold tracking-tight">Run · {run.title}</h1>
-        <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          {run.email} · {run.kind} ·{" "}
-          <Badge variant={run.status === "failed" ? "destructive" : "outline"}>{run.status}</Badge>
-          <Link href={`/admin/books/${run.projectId}`} className="text-primary hover:underline">
-            view book
-          </Link>
-        </p>
+      <div>
+        <PageHeader
+          label="Admin / Run telemetry"
+          title={`Run · ${run.title}`}
+          description={`${run.email} · ${run.kind}`}
+          actions={
+            <>
+              <Badge variant={run.status === "failed" ? "destructive" : "outline"}>
+                {run.status}
+              </Badge>
+              <Link href={`/admin/books/${run.projectId}`} className="text-primary hover:underline">
+                view book
+              </Link>
+            </>
+          }
+        />
         {run.error ? (
           <p className="mt-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
             {run.error}
@@ -39,7 +47,7 @@ export default async function AdminRunDetail({ params }: { params: Promise<{ run
             cheesejaguar-2353s-projects
           </p>
         ) : null}
-      </header>
+      </div>
 
       <section aria-label="Event log">
         <ol className="space-y-1 font-mono text-xs">
@@ -55,7 +63,14 @@ export default async function AdminRunDetail({ params }: { params: Promise<{ run
             </li>
           ))}
           {events.length === 0 ? (
-            <li className="px-2 py-4 text-muted-foreground">No events persisted.</li>
+            <li>
+              <AsyncState
+                status="empty"
+                compact
+                title="No events persisted"
+                description="This run has not written telemetry to the event log."
+              />
+            </li>
           ) : null}
         </ol>
       </section>

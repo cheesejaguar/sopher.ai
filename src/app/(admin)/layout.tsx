@@ -1,21 +1,15 @@
-import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
-import { Feather } from "lucide-react";
 
-import { requireAdmin } from "@/lib/auth";
+import { ForbiddenError, requireAdmin, UnauthorizedError } from "@/lib/auth";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ThemeToggle } from "@/components/studio/theme-toggle";
+import { ProductShell } from "@/components/studio/product-shell";
 
-const LINKS = [
-  { href: "/admin", label: "Overview" },
-  { href: "/admin/metrics", label: "Metrics" },
-  { href: "/admin/users", label: "Users" },
-  { href: "/admin/purchases", label: "Purchases" },
-  { href: "/admin/books", label: "Books" },
-  { href: "/admin/flags", label: "Flags" },
-  { href: "/admin/runs", label: "Runs" },
-] as const;
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, noarchive: true },
+};
 
 /**
  * The admin shell. requireAdmin() failing renders a plain 404 — the surface's
@@ -23,7 +17,11 @@ const LINKS = [
  * so with cacheComponents the ENTIRE shell (nav included — nothing may leak
  * into static HTML) renders inside the Suspense boundary around it.
  */
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  // Admin is both authorization- and data-dependent; never evaluate it during
+  // the public build or include any part of it in a static shell.
+  await connection();
+
   return (
     <Suspense
       fallback={
@@ -41,50 +39,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 async function GuardedShell({ children }: { children: React.ReactNode }) {
   try {
     await requireAdmin();
-  } catch {
-    notFound();
+  } catch (error) {
+    if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
+      notFound();
+    }
+    throw error;
   }
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur">
-        <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between gap-6 px-6">
-          <Link
-            href="/admin"
-            className="flex items-center gap-2 font-display text-lg font-semibold tracking-tight"
-          >
-            <Feather aria-hidden="true" className="size-4 text-ember" />
-            sopher.ai{" "}
-            <span className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground">
-              <span aria-hidden="true" className="size-1.5 rounded-full bg-ember" />
-              admin
-            </span>
-          </Link>
-          <nav aria-label="Admin">
-            <ul className="flex items-center gap-1">
-              {LINKS.map((link) => (
-                <li key={link.href}>
-                  <Link
-                    href={link.href}
-                    className="inline-flex h-8 items-center rounded-md px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    {link.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <div className="flex items-center gap-3">
-            <Link href="/studio" className="text-sm text-muted-foreground hover:text-foreground">
-              Studio
-            </Link>
-            <ThemeToggle />
+    <ProductShell variant="admin">
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading admin workspace" className="space-y-4">
+            <span className="sr-only">Loading admin workspace</span>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="h-64 w-full" />
           </div>
-        </div>
-      </header>
-      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">
+        }
+      >
         {children}
-      </main>
-    </div>
+      </Suspense>
+    </ProductShell>
   );
 }

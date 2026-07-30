@@ -6,6 +6,7 @@ import { ChevronDown, ChevronUp, Replace, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 /**
  * Chapter-scoped find & replace, operating directly on the ProseMirror doc.
@@ -35,7 +36,16 @@ function findMatches(editor: Editor, query: string): Match[] {
   return matches;
 }
 
-export function FindReplace({ editor, onClose }: { editor: Editor; onClose: () => void }) {
+export function FindReplace({
+  editor,
+  onClose,
+  touchLayout = false,
+}: {
+  editor: Editor;
+  onClose: () => void;
+  /** Stacks fields and enlarges controls inside the phone/tablet sheet. */
+  touchLayout?: boolean;
+}) {
   const [query, setQuery] = useState("");
   const [replacement, setReplacement] = useState("");
   const [matches, setMatches] = useState<Match[]>([]);
@@ -101,7 +111,10 @@ export function FindReplace({ editor, onClose }: { editor: Editor; onClose: () =
     <div
       role="search"
       aria-label="Find and replace in this chapter"
-      className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2"
+      className={cn(
+        "flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2",
+        touchLayout && "flex-col items-stretch border-0 bg-transparent p-4",
+      )}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.stopPropagation();
@@ -114,67 +127,84 @@ export function FindReplace({ editor, onClose }: { editor: Editor; onClose: () =
         }
       }}
     >
-      <Input
-        ref={inputRef}
-        value={query}
-        onChange={(event) => search(event.target.value)}
-        placeholder="Find…"
-        aria-label="Find"
-        className="h-7 w-40 text-xs"
-      />
-      <span className="font-mono text-[11px] text-muted-foreground tabular-nums" role="status">
-        {query ? `${matches.length === 0 ? 0 : current + 1}/${matches.length}` : ""}
-      </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Previous match"
-        disabled={matches.length === 0}
-        onClick={() => step(-1)}
-      >
-        <ChevronUp aria-hidden="true" className="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7"
-        aria-label="Next match"
-        disabled={matches.length === 0}
-        onClick={() => step(1)}
-      >
-        <ChevronDown aria-hidden="true" className="size-3.5" />
-      </Button>
+      <div className={touchLayout ? "flex items-center gap-2" : "contents"}>
+        <Input
+          ref={inputRef}
+          value={query}
+          onChange={(event) => search(event.target.value)}
+          placeholder="Find…"
+          aria-label="Find"
+          className={cn("h-7 w-40 text-xs", touchLayout && "h-11 min-w-0 flex-1 text-base")}
+        />
+        <span
+          className={cn(
+            "font-mono text-[11px] text-muted-foreground tabular-nums",
+            touchLayout && "w-10 shrink-0 text-center",
+          )}
+          role="status"
+          aria-label={
+            query
+              ? matches.length === 0
+                ? "No matches"
+                : `Match ${current + 1} of ${matches.length}`
+              : undefined
+          }
+        >
+          {query ? `${matches.length === 0 ? 0 : current + 1}/${matches.length}` : ""}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("size-7", touchLayout && "size-11 rounded-sm")}
+          aria-label="Previous match"
+          disabled={matches.length === 0}
+          onClick={() => step(-1)}
+        >
+          <ChevronUp aria-hidden="true" className="size-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("size-7", touchLayout && "size-11 rounded-sm")}
+          aria-label="Next match"
+          disabled={matches.length === 0}
+          onClick={() => step(1)}
+        >
+          <ChevronDown aria-hidden="true" className="size-3.5" />
+        </Button>
+      </div>
       <Input
         value={replacement}
         onChange={(event) => setReplacement(event.target.value)}
         placeholder="Replace with…"
         aria-label="Replace with"
-        className="h-7 w-40 text-xs"
+        className={cn("h-7 w-40 text-xs", touchLayout && "h-11 w-full text-base")}
       />
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs"
-        disabled={matches.length === 0}
-        onClick={replaceCurrent}
-      >
-        <Replace aria-hidden="true" className="size-3.5" />
-        Replace
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-7 px-2 text-xs"
-        disabled={matches.length === 0}
-        onClick={replaceAll}
-      >
-        Replace all
-      </Button>
+      <div className={touchLayout ? "grid grid-cols-2 gap-2" : "contents"}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn("h-7 px-2 text-xs", touchLayout && "min-h-11 text-sm")}
+          disabled={matches.length === 0}
+          onClick={replaceCurrent}
+        >
+          <Replace aria-hidden="true" className="size-3.5" />
+          Replace
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className={cn("h-7 px-2 text-xs", touchLayout && "min-h-11 text-sm")}
+          disabled={matches.length === 0}
+          onClick={replaceAll}
+        >
+          Replace all
+        </Button>
+      </div>
       <Button
         variant="ghost"
         size="icon"
-        className="ml-auto size-7"
+        className={cn("ml-auto size-7", touchLayout && "hidden")}
         aria-label="Close find and replace"
         onClick={() => {
           onClose();

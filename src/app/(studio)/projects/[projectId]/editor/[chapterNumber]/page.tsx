@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { Feather } from "lucide-react";
+import { ArrowRight, Feather } from "lucide-react";
 
 import { getDb, schema } from "@/db";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
@@ -19,18 +19,21 @@ function NotDraftedState({
   chapterNumber: number;
 }) {
   return (
-    <div className="paper-surface flex min-h-72 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-      <Feather aria-hidden="true" className="size-6 text-paper-muted" />
-      <h2 className="font-display text-lg font-semibold">Chapter {chapterNumber} is still blank</h2>
-      <p className="max-w-sm text-sm leading-relaxed text-paper-muted">
-        The writers haven&apos;t drafted this chapter yet. Once a draft lands you can line-edit it
-        here with suggestions in the margin.
+    <div className="instrument-surface relative flex min-h-72 flex-col items-center justify-center overflow-hidden px-6 py-16 text-center">
+      <span aria-hidden="true" className="spectral-rule absolute inset-x-0 top-0 h-px" />
+      <p className="folio-label text-primary">Chapter {String(chapterNumber).padStart(2, "0")}</p>
+      <Feather aria-hidden="true" className="mt-4 size-6 text-muted-foreground" />
+      <h2 className="mt-3 font-display text-lg font-semibold">This chapter is still blank</h2>
+      <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
+        The writing stage has not produced a draft yet. Once it does, this chapter becomes a full
+        editing surface with suggestions and revision history.
       </p>
       <Link
         href={`/projects/${projectId}/write`}
-        className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+        className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-sm border border-border px-4 text-sm font-medium text-primary transition-colors hover:bg-accent"
       >
         Go to the Write stage
+        <ArrowRight aria-hidden="true" className="size-4" />
       </Link>
     </div>
   );

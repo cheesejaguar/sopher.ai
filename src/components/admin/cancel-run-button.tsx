@@ -16,7 +16,7 @@ export function CancelRunButton({ runId }: { runId: string }) {
       <Button
         variant="destructive"
         size="sm"
-        className="h-7 px-2 text-xs"
+        className="h-11 px-2 text-xs sm:h-7"
         disabled={pending}
         onClick={() => {
           setError(null);

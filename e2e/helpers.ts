@@ -54,13 +54,24 @@ export const test = base.extend<ThemeOptions>({
 export { expect };
 
 /**
- * Rules whose violations are reported but do not fail the test, regardless of
- * impact. "color-contrast" is currently on this list because the app's oklch
- * palette has known serious contrast findings (e.g. Base UI badge/secondary
- * hover text) that live in src/ — re-tighten this once the palette is fixed.
+ * Ends a fixture-dependent test when its isolated seed is incomplete.
+ *
+ * Ad-hoc local DB runs may point at a fresh branch, so missing data remains a
+ * skip by default. Acceptance runs set E2E_FIXTURES_REQUIRED=1: in that mode a
+ * missing fixture is a broken seed/contract and must fail loudly.
  */
-// Contrast issues were fixed app-side (tokens + tab trigger); nothing is
-// advisory anymore — every serious/critical finding fails the suite.
+export function missingE2EFixture(message: string): never {
+  if (process.env.E2E_FIXTURES_REQUIRED === "1") {
+    throw new Error(`Required E2E fixture missing: ${message}`);
+  }
+  test.skip(true, message);
+  // Playwright's runtime skip interrupts the test. This keeps the return type
+  // honest if that behavior ever changes.
+  throw new Error(`Playwright did not skip after missing fixture: ${message}`);
+}
+
+// Every serious/critical finding fails the suite. Keep the set explicit so a
+// future exception requires a visible code review instead of a hidden filter.
 const ADVISORY_RULES = new Set<string>([]);
 
 /**

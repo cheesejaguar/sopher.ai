@@ -41,15 +41,24 @@ type QuotedEstimate = BookEstimate & { credits: number; balance: number | null }
 
 type EstimateMap = Partial<Record<QualityTier, QuotedEstimate>>;
 
+export type WizardQuoteSummary = {
+  credits: number;
+  estimatedMinutes: number;
+};
+
 export function StepEstimate({
   state,
   dispatch,
+  onQuote,
 }: {
   state: WizardState;
   dispatch: React.Dispatch<WizardActionEvent>;
+  onQuote?: (quote: WizardQuoteSummary | null) => void;
 }) {
   const [estimates, setEstimates] = React.useState<EstimateMap>({});
   const [loading, setLoading] = React.useState(true);
+  const [quoteError, setQuoteError] = React.useState<string | null>(null);
+  const [quoteRevision, retryQuote] = React.useReducer((value: number) => value + 1, 0);
 
   const { chapters, wordsPerChapter } = state;
 
@@ -58,6 +67,7 @@ export function StepEstimate({
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       setLoading(true);
+      setQuoteError(null);
       try {
         // One request for all three tiers. This used to fan out to three
         // parallel requests, each repeating the same per-user balance query.
@@ -67,23 +77,34 @@ export function StepEstimate({
           body: JSON.stringify({ chapters, wordsPerChapter }),
           signal: controller.signal,
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+          throw new Error(
+            typeof body?.error === "string" ? body.error : "The estimate could not be refreshed.",
+          );
+        }
         const body = (await res.json()) as { tiers: QuotedEstimate[] };
         const next: EstimateMap = {};
         for (const estimate of body.tiers ?? []) {
           next[estimate.tier] = estimate;
         }
         setEstimates(next);
-        setLoading(false);
-      } catch {
-        // Aborted or offline — keep the previous quote on screen.
+      } catch (cause) {
+        if (controller.signal.aborted) return;
+        setQuoteError(
+          cause instanceof Error && cause.message
+            ? cause.message
+            : "The estimate could not be refreshed. Check your connection and try again.",
+        );
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
       }
     }, 350);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [chapters, wordsPerChapter]);
+  }, [chapters, wordsPerChapter, quoteRevision]);
 
   const selected = estimates[state.tier];
   const balance = selected?.balance ?? null;
@@ -98,8 +119,31 @@ export function StepEstimate({
         } minutes.`
       : "";
 
+  React.useEffect(() => {
+    onQuote?.(
+      selected && !loading
+        ? { credits: selected.credits, estimatedMinutes: selected.estimatedMinutes }
+        : null,
+    );
+  }, [loading, onQuote, selected]);
+
   return (
     <div className="space-y-5">
+      {quoteError ? (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center justify-between gap-3 border border-destructive/35 bg-destructive/5 px-4 py-3 text-sm"
+        >
+          <span className="text-destructive">{quoteError}</span>
+          <button
+            type="button"
+            onClick={retryQuote}
+            className="min-h-11 rounded-sm font-medium text-foreground underline underline-offset-4 sm:min-h-9"
+          >
+            Try the quote again
+          </button>
+        </div>
+      ) : null}
       <RadioGroup
         aria-label="Quality tier"
         value={state.tier}
@@ -125,7 +169,7 @@ export function StepEstimate({
             <label
               key={tier}
               className={cn(
-                "flex cursor-pointer flex-col gap-1.5 rounded-xl border bg-card p-4 transition-colors",
+                "flex cursor-pointer flex-col gap-1.5 rounded-sm border bg-card p-4 transition-colors",
                 active ? "border-primary ring-1 ring-primary" : "hover:border-foreground/25",
               )}
             >
@@ -156,7 +200,7 @@ export function StepEstimate({
       </RadioGroup>
 
       {/* The receipt — itemized, honest, mono */}
-      <div className="paper-surface p-5 sm:p-6">
+      <div className="manuscript-sheet p-5 sm:p-6">
         <p className="font-display text-xs tracking-[0.25em] text-paper-muted uppercase">
           Estimate — {TIER_LABELS[state.tier].name}
         </p>
@@ -217,7 +261,7 @@ export function StepEstimate({
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between gap-4 rounded-xl border bg-card p-4">
+      <div className="flex items-center justify-between gap-4 rounded-sm border bg-card p-4">
         <div className="space-y-0.5">
           <Label htmlFor="wizard-approval">Pause for my outline approval</Label>
           <p id="wizard-approval-hint" className="text-xs text-muted-foreground">

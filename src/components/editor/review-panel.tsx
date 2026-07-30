@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { BookOpenCheck, Check, SlidersHorizontal, Sparkles, Unlink, X } from "lucide-react";
+import { BookOpenCheck, Check, ScanText, SlidersHorizontal, Unlink, X } from "lucide-react";
 
 import {
   AlertDialog,
@@ -97,6 +97,7 @@ function SuggestionRow({
   onHover,
   onAccept,
   onReject,
+  touchFriendly,
 }: {
   suggestion: SuggestionDTO;
   unanchored: boolean;
@@ -106,6 +107,7 @@ function SuggestionRow({
   onHover: (hovering: boolean) => void;
   onAccept: () => void;
   onReject: () => void;
+  touchFriendly: boolean;
 }) {
   return (
     <li
@@ -124,7 +126,10 @@ function SuggestionRow({
       <button
         type="button"
         onClick={onSelect}
-        className="block w-full rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className={cn(
+          "block w-full rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          touchFriendly && "min-h-11",
+        )}
       >
         <span className="flex items-center gap-1.5">
           <span
@@ -154,11 +159,30 @@ function SuggestionRow({
           {suggestion.explanation}
         </span>
       </button>
-      <div className="mt-1.5 flex gap-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-        <Button variant="ghost" size="xs" disabled={busy} onClick={onAccept}>
+      <div
+        className={cn(
+          "mt-1.5 flex gap-1 transition-opacity",
+          touchFriendly
+            ? "opacity-100"
+            : "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
+        )}
+      >
+        <Button
+          variant="ghost"
+          size="xs"
+          className={cn(touchFriendly && "min-h-11 flex-1")}
+          disabled={busy}
+          onClick={onAccept}
+        >
           <Check aria-hidden="true" className="text-success" /> Accept
         </Button>
-        <Button variant="ghost" size="xs" disabled={busy} onClick={onReject}>
+        <Button
+          variant="ghost"
+          size="xs"
+          className={cn(touchFriendly && "min-h-11 flex-1")}
+          disabled={busy}
+          onClick={onReject}
+        >
           <X aria-hidden="true" /> Reject
         </Button>
       </div>
@@ -184,6 +208,7 @@ export function ReviewPanel({
   onReject,
   onAcceptAll,
   onRejectAll,
+  touchFriendly = false,
 }: {
   chapterNumber: number;
   suggestions: SuggestionDTO[];
@@ -198,6 +223,8 @@ export function ReviewPanel({
   onReject: (id: string) => void;
   onAcceptAll: () => void;
   onRejectAll: () => void;
+  /** Keeps actions visible and at least 44px inside touch-oriented sheets. */
+  touchFriendly?: boolean;
 }) {
   const [instruction, setInstruction] = useState("");
   const [focusOpen, setFocusOpen] = useState(false);
@@ -227,7 +254,12 @@ export function ReviewPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-1.5 border-b border-border p-3">
+      <div
+        className={cn(
+          "flex items-center gap-1.5 border-b border-border p-3",
+          touchFriendly && "flex-wrap pr-14",
+        )}
+      >
         <h2 className="text-sm font-semibold">Suggestions</h2>
         {count > 0 ? (
           <span className="rounded-full bg-ai-soft px-1.5 font-mono text-[10px] text-ai tabular-nums">
@@ -235,7 +267,7 @@ export function ReviewPanel({
             <span className="sr-only"> pending</span>
           </span>
         ) : null}
-        <div className="ml-auto flex items-center gap-1">
+        <div className={cn("ml-auto flex items-center gap-1", touchFriendly && "mt-1 w-full")}>
           <Popover open={focusOpen} onOpenChange={setFocusOpen}>
             <PopoverTrigger
               render={
@@ -247,7 +279,7 @@ export function ReviewPanel({
                   aria-label={
                     instruction ? "Review focus set — change it" : "Set a focus for the review"
                   }
-                  className={cn(instruction && "text-ai")}
+                  className={cn(touchFriendly && "size-11 rounded-sm", instruction && "text-ai")}
                 />
               }
             >
@@ -261,7 +293,7 @@ export function ReviewPanel({
                 value={instruction}
                 onChange={(e) => setInstruction(e.target.value)}
                 placeholder="e.g. dialogue rhythm, pacing in the middle"
-                className="h-8 text-xs"
+                className={cn("h-8 text-xs", touchFriendly && "h-11 text-sm")}
                 aria-labelledby={focusLabelId}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") setFocusOpen(false);
@@ -272,6 +304,7 @@ export function ReviewPanel({
           <Button
             variant="outline"
             size="sm"
+            className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
             disabled={reviewing || busy}
             onClick={() => onReview(instruction.trim() || undefined)}
           >
@@ -292,7 +325,7 @@ export function ReviewPanel({
           <ReviewingState chapterNumber={chapterNumber} />
         ) : count === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
-            <Sparkles aria-hidden="true" className="size-5 text-ai/60" />
+            <ScanText aria-hidden="true" className="size-5 text-ai/60" />
             <p className="text-sm font-medium">No suggestions yet</p>
             <p className="max-w-[24ch] text-xs leading-relaxed text-muted-foreground">
               Run a review, or select a passage on the page and ask for a rewrite.
@@ -317,6 +350,7 @@ export function ReviewPanel({
                       onHover={(h) => onHover(h ? s.id : null)}
                       onAccept={() => resolving(() => onAccept(s.id))}
                       onReject={() => resolving(() => onReject(s.id))}
+                      touchFriendly={touchFriendly}
                     />
                   ))}
                 </ul>
@@ -329,7 +363,15 @@ export function ReviewPanel({
       {count > 0 && !reviewing ? (
         <div className="flex gap-1.5 border-t border-border p-3">
           <AlertDialog>
-            <AlertDialogTrigger render={<Button size="sm" className="flex-1" disabled={busy} />}>
+            <AlertDialogTrigger
+              render={
+                <Button
+                  size="sm"
+                  className={cn("flex-1", touchFriendly && "min-h-11 rounded-sm")}
+                  disabled={busy}
+                />
+              }
+            >
               Accept all
             </AlertDialogTrigger>
             <AlertDialogContent size="sm">
@@ -341,8 +383,13 @@ export function ReviewPanel({
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => resolving(onAcceptAll)}>
+                <AlertDialogCancel className={cn(touchFriendly && "min-h-11 rounded-sm")}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className={cn(touchFriendly && "min-h-11 rounded-sm")}
+                  onClick={() => resolving(onAcceptAll)}
+                >
                   Accept {count} suggestion{count === 1 ? "" : "s"}
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -350,7 +397,14 @@ export function ReviewPanel({
           </AlertDialog>
           <AlertDialog>
             <AlertDialogTrigger
-              render={<Button variant="ghost" size="sm" className="flex-1" disabled={busy} />}
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={cn("flex-1", touchFriendly && "min-h-11 rounded-sm")}
+                  disabled={busy}
+                />
+              }
             >
               Reject all
             </AlertDialogTrigger>
@@ -362,8 +416,13 @@ export function ReviewPanel({
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={() => resolving(onRejectAll)}>
+                <AlertDialogCancel className={cn(touchFriendly && "min-h-11 rounded-sm")}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className={cn(touchFriendly && "min-h-11 rounded-sm")}
+                  onClick={() => resolving(onRejectAll)}
+                >
                   Reject {count} suggestion{count === 1 ? "" : "s"}
                 </AlertDialogAction>
               </AlertDialogFooter>

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pause, Play } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { useReducedMotion } from "@/hooks/use-reduced-motion";
 
 type Example = {
   id: string;
@@ -46,22 +47,6 @@ const EXAMPLES: Example[] = [
 const TYPE_TICK_MS = 18;
 const CHARS_PER_TICK = 3;
 const HOLD_MS = 4200;
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
-
-function subscribeReducedMotion(onChange: () => void) {
-  const query = window.matchMedia(REDUCED_MOTION_QUERY);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-
-function useReducedMotion() {
-  return useSyncExternalStore(
-    subscribeReducedMotion,
-    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
-    () => false,
-  );
-}
-
 export function BriefDemo() {
   const reduced = useReducedMotion();
   const [index, setIndex] = useState(0);
@@ -71,25 +56,27 @@ export function BriefDemo() {
   const [userDriven, setUserDriven] = useState(false);
 
   const example = EXAMPLES[index];
-  const typedChars = reduced
-    ? example.opening.length
-    : progress.id === example.id
-      ? progress.chars
-      : 0;
+  const typedChars =
+    reduced || userDriven
+      ? example.opening.length
+      : progress.id === example.id
+        ? progress.chars
+        : 0;
   const complete = typedChars >= example.opening.length;
   const autoAdvancing = !reduced && !paused && !userDriven;
 
   // Type the current opening out. Reduced motion skips straight to the full text.
   useEffect(() => {
-    if (reduced) return;
+    if (reduced || paused || userDriven || complete) return;
     const interval = setInterval(() => {
       setProgress((prev) => {
         const base = prev.id === example.id ? prev.chars : 0;
+        if (base >= example.opening.length) return prev;
         return { id: example.id, chars: Math.min(base + CHARS_PER_TICK, example.opening.length) };
       });
     }, TYPE_TICK_MS);
     return () => clearInterval(interval);
-  }, [example, reduced]);
+  }, [complete, example, paused, reduced, userDriven]);
 
   // Hold the finished passage briefly, then move to the next brief.
   useEffect(() => {
@@ -104,13 +91,13 @@ export function BriefDemo() {
   }, []);
 
   return (
-    <div className="w-full">
-      <div className="flex flex-wrap items-center justify-center gap-2">
+    <div className="grid w-full gap-6 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
+      <div className="min-w-0">
         <span className="sr-only" id="brief-demo-label">
           Example books, each written from a one-sentence brief
         </span>
         <div
-          className="flex flex-wrap justify-center gap-1.5"
+          className="grid grid-cols-3 gap-px bg-black/10 dark:bg-white/10 md:grid-cols-1"
           role="group"
           aria-labelledby="brief-demo-label"
         >
@@ -121,13 +108,16 @@ export function BriefDemo() {
               onClick={() => choose(i)}
               aria-pressed={i === index}
               className={cn(
-                "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                "grid min-h-11 min-w-0 grid-cols-[auto_1fr] items-center gap-2 bg-[#eeeff4] px-2.5 py-2 text-left text-xs font-medium transition-colors aria-[pressed=true]:underline aria-[pressed=true]:underline-offset-4 dark:bg-[#111118] md:px-3",
                 i === index
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground",
+                  ? "border-l border-primary text-foreground"
+                  : "border-l border-transparent text-muted-foreground hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.045]",
               )}
             >
-              {item.kind}
+              <span className="font-mono text-[0.6875rem] text-primary">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <span className="min-w-0 leading-tight whitespace-normal">{item.kind}</span>
             </button>
           ))}
         </div>
@@ -135,7 +125,7 @@ export function BriefDemo() {
           <button
             type="button"
             onClick={() => setPaused((p) => !p)}
-            className="inline-flex size-7 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:text-foreground"
+            className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-black/10 px-3 text-xs text-muted-foreground transition-colors hover:text-foreground dark:border-white/12"
             aria-label={
               paused ? "Resume cycling through examples" : "Pause cycling through examples"
             }
@@ -145,24 +135,26 @@ export function BriefDemo() {
             ) : (
               <Pause aria-hidden="true" className="size-3" />
             )}
+            <span>{paused ? "Resume" : "Pause"}</span>
           </button>
         ) : null}
+
+        <div className="mt-6 text-left" aria-live="polite">
+          <p className="font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
+            The brief
+          </p>
+          <p className="mt-2 text-sm leading-6 text-pretty text-foreground/85">
+            &ldquo;{example.brief}&rdquo;
+          </p>
+        </div>
       </div>
 
-      <div className="mt-5 text-left">
-        <p className="font-mono text-[0.65rem] tracking-[0.16em] text-muted-foreground uppercase">
-          The brief
-        </p>
-        <p className="mt-1.5 text-sm text-pretty text-foreground/85 sm:text-base">
-          &ldquo;{example.brief}&rdquo;
-        </p>
-      </div>
-
-      <article className="paper-surface glow-primary mt-4 px-6 py-7 text-left sm:px-9 sm:py-8">
-        <p className="font-sans text-[0.65rem] font-medium tracking-[0.2em] text-paper-muted uppercase">
+      <article className="manuscript-sheet min-w-0 px-6 py-8 text-left sm:px-10 sm:py-10">
+        <div className="absolute top-0 right-6 h-5 w-16 bg-primary/80" aria-hidden="true" />
+        <p className="font-sans text-[0.6875rem] font-medium tracking-[0.16em] text-paper-muted uppercase">
           {example.title} · Chapter one
         </p>
-        <div className="prose-manuscript mt-4 min-h-[12.5rem] sm:min-h-[9.5rem]">
+        <div className="prose-manuscript mt-5 min-h-[15rem] sm:min-h-[12rem]">
           <div className="relative">
             {/* Invisible full passage reserves the final height so nothing jumps while typing. */}
             <p aria-hidden="true" className="invisible" style={{ marginBlock: 0 }}>

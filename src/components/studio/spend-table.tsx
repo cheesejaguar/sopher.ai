@@ -9,7 +9,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatUsd } from "@/components/usage/format";
+import { AsyncState } from "@/components/studio/product-primitives";
+import { formatCredits, formatUsd } from "@/components/usage/format";
+import { creditsForUsd } from "@/lib/billing/credits-shared";
 
 export type ProjectSpendRow = {
   projectId: string | null;
@@ -24,14 +26,17 @@ export function SpendTable({ rows }: { rows: ProjectSpendRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <p className="py-6 text-center text-sm text-muted-foreground">
-        Nothing metered yet — spend appears the moment a book starts generating.
-      </p>
+      <AsyncState
+        status="empty"
+        compact
+        title="No credit use yet"
+        description="Usage appears here the moment a book starts generating."
+      />
     );
   }
 
   return (
-    <Table>
+    <Table scrollLabel="Credit use by book">
       <caption className="sr-only">Spend by book, month to date</caption>
       <TableHeader>
         <TableRow>
@@ -40,7 +45,7 @@ export function SpendTable({ rows }: { rows: ProjectSpendRow[] }) {
             Model calls
           </TableHead>
           <TableHead scope="col" className="text-right">
-            Spend
+            Credits
           </TableHead>
         </TableRow>
       </TableHeader>
@@ -63,7 +68,10 @@ export function SpendTable({ rows }: { rows: ProjectSpendRow[] }) {
               {row.calls.toLocaleString("en-US")}
             </TableCell>
             <TableCell className="text-right font-mono tabular-nums">
-              {formatUsd(row.usd)}
+              <span className="block">{formatCredits(creditsForUsd(row.usd))}</span>
+              <span className="block text-[0.65rem] text-muted-foreground">
+                {formatUsd(row.usd)} metered
+              </span>
             </TableCell>
           </TableRow>
         ))}
@@ -73,7 +81,10 @@ export function SpendTable({ rows }: { rows: ProjectSpendRow[] }) {
           <TableCell>Total</TableCell>
           <TableCell />
           <TableCell className="text-right font-mono tabular-nums">
-            {formatUsd(totalSpend)}
+            <span className="block">{formatCredits(creditsForUsd(totalSpend))}</span>
+            <span className="block text-[0.65rem] font-normal text-muted-foreground">
+              {formatUsd(totalSpend)} metered
+            </span>
           </TableCell>
         </TableRow>
       </TableFooter>

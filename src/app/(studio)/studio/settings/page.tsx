@@ -8,6 +8,7 @@ import { requireUser } from "@/lib/auth";
 import Link from "next/link";
 
 import { AppearanceCard, DefaultsCard } from "./settings-cards";
+import { CostDisplay, PageHeader } from "@/components/studio/product-primitives";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -17,7 +18,7 @@ async function CreditsSection() {
   const { userId } = await requireUser();
   const balance = await getBalance(userId);
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <h2 className="font-sans text-base font-semibold">Credits</h2>
         <p className="text-sm text-muted-foreground">
@@ -25,11 +26,8 @@ async function CreditsSection() {
           out, so there is no separate monthly cap to manage.
         </p>
       </CardHeader>
-      <CardContent className="flex items-baseline justify-between gap-4">
-        <p className="font-display text-2xl font-semibold tabular-nums">
-          {balance.toFixed(2)}
-          <span className="ml-2 font-sans text-sm font-normal text-muted-foreground">credits</span>
-        </p>
+      <CardContent className="flex flex-wrap items-end justify-between gap-4">
+        <CostDisplay credits={balance} label="Available balance" />
         <Link href="/studio/credits" className="text-sm font-medium text-primary hover:underline">
           Buy credits
         </Link>
@@ -40,7 +38,7 @@ async function CreditsSection() {
 
 function CreditsSkeleton() {
   return (
-    <Card>
+    <Card className="instrument-surface rounded-sm">
       <CardHeader>
         <Skeleton className="h-5 w-36" />
         <Skeleton className="h-4 w-72" />
@@ -55,13 +53,12 @@ function CreditsSkeleton() {
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto max-w-2xl space-y-8">
-      <header className="space-y-1">
-        <h1 className="font-display text-3xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          How the studio looks and what new books assume.
-        </p>
-      </header>
+    <div className="mx-auto max-w-4xl space-y-8">
+      <PageHeader
+        label="Account / Settings"
+        title="Settings"
+        description="Choose how the studio looks and what each new book assumes."
+      />
 
       <div className="space-y-6">
         <AppearanceCard />

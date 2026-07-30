@@ -49,7 +49,7 @@ export function CompletionMoment({
   return (
     <section
       aria-label="Book complete"
-      className="flex flex-col items-center gap-8 rounded-xl bg-card px-6 py-12 ring-1 ring-foreground/10"
+      className="instrument-surface-raised flex flex-col items-center gap-8 rounded-sm px-6 py-12"
     >
       <div className="relative flex h-40 items-center justify-center">
         <div
@@ -77,7 +77,7 @@ export function CompletionMoment({
           className="absolute inset-0 flex items-center justify-center transition-opacity duration-500"
           style={{ opacity: closed ? 1 : 0, transitionDelay: closed ? "900ms" : "0ms" }}
         >
-          <div className="glow-primary flex h-36 w-11 items-center justify-center overflow-hidden rounded-md bg-primary px-1">
+          <div className="flex h-36 w-11 items-center justify-center overflow-hidden rounded-md bg-primary px-1 ring-1 ring-primary/40 ring-offset-4 ring-offset-background">
             <span
               className="max-h-32 truncate font-display text-sm font-semibold text-primary-foreground [writing-mode:vertical-rl]"
               title={projectTitle}

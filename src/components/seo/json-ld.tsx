@@ -123,7 +123,6 @@ export function HowToJsonLd() {
         name: "How sopher.ai writes a book",
         description:
           "Five agent stages take a one-sentence brief to a finished, edited manuscript.",
-        totalTime: "PT1H",
         step: PIPELINE_STEPS.map((step, index) => ({
           "@type": "HowToStep",
           position: index + 1,

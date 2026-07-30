@@ -5,10 +5,13 @@ import { useEditorState, type Editor } from "@tiptap/react";
 import {
   AlertTriangle,
   Check,
+  FilePenLine,
+  ListTree,
   Maximize2,
   MessageSquareText,
   Minimize2,
   Redo2,
+  Search,
   Undo2,
 } from "lucide-react";
 
@@ -50,7 +53,7 @@ function SaveAnnouncer({ state }: { state: SaveState }) {
   );
 }
 
-function SaveIndicator({ state }: { state: SaveState }) {
+export function SaveIndicator({ state, compact = false }: { state: SaveState; compact?: boolean }) {
   if (state === "saving") {
     return (
       <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -68,7 +71,8 @@ function SaveIndicator({ state }: { state: SaveState }) {
   if (state === "error") {
     return (
       <span className="flex items-center gap-1.5 text-ember">
-        <AlertTriangle aria-hidden="true" className="size-3" /> Save failed — retrying on next edit
+        <AlertTriangle aria-hidden="true" className="size-3" />{" "}
+        {compact ? "Save failed" : "Save failed — retrying on next edit"}
       </span>
     );
   }
@@ -79,6 +83,194 @@ function SaveIndicator({ state }: { state: SaveState }) {
     <span className="flex items-center gap-1.5 text-muted-foreground">
       <Check aria-hidden="true" className="size-3 text-success" /> Saved
     </span>
+  );
+}
+
+const mobileToolClass =
+  "relative size-11 rounded-sm text-muted-foreground hover:text-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground";
+
+/**
+ * Phone and tablet editor orientation. Save state stays visible above the
+ * software keyboard, while the chapter chooser remains a real dialog trigger.
+ */
+export function MobileEditorHeader({
+  chapterNumber,
+  chapterTitle,
+  saveState,
+  chaptersOpen,
+  onOpenChapters,
+}: {
+  chapterNumber: number;
+  chapterTitle: string | null;
+  saveState: SaveState;
+  chaptersOpen: boolean;
+  onOpenChapters: () => void;
+}) {
+  return (
+    <header className="safe-area-top shrink-0 border-b border-border bg-card">
+      <div className="flex min-h-12 min-w-0 items-center gap-2 px-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={mobileToolClass}
+          aria-label="Choose a chapter"
+          aria-haspopup="dialog"
+          aria-expanded={chaptersOpen}
+          onClick={onOpenChapters}
+        >
+          <ListTree aria-hidden="true" className="size-4" />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <p className="folio-label text-muted-foreground">Chapter {chapterNumber}</p>
+          <p className="truncate text-sm font-semibold">
+            {chapterTitle ?? `Chapter ${chapterNumber}`}
+          </p>
+        </div>
+        <div className="shrink-0 text-[11px]">
+          <SaveIndicator state={saveState} compact />
+          <SaveAnnouncer state={saveState} />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+/**
+ * The touch editor's persistent command row. Every action is at least 44px,
+ * named for assistive technology, and backed by the same TipTap commands as
+ * the desktop workbench.
+ */
+export function MobileEditorToolbar({
+  editor,
+  pendingCount,
+  zen,
+  reviewOpen,
+  selectionToolsOpen,
+  findOpen,
+  onOpenSelectionTools,
+  onOpenReview,
+  onOpenFind,
+  onToggleZen,
+  history,
+}: {
+  editor: Editor | null;
+  pendingCount: number;
+  zen: boolean;
+  reviewOpen: boolean;
+  selectionToolsOpen: boolean;
+  findOpen: boolean;
+  onOpenSelectionTools: () => void;
+  onOpenReview: () => void;
+  onOpenFind: () => void;
+  onToggleZen: () => void;
+  history: React.ReactNode;
+}) {
+  const state = useEditorState({
+    editor,
+    selector: (ctx) => ({
+      canUndo: ctx.editor?.can().undo() ?? false,
+      canRedo: ctx.editor?.can().redo() ?? false,
+      hasSelection: !(ctx.editor?.state.selection.empty ?? true),
+    }),
+  });
+
+  return (
+    <div
+      role="toolbar"
+      aria-label="Chapter editing tools"
+      className="safe-area-bottom shrink-0 border-t border-border bg-card px-1"
+    >
+      <div className="flex min-h-12 items-center justify-around">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={mobileToolClass}
+          aria-label="Undo"
+          disabled={!state?.canUndo}
+          onClick={() => editor?.chain().focus().undo().run()}
+        >
+          <Undo2 aria-hidden="true" className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={mobileToolClass}
+          aria-label="Redo"
+          disabled={!state?.canRedo}
+          onClick={() => editor?.chain().focus().redo().run()}
+        >
+          <Redo2 aria-hidden="true" className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={cn(mobileToolClass, state?.hasSelection && "text-ai")}
+          aria-label={
+            state?.hasSelection
+              ? "Edit the selected passage with AI"
+              : "AI editing unavailable — select a passage first"
+          }
+          aria-haspopup="dialog"
+          aria-expanded={selectionToolsOpen}
+          disabled={!state?.hasSelection}
+          onClick={onOpenSelectionTools}
+        >
+          <FilePenLine aria-hidden="true" className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={cn(mobileToolClass, pendingCount > 0 && "text-ai")}
+          aria-label={`Suggestions${pendingCount > 0 ? `, ${pendingCount} pending` : ""}`}
+          aria-haspopup="dialog"
+          aria-expanded={reviewOpen}
+          onClick={onOpenReview}
+        >
+          <MessageSquareText aria-hidden="true" className="size-4" />
+          {pendingCount > 0 ? (
+            <span
+              aria-hidden="true"
+              className="absolute top-1 right-1 min-w-4 rounded-full bg-ai px-1 font-mono text-[9px] leading-4 text-ai-foreground"
+            >
+              {pendingCount > 99 ? "99+" : pendingCount}
+            </span>
+          ) : null}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={mobileToolClass}
+          aria-label="Find and replace"
+          aria-haspopup="dialog"
+          aria-expanded={findOpen}
+          onClick={onOpenFind}
+        >
+          <Search aria-hidden="true" className="size-4" />
+        </Button>
+        {history}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={cn(mobileToolClass, zen && "text-primary")}
+          aria-label={zen ? "Exit zen mode" : "Enter zen mode"}
+          aria-pressed={zen}
+          onClick={onToggleZen}
+        >
+          {zen ? (
+            <Minimize2 aria-hidden="true" className="size-4" />
+          ) : (
+            <Maximize2 aria-hidden="true" className="size-4" />
+          )}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -127,8 +319,8 @@ export function StatusBar({
 
         <p className="hidden font-mono text-muted-foreground tabular-nums sm:block">
           {formatWordCount(wordCount)}
-          <span className="text-muted-foreground/60"> / {formatWordCount(targetWords)} words</span>
-          <span className="text-muted-foreground/60"> · {readingMinutes} min read</span>
+          <span className="text-muted-foreground"> / {formatWordCount(targetWords)} words</span>
+          <span className="text-muted-foreground"> · {readingMinutes} min read</span>
         </p>
 
         <div className="flex items-center gap-1">

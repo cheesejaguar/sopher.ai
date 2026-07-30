@@ -1,15 +1,27 @@
-import { CommandPalette } from "@/components/studio/command-palette";
-import { StudioNav } from "@/components/studio/studio-nav";
+import type { Metadata } from "next";
+import { Suspense } from "react";
+import { connection } from "next/server";
 
-export default function StudioLayout({ children }: { children: React.ReactNode }) {
+import StudioLoading from "./loading";
+import { ProductShell } from "@/components/studio/product-shell";
+import { getBalance } from "@/lib/billing/credits";
+import { requireUser } from "@/lib/auth";
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, noarchive: true },
+};
+
+export default async function StudioLayout({ children }: { children: React.ReactNode }) {
+  // Every Studio surface is user-specific. Waiting for the request keeps
+  // private data and auth checks out of the public prerender while retaining
+  // streaming boundaries for the shell and page content.
+  await connection();
+  const { userId } = await requireUser();
+  const credits = await getBalance(userId);
+
   return (
-    <div className="flex min-h-dvh flex-col">
-      <StudioNav />
-      <CommandPalette />
-      {/* id + tabIndex are the skip link's target (rendered once in the root layout). */}
-      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-7xl flex-1 px-6 py-8">
-        {children}
-      </main>
-    </div>
+    <ProductShell credits={credits}>
+      <Suspense fallback={<StudioLoading />}>{children}</Suspense>
+    </ProductShell>
   );
 }
