@@ -28,9 +28,10 @@ export default async function SignInPage() {
           <SignIn
             appearance={{
               elements: {
-                rootBox: "w-full",
-                cardBox: "w-full shadow-none",
-                card: "w-full rounded-sm border border-border shadow-none",
+                rootBox: "w-full min-w-0 max-w-full",
+                cardBox: "w-full min-w-0 max-w-full shadow-none",
+                card: "w-full min-w-0 max-w-full rounded-sm border border-border shadow-none",
+                headerTitle: "hidden",
               },
             }}
           />

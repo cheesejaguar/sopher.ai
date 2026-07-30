@@ -20,11 +20,11 @@ export function AuthShell({
     <main
       id="main-content"
       tabIndex={-1}
-      className="grid min-h-dvh bg-background font-sans text-foreground outline-none [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid-cols-2"
+      className="grid min-h-dvh min-w-0 max-w-full overflow-x-clip bg-background font-sans text-foreground outline-none [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid-cols-2"
     >
       <section
         aria-labelledby="auth-heading"
-        className="instrument-canvas relative flex min-h-[25rem] flex-col border-b border-border px-6 py-6 sm:px-10 sm:py-8 lg:min-h-dvh lg:border-r lg:border-b-0 lg:px-12 lg:py-10"
+        className="instrument-canvas relative flex min-h-[25rem] min-w-0 max-w-full flex-col border-b border-border px-6 py-6 sm:px-10 sm:py-8 lg:min-h-dvh lg:border-r lg:border-b-0 lg:px-12 lg:py-10"
       >
         <Link
           href="/"
@@ -69,16 +69,16 @@ export function AuthShell({
 
       <section
         aria-label={mode}
-        className="flex min-h-[32rem] items-center justify-center bg-background px-6 py-14 sm:px-10 lg:min-h-dvh lg:px-12"
+        className="flex min-h-[32rem] min-w-0 max-w-full items-center justify-center bg-background px-6 py-14 sm:px-10 lg:min-h-dvh lg:px-12"
       >
-        <div className="w-full max-w-md">
+        <div className="min-w-0 w-full max-w-md">
           <div className="mb-6 flex items-center justify-between border-b border-border pb-4">
             <p className="folio-label text-muted-foreground">{mode}</p>
             <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ion uppercase">
               Private session
             </span>
           </div>
-          <div className="[&_.cl-card]:rounded-sm [&_.cl-card]:border [&_.cl-card]:border-border [&_.cl-card]:shadow-none">
+          <div className="min-w-0 max-w-full [&_.cl-card]:max-w-full [&_.cl-card]:rounded-sm [&_.cl-card]:border [&_.cl-card]:border-border [&_.cl-card]:shadow-none [&_.cl-cardBox]:max-w-full [&_.cl-rootBox]:max-w-full">
             {children}
           </div>
           <p className="mt-6 border-t border-border pt-4 text-xs leading-5 text-muted-foreground">
