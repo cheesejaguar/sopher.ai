@@ -165,8 +165,21 @@ export async function POST(
     cross join applied_suggestion
   `);
   if (!accepted[0]) {
+    // The guarded CTE can lose either the chapter-version race or the
+    // production-run race. Recheck both so the author gets the real recovery
+    // instruction instead of every conflict looking like an edit collision.
+    if (await hasActiveAuthoringRun(ownership.projectId)) {
+      return Response.json(
+        { error: "Finish or stop the current run before applying suggestions" },
+        { status: 409 },
+      );
+    }
+    const currentChapter = await getChapterById(chapterId);
     return Response.json(
-      { error: "The chapter changed while applying — try again", currentVersion: newVersion },
+      {
+        error: "The chapter changed while applying — try again",
+        currentVersion: currentChapter?.version ?? chapter.version,
+      },
       { status: 409 },
     );
   }

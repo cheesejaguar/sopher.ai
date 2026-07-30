@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth";
-import { getActiveRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
+import { getActiveFullBookRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
 import { bookOutlineSchema, type BookOutline } from "@/ai/schemas";
 import { OutlineApprovalBar } from "@/components/generation/outline-approval-bar";
 import { OutlineEditor } from "@/components/studio/outline-editor";
@@ -34,10 +34,9 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
 
   const [outlineRow, activeRun] = await Promise.all([
     book ? getLatestOutline(book.id) : Promise.resolve(null),
-    getActiveRun(projectId),
+    getActiveFullBookRun(projectId),
   ]);
-  const runConfig =
-    activeRun?.kind === "full_book" ? (activeRun.config as Partial<GenerationConfig>) : null;
+  const runConfig = activeRun?.config as Partial<GenerationConfig> | undefined;
   const stagedParsed = runConfig?.stagedOutline
     ? bookOutlineSchema.safeParse(runConfig.stagedOutline)
     : null;

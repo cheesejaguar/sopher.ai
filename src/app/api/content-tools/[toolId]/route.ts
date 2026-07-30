@@ -115,7 +115,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
       ),
     )
     .limit(1);
-  if (replayed) return Response.json({ output: replayed.output });
+  if (replayed) return Response.json({ output: replayed.output, replayed: true });
 
   const tier: QualityTier = project?.settings.qualityTier ?? "standard";
   const models = MODELS[tier];
@@ -196,8 +196,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     }
 
     let deliveredOutput = output;
+    let replayedDelivery = false;
     try {
-      deliveredOutput = await db.transaction(async (tx) => {
+      const delivery = await db.transaction(async (tx) => {
         // Project deletion and every asset-producing path take this same lock.
         // The transaction is therefore either fully visible to deletion or
         // finishes after deletion and rolls back on the foreign key.
@@ -222,7 +223,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
             ),
           )
           .limit(1);
-        if (alreadyDelivered) return alreadyDelivered.output as typeof output;
+        if (alreadyDelivered) {
+          return { output: alreadyDelivered.output as typeof output, replayed: true };
+        }
 
         if (rawOutput.kind === "image") {
           await tx.insert(schema.assets).values({
@@ -250,8 +253,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
             .reduce((total, settlement) => total + settlement.meteredUsd, 0)
             .toFixed(6),
         });
-        return output;
+        return { output, replayed: false };
       });
+      deliveredOutput = delivery.output;
+      replayedDelivery = delivery.replayed;
     } catch (persistenceError) {
       // A thrown transaction can still mean COMMIT succeeded and only its
       // acknowledgement was lost. Verify the exact operation and, for an
@@ -309,7 +314,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
       }
     }
 
-    return Response.json({ output: deliveredOutput });
+    return Response.json({ output: deliveredOutput, replayed: replayedDelivery });
   } catch (error) {
     if (
       !(error instanceof AmbiguousContentToolDeliveryError) &&

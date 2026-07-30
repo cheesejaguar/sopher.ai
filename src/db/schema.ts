@@ -383,6 +383,8 @@ export type SuggestionAnchor = {
   originalText: string;
   /** Ordinal among identical matches of originalText (0 = first). Absent on legacy/review rows. */
   occurrence?: number;
+  /** Stable paid-operation key used to replay a delivered selection edit without another model call. */
+  operationKey?: string;
 };
 
 export const suggestions = pgTable(

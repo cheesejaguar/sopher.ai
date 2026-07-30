@@ -1,5 +1,5 @@
 import { generateText, Output } from "ai";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { anthropicCachedSystem } from "@/ai/cache";
@@ -83,10 +83,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     throw error;
   }
 
-  // Bound repeated paid-work requests before atomic provider authorization.
-  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
-  if (limited.limited) return limited.response;
-
   const { chapterId } = await ctx.params;
   if (!z.uuid().safeParse(chapterId).success) {
     return Response.json({ error: "Chapter not found" }, { status: 404 });
@@ -112,6 +108,31 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "Chapter not found" }, { status: 404 });
   }
 
+  const db = getDb();
+  const findDeliveredSelection = () =>
+    db
+      .select()
+      .from(schema.suggestions)
+      .where(
+        and(
+          eq(schema.suggestions.chapterId, chapterId),
+          eq(schema.suggestions.passType, "selection"),
+          sql`${schema.suggestions.anchor}->>'operationKey' = ${idempotencyKey}`,
+        ),
+      )
+      .limit(1);
+
+  // A response can be lost after the suggestion commits. Reuse that exact
+  // durable delivery before rate limiting or invoking another paid model call.
+  const [replayed] = await findDeliveredSelection();
+  if (replayed) {
+    return Response.json({ suggestion: toSuggestionDTO(replayed) }, { status: 201 });
+  }
+
+  // Bound new paid work only after ruling out a free delivery replay.
+  const limited = await rateLimit(LIMITS.llmEdit, req, userId);
+  if (limited.limited) return limited.response;
+
   const chapter = await getChapterById(chapterId);
   if (!chapter) return Response.json({ error: "Chapter not found" }, { status: 404 });
 
@@ -122,7 +143,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     );
   }
 
-  const db = getDb();
   const [project] = await db
     .select({ settings: schema.projects.settings })
     .from(schema.projects)
@@ -191,6 +211,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
           end: selection.end,
           originalText: selection.text,
           occurrence,
+          operationKey: idempotencyKey,
         },
         suggestedText: output.replacement,
         explanation: output.rationale,
@@ -200,9 +221,21 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
         status: "pending",
       })
       .returning();
-  } catch {
-    await refundMeteredDelivery(meter, "Selection edit could not be saved — refunded");
-    return Response.json({ error: "Could not save the suggestion" }, { status: 503 });
+  } catch (persistenceError) {
+    // A thrown insert can still mean COMMIT succeeded and its acknowledgement
+    // was lost. Verify the exact paid operation before deciding to refund.
+    try {
+      [row] = await findDeliveredSelection();
+    } catch (verificationError) {
+      throw new AggregateError(
+        [persistenceError, verificationError],
+        "Selection-edit persistence failed and could not be verified",
+      );
+    }
+    if (!row) {
+      await refundMeteredDelivery(meter, "Selection edit could not be saved — refunded");
+      return Response.json({ error: "Could not save the suggestion" }, { status: 503 });
+    }
   }
   if (!row) {
     await refundMeteredDelivery(meter, "Selection edit could not be saved — refunded");

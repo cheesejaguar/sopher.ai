@@ -125,4 +125,22 @@ describe("suggestion acceptance mutation boundary", () => {
     expect(sql).toContain("applied_suggestion as");
     expect(sql).toContain("not exists");
   });
+
+  it("reports a production-run race instead of mislabeling it as a chapter edit", async () => {
+    mocks.active.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    const execute = vi.fn().mockResolvedValue({ rows: [] });
+    mocks.getDb.mockReturnValue({
+      select: vi.fn().mockReturnValue(query([suggestion])),
+      execute,
+    });
+
+    const response = await POST(request(), {
+      params: Promise.resolve({ chapterId, suggestionId }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Finish or stop the current run before applying suggestions",
+    });
+  });
 });

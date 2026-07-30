@@ -14,6 +14,11 @@ import {
 } from "./metering-limits";
 import { PROSE_FALLBACK_MODELS } from "./models";
 
+/**
+ * Mutable state for one sequential metered operation. Do not share a MeterCtx
+ * across concurrent `metered()` calls; each provider attempt writes its own
+ * attempt tag and settlement result into this object.
+ */
 export type MeterCtx = {
   userId: string;
   projectId?: string | null;

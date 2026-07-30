@@ -53,6 +53,7 @@ import type {
 import { markdownSelection } from "@/lib/editor/markdown-offsets";
 
 import { ChapterSidebar } from "./chapter-sidebar";
+import { editorContainsContentToolOutput } from "./content-tool-delivery";
 import { ImageNode } from "./image-node";
 import { mermaidCodeBlockView } from "./mermaid-code-block-view";
 import { ReviewPanel } from "./review-panel";
@@ -440,33 +441,37 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
-        const insertPos = ed.state.selection.$to.after(1);
-        let inserted = false;
-        if (data.output.kind === "mermaid") {
-          inserted = ed
-            .chain()
-            .focus()
-            .insertContentAt(insertPos, {
-              type: "codeBlock",
-              attrs: { language: "mermaid" },
-              content: [{ type: "text", text: data.output.source }],
-            })
-            .run();
-        } else {
-          const { url, alt } = data.output;
-          inserted = ed
-            .chain()
-            .focus()
-            .insertContentAt(insertPos, [
-              { type: "paragraph", content: [{ type: "image", attrs: { src: url, alt } }] },
-              {
-                type: "paragraph",
-                content: alt
-                  ? [{ type: "text", marks: [{ type: "italic" }], text: alt }]
-                  : undefined,
-              },
-            ])
-            .run();
+        const alreadyInserted =
+          data.replayed === true && editorContainsContentToolOutput(ed.state.doc, data.output);
+        let inserted = alreadyInserted;
+        if (!alreadyInserted) {
+          const insertPos = ed.state.selection.$to.after(1);
+          if (data.output.kind === "mermaid") {
+            inserted = ed
+              .chain()
+              .focus()
+              .insertContentAt(insertPos, {
+                type: "codeBlock",
+                attrs: { language: "mermaid" },
+                content: [{ type: "text", text: data.output.source }],
+              })
+              .run();
+          } else {
+            const { url, alt } = data.output;
+            inserted = ed
+              .chain()
+              .focus()
+              .insertContentAt(insertPos, [
+                { type: "paragraph", content: [{ type: "image", attrs: { src: url, alt } }] },
+                {
+                  type: "paragraph",
+                  content: alt
+                    ? [{ type: "text", marks: [{ type: "italic" }], text: alt }]
+                    : undefined,
+                },
+              ])
+              .run();
+          }
         }
         if (!inserted) {
           const message = "The result is ready, but it could not be inserted. Try again.";
@@ -481,16 +486,15 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
-        toast.success(
-          data.output.kind === "mermaid"
+        const successMessage = alreadyInserted
+          ? data.output.kind === "mermaid"
+            ? "Diagram was already added."
+            : "Illustration was already added."
+          : data.output.kind === "mermaid"
             ? "Diagram added below the passage."
-            : "Illustration added below the passage.",
-        );
-        setAnnouncement(
-          data.output.kind === "mermaid"
-            ? "Diagram added below the passage."
-            : "Illustration added below the passage.",
-        );
+            : "Illustration added below the passage.";
+        toast.success(successMessage);
+        setAnnouncement(successMessage);
         acknowledge();
       } finally {
         setBusy(null);
