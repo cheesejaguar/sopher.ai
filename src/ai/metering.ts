@@ -86,9 +86,11 @@ export function gatewayOptions(
       caching: "auto",
       ...(opts?.withFallbacks ? { models: PROSE_FALLBACK_MODELS } : {}),
     },
-    // Sonnet 5 enables thinking by default. Our output ceilings are sized for
-    // the author-facing JSON/prose, so implicit reasoning can otherwise consume
-    // the entire allowance before any deliverable output is produced.
+    // Sonnet 5 enables thinking by default. This is deliberately a blanket
+    // metering policy: our output ceilings are sized for author-facing
+    // JSON/prose, so implicit reasoning can otherwise consume the allowance
+    // before any deliverable output is produced. A future operation that needs
+    // extended thinking must opt into it with a separately budgeted contract.
     anthropic: {
       thinking: { type: "disabled" },
     },
@@ -385,8 +387,11 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     let outputDeliveryFailure: unknown;
     if ("output" in result) {
       try {
-        // AI SDK exposes completed output through a getter that throws when
-        // the provider stopped before a complete result could be parsed.
+        // AI SDK v7 exposes completed structured output through a getter that
+        // throws when the provider stopped before a complete result could be
+        // parsed. Treat any getter failure as an undelivered result so billing
+        // cannot settle without usable output; the regression test deliberately
+        // locks this SDK contract.
         void (result as T & { output: unknown }).output;
       } catch (error) {
         outputDeliveryFailure = error;
