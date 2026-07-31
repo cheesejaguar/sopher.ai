@@ -4,6 +4,7 @@ import { getRun } from "workflow/api";
 import { estimateBookCost } from "@/ai/estimate";
 import type { QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
+import { netRunCreditsUsedSql } from "@/lib/billing/run-spend";
 import {
   ACTIVE_AUTHORING_RUN_STATUSES,
   deriveAuthoringRunAcceptanceState,
@@ -422,10 +423,10 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
       .where(eq(schema.llmCalls.runId, run.id)),
     db
       .select({
-        credits: sql<string>`coalesce(-sum(${schema.creditLedger.amount}), 0)`,
+        credits: netRunCreditsUsedSql(),
       })
       .from(schema.creditLedger)
-      .where(and(eq(schema.creditLedger.runId, run.id), eq(schema.creditLedger.kind, "usage"))),
+      .where(eq(schema.creditLedger.runId, run.id)),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.creditLedger)

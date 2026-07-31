@@ -1,3 +1,4 @@
+import { NoOutputGeneratedError } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +26,8 @@ vi.mock("@/lib/billing/credits", async (importOriginal) => {
 import { InsufficientCreditsError } from "@/lib/billing/credits";
 import { MeteredInputLimitError } from "./metering-limits";
 import {
+  gatewayOptions,
+  MeteredOutputDeliveryError,
   MeteringReconciliationRequiredError,
   metered,
   refundMeteredDeliveries,
@@ -60,6 +63,30 @@ beforeEach(() => {
 });
 
 describe("metered atomic authorization", () => {
+  it("disables implicit Anthropic thinking without dropping Gateway attribution or fallbacks", () => {
+    expect(
+      gatewayOptions(
+        {
+          userId: "user-1",
+          projectId: "project-1",
+          meteringAttemptId: "attempt-1",
+        },
+        "writer",
+        { withFallbacks: true },
+      ),
+    ).toEqual({
+      gateway: {
+        user: "user-1",
+        tags: ["role:writer", "project:project-1", "attempt:attempt-1"],
+        caching: "auto",
+        models: expect.any(Array),
+      },
+      anthropic: {
+        thinking: { type: "disabled" },
+      },
+    });
+  });
+
   it("claims an interactive maximum before provider work and settles through that exact claim", async () => {
     const provider = vi.fn(async () => ({ usage }));
 
@@ -326,6 +353,86 @@ describe("metered atomic authorization", () => {
     ).resolves.toEqual({ usage });
     expect(mocks.refundSettled).toHaveBeenCalledOnce();
     expect(provider).toHaveBeenCalledOnce();
+  });
+
+  it("settles and refunds truncated structured output before exposing a non-retryable error", async () => {
+    const truncatedUsage = {
+      ...usage,
+      outputTokens: 5_000,
+      outputTokenDetails: { textTokens: 72, reasoningTokens: 4_928 },
+    };
+    const provider = vi.fn(async () => ({
+      usage: truncatedUsage,
+      finishReason: "length",
+      rawFinishReason: "max_tokens",
+      get output(): never {
+        throw new NoOutputGeneratedError();
+      },
+    }));
+
+    const call = metered(
+      {
+        userId: "user-1",
+        projectId: "project-1",
+        runId: "run-1",
+        billingScope: "generation:run-1:chapter:1",
+        reservationRef: "generation-reservation:run-1:opening",
+      },
+      {
+        role: "concept",
+        operation: "concept.refine",
+        model: "anthropic/claude-sonnet-5",
+      },
+      provider,
+    );
+
+    await expect(call).rejects.toMatchObject({
+      name: "MeteredOutputDeliveryError",
+      operation: "concept.refine",
+      finishReason: "length",
+      outputTokens: 5_000,
+      reasoningTokens: 4_928,
+      isRetryable: false,
+      message: expect.stringContaining("finish reason: length"),
+    });
+    await expect(call).rejects.toBeInstanceOf(MeteredOutputDeliveryError);
+    expect(mocks.recordMany).toHaveBeenCalledOnce();
+    expect(mocks.recordMany).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({
+        compensateDelivery: {
+          description: "Provider output for concept.refine was incomplete and not delivered",
+        },
+      }),
+    );
+    expect(mocks.refundSettled).not.toHaveBeenCalled();
+  });
+
+  it("returns complete structured output without requesting delivery compensation", async () => {
+    const output = { title: "Delivered" };
+    const result = {
+      usage,
+      finishReason: "stop",
+      get output() {
+        return output;
+      },
+    };
+
+    await expect(
+      metered(
+        { userId: "user-1", projectId: "project-1", authorizationUsd: 0.1 },
+        {
+          role: "concept",
+          operation: "concept.refine",
+          model: "anthropic/claude-sonnet-5",
+        },
+        async () => result,
+      ),
+    ).resolves.toBe(result);
+    expect(mocks.recordMany).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.not.objectContaining({ compensateDelivery: expect.anything() }),
+    );
   });
 
   it("uses a caller-stable interactive key to block replay but permits a new action key", async () => {

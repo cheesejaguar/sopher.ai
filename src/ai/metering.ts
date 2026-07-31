@@ -71,7 +71,10 @@ export function gatewayOptions(
   ctx: MeterCtx,
   role: string,
   opts?: { withFallbacks?: boolean },
-): { gateway: Record<string, JSONValue> } {
+): {
+  gateway: Record<string, JSONValue>;
+  anthropic: Record<string, JSONValue>;
+} {
   return {
     gateway: {
       user: ctx.userId,
@@ -82,6 +85,14 @@ export function gatewayOptions(
       ],
       caching: "auto",
       ...(opts?.withFallbacks ? { models: PROSE_FALLBACK_MODELS } : {}),
+    },
+    // Sonnet 5 enables thinking by default. This is deliberately a blanket
+    // metering policy: our output ceilings are sized for author-facing
+    // JSON/prose, so implicit reasoning can otherwise consume the allowance
+    // before any deliverable output is produced. A future operation that needs
+    // extended thinking must opt into it with a separately budgeted contract.
+    anthropic: {
+      thinking: { type: "disabled" },
     },
   };
 }
@@ -107,6 +118,30 @@ export class MeteringReconciliationRequiredError extends Error {
         : "A prior provider attempt has unresolved local metering. The call was not repeated; reconciliation is required.",
     );
     this.name = "MeteringReconciliationRequiredError";
+  }
+}
+
+export class MeteredOutputDeliveryError extends Error {
+  readonly isRetryable: boolean;
+
+  constructor(
+    readonly operation: string,
+    readonly finishReason: string,
+    readonly outputTokens: number,
+    readonly reasoningTokens: number,
+  ) {
+    const usageDetail = [
+      outputTokens > 0 ? `${outputTokens} output tokens` : null,
+      reasoningTokens > 0 ? `${reasoningTokens} reasoning tokens` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    super(
+      `${operation} ended before a complete result was available` +
+        ` (finish reason: ${finishReason}${usageDetail ? `; ${usageDetail}` : ""}).`,
+    );
+    this.name = "MeteredOutputDeliveryError";
+    this.isRetryable = finishReason !== "length" && finishReason !== "content-filter";
   }
 }
 
@@ -349,6 +384,19 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
 
   try {
     const result = await providerPromise;
+    let outputDeliveryFailure: unknown;
+    if ("output" in result) {
+      try {
+        // AI SDK v7 exposes completed structured output through a getter that
+        // throws when the provider stopped before a complete result could be
+        // parsed. Treat any getter failure as an undelivered result so billing
+        // cannot settle without usable output; the regression test deliberately
+        // locks this SDK contract.
+        void (result as T & { output: unknown }).output;
+      } catch (error) {
+        outputDeliveryFailure = error;
+      }
+    }
     // Image models bill per generated image, not per token — count returned image files.
     const imageCount =
       (result as { files?: Array<{ mediaType?: string }> }).files?.filter((f) =>
@@ -388,6 +436,13 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
         externalRefPrefix,
         intentRef,
         reservationRef: intent.reservationRef,
+        ...(outputDeliveryFailure
+          ? {
+              compensateDelivery: {
+                description: `Provider output for ${info.operation} was incomplete and not delivered`,
+              },
+            }
+          : {}),
       },
     );
     const settlement = {
@@ -397,6 +452,19 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     };
     ctx.lastSettlement = settlement;
     ctx.settlements?.push(settlement);
+
+    if (outputDeliveryFailure) {
+      const finishReason =
+        "finishReason" in result && typeof result.finishReason === "string"
+          ? result.finishReason
+          : "unknown";
+      throw new MeteredOutputDeliveryError(
+        info.operation,
+        finishReason,
+        result.usage.outputTokens ?? 0,
+        result.usage.outputTokenDetails?.reasoningTokens ?? 0,
+      );
+    }
 
     return result;
   } catch (error) {

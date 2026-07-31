@@ -130,4 +130,45 @@ describeIsolated("run health against isolated Neon", () => {
       authoringBegan: true,
     });
   });
+
+  it("reports net credits after delivery refunds without subtracting unrelated adjustments", async () => {
+    if (!observer) throw new Error("Isolated database observer is unavailable");
+
+    await observer`
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      values
+        (
+          ${userId}, -0.4742, 'usage', 'Refunded provider usage',
+          ${projectId}, ${runId}, ${`llm:generation:${runId}:refine:attempt:one:step:0`}
+        ),
+        (
+          ${userId}, -0.2415, 'usage', 'Delivered provider usage',
+          ${projectId}, ${runId}, ${`llm:generation:${runId}:expand:attempt:two:step:0`}
+        ),
+        (
+          ${userId}, 0.4742, 'adjustment', 'Undelivered output compensation',
+          ${projectId}, ${runId}, ${`delivery-refund:llm:generation:${runId}:refine:attempt:one`}
+        ),
+        (
+          ${userId}, 9.0000, 'adjustment', 'Malformed unmatched compensation',
+          ${projectId}, ${runId}, ${`delivery-refund:llm:generation:${runId}:unmatched`}
+        ),
+        (
+          ${userId}, 1.0000, 'adjustment', 'Unrelated account adjustment',
+          ${projectId}, ${runId}, ${`support-adjustment:${runId}`}
+        )
+    `;
+
+    const [run] = await getDb()
+      .select()
+      .from(schema.generationRuns)
+      .where(eq(schema.generationRuns.id, runId))
+      .limit(1);
+    expect(run).toBeDefined();
+
+    const health = await getRunHealth(run!);
+    expect(health.spend.creditsUsed).toBeCloseTo(0.2415, 4);
+  });
 });

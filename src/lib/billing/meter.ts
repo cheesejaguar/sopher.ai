@@ -61,7 +61,7 @@ export type MeteredLedgerDebit = {
   intentRef: string;
   /** Per-attempt child claim created atomically with the intent. */
   reservationRef: string;
-  /** Atomically refund operator-verified work whose output was not delivered. */
+  /** Atomically refund settled provider work whose output was not delivered. */
   compensateDelivery?: { description: string };
 };
 
@@ -232,7 +232,19 @@ export async function beginMeteredCallIntent(input: {
     trial_spend as materialized (
       select
         coalesce(
-          -sum(entry.amount) filter (where entry.kind = 'usage'),
+          -sum(entry.amount) filter (
+            where entry.kind = 'usage'
+              and not exists (
+                select 1
+                from credit_ledger compensated
+                where compensated.user_id = entry.user_id
+                  and compensated.kind = 'adjustment'
+                  and compensated.amount > 0
+                  and compensated.external_ref =
+                    'delivery-refund:' ||
+                    regexp_replace(entry.external_ref, ':step:[0-9]+$', '')
+              )
+          ),
           0
         ) as credits_used,
         coalesce(
@@ -1446,6 +1458,10 @@ export async function recordLlmCallsAndDebit(
   const releaseRef = `release:${debit.reservationRef}`;
   const settledIntentRef = `intent-settled:${debit.intentRef}`;
   const deliveryRefundRef = `delivery-refund:${debit.externalRefPrefix}`;
+  const optionalLeaseReleaseRef =
+    debit.compensateDelivery && projectId && !runId
+      ? `release:optional-operation-lease:${debit.intentRef}`
+      : null;
   const callRows = JSON.stringify(
     costed.map(({ record, usd }) => ({
       user_id: record.userId,
@@ -1476,7 +1492,14 @@ export async function recordLlmCallsAndDebit(
   );
 
   const client = getSqlClient();
-  const [, result] = await client.transaction((tx) => [
+  const transactionResults = await client.transaction((tx) => [
+    ...(optionalLeaseReleaseRef
+      ? [
+          tx`select pg_advisory_xact_lock(
+            hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
+          )`,
+        ]
+      : []),
     tx`select pg_advisory_xact_lock(hashtextextended(${userId}, 0))`,
     tx`
     with call_values as materialized (
@@ -1647,6 +1670,17 @@ export async function recordLlmCallsAndDebit(
         and run_id is not distinct from ${runId}
       limit 1
     ),
+    existing_optional_lease_release as materialized (
+      select id
+      from credit_ledger
+      where user_id = ${userId}
+        and external_ref = ${optionalLeaseReleaseRef}
+        and kind = 'adjustment'
+        and amount = 0
+        and project_id is not distinct from ${projectId}
+        and run_id is null
+      limit 1
+    ),
     delivery_refund as (
       insert into credit_ledger (
         user_id, amount, kind, description, project_id, run_id, external_ref
@@ -1662,6 +1696,26 @@ export async function recordLlmCallsAndDebit(
       from settled_intent
       where ${debit.compensateDelivery?.description ?? null}::text is not null
         and exists (select 1 from usage_insert)
+      on conflict (external_ref) do nothing
+      returning id
+    ),
+    compensated_optional_lease_release as (
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref
+      )
+      select
+        ${userId},
+        0,
+        'adjustment',
+        'Release optional operation after compensated delivery',
+        ${projectId},
+        null,
+        ${optionalLeaseReleaseRef}
+      where ${optionalLeaseReleaseRef}::text is not null
+        and (
+          exists (select 1 from delivery_refund)
+          or exists (select 1 from existing_delivery_refund)
+        )
       on conflict (external_ref) do nothing
       returning id
     ),
@@ -1712,6 +1766,11 @@ export async function recordLlmCallsAndDebit(
             ${debit.compensateDelivery?.description ?? null}::text is null
             or exists (select 1 from delivery_refund)
           )
+          and (
+            ${optionalLeaseReleaseRef}::text is null
+            or exists (select 1 from compensated_optional_lease_release)
+            or exists (select 1 from existing_optional_lease_release)
+          )
         )
         or (
           exists (select 1 from existing_settlement)
@@ -1719,6 +1778,11 @@ export async function recordLlmCallsAndDebit(
           and (
             ${debit.compensateDelivery?.description ?? null}::text is null
             or exists (select 1 from existing_delivery_refund)
+          )
+          and (
+            ${optionalLeaseReleaseRef}::text is null
+            or exists (select 1 from compensated_optional_lease_release)
+            or exists (select 1 from existing_optional_lease_release)
           )
         )
       ) as recorded,
@@ -1735,6 +1799,7 @@ export async function recordLlmCallsAndDebit(
       ) as debited_credits
   `,
   ]);
+  const result = transactionResults.at(-1);
   const settled = (
     result as Array<{
       recorded: boolean;
