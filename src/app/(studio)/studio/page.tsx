@@ -14,7 +14,7 @@ import {
 import { StudioInlineChecklist } from "@/components/studio/first-book-checklist";
 import { listAuthoringJourneySnapshots } from "@/db/queries/authoring-journey";
 import { requireUser } from "@/lib/auth";
-import type { AuthoringJourneySnapshot } from "@/lib/authoring-journey";
+import { authoringStatusHref, type AuthoringJourneySnapshot } from "@/lib/authoring-journey";
 import { getAuthoringOnboardingSnapshot } from "@/lib/authoring-onboarding";
 import { getStudioAccess, shouldOfferFullBookUnlock } from "@/lib/studio-access";
 import { getBalance } from "@/lib/billing/credits";
@@ -26,11 +26,6 @@ export const metadata: Metadata = {
 
 function toCard(journey: AuthoringJourneySnapshot): ProjectCardData {
   const { project, artifacts } = journey;
-  const statusHref = journey.run
-    ? journey.run.kind !== "full_book"
-      ? `/projects/${project.id}/editor#editor-production-status`
-      : `/projects/${project.id}/write#production-status`
-    : `/projects/${project.id}/write`;
   return {
     id: project.id,
     title: project.title,
@@ -48,7 +43,7 @@ function toCard(journey: AuthoringJourneySnapshot): ProjectCardData {
       project.targetWordsPerChapter,
     ).totalUsd,
     nextAction: journey.nextAction,
-    statusHref,
+    statusHref: authoringStatusHref(project.id, journey.run),
   };
 }
 

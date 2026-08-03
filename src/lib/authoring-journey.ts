@@ -169,6 +169,37 @@ function projectHref(projectId: string, stage: string): string {
   return `/projects/${projectId}/${stage}`;
 }
 
+/**
+ * Points a library status action at a surface that is actually mounted for the
+ * current run. Active full-book runs expose live telemetry, terminal failures
+ * expose recovery details, and completed runs render their completion moment
+ * without either fragment target.
+ */
+export function authoringStatusHref(
+  projectId: string,
+  run: Pick<
+    AuthoringJourneyRun,
+    "kind" | "databaseStatus" | "effectiveStatus" | "stage" | "completionArtifactsReady"
+  > | null,
+): string {
+  const writeHref = projectHref(projectId, "write");
+  if (!run) return writeHref;
+  if (run.kind !== undefined && run.kind !== "full_book") {
+    return `${projectHref(projectId, "editor")}#editor-production-status`;
+  }
+  if (
+    run.effectiveStatus === "failed" ||
+    run.effectiveStatus === "cancelled" ||
+    run.stage === "failed" ||
+    run.stage === "cancelled" ||
+    (run.databaseStatus === "completed" && run.completionArtifactsReady === false)
+  ) {
+    return `${writeHref}#authoring-recovery`;
+  }
+  if (run.effectiveStatus === "completed" || run.stage === "done") return writeHref;
+  return `${writeHref}#production-status`;
+}
+
 function supportReferenceFor(projectId: string, runId?: string | null): string {
   const projectPart = projectId.replaceAll("-", "").slice(0, 8).toUpperCase();
   const runPart = runId ? runId.replaceAll("-", "").slice(0, 8).toUpperCase() : "PROJECT";

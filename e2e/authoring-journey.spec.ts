@@ -105,7 +105,7 @@ test("library exposes one truthful action for every authoring state", async ({
     {
       title: "The House That Counted",
       label: "Review production status",
-      href: `/projects/${PROJECTS.invalidCompletion}/write#production-status`,
+      href: `/projects/${PROJECTS.invalidCompletion}/write#authoring-recovery`,
       detail: "without a complete, verifiable manuscript",
     },
   ] as const;
@@ -123,6 +123,23 @@ test("library exposes one truthful action for every authoring state", async ({
   await expectNoPageOverflow(page, "authoring-state library");
   await axeCheck(page);
   await screenshot(page, testInfo.project.name, "journey-library");
+});
+
+test("a contradictory completion opens its recovery evidence", async ({ page }) => {
+  await page.goto("/studio");
+  await page
+    .getByRole("link", {
+      name: "Review production status: The House That Counted",
+      exact: true,
+    })
+    .click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${PROJECTS.invalidCompletion}/write#authoring-recovery$`),
+  );
+  const recovery = page.locator("#authoring-recovery");
+  await expect(recovery).toBeVisible();
+  await expect(recovery).toBeFocused();
 });
 
 test("project surfaces repeat the authoritative next step", async ({ page }, testInfo) => {

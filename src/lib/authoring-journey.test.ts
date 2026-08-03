@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  authoringStatusHref,
   authoringJourneyWithProgress,
   deriveAuthoringJourney,
   type AuthoringJourneyRun,
@@ -81,6 +82,49 @@ function seed(
     run: overrides.run === undefined ? null : overrides.run,
   };
 }
+
+describe("authoringStatusHref", () => {
+  it("targets the mounted full-book status surface for every run state", () => {
+    expect(authoringStatusHref(PROJECT_ID, null)).toBe(`/projects/${PROJECT_ID}/write`);
+    expect(authoringStatusHref(PROJECT_ID, run())).toBe(
+      `/projects/${PROJECT_ID}/write#production-status`,
+    );
+    expect(
+      authoringStatusHref(PROJECT_ID, run({ effectiveStatus: "failed", stage: "failed" })),
+    ).toBe(`/projects/${PROJECT_ID}/write#authoring-recovery`);
+    expect(
+      authoringStatusHref(PROJECT_ID, run({ effectiveStatus: "cancelled", stage: "cancelled" })),
+    ).toBe(`/projects/${PROJECT_ID}/write#authoring-recovery`);
+    expect(
+      authoringStatusHref(
+        PROJECT_ID,
+        run({
+          databaseStatus: "completed",
+          effectiveStatus: "completed",
+          stage: "done",
+          completionArtifactsReady: true,
+        }),
+      ),
+    ).toBe(`/projects/${PROJECT_ID}/write`);
+    expect(
+      authoringStatusHref(
+        PROJECT_ID,
+        run({
+          databaseStatus: "completed",
+          effectiveStatus: "completed",
+          stage: "done",
+          completionArtifactsReady: false,
+        }),
+      ),
+    ).toBe(`/projects/${PROJECT_ID}/write#authoring-recovery`);
+  });
+
+  it("targets the persistent editor status surface for scoped runs", () => {
+    expect(authoringStatusHref(PROJECT_ID, run({ kind: "chapter", stage: "failed" }))).toBe(
+      `/projects/${PROJECT_ID}/editor#editor-production-status`,
+    );
+  });
+});
 
 describe("deriveAuthoringJourney", () => {
   const cases: Array<{

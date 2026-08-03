@@ -79,6 +79,7 @@ describe("project journey destinations", () => {
       <ProjectCard
         project={{
           ...project,
+          statusHref: "/projects/11111111-1111-4111-8111-111111111111/write#authoring-recovery",
           nextAction: {
             kind: "contact_support",
             href: "mailto:support@sopher.ai?subject=Authoring%20help",
@@ -93,7 +94,10 @@ describe("project journey destinations", () => {
     const link = screen.getByRole("link", {
       name: "Review production status: The Night Ferry",
     });
-    expect(link).toHaveAttribute("href", "/projects/11111111-1111-4111-8111-111111111111/write");
+    expect(link).toHaveAttribute(
+      "href",
+      "/projects/11111111-1111-4111-8111-111111111111/write#authoring-recovery",
+    );
     expect(link.getAttribute("href")).not.toContain("mailto:");
     expect(screen.getByText("Review production status")).toBeVisible();
     expect(screen.getByText("Needs attention")).toBeVisible();
