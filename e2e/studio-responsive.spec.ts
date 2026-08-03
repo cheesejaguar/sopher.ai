@@ -136,10 +136,12 @@ for (const viewport of PRODUCT_VIEWPORTS) {
         ).toBeLessThanOrEqual(1);
 
         if (surface.name === "Admin book reader" || surface.name === "manuscript") {
-          const recoveredParagraph = page.getByText(
-            "The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.",
-            { exact: true },
-          );
+          const recoveredParagraph = page
+            .locator("#main-content")
+            .getByText(
+              "The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.",
+              { exact: true },
+            );
           await expect(recoveredParagraph).toBeVisible();
           const paragraphLayout = await recoveredParagraph.evaluate((node) => {
             const style = getComputedStyle(node);
