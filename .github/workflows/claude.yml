@@ -32,7 +32,7 @@ jobs:
 
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@28f83620103c48a57093dcc2837eec89e036bb9f # beta
+        uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
@@ -40,12 +40,10 @@ jobs:
           additional_permissions: |
             actions: read
 
-          # Pin the model explicitly. Left unset, the action falls back to its
-          # own built-in default — which is claude-sonnet-4-20250514, now
-          # retired, so every run failed with:
-          #   API Error: 404 not_found_error "model: claude-sonnet-4-20250514"
-          # An unpinned model means the next retirement breaks CI the same way.
-          model: "claude-sonnet-5"
+          # v1 routes CLI configuration through claude_args. Keep the model
+          # pinned so a provider-default retirement cannot silently break CI.
+          claude_args: |
+            --model claude-sonnet-5
 
           # Optional: Customize the trigger phrase (default: @claude)
           # trigger_phrase: "/claude"
@@ -54,14 +52,12 @@ jobs:
           # assignee_trigger: "claude-bot"
 
           # Optional: Allow Claude to run specific commands
-          # allowed_tools: "Bash(npm install),Bash(npm run build),Bash(npm run test:*),Bash(npm run lint:*)"
+          # claude_args: "--allowedTools Bash(npm install),Bash(npm run build),Bash(npm run test:*),Bash(npm run lint:*)"
 
           # Optional: Add custom instructions for Claude to customize its behavior for your project
-          # custom_instructions: |
-          #   Follow our coding standards
-          #   Ensure all new code has tests
-          #   Use TypeScript for new files
+          # claude_args: |
+          #   --append-system-prompt "Follow our coding standards, require tests, and use TypeScript."
 
           # Optional: Custom environment variables for Claude
-          # claude_env: |
-          #   NODE_ENV: test
+          # settings: |
+          #   {"env":{"NODE_ENV":"test"}}
