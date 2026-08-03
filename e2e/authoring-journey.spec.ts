@@ -188,7 +188,9 @@ test("project surfaces repeat the authoritative next step", async ({ page }, tes
   await expect(page.getByRole("button", { name: "Stop the run" })).toHaveCount(0);
 
   await page.goto(`/projects/${PROJECTS.creditsPause}/write`);
-  await expect(page.getByText("Writing is paused — out of credits.")).toBeVisible({
+  await expect(
+    page.locator("#main-content").getByText("Writing is paused — out of credits."),
+  ).toBeVisible({
     timeout: 20_000,
   });
   await expect(page.getByRole("heading", { name: "Waiting for credits" })).toBeVisible();
@@ -319,7 +321,7 @@ test("mobile next step remains below the app bar and incomplete work stays expli
     name: "Production stopped before the manuscript was finished.",
   });
   await expect(incomplete).toBeVisible();
-  await expect(page.getByText(/2 of 3 chapters are saved/)).toBeVisible();
+  await expect(page.locator("#main-content").getByText(/2 of 3 chapters are saved/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Resume from saved work" })).toHaveCount(1);
   await expectNoPageOverflow(page, "mobile incomplete editor");
   await axeCheck(page);
@@ -332,7 +334,7 @@ test("mobile next step remains below the app bar and incomplete work stays expli
     }),
   ).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("region", { name: "Manuscript chapters" })).toBeVisible();
-  await expect(page.getByText(/2 of 3 chapters are saved/)).toBeVisible();
+  await expect(page.locator("#main-content").getByText(/2 of 3 chapters are saved/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Resume from saved work" })).toHaveCount(1);
   await expectNoPageOverflow(page, "mobile incomplete manuscript");
   await axeCheck(page);
