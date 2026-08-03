@@ -157,7 +157,7 @@ export function StageTimeline({
         tabIndex={0}
         role="region"
         aria-label="Generation stage timeline"
-        className="instrument-surface overflow-x-auto rounded-sm px-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="instrument-surface contain-paint overflow-x-auto rounded-sm px-4 py-3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
       >
         <ol className="flex min-w-max items-center gap-3">
           {steps.map((step, index) => {

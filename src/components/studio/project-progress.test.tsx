@@ -1,5 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -23,6 +24,13 @@ const activeProgress = {
   totalChapters: 12,
 };
 
+const failedProgress = {
+  ...activeProgress,
+  stage: "failed" as const,
+  pct: 58,
+  detail: "Production stopped after four saved chapters",
+};
+
 function ProgressProbe() {
   const { progress } = useProjectProgress();
   return <div data-testid="progress-probe">{`${progress.stage}:${progress.draftedCount}`}</div>;
@@ -44,6 +52,14 @@ function CompletionPublisher() {
       </button>
     </>
   );
+}
+
+function AuthoritativeMountPublisher({ progress }: { progress: typeof failedProgress }) {
+  const { publishProgress } = useProjectProgress();
+  useEffect(() => {
+    publishProgress(progress, { refreshAuthoritativeJourney: true });
+  }, [progress, publishProgress]);
+  return null;
 }
 
 beforeEach(() => {
@@ -125,6 +141,31 @@ describe("ProjectProgressProvider polling", () => {
     expect(navigation.refresh).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Health-confirmed done" }));
+    expect(navigation.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not refresh an initial server-authoritative terminal run again on mount", () => {
+    render(
+      <ProjectProgressProvider projectId="project-1" initialProgress={failedProgress}>
+        <AuthoritativeMountPublisher progress={failedProgress} />
+      </ProjectProgressProvider>,
+    );
+
+    expect(navigation.refresh).not.toHaveBeenCalled();
+  });
+
+  it("still refreshes when a distinct recovery run becomes authoritative and terminal", () => {
+    const recoveredFailure = {
+      ...failedProgress,
+      runId: "66666666-6666-4666-8666-666666666662",
+    };
+
+    render(
+      <ProjectProgressProvider projectId="project-1" initialProgress={failedProgress}>
+        <AuthoritativeMountPublisher progress={recoveredFailure} />
+      </ProjectProgressProvider>,
+    );
+
     expect(navigation.refresh).toHaveBeenCalledTimes(1);
   });
 

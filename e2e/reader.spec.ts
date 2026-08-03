@@ -264,10 +264,12 @@ test("reader prose reflows at 320px and 390px with no serious accessibility find
     await expect(page.getByRole("heading", { level: 1, name: SHARES.first.title })).toBeVisible();
     await expectNoPageOverflow(page, `reader at ${viewport.width}px`);
 
-    const recoveredParagraph = page.getByText(
-      "The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.",
-      { exact: true },
-    );
+    const recoveredParagraph = page
+      .getByRole("article")
+      .getByText(
+        "The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.",
+        { exact: true },
+      );
     await expect(recoveredParagraph).toBeVisible();
     const layout = await recoveredParagraph.evaluate((node) => {
       const style = getComputedStyle(node);

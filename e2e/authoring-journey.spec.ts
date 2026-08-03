@@ -409,13 +409,33 @@ test("mobile interrupted recovery CTA reaches the actionable recovery panel", as
   await page.route(`**/api/runs/${recoveredRunId}/stream?**`, async (route) => {
     await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: "" });
   });
+  // The generate endpoint is stubbed and therefore cannot insert the recovered
+  // run into the disposable database. Keep the provider's quiet-page fallback
+  // aligned with the same authoritative queued fixture if this assertion takes
+  // longer than one poll interval.
+  await page.route(`**/api/projects/${PROJECTS.partialFailure}/progress`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        progress: {
+          runId: recoveredRunId,
+          stage: "queued",
+          pct: 0,
+          detail: "Preparing the writing room",
+          draftedCount: 2,
+          totalChapters: 3,
+        },
+      }),
+    });
+  });
   await page.goto(`/projects/${PROJECTS.partialFailure}/write`);
 
   const nextStep = page.getByRole("region", {
     name: "Next step: Resume from saved work",
   });
   const resumeLink = nextStep.getByRole("link", { name: "Resume from saved work" });
-  const recoveryPanel = page.locator("#authoring-recovery");
+  const recoveryPanel = page.locator("#authoring-recovery:visible");
 
   await expect(nextStep).toBeVisible({ timeout: 20_000 });
   await expect(resumeLink).toHaveAttribute(
@@ -423,6 +443,7 @@ test("mobile interrupted recovery CTA reaches the actionable recovery panel", as
     `/projects/${PROJECTS.partialFailure}/write#authoring-recovery`,
   );
   await expect(recoveryPanel).toHaveAttribute("tabindex", "-1");
+  await expect(recoveryPanel).toHaveCount(1);
   await expectNoPageOverflow(page, "390px interrupted recovery");
   await axeCheck(page);
 
@@ -445,8 +466,13 @@ test("mobile interrupted recovery CTA reaches the actionable recovery panel", as
 
   await recoveryPanel.getByRole("button", { name: "Resume from saved work" }).click();
 
-  await expect(page.getByRole("region", { name: "Next step: Watch production" })).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Next step: Watch the writing room" }),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: "Resume from saved work" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Book generation run" })).toBeFocused();
   await expectNoPageOverflow(page, "390px recovered production");
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expectNoPageOverflow(page, "320px recovered production");
+  await axeCheck(page);
 });

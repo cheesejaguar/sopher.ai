@@ -26,6 +26,7 @@ function words(value: number): string {
 const GENERATION_REQUEST_KEY = "sopher.generation-request.v1";
 const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "awaiting_input"] as const);
 type ActiveRunStatus = "queued" | "running" | "awaiting_input";
+type StartSafetyLatch = "support_required" | "completed_replay";
 
 export function generationRequestStorageKey(projectId: string): string {
   return `${GENERATION_REQUEST_KEY}:${projectId}`;
@@ -80,6 +81,26 @@ export function isSupportRequiredResponse(
   response: { code?: string } | null,
 ): boolean {
   return status === 409 && response?.code === "support_required";
+}
+
+export function journeyAllowsGenerationStart(response: unknown): boolean {
+  if (!response || typeof response !== "object") return false;
+  const journey = (response as { journey?: unknown }).journey;
+  if (!journey || typeof journey !== "object") return false;
+  const nextAction = (journey as { nextAction?: unknown }).nextAction;
+  if (!nextAction || typeof nextAction !== "object") return false;
+  const kind = (nextAction as { kind?: unknown }).kind;
+  return kind === "start_production" || kind === "recover_saved_work";
+}
+
+function journeyStartBlockDescription(response: unknown): string | null {
+  if (!response || typeof response !== "object") return null;
+  const journey = (response as { journey?: unknown }).journey;
+  if (!journey || typeof journey !== "object") return null;
+  const nextAction = (journey as { nextAction?: unknown }).nextAction;
+  if (!nextAction || typeof nextAction !== "object") return null;
+  const description = (nextAction as { description?: unknown }).description;
+  return typeof description === "string" ? description : null;
 }
 
 export function clearRecoveredWizardStorage(
@@ -173,7 +194,11 @@ export function WriteExperience({
     };
   });
   const { publishProgress } = useProjectProgress();
-  const safetyBlockedForSnapshotRef = React.useRef<RunSnapshot | null | undefined>(undefined);
+  // A safety response may arrive while the server snapshot is null. Do not key
+  // the latch to object identity: null would make the visible start action inert
+  // forever. A subsequent activation performs a read-only journey recheck and
+  // can proceed only when the server explicitly derives a start/recovery action.
+  const startSafetyLatchRef = React.useRef<StartSafetyLatch | null>(null);
   const activeRunId = snapshot?.run.id ?? null;
   const handleProgress = React.useCallback(
     (progress: RunProgressSnapshot) => {
@@ -207,6 +232,47 @@ export function WriteExperience({
     clearRecoveredWizardStorage(window.localStorage, userId, experience, recoveryRequestKey);
   }, [experience, recoveryRequestKey, userId]);
 
+  const recheckStartSafety = React.useCallback(
+    async (explicitCompletedRestart: boolean): Promise<boolean> => {
+      const latch = startSafetyLatchRef.current;
+      if (!latch) return true;
+
+      // A completed-request replay protects a lost response from silently
+      // starting paid work twice. Once the refreshed UI proves the full-book
+      // run completed, the separately confirmed "Start new draft" action is a
+      // new author intent and may use a fresh request key. Support blocks never
+      // receive this bypass.
+      if (
+        latch === "completed_replay" &&
+        explicitCompletedRestart &&
+        experience === "full_book" &&
+        snapshot?.run.status === "completed"
+      ) {
+        startSafetyLatchRef.current = null;
+        return true;
+      }
+
+      const response = await fetch(`/api/projects/${projectId}/journey`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const body: unknown = await response.json().catch(() => null);
+      if (response.ok && journeyAllowsGenerationStart(body)) {
+        startSafetyLatchRef.current = null;
+        return true;
+      }
+      setError(
+        journeyStartBlockDescription(body) ??
+          (response.ok
+            ? "The latest project state does not allow another production start."
+            : "The studio could not safely recheck this project. Try again in a moment."),
+      );
+      router.refresh();
+      return false;
+    },
+    [experience, projectId, router, snapshot?.run.status],
+  );
+
   React.useEffect(() => {
     if (snapshot && moveFocusToRun.current) {
       moveFocusToRun.current = false;
@@ -214,11 +280,12 @@ export function WriteExperience({
     }
   }, [snapshot]);
 
-  async function startRun() {
-    if (pending || safetyBlockedForSnapshotRef.current === initialSnapshot) return;
+  async function startRun(options?: { explicitCompletedRestart?: boolean }) {
+    if (pending) return;
     setPending(true);
     setError(null);
     try {
+      if (!(await recheckStartSafety(options?.explicitCompletedRestart === true))) return;
       const storageKey = generationRequestStorageKey(projectId);
       let requestKey =
         requestKeyRef.current ?? window.localStorage.getItem(storageKey) ?? createRequestKey();
@@ -234,6 +301,8 @@ export function WriteExperience({
         config?: Partial<GenerationConfig>;
         code?: string;
         retryable?: boolean;
+        error?: string;
+        reattached?: boolean;
       } | null;
 
       while (true) {
@@ -245,18 +314,23 @@ export function WriteExperience({
         json = await res.json().catch(() => null);
         responseBody = json as typeof responseBody;
         if (isSupportRequiredResponse(res.status, responseBody)) {
-          safetyBlockedForSnapshotRef.current = initialSnapshot;
+          startSafetyLatchRef.current = "support_required";
           window.localStorage.removeItem(storageKey);
           requestKeyRef.current = null;
+          setError(
+            responseBody?.error ??
+              "Production needs support before another safe start can be attempted.",
+          );
           router.refresh();
           return;
         }
         if (isCompletedRequestReplay(res.status, responseBody)) {
-          safetyBlockedForSnapshotRef.current = initialSnapshot;
+          startSafetyLatchRef.current = "completed_replay";
           // Never turn a lost response for already-completed paid work into a
           // second run. Retire the stale key and re-read the durable journey.
           window.localStorage.removeItem(storageKey);
           requestKeyRef.current = null;
+          setError(responseBody?.error ?? "The completed project state is being refreshed.");
           router.refresh();
           return;
         }
@@ -298,21 +372,30 @@ export function WriteExperience({
         const returnedStatus = ACTIVE_RUN_STATUSES.has(responseBody?.status as ActiveRunStatus)
           ? (responseBody?.status as ActiveRunStatus)
           : "queued";
+        const authoritativeReattach =
+          responseBody?.reattached === true || res.status === 409 || returnedStatus !== "queued";
+        if (authoritativeReattach) {
+          // The start endpoint intentionally returns no event history, pause,
+          // chapter rows, or canonical health. Mounting RunViewer from that
+          // partial response would synchronously publish guessed progress
+          // before its first health poll. Wait for the refreshed server page,
+          // which loads the complete authoritative snapshot instead.
+          moveFocusToRun.current = true;
+          router.refresh();
+          return;
+        }
         const draftedCount =
           snapshot?.chapters?.filter((chapter) =>
             ["drafted", "edited", "final"].includes(chapter.status),
           ).length ?? 0;
-        publishProgress(
-          {
-            runId,
-            stage: "queued",
-            pct: 0,
-            detail: returnedStatus === "queued" ? "Preparing the writing room" : "Reconnecting",
-            draftedCount,
-            totalChapters: chapters,
-          },
-          { refreshAuthoritativeJourney: true },
-        );
+        publishProgress({
+          runId,
+          stage: "queued",
+          pct: 0,
+          detail: "Preparing the writing room",
+          draftedCount,
+          totalChapters: chapters,
+        });
         moveFocusToRun.current = true;
         setSnapshot({
           run: { id: runId, status: returnedStatus, error: null, kind: "full_book" },
@@ -377,7 +460,7 @@ export function WriteExperience({
         estimatedMinutes={runShape.estimatedMinutes}
         plannedChapters={runShape.chapters}
         targetWordsPerChapter={runShape.wordsPerChapter}
-        onRestart={startRun}
+        onRestart={() => void startRun({ explicitCompletedRestart: true })}
         restartPending={pending}
         restartError={error}
         onProgress={handleProgress}

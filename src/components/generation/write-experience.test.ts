@@ -35,6 +35,7 @@ import {
   isCompletedRequestReplay,
   isSupportRequiredResponse,
   isTerminalRequestReplay,
+  journeyAllowsGenerationStart,
   shouldRefreshAuthoritativeJourney,
   WriteExperience,
 } from "./write-experience";
@@ -198,6 +199,19 @@ describe("canAttachToWholeBookRun", () => {
 });
 
 describe("terminal generation request replay", () => {
+  it("allows a retried POST only when the refreshed journey explicitly permits it", () => {
+    expect(
+      journeyAllowsGenerationStart({ journey: { nextAction: { kind: "recover_saved_work" } } }),
+    ).toBe(true);
+    expect(
+      journeyAllowsGenerationStart({ journey: { nextAction: { kind: "start_production" } } }),
+    ).toBe(true);
+    expect(
+      journeyAllowsGenerationStart({ journey: { nextAction: { kind: "read_or_export" } } }),
+    ).toBe(false);
+    expect(journeyAllowsGenerationStart(null)).toBe(false);
+  });
+
   it("recognizes only an explicitly retryable terminal replay", () => {
     expect(isTerminalRequestReplay(409, { code: "terminal_request_replay", retryable: true })).toBe(
       true,
@@ -210,25 +224,47 @@ describe("terminal generation request replay", () => {
     );
   });
 
-  it("refreshes durable state instead of restarting an already-completed run", async () => {
+  it("refreshes a completed replay, then honors a separately confirmed paid restart", async () => {
     window.localStorage.setItem(generationRequestStorageKey(PROJECT_ID), STALE_REQUEST_KEY);
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: "This saved start request already completed.",
-          code: "terminal_request_replay",
-          retryable: false,
-          runId: "44444444-4444-4444-8444-444444444444",
-          kind: "full_book",
-          status: "completed",
-        }),
-        { status: 409, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: "This saved start request already completed.",
+            code: "terminal_request_replay",
+            retryable: false,
+            runId: "44444444-4444-4444-8444-444444444444",
+            kind: "full_book",
+            status: "completed",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            runId: ACTIVE_RUN_ID,
+            kind: "full_book",
+            status: "queued",
+            config: { tier: "standard", targetChapters: 10, targetWordsPerChapter: 2500 },
+          }),
+          { status: 202, headers: { "Content-Type": "application/json" } },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
-    const rendered = renderPreflight();
-    fireEvent.click(screen.getByRole("button", { name: "Start my included story" }));
+    const fullBookProps = {
+      ...writeExperienceProps(),
+      experience: "full_book" as const,
+      fullBookUnlocked: true,
+      targetChapters: 10,
+      targetWordsPerChapter: 2500,
+      balanceCredits: 100,
+      requiredCredits: 20,
+    };
+    const rendered = render(React.createElement(WriteExperience, fullBookProps));
+    fireEvent.click(screen.getByRole("button", { name: "Start writing this book" }));
 
     await waitFor(() => expect(clientMocks.refresh).toHaveBeenCalledOnce());
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -236,9 +272,9 @@ describe("terminal generation request replay", () => {
     expect(clientMocks.publishProgress).not.toHaveBeenCalled();
 
     rendered.rerender(
-      React.createElement(
-        WriteExperience,
-        writeExperienceProps({
+      React.createElement(WriteExperience, {
+        ...fullBookProps,
+        initialSnapshot: {
           run: {
             id: "44444444-4444-4444-8444-444444444444",
             status: "completed",
@@ -248,26 +284,51 @@ describe("terminal generation request replay", () => {
           events: [],
           chapters: [],
           totalUsd: 0,
-        }),
-      ),
+        },
+      }),
     );
     expect(await screen.findByText("Run 44444444-4444-4444-8444-444444444444")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Start my included story" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start writing this book" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Explicit restart" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(`Run ${ACTIVE_RUN_ID}`)).toBeVisible();
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["POST", "POST"]);
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      requestKey: string;
+    };
+    const secondBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)) as {
+      requestKey: string;
+    };
+    expect(firstBody.requestKey).toBe(STALE_REQUEST_KEY);
+    expect(secondBody.requestKey).not.toBe(STALE_REQUEST_KEY);
+    expect(clientMocks.refresh).toHaveBeenCalledOnce();
   });
 
   it("refreshes a support-required safety decision and blocks repeated generation posts", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: "This project needs a safety recheck.",
-          code: "support_required",
-          action: { kind: "contact_support" },
-        }),
-        { status: 409, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: "This project needs a safety recheck.",
+            code: "support_required",
+            action: { kind: "contact_support" },
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            journey: {
+              nextAction: {
+                kind: "contact_support",
+                description: "Support is still verifying the prior provider attempt.",
+              },
+            },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
 
     renderPreflight();
@@ -276,9 +337,54 @@ describe("terminal generation request replay", () => {
     await waitFor(() => expect(clientMocks.refresh).toHaveBeenCalledOnce());
     fireEvent.click(start);
 
-    expect(fetchMock).toHaveBeenCalledOnce();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["POST", "GET"]);
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Support is still verifying the prior provider attempt.",
+    );
     expect(isSupportRequiredResponse(409, { code: "support_required" })).toBe(true);
     expect(window.localStorage.getItem(generationRequestStorageKey(PROJECT_ID))).toBeNull();
+  });
+
+  it("rechecks a null-snapshot safety latch and starts only after recovery is allowed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: "This project needs a safety recheck.",
+            code: "support_required",
+          }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ journey: { nextAction: { kind: "recover_saved_work" } } }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            runId: ACTIVE_RUN_ID,
+            kind: "full_book",
+            status: "queued",
+            config: { tier: "standard", targetChapters: 3, targetWordsPerChapter: 1000 },
+          }),
+          { status: 202, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPreflight();
+    const start = screen.getByRole("button", { name: "Start my included story" });
+    fireEvent.click(start);
+    await waitFor(() => expect(clientMocks.refresh).toHaveBeenCalledOnce());
+    fireEvent.click(start);
+
+    expect(await screen.findByText(`Run ${ACTIVE_RUN_ID}`)).toBeVisible();
+    expect(fetchMock.mock.calls.map((call) => call[1]?.method)).toEqual(["POST", "GET", "POST"]);
   });
 
   it("distinguishes a completed replay from a retryable failed replay", () => {
@@ -343,18 +449,65 @@ describe("terminal generation request replay", () => {
     expect(secondBody.requestKey).not.toBe(STALE_REQUEST_KEY);
     expect(secondBody.requestKey).toMatch(/^[0-9a-f-]{36}$/i);
     expect(window.localStorage.getItem(generationRequestStorageKey(PROJECT_ID))).toBeNull();
-    expect(clientMocks.publishProgress).toHaveBeenCalledWith(
-      {
-        runId: ACTIVE_RUN_ID,
-        stage: "queued",
-        pct: 0,
-        detail: "Preparing the writing room",
-        draftedCount: 0,
-        totalChapters: 3,
-      },
-      { refreshAuthoritativeJourney: true },
-    );
+    expect(clientMocks.publishProgress).toHaveBeenCalledWith({
+      runId: ACTIVE_RUN_ID,
+      stage: "queued",
+      pct: 0,
+      detail: "Preparing the writing room",
+      draftedCount: 0,
+      totalChapters: 3,
+    });
   });
+
+  it.each([
+    { status: "running" as const, responseStatus: 409, reattached: false },
+    { status: "awaiting_input" as const, responseStatus: 202, reattached: true },
+    { status: "queued" as const, responseStatus: 409, reattached: false },
+  ])(
+    "waits for authoritative server state when reattaching to a $status run",
+    async ({ status, responseStatus, reattached }) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            runId: ACTIVE_RUN_ID,
+            kind: "full_book",
+            status,
+            ...(reattached ? { reattached: true } : {}),
+            config: { tier: "standard", targetChapters: 3, targetWordsPerChapter: 1000 },
+          }),
+          { status: responseStatus, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      const rendered = renderPreflight();
+      fireEvent.click(screen.getByRole("button", { name: "Start my included story" }));
+
+      await waitFor(() => expect(clientMocks.refresh).toHaveBeenCalledOnce());
+      expect(screen.queryByText(`Run ${ACTIVE_RUN_ID}`)).not.toBeInTheDocument();
+      expect(clientMocks.publishProgress).not.toHaveBeenCalled();
+
+      rendered.rerender(
+        React.createElement(
+          WriteExperience,
+          writeExperienceProps({
+            run: { id: ACTIVE_RUN_ID, status, error: null, kind: "full_book" },
+            events: [],
+            chapters: [],
+            totalUsd: 0,
+            health: {
+              databaseStatus: status,
+              effectiveStatus: status,
+              stage: status === "awaiting_input" ? "awaiting_guidance" : "concept",
+              progressPct: status === "queued" ? 0 : 7,
+              health: "healthy",
+            },
+          }),
+        ),
+      );
+      expect(await screen.findByText(`Run ${ACTIVE_RUN_ID}`)).toBeVisible();
+    },
+  );
 
   it("does not loop when the fresh request also resolves to a terminal run", async () => {
     window.localStorage.setItem(generationRequestStorageKey(PROJECT_ID), STALE_REQUEST_KEY);
