@@ -53,7 +53,9 @@ test("authoring mode stays reversible and live assembly has a complete reduced-m
   await expectNoPageOverflow(page, "authoring-mode settings");
 
   await page.goto(`/projects/${ACTIVE_PROJECT_ID}/write`);
-  const assembly = page.locator('section[aria-labelledby="book-assembly-title"]');
+  const assembly = page
+    .locator('section[aria-labelledby="book-assembly-title"]')
+    .filter({ visible: true });
   await expect(
     assembly.getByRole("heading", { name: "Watch the story become a book" }),
   ).toBeVisible({ timeout: 20_000 });
@@ -173,13 +175,18 @@ test("whole-manuscript review fails safely and Book Package preserves the seeded
   await expect(page.getByRole("heading", { name: "Editorial workbench" })).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByText("Whole-manuscript direction", { exact: true })).toBeVisible();
-  const instruction = page.getByLabel("What should change across the book?");
+  const direction = page
+    .locator('section[aria-labelledby="manuscript-direction-heading"]')
+    .filter({ visible: true });
+  await expect(direction.getByText("Whole-manuscript direction", { exact: true })).toBeVisible();
+  const instruction = direction.getByLabel("What should change across the book?");
   await instruction.fill("Make every scene more adventurous without changing the plot.");
-  const review = page.getByRole("button", { name: "Review the whole manuscript" });
+  const review = direction.getByRole("button", { name: "Review the whole manuscript" });
   await review.click();
   await expect(
-    page.getByRole("alert").filter({ hasText: "The review service is temporarily unavailable." }),
+    direction
+      .getByRole("alert")
+      .filter({ hasText: "The review service is temporarily unavailable." }),
   ).toHaveText("The review service is temporarily unavailable.");
   await expect(instruction).toHaveValue(
     "Make every scene more adventurous without changing the plot.",

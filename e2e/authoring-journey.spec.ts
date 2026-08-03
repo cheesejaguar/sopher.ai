@@ -174,7 +174,7 @@ test("cross-page Editor and Manuscript actions focus their destination", async (
   for (const destination of destinations) {
     await page.goto(destination.route);
     await expect(page).toHaveURL(new RegExp(`${destination.target}$`));
-    const target = page.locator(destination.target);
+    const target = page.locator(destination.target).filter({ visible: true });
     await expect(target).toBeVisible();
     await expect(target).toBeFocused();
   }
