@@ -1,4 +1,4 @@
-import type { JSONValue, LanguageModelUsage } from "ai";
+import { NoObjectGeneratedError, type JSONValue, type LanguageModelUsage } from "ai";
 import {
   abortMeteredCallIntent,
   attachGatewayGenerationIds,
@@ -438,6 +438,62 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   };
 
   const startedAt = Date.now();
+  const settleProviderUsage = async (input: {
+    carrier: UsageCarrier & { usage: LanguageModelUsage };
+    imageCount?: number;
+    outputDeliveryFailure?: unknown;
+  }) => {
+    const calls = actualCalls(input.carrier, info.model);
+    if (calls.length === 0) {
+      calls.push({ usage: input.carrier.usage, model: info.model });
+    }
+    const generationIds = calls.flatMap((call) => (call.generationId ? [call.generationId] : []));
+    await attachGatewayGenerationIds({
+      userId: ctx.userId,
+      externalRef: intentRef,
+      generationIds,
+    });
+    const externalRefPrefix = `llm:${logicalScope}:${info.operation}:attempt:${attemptId}`;
+    const settlementResult = await recordLlmCallsAndDebit(
+      calls.map((call, index) => ({
+        userId: ctx.userId,
+        projectId: ctx.projectId,
+        runId: ctx.runId,
+        agentRole: info.role,
+        operation: info.operation,
+        model: call.model,
+        usage: {
+          inputTokens: call.usage.inputTokens ?? 0,
+          outputTokens: call.usage.outputTokens ?? 0,
+          cachedInputTokens: call.usage.inputTokenDetails?.cacheReadTokens ?? 0,
+          cacheWriteTokens: call.usage.inputTokenDetails?.cacheWriteTokens ?? 0,
+          reasoningTokens: call.usage.outputTokenDetails?.reasoningTokens ?? 0,
+          imageCount: index === calls.length - 1 ? (input.imageCount ?? 0) : 0,
+        },
+        latencyMs: Date.now() - startedAt,
+      })),
+      {
+        description: info.operation,
+        externalRefPrefix,
+        intentRef,
+        reservationRef: intent.reservationRef,
+        ...(input.outputDeliveryFailure
+          ? {
+              compensateDelivery: {
+                description: `Provider output for ${info.operation} was incomplete and not delivered`,
+              },
+            }
+          : {}),
+      },
+    );
+    const settlement = {
+      meteredUsd: settlementResult.meteredUsd,
+      credits: settlementResult.debitedCredits,
+      externalRefPrefix,
+    };
+    ctx.lastSettlement = settlement;
+    ctx.settlements?.push(settlement);
+  };
   let providerPromise: Promise<T>;
   try {
     // Cancellation may arrive after a phase hold was granted but before this
@@ -445,9 +501,9 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     // release the untouched intent when the author has asked us to stop.
     await throwIfAuthoringCancellationRequested(ctx.runId);
     // A synchronous throw proves dispatch never returned a provider promise.
-    // Once a promise exists, every rejection is ambiguous (the Gateway may
-    // have accepted or partially streamed it) and must remain held for
-    // generation-tag reconciliation.
+    // Once a promise exists, a rejection is normally ambiguous (the Gateway
+    // may have accepted or partially streamed it). AI SDK structured-output
+    // errors are the narrow exception because they carry completed usage.
     providerPromise = fn();
   } catch (error) {
     await abortKnownUnsent();
@@ -474,56 +530,11 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
       (result as { files?: Array<{ mediaType?: string }> }).files?.filter((f) =>
         f.mediaType?.startsWith("image/"),
       ).length ?? 0;
-    const calls = actualCalls(result, info.model);
-    if (calls.length === 0) {
-      calls.push({ usage: result.usage, model: info.model });
-    }
-    const generationIds = calls.flatMap((call) => (call.generationId ? [call.generationId] : []));
-    await attachGatewayGenerationIds({
-      userId: ctx.userId,
-      externalRef: intentRef,
-      generationIds,
+    await settleProviderUsage({
+      carrier: result,
+      imageCount,
+      outputDeliveryFailure,
     });
-    const externalRefPrefix = `llm:${logicalScope}:${info.operation}:attempt:${attemptId}`;
-    const settlementResult = await recordLlmCallsAndDebit(
-      calls.map((call, index) => ({
-        userId: ctx.userId,
-        projectId: ctx.projectId,
-        runId: ctx.runId,
-        agentRole: info.role,
-        operation: info.operation,
-        model: call.model,
-        usage: {
-          inputTokens: call.usage.inputTokens ?? 0,
-          outputTokens: call.usage.outputTokens ?? 0,
-          cachedInputTokens: call.usage.inputTokenDetails?.cacheReadTokens ?? 0,
-          cacheWriteTokens: call.usage.inputTokenDetails?.cacheWriteTokens ?? 0,
-          reasoningTokens: call.usage.outputTokenDetails?.reasoningTokens ?? 0,
-          imageCount: index === calls.length - 1 ? imageCount : 0,
-        },
-        latencyMs: Date.now() - startedAt,
-      })),
-      {
-        description: info.operation,
-        externalRefPrefix,
-        intentRef,
-        reservationRef: intent.reservationRef,
-        ...(outputDeliveryFailure
-          ? {
-              compensateDelivery: {
-                description: `Provider output for ${info.operation} was incomplete and not delivered`,
-              },
-            }
-          : {}),
-      },
-    );
-    const settlement = {
-      meteredUsd: settlementResult.meteredUsd,
-      credits: settlementResult.debitedCredits,
-      externalRefPrefix,
-    };
-    ctx.lastSettlement = settlement;
-    ctx.settlements?.push(settlement);
 
     if (outputDeliveryFailure) {
       const finishReason =
@@ -541,16 +552,36 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     await throwIfAuthoringCancellationRequested(ctx.runId);
     return result;
   } catch (error) {
+    if (NoObjectGeneratedError.isInstance(error) && error.usage) {
+      // AI SDK rejects generateText(Output.object(...)) after the provider has
+      // returned when its response cannot be parsed or validated. The usage
+      // attached to this error is authoritative: settle and compensate it so
+      // Workflow can safely retry the structured output instead of mistaking
+      // its own completed attempt for unresolved external billing.
+      await settleProviderUsage({
+        carrier: {
+          usage: error.usage,
+          ...(error.response ? { response: error.response } : {}),
+        },
+        outputDeliveryFailure: error,
+      });
+      throw new MeteredOutputDeliveryError(
+        info.operation,
+        error.finishReason ?? "unknown",
+        error.usage.outputTokens ?? 0,
+        error.usage.outputTokenDetails?.reasoningTokens ?? 0,
+      );
+    }
     if (error instanceof MeteredInputLimitError && error.stepNumber === 0) {
       // AI SDK prepareStep runs before the corresponding provider request.
       // A first-step guard failure therefore proves no model call was sent.
       await abortKnownUnsent();
       throw error;
     }
-    // Provider promise rejection, stream interruption, generation-id write
-    // failure, and settlement failure are all ambiguous after dispatch. Keep
-    // the claim and intent pending; an operator can reconcile it against the
-    // unique Gateway attempt tag.
+    // Every other provider rejection, stream interruption, generation-id
+    // write failure, and settlement failure remains ambiguous after dispatch.
+    // Keep the claim and intent pending for operator reconciliation against
+    // the unique Gateway attempt tag.
     throw error;
   }
 }

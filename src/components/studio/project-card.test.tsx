@@ -26,6 +26,7 @@ const project: ProjectCardData = {
   chaptersTotal: 3,
   creditsUsed: 0,
   estimateUsd: 0.6,
+  statusHref: "/projects/11111111-1111-4111-8111-111111111111/write",
   nextAction: {
     kind: "start_production",
     href: "/projects/11111111-1111-4111-8111-111111111111/write",
@@ -71,6 +72,31 @@ describe("project journey destinations", () => {
     expect(screen.getByText("Review needed")).toBeInTheDocument();
     expect(screen.getByText("Production is paused for your approval.")).toBeInTheDocument();
     expect(screen.queryByText("Continue where you left off")).not.toBeInTheDocument();
+  });
+
+  it("opens a failed book's internal status before offering email support", () => {
+    render(
+      <ProjectCard
+        project={{
+          ...project,
+          nextAction: {
+            kind: "contact_support",
+            href: "mailto:support@sopher.ai?subject=Authoring%20help",
+            label: "Contact support",
+            description: "Production stopped and needs a safe evidence review.",
+            requiresMeteredAccess: false,
+          },
+        }}
+      />,
+    );
+
+    const link = screen.getByRole("link", {
+      name: "Review production status: The Night Ferry",
+    });
+    expect(link).toHaveAttribute("href", "/projects/11111111-1111-4111-8111-111111111111/write");
+    expect(link.getAttribute("href")).not.toContain("mailto:");
+    expect(screen.getByText("Review production status")).toBeVisible();
+    expect(screen.getByText("Needs attention")).toBeVisible();
   });
 });
 

@@ -97,7 +97,10 @@ export default async function ManuscriptPage({
       <h2 className="sr-only">Manuscript</h2>
       {journey ? <IncompleteProductionNotice journey={journey} /> : null}
 
-      <header className="instrument-surface flex flex-wrap items-center justify-between gap-4 rounded-sm p-4">
+      <header
+        id="manuscript-actions"
+        className="instrument-surface scroll-mt-28 flex flex-wrap items-center justify-between gap-4 rounded-sm p-4"
+      >
         <div className="min-w-0 space-y-2">
           <p className="folio-label text-muted-foreground">
             Chapter {active.chapterNumber} of {readable.length} readable ·{" "}

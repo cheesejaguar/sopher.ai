@@ -152,13 +152,61 @@ function renderNextStep(journey: ReturnType<typeof snapshot>) {
 
 afterEach(() => {
   cleanup();
-  document.querySelectorAll("#authoring-recovery").forEach((target) => target.remove());
+  document
+    .querySelectorAll("#authoring-recovery, #production-status, #manuscript-actions")
+    .forEach((target) => target.remove());
   navigation.pathname = `/projects/${PROJECT_ID}/write`;
   window.history.replaceState({}, "", navigation.pathname);
   navigation.refresh.mockClear();
 });
 
 describe("ProjectNextStep presentation", () => {
+  it("moves the same-page writing-room action to the live production status", () => {
+    window.history.replaceState({}, "", `/projects/${PROJECT_ID}/write`);
+    const target = document.createElement("section");
+    target.id = "production-status";
+    target.scrollIntoView = vi.fn();
+    target.getClientRects = vi.fn(() => [{ width: 1, height: 1 }] as unknown as DOMRectList);
+    document.body.append(target);
+
+    renderNextStep(snapshot(run({ stage: "queued", progressPct: 0 })));
+    const link = screen.getByRole("link", { name: "Watch the writing room" });
+    expect(link).toHaveAttribute("href", `/projects/${PROJECT_ID}/write#production-status`);
+
+    fireEvent.click(link);
+
+    expect(window.location.hash).toBe("#production-status");
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(target).toHaveFocus();
+  });
+
+  it("moves the same-page manuscript action to the reading and export controls", () => {
+    navigation.pathname = `/projects/${PROJECT_ID}/manuscript`;
+    window.history.replaceState({}, "", navigation.pathname);
+    const target = document.createElement("header");
+    target.id = "manuscript-actions";
+    target.scrollIntoView = vi.fn();
+    target.getClientRects = vi.fn(() => [{ width: 1, height: 1 }] as unknown as DOMRectList);
+    document.body.append(target);
+
+    render(
+      <JourneyActionLink
+        action={{
+          kind: "read_or_export",
+          href: `/projects/${PROJECT_ID}/manuscript#manuscript-actions`,
+          label: "Read or export the manuscript",
+          description: "The manuscript is ready.",
+          requiresMeteredAccess: false,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("link", { name: "Read or export the manuscript" }));
+
+    expect(window.location.hash).toBe("#manuscript-actions");
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(target).toHaveFocus();
+  });
+
   it("sets and retains the recovery hash while focusing the target on every activation", () => {
     window.history.replaceState({}, "", `/projects/${PROJECT_ID}/write`);
     const target = document.createElement("section");

@@ -682,7 +682,7 @@ describe("deriveAuthoringJourney", () => {
 
     expect(journey.nextAction).toMatchObject({
       kind: "read_or_export",
-      href: `/projects/${PROJECT_ID}/manuscript`,
+      href: `/projects/${PROJECT_ID}/manuscript#manuscript-actions`,
     });
     expect(journey.purchaseAction).toMatchObject({
       kind: "unlock_full_book",
@@ -719,7 +719,7 @@ describe("deriveAuthoringJourney", () => {
 
     expect(journey.nextAction).toMatchObject({
       kind: "read_or_export",
-      href: `/projects/${PROJECT_ID}/manuscript`,
+      href: `/projects/${PROJECT_ID}/manuscript#manuscript-actions`,
     });
     expect(journey.purchaseAction).toMatchObject({
       kind: "unlock_full_book",
@@ -970,7 +970,7 @@ describe("authoringJourneyWithProgress", () => {
     expect(resumed.nextAction).toMatchObject({
       kind: "watch_production",
       label: "Watch production",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#production-status`,
     });
   });
 

@@ -26,6 +26,10 @@ export const metadata: Metadata = {
 
 function toCard(journey: AuthoringJourneySnapshot): ProjectCardData {
   const { project, artifacts } = journey;
+  const statusHref =
+    journey.run?.kind && journey.run.kind !== "full_book"
+      ? `/projects/${project.id}/editor`
+      : `/projects/${project.id}/write`;
   return {
     id: project.id,
     title: project.title,
@@ -43,6 +47,7 @@ function toCard(journey: AuthoringJourneySnapshot): ProjectCardData {
       project.targetWordsPerChapter,
     ).totalUsd,
     nextAction: journey.nextAction,
+    statusHref,
   };
 }
 

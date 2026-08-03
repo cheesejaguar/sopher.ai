@@ -34,7 +34,22 @@ export interface ProjectCardData {
   creditsUsed: number;
   estimateUsd: number;
   nextAction: AuthoringNextAction;
+  /** Internal project surface that explains the current run state. */
+  statusHref: string;
   archived?: boolean;
+}
+
+function projectCardDestination(project: ProjectCardData): { href: string; label: string } {
+  if (project.nextAction.kind === "contact_support") {
+    return {
+      href: project.statusHref,
+      label: "Review production status",
+    };
+  }
+  return {
+    href: project.nextAction.href,
+    label: project.nextAction.label,
+  };
 }
 
 function formatSpendCredits(value: number): string {
@@ -78,6 +93,7 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
   const progress =
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
   const needsAttention = journeyNeedsAttention(project.nextAction);
+  const destination = projectCardDestination(project);
 
   return (
     <div className="group relative h-full">
@@ -87,8 +103,8 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
         <ProjectMenu projectId={project.id} title={project.title} archived={project.archived} />
       </div>
       <Link
-        href={project.nextAction.href as Route}
-        aria-label={`${project.nextAction.label}: ${project.title}`}
+        href={destination.href as Route}
+        aria-label={`${destination.label}: ${project.title}`}
         className="instrument-surface relative flex h-full min-h-36 flex-col overflow-hidden rounded-sm p-4 transition-colors hover:border-foreground/30 md:min-h-64 md:p-5"
       >
         <span
@@ -170,7 +186,7 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
               </span>
             </span>
             <span className="max-w-36 text-right text-muted-foreground">
-              <span className="block font-medium text-foreground">{project.nextAction.label}</span>
+              <span className="block font-medium text-foreground">{destination.label}</span>
               <span className="mt-1 block">
                 Updated <RelativeTime iso={project.updatedAt} />
               </span>
@@ -189,6 +205,7 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
 export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
   const progress =
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
+  const destination = projectCardDestination(project);
 
   return (
     <div className="group relative">
@@ -196,8 +213,8 @@ export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
         <ProjectMenu projectId={project.id} title={project.title} archived={project.archived} />
       </div>
       <Link
-        href={project.nextAction.href as Route}
-        aria-label={`${project.nextAction.label}: ${project.title}`}
+        href={destination.href as Route}
+        aria-label={`${destination.label}: ${project.title}`}
         className="instrument-surface-raised relative grid min-h-72 overflow-hidden rounded-sm transition-colors hover:border-foreground/30 md:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]"
       >
         <span aria-hidden="true" className="spectral-rule absolute inset-y-0 left-0 w-px" />
@@ -219,7 +236,7 @@ export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
             </p>
           </div>
           <span className="mt-8 inline-flex min-h-11 w-fit items-center gap-2 rounded-sm bg-primary px-4 text-sm font-semibold text-primary-foreground">
-            {project.nextAction.label}
+            {destination.label}
             <ArrowUpRight
               aria-hidden="true"
               className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"

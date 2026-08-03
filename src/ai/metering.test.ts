@@ -1,4 +1,4 @@
-import { NoOutputGeneratedError } from "ai";
+import { NoObjectGeneratedError, NoOutputGeneratedError } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -378,6 +378,61 @@ describe("metered atomic authorization", () => {
     expect(provider).toHaveBeenCalledOnce();
     expect(mocks.abort).not.toHaveBeenCalled();
     expect(mocks.recordMany).not.toHaveBeenCalled();
+  });
+
+  it("settles and compensates a rejected structured response before a durable retry", async () => {
+    const malformed = new NoObjectGeneratedError({
+      message: "No object generated: response did not match schema.",
+      text: '{"entities":[]}',
+      response: {
+        id: "gateway-response-1",
+        timestamp: new Date("2026-08-03T00:00:00.000Z"),
+        modelId: "anthropic/claude-sonnet-5",
+      },
+      usage,
+      finishReason: "stop",
+    });
+    const provider = vi
+      .fn<() => Promise<{ usage: typeof usage }>>()
+      .mockRejectedValueOnce(malformed)
+      .mockResolvedValueOnce({ usage });
+    const ctx = {
+      userId: "user-1",
+      runId: "run-1",
+      billingScope: "generation:run-1:entity-bible",
+      reservationRef: "generation-reservation:run-1:entity-bible",
+    };
+    const info = {
+      role: "entity-bible",
+      operation: "entity.bible",
+      model: "anthropic/claude-sonnet-5",
+    };
+
+    await expect(metered(ctx, info, provider)).rejects.toMatchObject({
+      name: "MeteredOutputDeliveryError",
+      operation: "entity.bible",
+      finishReason: "stop",
+      isRetryable: true,
+    });
+    expect(mocks.recordMany).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({
+          model: "anthropic/claude-sonnet-5",
+          operation: "entity.bible",
+          usage: expect.objectContaining({ inputTokens: 1_000, outputTokens: 500 }),
+        }),
+      ],
+      expect.objectContaining({
+        compensateDelivery: {
+          description: "Provider output for entity.bible was incomplete and not delivered",
+        },
+      }),
+    );
+    expect(mocks.abort).not.toHaveBeenCalled();
+
+    await expect(metered(ctx, info, provider)).resolves.toEqual({ usage });
+    expect(provider).toHaveBeenCalledTimes(2);
+    expect(mocks.recordMany).toHaveBeenCalledTimes(2);
   });
 
   it("releases a first-step input guard failure that proves no provider dispatch", async () => {

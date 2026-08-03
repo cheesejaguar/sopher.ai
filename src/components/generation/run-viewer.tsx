@@ -139,8 +139,9 @@ function ProductionTelemetry({
 
   return (
     <section
+      id="production-status"
       aria-labelledby="production-now-title"
-      className="instrument-surface-raised overflow-hidden rounded-sm"
+      className="instrument-surface-raised scroll-mt-28 overflow-hidden rounded-sm"
     >
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
         <div>

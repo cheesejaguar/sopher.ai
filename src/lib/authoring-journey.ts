@@ -210,7 +210,7 @@ function fullBookContinuationAction(
 function readAction(projectId: string): AuthoringNextAction {
   return nextAction(
     "read_or_export",
-    projectHref(projectId, "manuscript"),
+    `${projectHref(projectId, "manuscript")}#manuscript-actions`,
     "Read or export the manuscript",
     "Your assembled manuscript is ready to read, download, or take back into the editor.",
   );
@@ -414,7 +414,9 @@ function actionForSeed(
 
     return nextAction(
       "watch_production",
-      projectWriteHref,
+      run.kind && run.kind !== "full_book"
+        ? projectWriteHref
+        : `${projectWriteHref}#production-status`,
       run.stage === "queued" ? "Watch the writing room" : "Watch production",
       run.health === "degraded"
         ? "The live connection is delayed. The durable run remains active, and the Write page will keep checking it."
