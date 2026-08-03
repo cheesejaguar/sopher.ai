@@ -144,7 +144,8 @@ test.describe("landing page", () => {
     await expect(page.locator("#main-content")).toBeVisible();
     await page.keyboard.press("Tab");
 
-    const skip = page.getByRole("link", { name: "Skip to main content" });
+    const skipNavigation = page.getByRole("navigation", { name: "Skip links" });
+    const skip = skipNavigation.getByRole("link", { name: "Skip to main content" });
     await expect(skip).toBeFocused();
     await skip.press("Enter");
     await expect(page.locator("#main-content")).toBeFocused();

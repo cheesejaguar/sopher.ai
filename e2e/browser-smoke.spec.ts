@@ -18,7 +18,8 @@ test("the native skip link focuses the main region", async ({ page }) => {
   const main = page.locator("#main-content");
   await expect(main).toBeVisible();
 
-  const skip = page.getByRole("link", { name: "Skip to main content" });
+  const skipNavigation = page.getByRole("navigation", { name: "Skip links" });
+  const skip = skipNavigation.getByRole("link", { name: "Skip to main content" });
   // WebKit follows Safari's system Full Keyboard Access preference, which can
   // intentionally omit links from sequential Tab navigation. Chromium covers
   // first-tab order; this cross-engine smoke isolates native activation.
