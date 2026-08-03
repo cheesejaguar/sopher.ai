@@ -35,6 +35,9 @@ const AI_CRAWLERS = [
   "Amazonbot",
 ];
 
+// Reader pages carry an enforced noindex response header. They remain
+// crawlable so compliant engines can see and honor it; robots.txt is not an
+// access-control mechanism.
 const DISALLOW = ["/studio", "/projects", "/admin", "/api/", "/sign-in", "/sign-up"];
 
 export default function robots(): MetadataRoute.Robots {

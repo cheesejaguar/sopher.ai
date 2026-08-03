@@ -8,6 +8,7 @@ export type Tense = "past" | "present";
 export type HeatLevel = "none" | "mild" | "moderate" | "explicit";
 export type ViolenceLevel = "none" | "mild" | "moderate" | "graphic";
 export type ProfanityLevel = "none" | "mild" | "moderate" | "strong";
+export type AuthoringMode = "guided" | "autopilot";
 
 export const WIZARD_STEPS = [
   { id: "genre", label: "Genre" },
@@ -55,6 +56,7 @@ export interface WizardState {
   heatLevel: HeatLevel;
   violenceLevel: ViolenceLevel;
   profanity: ProfanityLevel;
+  authoringMode: AuthoringMode;
   tier: QualityTier;
   requireOutlineApproval: boolean;
 }
@@ -75,6 +77,7 @@ export const initialWizardState: WizardState = {
   heatLevel: "none",
   violenceLevel: "mild",
   profanity: "mild",
+  authoringMode: "guided",
   tier: "standard",
   requireOutlineApproval: true,
 };

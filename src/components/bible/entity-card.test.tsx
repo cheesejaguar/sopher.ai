@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import type { BibleEntity } from "@/db/queries/entities";
+import { StudioSuspensionProvider } from "@/components/studio/studio-access-context";
 
 import { EntityCard } from "./entity-card";
 
@@ -18,6 +19,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/actions/continuity", () => ({
   setContinuityIssueStatus: mocks.settleIssue,
+}));
+vi.mock("@/lib/actions/entities", () => ({
+  createBibleEntity: vi.fn(),
+  updateBibleEntity: vi.fn(),
 }));
 
 afterEach(() => {
@@ -96,7 +101,7 @@ const object: BibleEntity = {
 
 describe("EntityCard", () => {
   it("presents a sectioned profile and relationship context", () => {
-    render(<EntityCard entity={character} conflicts={[]} />);
+    render(<EntityCard projectId="project-1" entity={character} conflicts={[]} />);
 
     expect(screen.getByRole("heading", { name: "Place in the story" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Physical canon" })).toBeTruthy();
@@ -108,16 +113,64 @@ describe("EntityCard", () => {
   });
 
   it("names generated-image actions for the entity kind", () => {
-    const locationCard = render(<EntityCard entity={location} conflicts={[]} />);
+    const locationCard = render(
+      <EntityCard projectId="project-1" entity={location} conflicts={[]} />,
+    );
     expect(screen.getByRole("button", { name: /Generate location image/ })).toBeVisible();
     locationCard.unmount();
 
-    render(<EntityCard entity={object} conflicts={[]} />);
+    render(<EntityCard projectId="project-1" entity={object} conflicts={[]} />);
     expect(screen.getByRole("button", { name: /Generate object illustration/ })).toBeVisible();
   });
 
+  it("explains a suspension and disables new metered image work", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <StudioSuspensionProvider suspended>
+        <EntityCard
+          projectId="project-1"
+          entity={{ ...character, portraitUrl: null }}
+          conflicts={[]}
+        />
+      </StudioSuspensionProvider>,
+    );
+
+    const generate = screen.getByRole("button", { name: /Generate portrait/ });
+    expect(generate).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText(/AI authoring and purchases are unavailable/i)).toBeVisible();
+
+    fireEvent.click(generate);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("explains the active-production lock and does not request a generated image", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const readOnlyReason =
+      "Story canon and image generation are locked while production is active. Finish or stop the current run to make changes.";
+
+    render(
+      <EntityCard
+        projectId="project-1"
+        entity={{ ...character, portraitUrl: null }}
+        conflicts={[]}
+        readOnlyReason={readOnlyReason}
+      />,
+    );
+
+    const generate = screen.getByRole("button", { name: /Generate portrait/ });
+    expect(generate).toHaveAttribute("aria-disabled", "true");
+    expect(generate).toHaveAccessibleDescription(readOnlyReason);
+    expect(screen.getByText(readOnlyReason, { selector: "p" })).toBeVisible();
+
+    fireEvent.click(generate);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("opens the full image with a named control, closes on Escape, and restores focus", async () => {
-    render(<EntityCard entity={character} conflicts={[]} />);
+    render(<EntityCard projectId="project-1" entity={character} conflicts={[]} />);
 
     const trigger = screen.getByRole("button", { name: "View full image of Mara Vale" });
     trigger.focus();
@@ -143,7 +196,13 @@ describe("EntityCard", () => {
         }),
       ),
     );
-    render(<EntityCard entity={{ ...character, portraitUrl: null }} conflicts={[]} />);
+    render(
+      <EntityCard
+        projectId="project-1"
+        entity={{ ...character, portraitUrl: null }}
+        conflicts={[]}
+      />,
+    );
 
     const generate = screen.getByRole("button", { name: /Generate portrait/ });
     generate.focus();
@@ -161,7 +220,13 @@ describe("EntityCard", () => {
       finishRequest = resolve;
     });
     vi.stubGlobal("fetch", vi.fn().mockReturnValue(request));
-    render(<EntityCard entity={{ ...character, portraitUrl: null }} conflicts={[]} />);
+    render(
+      <EntityCard
+        projectId="project-1"
+        entity={{ ...character, portraitUrl: null }}
+        conflicts={[]}
+      />,
+    );
 
     const generate = screen.getByRole("button", { name: /Generate portrait/ });
     generate.focus();
@@ -191,13 +256,21 @@ describe("EntityCard", () => {
         }),
       ),
     );
-    render(<EntityCard entity={{ ...character, portraitUrl: null }} conflicts={[]} />);
+    render(
+      <EntityCard
+        projectId="project-1"
+        entity={{ ...character, portraitUrl: null }}
+        conflicts={[]}
+      />,
+    );
 
     const generate = screen.getByRole("button", { name: /Generate portrait/ });
     generate.focus();
     fireEvent.click(generate);
 
-    expect(await screen.findByRole("status")).toHaveTextContent("Portrait ready for Mara Vale");
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("Portrait ready for Mara Vale"),
+    );
     const imageTrigger = await screen.findByRole("button", {
       name: "View full image of Mara Vale",
     });
@@ -214,6 +287,7 @@ describe("EntityCard", () => {
     );
     render(
       <EntityCard
+        projectId="project-1"
         entity={character}
         conflicts={[
           {

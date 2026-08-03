@@ -107,6 +107,20 @@ describe("deriveAuthoringJourney", () => {
       href: `/projects/${PROJECT_ID}/write`,
     },
     {
+      name: "takes a creative pause to the exact Write decision",
+      input: seed({
+        run: run({
+          databaseStatus: "awaiting_input",
+          effectiveStatus: "awaiting_input",
+          stage: "awaiting_guidance",
+          pause: { kind: "creative_decision", version: 1 },
+          health: "waiting",
+        }),
+      }),
+      action: "answer_question",
+      href: `/projects/${PROJECT_ID}/write#creative-decision`,
+    },
+    {
       name: "takes an outline pause directly to review",
       input: seed({
         artifacts: { outlineReady: true },
@@ -557,8 +571,36 @@ describe("deriveAuthoringJourney", () => {
 
       expect(journey.nextAction.kind).toBe("watch_production");
       expect(journey.nextAction.href).toBe(`/projects/${PROJECT_ID}/editor`);
+      if (kind === "edit_pass") {
+        expect(journey.nextAction.label).toMatch(/manuscript review/i);
+        expect(journey.nextAction.description).toMatch(/chapter-by-chapter review/i);
+      }
     },
   );
+
+  it("returns an interrupted manuscript review to its saved suggestions without an upsell", () => {
+    const journey = deriveAuthoringJourney(
+      seed({
+        artifacts: { savedChapters: 3, wordCount: 3_000 },
+        run: run({
+          kind: "edit_pass",
+          databaseStatus: "failed",
+          workflowStatus: "failed",
+          effectiveStatus: "failed",
+          stage: "failed",
+          health: "needs_attention",
+        }),
+      }),
+    );
+
+    expect(journey.nextAction).toMatchObject({
+      kind: "edit_manuscript",
+      href: `/projects/${PROJECT_ID}/editor`,
+      label: "Review saved suggestions",
+    });
+    expect(journey.nextAction.description).toMatch(/without overwriting your prose/i);
+    expect(journey.purchaseAction).toBeNull();
+  });
 
   it.each(["chapter", "edit_pass", "continuity"] as const)(
     "lets a completed %s mutation fall through to the saved-manuscript action",

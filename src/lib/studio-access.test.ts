@@ -17,6 +17,7 @@ import {
 const baseFacts = {
   emailVerified: true,
   isAdmin: false,
+  suspended: false,
   hasSettledPurchase: false,
   hasPriorMeteredUsage: false,
   trialProjectId: null,

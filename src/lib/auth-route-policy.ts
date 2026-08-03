@@ -34,6 +34,11 @@ export function isProtectedPath(pathname: string): boolean {
     within(pathname, "/api/webhooks") ||
     pathname === "/api/estimates" ||
     pathname === "/api/events" ||
+    // A reader recipient may not have a Sopher account. This exact endpoint
+    // validates the fragment bearer token, rate-limits anonymous attempts, and
+    // exchanges it for a path-scoped HttpOnly reader cookie. Adjacent reader
+    // APIs remain protected by the default policy.
+    pathname === "/api/reader-session" ||
     // Vercel Cron has no Clerk session. This exact handler authenticates with
     // CRON_SECRET using a timing-safe comparison; adjacent internal routes
     // remain behind Clerk.

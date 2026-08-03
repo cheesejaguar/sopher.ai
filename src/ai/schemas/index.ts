@@ -38,6 +38,38 @@ export const conceptSchema = z.object({
 });
 export type BookConcept = z.infer<typeof conceptSchema>;
 
+export const creativeQuestionOptionSchema = z.object({
+  id: z.enum(["option-1", "option-2", "option-3"]),
+  label: z.string().trim().min(2).max(80),
+  description: z.string().trim().min(8).max(280),
+});
+
+export const creativeQuestionSchema = z
+  .object({
+    question: z.string().trim().min(12).max(240),
+    rationale: z.string().trim().min(8).max(320),
+    options: z.array(creativeQuestionOptionSchema).length(3),
+    recommendedOptionId: z.enum(["option-1", "option-2", "option-3"]),
+  })
+  .superRefine((question, ctx) => {
+    const ids = question.options.map((option) => option.id);
+    if (new Set(ids).size !== 3) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["options"],
+        message: "Creative direction options must use three distinct ids",
+      });
+    }
+    if (!ids.includes(question.recommendedOptionId)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["recommendedOptionId"],
+        message: "The recommended option must be one of the three choices",
+      });
+    }
+  });
+export type CreativeQuestion = z.infer<typeof creativeQuestionSchema>;
+
 export const emotionalArcSchema = z.enum([
   "exposition",
   "rising_action",

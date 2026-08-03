@@ -50,7 +50,7 @@ async function StudioShell({ children }: { children: React.ReactNode }) {
 
   return (
     <ClerkRouteProvider>
-      <ProductShell credits={publicCredits} creditLabel={creditLabel}>
+      <ProductShell credits={publicCredits} creditLabel={creditLabel} suspended={access.suspended}>
         <Suspense fallback={<StudioLoading />}>{children}</Suspense>
       </ProductShell>
     </ClerkRouteProvider>

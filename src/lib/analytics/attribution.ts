@@ -18,6 +18,11 @@ export const ANON_COOKIE = "sopher_aid";
 /** Long enough to cover a slow consideration cycle, short enough to be honest. */
 export const ATTRIBUTION_MAX_AGE_SECONDS = 60 * 60 * 24 * 90;
 
+/** Reader sessions are deliberately outside acquisition/product analytics. */
+export function isReaderPath(pathname: string): boolean {
+  return pathname === "/r" || pathname.startsWith("/r/");
+}
+
 const UTM_KEYS = ["source", "medium", "campaign", "term", "content"] as const;
 
 /** Builds the first-touch record from a landing URL and its referrer. */

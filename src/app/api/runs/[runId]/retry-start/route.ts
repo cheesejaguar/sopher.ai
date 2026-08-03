@@ -18,11 +18,13 @@ import {
   terminalizeAuthoringRun,
 } from "@/lib/generation-runs";
 import type { GenerationConfig } from "@/lib/run-events";
+import type { ManuscriptEditPassConfig } from "@/lib/manuscript-edit-pass";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { authorizeProjectSpend } from "@/lib/project-spend-http";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 import { generateBook } from "@/workflows/generate-book";
 import { generateChapter } from "@/workflows/generate-chapter";
+import { editManuscript } from "@/workflows/edit-manuscript";
 
 export const maxDuration = 60;
 
@@ -329,6 +331,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
         chapterNumber,
         config,
         reservation.externalRef!,
+      ]);
+  } else if (claimed.kind === "edit_pass") {
+    invoke = () =>
+      start(editManuscript, [
+        runId,
+        claimed.projectId,
+        userId,
+        claimed.config as ManuscriptEditPassConfig,
       ]);
   } else {
     await terminalizeAuthoringRun({

@@ -36,8 +36,13 @@ export function canReattachBookStart(
 /** Builds the immutable run snapshot from persisted, server-authoritative data. */
 export function buildBookGenerationConfig(project: BookGenerationSnapshot): GenerationConfig {
   const trial = project.experience === "trial_short_story";
+  const authoringMode = project.settings.authoringMode ?? "guided";
   return {
-    protocolVersion: 2,
+    protocolVersion: 3,
+    interaction: {
+      mode: authoringMode,
+      maxQuestions: authoringMode === "guided" ? 1 : 0,
+    },
     productionMode: project.experience,
     tier: trial ? TRIAL_STORY_CONFIG.tier : (project.settings.qualityTier ?? "standard"),
     requireOutlineApproval: trial

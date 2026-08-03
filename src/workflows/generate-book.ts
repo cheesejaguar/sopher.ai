@@ -8,9 +8,12 @@ import { notifyAuthoringFailureStep } from "./notify-authoring-failure";
 import { OUTLINE_REVISION_RESERVATION_KEY, type GenerationConfig } from "@/lib/run-events";
 import type { Stage } from "@/lib/run-events";
 import type { ContinuityOutcome } from "@/ai/agents/continuity";
+import type { BookConcept, BookOutline } from "@/ai/schemas";
 import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 import {
   conceptStep,
+  consumeCreativeDecisionStep,
+  creativeOpeningCreditCheckStep,
   chapterNumbersNeedingWorkStep,
   continuityFinalizeStep,
   continuityPhaseStep,
@@ -28,12 +31,16 @@ import {
   linkWorkflowRunStep,
   markRunStatus,
   markAuthoringPauseRegisteredStep,
+  markCreativeQuestionPauseRegisteredStep,
+  hydratePreManuscriptRetryStep,
   notifyCreditsPausedStep,
   notifyOutlineApprovalStep,
   openingCreditCheckStep,
+  initialOutlineCreditCheckStep,
   outlineRevisionCreditCheckStep,
   outlineStep,
   prepareBookRunStep,
+  prepareCreativeQuestionStep,
   readQualityGate,
   releaseCreditsStep,
   reserveCreditsStep,
@@ -59,14 +66,14 @@ export async function generateBook(
   "use workflow";
   const ref = { dbRunId, projectId, userId };
   const { workflowRunId } = getWorkflowMetadata();
+  const usesDurableInputs = config.protocolVersion === 2 || config.protocolVersion === 3;
 
   // One top-up hook for the entire run: tokens belong to a single active hook,
   // and both the pre-flight and the per-wave checks may need to wait on it —
   // possibly more than once, since resuming only proves a button was clicked.
-  const legacyTopUps =
-    config.protocolVersion === 2
-      ? null
-      : createHook<{ toppedUp: boolean }>({ token: `credits-topup:${dbRunId}` });
+  const legacyTopUps = usesDurableInputs
+    ? null
+    : createHook<{ toppedUp: boolean }>({ token: `credits-topup:${dbRunId}` });
   const legacyTopUpEvents = legacyTopUps?.[Symbol.asyncIterator]();
   type CreditCheck = { balance: number; required: number; sufficient: boolean };
   type CreditResumeStage = Extract<
@@ -97,7 +104,7 @@ export async function generateBook(
       credit = authorization;
       let pauseVersion: number | undefined;
       let waitForTopUp: () => Promise<{ toppedUp: boolean }>;
-      if (config.protocolVersion === 2) {
+      if (usesDurableInputs) {
         const pause = await allocateAuthoringPauseStep(ref, "credits_topup", {
           balanceCredits: credit.balance,
           requiredCredits: credit.required,
@@ -146,7 +153,7 @@ export async function generateBook(
       if (!resumed.toppedUp) {
         throw new FatalError("Run cancelled while waiting for credits");
       }
-      if (config.protocolVersion !== 2) await markRunStatus(ref, "running");
+      if (!usesDurableInputs) await markRunStatus(ref, "running");
       credit = await recheck();
     }
   };
@@ -173,50 +180,151 @@ export async function generateBook(
 
   try {
     await markRunStatus(ref, "running");
+    await hydratePreManuscriptRetryStep(ref, config);
 
-    // Pre-flight: suspend BEFORE any metered work unless the wallet covers the
-    // opening stretch (concept/outline/bible + the first wave). Deliberately
-    // not the whole book: each wave is authorized independently, and a
-    // zero-balance run must burn nothing.
-    // Loop, not if: a resume only proves the user clicked the button, so the
-    // balance is re-checked until it actually covers the opening stretch.
-    const openingAuthorization = await requireCreditGate(
-      await openingCreditCheckStep(ref, config),
-      () => openingCreditCheckStep(ref, config),
-      1,
-      "to start",
-      "concept",
-      "opening",
-    );
-
-    const opening = await withReservation(openingAuthorization.reservationRef, async () => {
-      await emitProgress(ref, { type: "stage", stage: "concept", pct: 2 });
-      await emitProgress(ref, { type: "agent", agent: "concept", message: "Expanding the brief" });
-      const concept = await conceptStep(ref, config, openingAuthorization.reservationRef);
-      await emitCost(ref);
-
-      await emitProgress(ref, { type: "stage", stage: "outline", pct: 8 });
-      await emitProgress(ref, {
-        type: "agent",
-        agent: "outliner",
-        message: `Structuring "${concept.title}"`,
-      });
-      const outline = await outlineStep(
-        ref,
-        config,
-        concept,
-        undefined,
-        openingAuthorization.reservationRef,
+    // Suspend before metered work. V3 deliberately releases the concept and
+    // question reservation before waiting for the author, then authorizes the
+    // outline separately. A durable human pause must never hold wallet funds.
+    let concept: BookConcept;
+    let outline: BookOutline;
+    if (config.protocolVersion === 3) {
+      const conceptAuthorization = await requireCreditGate(
+        await creativeOpeningCreditCheckStep(ref, config),
+        () => creativeOpeningCreditCheckStep(ref, config),
+        1,
+        "to develop the story direction",
+        "concept",
+        "creative-opening",
       );
-      await emitCost(ref);
-      return { concept, outline };
-    });
-    const concept = opening.concept;
-    let outline = opening.outline;
+      const creativeOpening = await withReservation(
+        conceptAuthorization.reservationRef,
+        async () => {
+          await emitProgress(ref, { type: "stage", stage: "concept", pct: 2 });
+          await emitProgress(ref, {
+            type: "agent",
+            agent: "concept",
+            message: "Expanding the brief",
+          });
+          const developedConcept = await conceptStep(
+            ref,
+            config,
+            conceptAuthorization.reservationRef,
+          );
+          const question = await prepareCreativeQuestionStep(
+            ref,
+            config,
+            developedConcept,
+            conceptAuthorization.reservationRef,
+          );
+          await emitCost(ref);
+          return { concept: developedConcept, question };
+        },
+      );
+      concept = creativeOpening.concept;
+
+      if (creativeOpening.question) {
+        const question = creativeOpening.question;
+        const pause = await allocateAuthoringPauseStep(ref, "creative_decision", {
+          questionId: question.id,
+          resumeStage: "outline",
+        });
+        const hook = createHook<{ inputId: string }>({ token: pause.token });
+        const conflict = await hook.getConflict();
+        if (conflict) {
+          throw new FatalError(`Creative decision token belongs to Workflow ${conflict.runId}`);
+        }
+        await markCreativeQuestionPauseRegisteredStep(ref, question.id, pause.version);
+        await emitProgress(ref, {
+          type: "stage",
+          stage: "awaiting_guidance",
+          pct: 6,
+          detail: "Choose the direction that should shape the chapter plan",
+        });
+        await emitProgress(ref, {
+          type: "agent",
+          agent: "outliner",
+          message: "Waiting for your story direction before building the outline",
+        });
+        const delivery = await hook;
+        const decision = await consumeCreativeDecisionStep(ref, pause.version, delivery.inputId);
+        if (!decision) {
+          throw new FatalError("Creative direction did not match the active question");
+        }
+        await clearAuthoringPauseStep(ref, "creative_decision", pause.version);
+      }
+
+      const outlineAuthorization = await requireCreditGate(
+        await initialOutlineCreditCheckStep(ref, config),
+        () => initialOutlineCreditCheckStep(ref, config),
+        8,
+        "to build the chapter plan",
+        "outline",
+        "initial-outline",
+      );
+      outline = await withReservation(outlineAuthorization.reservationRef, async () => {
+        await emitProgress(ref, { type: "stage", stage: "outline", pct: 8 });
+        await emitProgress(ref, {
+          type: "agent",
+          agent: "outliner",
+          message: `Structuring "${concept.title}"`,
+        });
+        const result = await outlineStep(
+          ref,
+          config,
+          concept,
+          undefined,
+          outlineAuthorization.reservationRef,
+        );
+        await emitCost(ref);
+        return result;
+      });
+    } else {
+      const openingAuthorization = await requireCreditGate(
+        await openingCreditCheckStep(ref, config),
+        () => openingCreditCheckStep(ref, config),
+        1,
+        "to start",
+        "concept",
+        "opening",
+      );
+
+      const opening = await withReservation(openingAuthorization.reservationRef, async () => {
+        await emitProgress(ref, { type: "stage", stage: "concept", pct: 2 });
+        await emitProgress(ref, {
+          type: "agent",
+          agent: "concept",
+          message: "Expanding the brief",
+        });
+        const developedConcept = await conceptStep(
+          ref,
+          config,
+          openingAuthorization.reservationRef,
+        );
+        await emitCost(ref);
+
+        await emitProgress(ref, { type: "stage", stage: "outline", pct: 8 });
+        await emitProgress(ref, {
+          type: "agent",
+          agent: "outliner",
+          message: `Structuring "${developedConcept.title}"`,
+        });
+        const developedOutline = await outlineStep(
+          ref,
+          config,
+          developedConcept,
+          undefined,
+          openingAuthorization.reservationRef,
+        );
+        await emitCost(ref);
+        return { concept: developedConcept, outline: developedOutline };
+      });
+      concept = opening.concept;
+      outline = opening.outline;
+    }
 
     if (config.requireOutlineApproval) {
       let approval: OutlineApproval;
-      if (config.protocolVersion === 2) {
+      if (usesDurableInputs) {
         const pause = await allocateAuthoringPauseStep(ref, "outline_approval");
         const hook = createHook<{ inputId: string }>({ token: pause.token });
         const conflict = await hook.getConflict();

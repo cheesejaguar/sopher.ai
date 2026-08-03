@@ -121,7 +121,9 @@ const HELP_TOPICS: HelpTopic[] = [
 ];
 
 function topicForPath(pathname: string): string {
-  if (pathname === "/studio/new") return "brief";
+  if (pathname === "/studio/new" || /^\/projects\/[^/]+\/brief\/?$/.test(pathname)) {
+    return "brief";
+  }
   if (pathname.includes("/write") || pathname.includes("/outline")) return "production";
   if (pathname.includes("/bible")) return "story-bible";
   if (pathname.includes("/editor")) return "editor";

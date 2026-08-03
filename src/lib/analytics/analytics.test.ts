@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { isEventName, sanitizeProps, MAX_PROPS_KEYS, MAX_PROP_LENGTH } from "./events";
-import { isEmptyAttribution, parseAttributionCookie, readAttribution } from "./attribution";
+import {
+  isEmptyAttribution,
+  isReaderPath,
+  parseAttributionCookie,
+  readAttribution,
+} from "./attribution";
 
 describe("event names", () => {
   it("accepts the known events and nothing else", () => {
@@ -49,12 +54,32 @@ describe("sanitizeProps", () => {
     expect(sanitizeProps({ ["k".repeat(100)]: 1, ok: 2 })).toEqual({ ok: 2 });
   });
 
+  it("never accepts a reader bearer secret as an analytics property", () => {
+    const token = "a".repeat(43);
+    expect(
+      sanitizeProps({
+        path: `/r/${token}`,
+        url: `https://sopher.ai/r/11111111-1111-4111-8111-111111111111#token=${token}`,
+        ok: "reader",
+      }),
+    ).toEqual({
+      ok: "reader",
+    });
+  });
+
   it("drops non-finite numbers, which break SQL aggregates", () => {
     expect(sanitizeProps({ a: NaN, b: Infinity, c: 3 })).toEqual({ c: 3 });
   });
 });
 
 describe("readAttribution", () => {
+  it("identifies the complete reader namespace for middleware exclusion", () => {
+    expect(isReaderPath("/r")).toBe(true);
+    expect(isReaderPath("/r/download")).toBe(true);
+    expect(isReaderPath("/r/assets/key")).toBe(true);
+    expect(isReaderPath("/reader")).toBe(false);
+  });
+
   it("captures utm parameters and the landing path", () => {
     const url = new URL(
       "https://sopher.ai/pricing?utm_source=reddit&utm_medium=social&utm_campaign=launch",

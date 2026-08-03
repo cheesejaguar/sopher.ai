@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initialWizardState } from "./wizard-state";
@@ -12,6 +12,23 @@ afterEach(() => {
 });
 
 describe("StepEstimate", () => {
+  it("offers collaborative participation by default and lets the author choose autopilot", () => {
+    const dispatch = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => {})),
+    );
+    render(<StepEstimate state={initialWizardState} dispatch={dispatch} />);
+
+    expect(screen.getByRole("radio", { name: /collaborative/i })).toBeChecked();
+    expect(screen.getByText("Recommended")).toBeVisible();
+    fireEvent.click(screen.getByRole("radio", { name: /autopilot/i }));
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "patch",
+      patch: { authoringMode: "autopilot" },
+    });
+  });
+
   it("invalidates the prior receipt when a changed shape cannot be quoted", async () => {
     const onQuote = vi.fn<(quote: WizardQuoteSummary | null) => void>();
     vi.stubGlobal(

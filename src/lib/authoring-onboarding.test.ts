@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   deriveAuthoringOnboardingSnapshot,
   deriveProductionChecklistMilestones,
+  selectAuthoringOnboardingProject,
 } from "./authoring-onboarding";
 
 const base = {
@@ -133,5 +134,30 @@ describe("deriveProductionChecklistMilestones", () => {
       startedProduction: true,
       continuedFullLength: true,
     });
+  });
+});
+
+describe("selectAuthoringOnboardingProject", () => {
+  it("prefers the newest active paid full book over an older included story", () => {
+    expect(
+      selectAuthoringOnboardingProject([
+        { id: "full-new", experience: "full_book", status: "generating" },
+        { id: "trial-old", experience: "trial_short_story", status: "editing" },
+      ]),
+    ).toMatchObject({ id: "full-new" });
+  });
+
+  it("falls back to the included story and then an archived project", () => {
+    expect(
+      selectAuthoringOnboardingProject([
+        { id: "trial-active", experience: "trial_short_story", status: "editing" },
+        { id: "full-archived", experience: "full_book", status: "archived" },
+      ]),
+    ).toMatchObject({ id: "trial-active" });
+    expect(
+      selectAuthoringOnboardingProject([
+        { id: "trial-archived", experience: "trial_short_story", status: "archived" },
+      ]),
+    ).toMatchObject({ id: "trial-archived" });
   });
 });

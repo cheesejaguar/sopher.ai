@@ -43,18 +43,22 @@ if (runDbTests && (!e2eDatabaseUrl || process.env.E2E_DATABASE_ISOLATED !== "1")
 const DB_DESKTOP_SPEC = /[/\\](studio|authoring-journey)\.spec\.ts$/;
 const DB_RESPONSIVE_SPEC = /[/\\]studio-responsive\.spec\.ts$/;
 const DB_SPEC = /(studio|studio-responsive|authoring-journey)\.spec\.ts$/;
+const READER_SPEC = /[/\\]reader\.spec\.ts$/;
 const WIZARD_SPEC = /[/\\]wizard\.spec\.ts$/;
 const RESPONSIVE_SPEC = /[/\\]responsive\.spec\.ts$/;
 const BROWSER_SMOKE_SPEC = /[/\\]browser-smoke\.spec\.ts$/;
 const AUTHENTICATED_BROWSER_SMOKE_SPEC = /authenticated-browser-smoke\.spec\.ts$/;
 const EDITOR_MUTATION_SPEC = /editor-mobile\.spec\.ts$/;
+const CREATIVE_FLOWS_SPEC = /creative-flows\.spec\.ts$/;
 const DB_FREE_EXCLUSIONS = [
   DB_SPEC,
+  READER_SPEC,
   WIZARD_SPEC,
   RESPONSIVE_SPEC,
   BROWSER_SMOKE_SPEC,
   AUTHENTICATED_BROWSER_SMOKE_SPEC,
   EDITOR_MUTATION_SPEC,
+  CREATIVE_FLOWS_SPEC,
 ];
 
 export default defineConfig<ThemeOptions>({
@@ -116,6 +120,11 @@ export default defineConfig<ThemeOptions>({
     ...(runDbTests
       ? [
           {
+            name: "dbReader-chromium",
+            testMatch: READER_SPEC,
+            use: { ...devices["Desktop Chrome"], appTheme: "dark" as const },
+          },
+          {
             name: "dbDependent-light",
             testMatch: DB_DESKTOP_SPEC,
             use: { ...devices["Desktop Chrome"], appTheme: "light" as const },
@@ -159,6 +168,20 @@ export default defineConfig<ThemeOptions>({
             use: { ...devices["Desktop Safari"], appTheme: "light" as const },
           },
           {
+            name: "dbCreative-chromium",
+            testMatch: CREATIVE_FLOWS_SPEC,
+            // These creative surfaces share the completed manuscript fixture.
+            // Exercise them after the broad read-only matrices and before any
+            // wizard/editor mutation project can change shared ordering or prose.
+            dependencies: [
+              "dbReader-chromium",
+              "dbDependent-light",
+              "dbDependent-dark",
+              "dbWebKit-smoke",
+            ],
+            use: { ...devices["Desktop Chrome"], appTheme: "dark" as const },
+          },
+          {
             name: "dbWizard-light",
             testMatch: WIZARD_SPEC,
             // Wizard submission creates durable projects and runs. Keep those
@@ -174,6 +197,7 @@ export default defineConfig<ThemeOptions>({
                   "dbMobile-dark",
                   "dbFirefox-smoke",
                   "dbWebKit-smoke",
+                  "dbCreative-chromium",
                 ],
             use: { ...devices["Desktop Chrome"], appTheme: "light" as const },
           },
@@ -208,6 +232,7 @@ export default defineConfig<ThemeOptions>({
               "dbMobile-dark",
               "dbFirefox-smoke",
               "dbWebKit-smoke",
+              "dbCreative-chromium",
             ],
             use: {
               ...devices["Desktop Chrome"],

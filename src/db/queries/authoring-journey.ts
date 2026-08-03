@@ -211,12 +211,13 @@ function persistedRunToJourney(input: {
       reason: string | null;
     } | null;
     pause: {
-      kind: "outline_approval" | "credits_topup";
+      kind: "outline_approval" | "credits_topup" | "creative_decision";
       version: number;
       details: {
         balanceCredits?: number;
         requiredCredits?: number;
         resumeStage?: string;
+        questionId?: string;
       } | null;
     } | null;
     supportReference: string;
@@ -276,7 +277,7 @@ function persistedRunToJourney(input: {
   const stageDescription = input.workflow?.stageDescription ?? persisted.stageDescription;
   const runLastUpdateAt = input.workflow?.lastUpdateAt ?? lastUpdateAt.toISOString();
   const health =
-    stage === "awaiting_approval" || stage === "awaiting_credits"
+    stage === "awaiting_guidance" || stage === "awaiting_approval" || stage === "awaiting_credits"
       ? "waiting"
       : (input.workflow?.health ??
         classifyPersistedJourneyHealth({
@@ -324,7 +325,12 @@ function persistedRunToJourney(input: {
       input.workflow?.cancellation?.requestedAt ?? toIso(input.run.cancellationRequestedAt),
     pause: input.workflow?.pause
       ? {
-          kind: input.workflow.pause.kind === "credits_topup" ? "credits" : "outline_approval",
+          kind:
+            input.workflow.pause.kind === "credits_topup"
+              ? "credits"
+              : input.workflow.pause.kind === "creative_decision"
+                ? "creative_decision"
+                : "outline_approval",
           version: input.workflow.pause.version,
           ...input.workflow.pause.details,
         }
@@ -340,11 +346,19 @@ function persistedRunToJourney(input: {
               version: input.run.pauseVersion,
               ...input.run.pauseDetails,
             }
-          : stage === "awaiting_approval"
-            ? { kind: "outline_approval" }
-            : stage === "awaiting_credits"
-              ? { kind: "credits" }
-              : null,
+          : input.run.pauseKind === "creative_decision"
+            ? {
+                kind: "creative_decision",
+                version: input.run.pauseVersion,
+                ...input.run.pauseDetails,
+              }
+            : stage === "awaiting_guidance"
+              ? { kind: "creative_decision" }
+              : stage === "awaiting_approval"
+                ? { kind: "outline_approval" }
+                : stage === "awaiting_credits"
+                  ? { kind: "credits" }
+                  : null,
     health,
     spend: input.workflow?.spend ?? {
       meteredUsd: input.projectSpendUsd,

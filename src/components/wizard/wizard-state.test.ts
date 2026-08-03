@@ -52,7 +52,17 @@ describe("wizard state", () => {
       step: 0,
       genre: "fantasy",
       title: "The Glass Road",
+      authoringMode: "guided",
     });
+  });
+
+  it("preserves the optional authoring mode in a saved setup", () => {
+    const restored = restoreDraft(
+      serializeDraft({ ...initialWizardState, authoringMode: "autopilot" }, "full_book"),
+      "full_book",
+    );
+
+    expect(restored?.authoringMode).toBe("autopilot");
   });
 
   it("uses separate account- and experience-scoped draft and request keys", () => {

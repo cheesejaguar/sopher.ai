@@ -215,6 +215,38 @@ describe("manuscriptToMarkdown", () => {
     expect(md).not.toContain("    Noah");
     expect(md).not.toContain("```markdown");
   });
+
+  it("assembles a complete reader package around the numbered chapters", () => {
+    const md = manuscriptToMarkdown(
+      buildManuscript({
+        title: "The Salt Road",
+        synopsis: "A voyage through a drowned coast.",
+        matter: {
+          subtitle: "A Chronicle of the Last Ferryman",
+          author: "Mara Vale",
+          editionName: "First edition",
+          copyrightYear: 2026,
+          copyrightHolder: "Mara Vale",
+          dedication: "For everyone who kept the lamps lit.",
+          epigraphText: "The tide remembers.",
+          epigraphAttribution: "Coastal proverb",
+          preface: "Why this story was written.",
+          afterword: "What happened after the crossing.",
+          acknowledgments: "With thanks to the harbor keepers.",
+        },
+        chapters: [{ number: 1, title: "The Crossing", content: "The bell rang at dusk." }],
+      }),
+    );
+
+    expect(md).toContain("# The Salt Road\n\n## A Chronicle of the Last Ferryman");
+    expect(md).toContain("Mara Vale\n\n_First edition_");
+    expect(md).toContain("© 2026 Mara Vale. All rights reserved.");
+    expect(md).toContain("## Dedication\n\n*For everyone who kept the lamps lit.*");
+    expect(md).toContain("> The tide remembers.\n>\n> — Coastal proverb");
+    expect(md.indexOf("## Preface")).toBeLessThan(md.indexOf("## Contents"));
+    expect(md.indexOf("## Chapter 1 — The Crossing")).toBeLessThan(md.indexOf("## Afterword"));
+    expect(md.indexOf("## Afterword")).toBeLessThan(md.indexOf("## Acknowledgments"));
+  });
 });
 
 describe("markdownToBlocks", () => {

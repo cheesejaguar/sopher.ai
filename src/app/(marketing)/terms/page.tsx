@@ -12,7 +12,12 @@ export const metadata: Metadata = publicPageMetadata({
 
 export default function TermsPage() {
   return (
-    <LegalPage title="Terms of Service" updated="July 29, 2026">
+    <LegalPage title="Terms of Service" updated="August 2, 2026">
+      <p>
+        <strong>Reader-link notice:</strong> the reader-link terms below take effect for you when
+        you expressly opt into that optional feature after its sharing disclosure, and for everyone
+        else on August 16, 2026.
+      </p>
       <p>
         These terms govern your use of sopher.ai (&ldquo;the Service&rdquo;), operated by sopher.ai
         (&ldquo;we&rdquo;, &ldquo;us&rdquo;). By creating an account or buying credits you agree to
@@ -52,7 +57,10 @@ export default function TermsPage() {
         Anthropic and Google, routed through Vercel&rsquo;s AI Gateway) to generate and edit your
         book. We use providers under terms that do not permit training on your content. Manuscripts
         are stored in our database and file storage so you can return to them; they are private to
-        your account.
+        your account unless you deliberately create a reader link. A reader link makes one captured
+        edition available to anyone who has its secret URL until it expires or you revoke it. You
+        are responsible for choosing recipients and for anything they copy or redistribute from that
+        edition.
       </p>
 
       <h2>Credits and payment</h2>
@@ -97,7 +105,8 @@ export default function TermsPage() {
       <p>
         We may update these terms. Material changes will be announced on this page with a new
         &ldquo;last updated&rdquo; date at least 14 days before they take effect; continuing to use
-        the Service after that date is acceptance.
+        the Service after that date is acceptance. You may choose to use a new optional feature
+        sooner when its specific terms are disclosed and you expressly opt in.
       </p>
 
       <h2>Contact</h2>

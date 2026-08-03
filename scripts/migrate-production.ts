@@ -94,7 +94,19 @@ async function main() {
 }
 
 void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : "Unknown migration failure.";
-  console.error(`Database migration failed: ${message}`);
+  const messages: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== undefined; depth += 1) {
+    if (current instanceof Error) {
+      if (current.message && !messages.includes(current.message)) messages.push(current.message);
+      current = current.cause;
+    } else {
+      if (current !== null) messages.push(String(current));
+      break;
+    }
+  }
+  console.error(
+    `Database migration failed: ${messages.join("\nCaused by: ") || "Unknown migration failure."}`,
+  );
   process.exitCode = 1;
 });

@@ -48,6 +48,7 @@ export function isEventName(value: unknown): value is EventName {
  */
 export const MAX_PROPS_KEYS = 12;
 export const MAX_PROP_LENGTH = 200;
+const READER_SECRET = /(?:\/r\/[A-Za-z0-9_-]{43}(?:\/|$)|#token=[A-Za-z0-9_-]{43})/;
 
 export function sanitizeProps(input: unknown): EventProps {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
@@ -57,7 +58,9 @@ export function sanitizeProps(input: unknown): EventProps {
     if (key.length > 40) continue;
     if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
     else if (typeof value === "boolean") out[key] = value;
-    else if (typeof value === "string") out[key] = value.slice(0, MAX_PROP_LENGTH);
+    else if (typeof value === "string" && !READER_SECRET.test(value)) {
+      out[key] = value.slice(0, MAX_PROP_LENGTH);
+    }
   }
   return out;
 }

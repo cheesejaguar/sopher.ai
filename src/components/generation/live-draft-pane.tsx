@@ -81,7 +81,11 @@ export function LiveDraftPane({
         <p className="font-serif text-lg text-paper-muted">
           {cancellationRequested
             ? "Stopping safely at the current production boundary."
-            : stage === "queued" || stage === "concept" || stage === "outline" || stage === "bible"
+            : stage === "queued" ||
+                stage === "concept" ||
+                stage === "awaiting_guidance" ||
+                stage === "outline" ||
+                stage === "bible"
               ? "The writers take over once the outline is set."
               : stage === "awaiting_approval"
                 ? "Drafting begins after you approve the outline."

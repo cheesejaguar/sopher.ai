@@ -42,4 +42,24 @@ describe("PackButtons", () => {
       screen.getByRole("button", { name: "Buy Author: 66 credits for $60" }),
     ).toHaveTextContent("Choose Author");
   });
+
+  it("explains a suspension before checkout and disables every purchase", () => {
+    render(
+      <PackButtons
+        packs={[
+          { id: "starter", name: "Starter", credits: 12, usd: 5, bonus: 0 },
+          { id: "author", name: "Author", credits: 30, usd: 10, bonus: 0.1 },
+        ]}
+        suspended
+      />,
+    );
+
+    expect(screen.getByText(/AI authoring and purchases are unavailable/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Contact support." })).toHaveAttribute(
+      "href",
+      "mailto:support@sopher.ai?subject=Suspended%20account%20help",
+    );
+    expect(screen.getByRole("button", { name: /Buy Starter/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Buy Author/ })).toBeDisabled();
+  });
 });

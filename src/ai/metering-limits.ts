@@ -43,6 +43,12 @@ const OPERATION_BUDGETS: Record<string, MeteredOperationBudget> = {
     maxProviderSteps: 1,
     imageCount: 0,
   },
+  "creative.question": {
+    maxInputTokensPerStep: 32_000,
+    maxOutputTokensPerStep: 2_000,
+    maxProviderSteps: 1,
+    imageCount: 0,
+  },
   "outliner.plan": {
     maxInputTokensPerStep: 64_000,
     maxOutputTokensPerStep: 8_000,

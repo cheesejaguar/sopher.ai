@@ -310,6 +310,65 @@ export function StepEstimate({
         </p>
       ) : null}
 
+      <fieldset className="space-y-3 rounded-sm border bg-card p-4">
+        <legend className="px-1 text-sm font-medium">How involved should I be?</legend>
+        <p
+          id="wizard-authoring-mode-hint"
+          className="text-xs leading-relaxed text-muted-foreground"
+        >
+          This changes only the creative check-in. Production progress, recovery, and any outline
+          approval remain available in either mode.
+        </p>
+        <RadioGroup
+          aria-label="Authoring mode"
+          aria-describedby="wizard-authoring-mode-hint"
+          value={state.authoringMode}
+          onValueChange={(value) => {
+            if (value === "guided" || value === "autopilot") {
+              dispatch({ type: "patch", patch: { authoringMode: value } });
+            }
+          }}
+          className="grid gap-3 sm:grid-cols-2"
+        >
+          <label
+            className={cn(
+              "flex min-h-24 cursor-pointer gap-3 rounded-sm border p-4 transition-colors",
+              state.authoringMode === "guided"
+                ? "border-primary ring-1 ring-primary"
+                : "hover:border-foreground/25",
+            )}
+          >
+            <RadioGroupItem value="guided" className="mt-0.5 shrink-0" />
+            <span className="min-w-0">
+              <span className="flex flex-wrap items-baseline gap-2 font-medium">
+                Collaborative
+                <span className="folio-label text-primary">Recommended</span>
+              </span>
+              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                After shaping the concept, Sopher asks one meaningful question with three suggested
+                directions and a custom-answer option.
+              </span>
+            </span>
+          </label>
+          <label
+            className={cn(
+              "flex min-h-24 cursor-pointer gap-3 rounded-sm border p-4 transition-colors",
+              state.authoringMode === "autopilot"
+                ? "border-primary ring-1 ring-primary"
+                : "hover:border-foreground/25",
+            )}
+          >
+            <RadioGroupItem value="autopilot" className="mt-0.5 shrink-0" />
+            <span className="min-w-0">
+              <span className="font-medium">Autopilot</span>
+              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                Sopher makes the creative call and continues without pausing for that question.
+              </span>
+            </span>
+          </label>
+        </RadioGroup>
+      </fieldset>
+
       {experience === "trial_short_story" ? (
         <div className="rounded-sm border bg-card p-4">
           <p className="text-sm font-medium">You approve the outline before drafting begins</p>

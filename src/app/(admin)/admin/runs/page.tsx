@@ -91,7 +91,11 @@ export default async function AdminRuns() {
                 </span>
                 {run.pauseKind ? (
                   <span className="mt-1 block text-xs text-ember">
-                    {run.pauseKind === "outline_approval" ? "outline review" : "credits required"}
+                    {run.pauseKind === "outline_approval"
+                      ? "outline review"
+                      : run.pauseKind === "creative_decision"
+                        ? "story direction"
+                        : "credits required"}
                   </span>
                 ) : null}
               </TableCell>

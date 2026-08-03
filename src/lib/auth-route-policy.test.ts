@@ -31,6 +31,8 @@ describe("proxy auth route policy", () => {
     "/api/estimates/private",
     "/api/events-private",
     "/api/events/private",
+    "/api/reader-session/private",
+    "/api/reader-sessions",
     "/api/internal/reconcile-runs/private",
     "/api/internal/e2e/start-state",
   ])("protects %s", (pathname) => {
@@ -45,6 +47,7 @@ describe("proxy auth route policy", () => {
     "/api/webhooks/clerk",
     "/api/estimates",
     "/api/events",
+    "/api/reader-session",
     "/api/internal/reconcile-runs",
   ])("keeps %s public", (pathname) => {
     expect(isProtectedPath(pathname)).toBe(false);

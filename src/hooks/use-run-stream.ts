@@ -3,6 +3,7 @@
 import * as React from "react";
 import { runEventSchema, type RunEvent, type Stage } from "@/lib/run-events";
 import { creditsForUsd } from "@/lib/billing/credits-shared";
+import type { CreativeQuestionForAuthor } from "@/lib/creative-decisions";
 
 /**
  * Client hook over GET /api/runs/[runId]/stream (NDJSON).
@@ -71,15 +72,17 @@ export type RunHealth = {
   workflowMissingSince?: string | null;
   cancellation?: { requestedAt: string; reason: string | null } | null;
   pause?: {
-    kind: "outline_approval" | "credits_topup";
+    kind: "outline_approval" | "credits_topup" | "creative_decision";
     version: number;
     registeredAt: string;
     details?: {
       balanceCredits?: number;
       requiredCredits?: number;
       resumeStage?: string;
+      questionId?: string;
     } | null;
   } | null;
+  question?: CreativeQuestionForAuthor | null;
   savedChapterCount?: number;
   savedCheckpointCount?: number;
   supportReference?: string;
@@ -165,6 +168,7 @@ const HEALTH_STATUSES = new Set(["healthy", "warning", "critical", "degraded"]);
 const STAGE_ORDER: Record<Stage, number> = {
   queued: 0,
   concept: 1,
+  awaiting_guidance: 1,
   outline: 2,
   awaiting_approval: 3,
   bible: 4,
@@ -296,7 +300,10 @@ function applyRunStatus(acc: Acc, status: RunStatus, error: string | null): void
       acc.stage = "cancelled";
       break;
     case "awaiting_input":
-      if (STAGE_ORDER[acc.stage] < STAGE_ORDER.awaiting_approval) {
+      if (
+        acc.stage !== "awaiting_guidance" &&
+        STAGE_ORDER[acc.stage] < STAGE_ORDER.awaiting_approval
+      ) {
         acc.stage = "awaiting_approval";
       }
       break;
@@ -344,7 +351,9 @@ function pauseState(value: unknown): RunHealth["pause"] | undefined {
   if (!value || typeof value !== "object") return undefined;
   const pause = value as Record<string, unknown>;
   if (
-    (pause.kind !== "outline_approval" && pause.kind !== "credits_topup") ||
+    (pause.kind !== "outline_approval" &&
+      pause.kind !== "credits_topup" &&
+      pause.kind !== "creative_decision") ||
     typeof pause.version !== "number" ||
     !Number.isInteger(pause.version) ||
     pause.version < 1
@@ -368,6 +377,7 @@ function pauseState(value: unknown): RunHealth["pause"] | undefined {
         ...(typeof rawDetails.resumeStage === "string"
           ? { resumeStage: rawDetails.resumeStage }
           : {}),
+        ...(typeof rawDetails.questionId === "string" ? { questionId: rawDetails.questionId } : {}),
       }
     : null;
   return {
@@ -375,6 +385,52 @@ function pauseState(value: unknown): RunHealth["pause"] | undefined {
     version: pause.version,
     registeredAt,
     details,
+  };
+}
+
+function creativeQuestionState(value: unknown): CreativeQuestionForAuthor | null | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== "object") return undefined;
+  const question = value as Record<string, unknown>;
+  if (
+    typeof question.id !== "string" ||
+    question.questionKey !== "after_concept" ||
+    typeof question.question !== "string" ||
+    typeof question.rationale !== "string" ||
+    typeof question.decisionDigest !== "string" ||
+    !/^[a-f0-9]{64}$/.test(question.decisionDigest) ||
+    !Array.isArray(question.options) ||
+    question.options.length !== 3 ||
+    typeof question.recommendedOptionId !== "string"
+  ) {
+    return undefined;
+  }
+  const options = question.options.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const option = value as Record<string, unknown>;
+    return typeof option.id === "string" &&
+      ["option-1", "option-2", "option-3"].includes(option.id) &&
+      typeof option.label === "string" &&
+      typeof option.description === "string"
+      ? [{ id: option.id, label: option.label, description: option.description }]
+      : [];
+  });
+  if (
+    options.length !== 3 ||
+    new Set(options.map((option) => option.id)).size !== 3 ||
+    !options.some((option) => option.id === question.recommendedOptionId)
+  ) {
+    return undefined;
+  }
+  return {
+    id: question.id,
+    questionKey: "after_concept",
+    question: question.question,
+    rationale: question.rationale,
+    decisionDigest: question.decisionDigest,
+    options: options as CreativeQuestionForAuthor["options"],
+    recommendedOptionId:
+      question.recommendedOptionId as CreativeQuestionForAuthor["recommendedOptionId"],
   };
 }
 
@@ -572,6 +628,16 @@ export function parseRunHealthResponse(
       : previous.pause !== undefined
         ? { pause: previous.pause }
         : {}),
+    ...(rawHealth && "question" in rawHealth
+      ? {
+          question:
+            rawHealth.question === null
+              ? null
+              : (creativeQuestionState(rawHealth.question) ?? previous.question ?? null),
+        }
+      : previous.question !== undefined
+        ? { question: previous.question }
+        : {}),
   };
 
   const spend =
@@ -594,10 +660,12 @@ export function parseRunHealthResponse(
         : typeof spend?.creditsUsed === "number" && Number.isFinite(spend.creditsUsed)
           ? spend.creditsUsed
           : undefined;
-  const polledStage =
+  const reportedStage =
     typeof rawHealth?.stage === "string" && rawHealth.stage in STAGE_ORDER
       ? (rawHealth.stage as Stage)
       : undefined;
+  const polledStage =
+    next.pause?.kind === "creative_decision" && next.question ? "awaiting_guidance" : reportedStage;
   const progressPct =
     typeof rawHealth?.progressPct === "number" &&
     Number.isFinite(rawHealth.progressPct) &&
@@ -655,14 +723,19 @@ function initFromSnapshot(snapshot: RunSnapshot): Acc {
       applyEvent(acc, parsed.data);
     }
   }
-  if (snapshot.health?.stage) {
-    const resumeStage = snapshot.health.pause?.details?.resumeStage;
+  const snapshotHealth = snapshot.health;
+  const snapshotStage =
+    snapshotHealth?.pause?.kind === "creative_decision" && snapshotHealth.question
+      ? "awaiting_guidance"
+      : snapshotHealth?.stage;
+  if (snapshotStage) {
+    const resumeStage = snapshotHealth?.pause?.details?.resumeStage;
     applyEvent(acc, {
       type: "stage",
-      stage: snapshot.health.stage,
-      pct: snapshot.health.progressPct ?? acc.pct,
-      ...(snapshot.health.stageDescription ? { detail: snapshot.health.stageDescription } : {}),
-      ...(snapshot.health.stage === "awaiting_credits" &&
+      stage: snapshotStage,
+      pct: snapshotHealth?.progressPct ?? acc.pct,
+      ...(snapshotHealth?.stageDescription ? { detail: snapshotHealth.stageDescription } : {}),
+      ...(snapshotStage === "awaiting_credits" &&
       resumeStage &&
       ["concept", "outline", "bible", "chapters", "editing", "continuity", "revising"].includes(
         resumeStage,

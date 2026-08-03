@@ -146,6 +146,30 @@ describe("POST /api/entities/[entityId]/portrait", () => {
     mocks.scheduleUnreferencedBlobCleanup.mockResolvedValue(undefined);
   });
 
+  it("preserves the active-production lock before credits, models, or Blob writes", async () => {
+    mocks.withDbTransaction.mockResolvedValueOnce(null);
+    mocks.authorizeProjectSpend.mockResolvedValueOnce(
+      Response.json(
+        {
+          error: "Finish the current authoring run before using optional AI tools",
+          code: "trial_busy",
+        },
+        { status: 409 },
+      ),
+    );
+
+    const response = await request();
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Finish the current authoring run before using optional AI tools",
+      code: "trial_busy",
+    });
+    expect(mocks.assertCreditsForUsd).not.toHaveBeenCalled();
+    expect(mocks.metered).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled();
+  });
+
   it("preserves both the persistence and immutable-verification failures after upload", async () => {
     const persistenceError = new Error("portrait persistence failed");
     const verificationError = new Error("immutable receipt verification failed");

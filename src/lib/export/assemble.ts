@@ -6,6 +6,12 @@ import type { GenerationConfig } from "@/lib/run-events";
 import { isSafeHref } from "@/lib/security/url";
 import { normalizeManuscriptMarkdown } from "@/lib/manuscript-markdown";
 import {
+  closingBookMatter,
+  openingBookMatter,
+  readBookMatter,
+  type BookMatter,
+} from "@/lib/book-package";
+import {
   buildFigureMap,
   diagramSourceHash,
   loadFigures,
@@ -40,6 +46,8 @@ export type AssembledManuscript = {
   figures: FigureMap;
   /** Generated cover image, when the author made one. */
   coverUrl: string | null;
+  /** Author-owned pages and publication metadata around the chapter body. */
+  matter: BookMatter;
   /** Truthful title-page label for a complete proof or an in-progress snapshot. */
   editionNote: string;
 };
@@ -58,10 +66,12 @@ export function buildManuscript(input: {
   /** Author byline; falls back to the house line when unset. */
   author?: string | null;
   coverUrl?: string | null;
+  matter?: BookMatter;
   editionNote?: string;
   chapters: ManuscriptSourceChapter[];
   figures?: FigureMap;
 }): AssembledManuscript {
+  const matter = input.matter ?? {};
   const chapters = input.chapters
     .filter((c) => c.content.trim().length > 0)
     .sort((a, b) => a.number - b.number)
@@ -80,13 +90,14 @@ export function buildManuscript(input: {
     });
   return {
     title: input.title.trim(),
-    author: input.author?.trim() || MANUSCRIPT_AUTHOR,
+    author: matter.author?.trim() || input.author?.trim() || MANUSCRIPT_AUTHOR,
     synopsis: input.synopsis?.trim() || null,
     genre: input.genre?.trim() || null,
     chapters,
     totalWords: chapters.reduce((sum, c) => sum + c.wordCount, 0),
     figures: input.figures ?? {},
-    coverUrl: input.coverUrl ?? null,
+    coverUrl: matter.coverUrl ?? input.coverUrl ?? null,
+    matter,
     editionNote: input.editionNote?.trim() || READING_LINE,
   };
 }
@@ -250,7 +261,7 @@ export async function captureExportSnapshot(
     editionChapters.some(
       (chapter) => chapter.status === "planned" || chapter.status === "drafting",
     );
-  const front = row.frontMatter as { author?: string; coverUrl?: string } | null;
+  const matter = readBookMatter(row.frontMatter);
   const capturedAt = new Date().toISOString();
   return {
     capturedAt,
@@ -263,8 +274,9 @@ export async function captureExportSnapshot(
       title: row.bookTitle,
       synopsis: row.synopsis,
       genre: row.genre,
-      author: front?.author,
-      coverUrl: front?.coverUrl,
+      author: matter.author,
+      coverUrl: matter.coverUrl,
+      matter,
       editionNote: incomplete ? "an incomplete production snapshot" : READING_LINE,
       chapters: written,
       figures: buildFigureMap(figureRows),
@@ -281,14 +293,43 @@ export function chapterHeading(chapter: Pick<ManuscriptChapter, "number" | "titl
 /** The complete assembled .md file: title page, contents, chapters. Deterministic. */
 export function manuscriptToMarkdown(m: AssembledManuscript): string {
   const lines: string[] = [`# ${m.title}`, ""];
+  if (m.matter.subtitle) lines.push(`## ${m.matter.subtitle}`, "");
   if (m.synopsis) lines.push(`*${m.synopsis}*`, "");
-  lines.push(m.author, "", `_${m.editionNote}_`, "", "## Contents", "");
+  lines.push(m.author, "", `_${m.matter.editionName ?? m.editionNote}_`, "");
+  if (m.matter.copyrightHolder || m.matter.publisher || m.matter.isbn) {
+    lines.push("## Copyright", "");
+    if (m.matter.copyrightHolder) {
+      lines.push(
+        m.matter.copyrightYear
+          ? `© ${m.matter.copyrightYear} ${m.matter.copyrightHolder}. All rights reserved.`
+          : `Copyright © ${m.matter.copyrightHolder}. All rights reserved.`,
+        "",
+      );
+    }
+    if (m.matter.publisher) lines.push(`Published by ${m.matter.publisher}.`, "");
+    if (m.matter.isbn) lines.push(`ISBN ${m.matter.isbn}`, "");
+  }
+  if (m.matter.dedication) lines.push("## Dedication", "", `*${m.matter.dedication}*`, "");
+  if (m.matter.epigraphText) {
+    lines.push("## Epigraph", "", `> ${m.matter.epigraphText.replaceAll("\n", "\n> ")}`);
+    if (m.matter.epigraphAttribution) {
+      lines.push(">", `> — ${m.matter.epigraphAttribution}`);
+    }
+    lines.push("");
+  }
+  for (const section of openingBookMatter(m.matter)) {
+    lines.push(`## ${section.title}`, "", section.markdown, "");
+  }
+  lines.push("## Contents", "");
   for (const chapter of m.chapters) {
     lines.push(`${chapter.number}. ${chapter.title}`);
   }
   lines.push("");
   for (const chapter of m.chapters) {
     lines.push("***", "", `## ${chapterHeading(chapter)}`, "", chapter.markdown, "");
+  }
+  for (const section of closingBookMatter(m.matter)) {
+    lines.push("***", "", `## ${section.title}`, "", section.markdown, "");
   }
   return `${lines.join("\n").trimEnd()}\n`;
 }
@@ -307,7 +348,7 @@ function figureHtml(figure: FigureAsset, prefer: "svg" | "png"): string {
   if (!src) return "";
   return [
     `<figure class="manuscript-figure">`,
-    `<img src="${escapeHtml(src)}" alt="${escapeHtml(figure.alt)}" />`,
+    `<img src="${escapeHtml(src)}" alt="${escapeHtml(figure.alt)}" loading="lazy" referrerpolicy="no-referrer" />`,
     `</figure>`,
   ].join("");
 }
@@ -316,7 +357,16 @@ function figureHtml(figure: FigureAsset, prefer: "svg" | "png"): string {
  * A Marked instance is built per call so the mermaid renderer can close over
  * this render's figure map. Instances are cheap; correctness beats reuse here.
  */
-function createRenderer(figures: FigureMap, prefer: "svg" | "png"): Marked {
+type MarkdownHtmlOptions = {
+  /** Reader editions replace owned images with a revocation-aware proxy. */
+  imageUrl?: (href: string) => string | null;
+};
+
+function createRenderer(
+  figures: FigureMap,
+  prefer: "svg" | "png",
+  options?: MarkdownHtmlOptions,
+): Marked {
   const renderer = new Marked({ async: false, gfm: true, breaks: false });
   renderer.use({
     renderer: {
@@ -335,8 +385,11 @@ function createRenderer(figures: FigureMap, prefer: "svg" | "png"): Marked {
         return escapeHtml(token.text);
       },
       image(token) {
-        if (isSafeHref(token.href)) return false as unknown as string;
-        return escapeHtml(token.text);
+        if (!isSafeHref(token.href)) return escapeHtml(token.text);
+        if (!options?.imageUrl) return false as unknown as string;
+        const src = options.imageUrl(token.href);
+        if (!src) return escapeHtml(token.text);
+        return `<img src="${escapeHtml(src)}" alt="${escapeHtml(token.text)}" loading="lazy" referrerpolicy="no-referrer" />`;
       },
       code(token) {
         if (token.lang !== "mermaid") return false as unknown as string;
@@ -362,9 +415,13 @@ export function markdownToHtml(
   markdown: string,
   figures?: FigureMap,
   prefer: "svg" | "png" = "svg",
+  options?: MarkdownHtmlOptions,
 ): string {
-  const renderer =
-    figures && Object.keys(figures).length > 0 ? createRenderer(figures, prefer) : defaultRenderer;
+  const renderer = options
+    ? createRenderer(figures ?? {}, prefer, options)
+    : figures && Object.keys(figures).length > 0
+      ? createRenderer(figures, prefer)
+      : defaultRenderer;
   return renderer.parse(normalizeManuscriptMarkdown(markdown)) as string;
 }
 
@@ -505,13 +562,14 @@ export async function loadManuscript(
     )
     .orderBy(schema.chapters.chapterNumber);
 
-  const front = row.frontMatter as { author?: string; coverUrl?: string } | null;
+  const matter = readBookMatter(row.frontMatter);
   return buildManuscript({
     title: row.bookTitle,
     synopsis: row.synopsis,
     genre: row.genre,
-    author: front?.author,
-    coverUrl: front?.coverUrl,
+    author: matter.author,
+    coverUrl: matter.coverUrl,
+    matter,
     chapters,
     figures: await loadFigures(row.projectId),
   });

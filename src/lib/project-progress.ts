@@ -20,6 +20,7 @@ export type LifecyclePhase = "Plan" | "Produce" | "Refine" | "Publish";
 export const PRODUCTION_STAGE_LABELS: Record<ProductionStage, string> = {
   queued: "Preparing the writing room",
   concept: "Developing the concept",
+  awaiting_guidance: "Waiting for your story direction",
   outline: "Building the outline",
   awaiting_approval: "Waiting for outline approval",
   bible: "Building the story bible",
@@ -37,6 +38,7 @@ export const PRODUCTION_STAGE_LABELS: Record<ProductionStage, string> = {
 const CANCELLATION_CHECKPOINT_LABELS: Record<ProductionStage, string> = {
   queued: "Start",
   concept: "Concept",
+  awaiting_guidance: "Story direction",
   outline: "Outline",
   awaiting_approval: "Outline approval",
   bible: "Story bible",
@@ -60,6 +62,7 @@ const TERMINAL_PRODUCTION_STAGES: ReadonlySet<ProductionStage> = new Set([
 const PAUSABLE_PRODUCTION_STAGES: ReadonlySet<string> = new Set([
   "queued",
   "concept",
+  "awaiting_guidance",
   "outline",
   "awaiting_approval",
   "bible",
@@ -110,6 +113,7 @@ export function lifecyclePhaseForProduction(
   switch (effectiveStage) {
     case "queued":
     case "concept":
+    case "awaiting_guidance":
     case "outline":
     case "awaiting_approval":
       return "Plan";

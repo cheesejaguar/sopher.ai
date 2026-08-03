@@ -18,6 +18,10 @@ import { useAuthoringJourneyCommand } from "@/components/studio/authoring-journe
 import { ApprovalBanner } from "@/components/generation/approval-banner";
 import { CreditsBanner } from "@/components/generation/credits-banner";
 import { CompletionMoment } from "@/components/generation/completion-moment";
+import {
+  CreativeDecisionCard,
+  creativeDecisionCardKey,
+} from "@/components/generation/creative-decision-card";
 import { ResponsiveInspector } from "@/components/studio/product-primitives";
 import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
@@ -43,6 +47,8 @@ export function announcementFor(
       return "Run queued. Waiting for the agents to start.";
     case "concept":
       return "Developing the concept.";
+    case "awaiting_guidance":
+      return "Paused. Choose one story direction before the outline is built.";
     case "outline":
       return "Writing the outline.";
     case "awaiting_approval":
@@ -552,6 +558,16 @@ export function RunViewer({
           draftingCount={draftingCount}
           plannedTotal={plannedTotal}
         />
+
+        {state.stage === "awaiting_guidance" && state.health.question ? (
+          <CreativeDecisionCard
+            key={creativeDecisionCardKey(state.health.question)}
+            runId={runId}
+            question={state.health.question}
+            onAccepted={checkHealth}
+            onRefreshRequested={checkHealth}
+          />
+        ) : null}
 
         {state.stage === "awaiting_approval" ? <ApprovalBanner projectId={projectId} /> : null}
 

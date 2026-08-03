@@ -11,6 +11,8 @@
  * Run:
  *   E2E_DATABASE_ISOLATED=1 E2E_DATABASE_URL=postgresql://... pnpm e2e:seed
  */
+import { createHash } from "node:crypto";
+
 import { neon } from "@neondatabase/serverless";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/neon-http";
@@ -24,6 +26,7 @@ import {
 import { parseAttrs, type EntityKind } from "../src/ai/schemas/entities";
 import * as schema from "../src/db/schema";
 import { countWords } from "../src/lib/editor/anchors";
+import { normalizeManuscriptMarkdown } from "../src/lib/manuscript-markdown";
 import { runEventSchema, type RunEvent } from "../src/lib/run-events";
 
 const IDS = {
@@ -131,6 +134,36 @@ const JOURNEY_IDS = {
   },
 } as const;
 
+/**
+ * Public-reader acceptance fixtures. Raw tokens are deterministic test data
+ * used only by the disposable E2E database; the database receives their
+ * SHA-256 digests, matching the production storage boundary.
+ */
+const READER_IDS = {
+  editions: {
+    first: "70707070-0000-4000-8000-000000000001",
+    second: "70707070-0000-4000-8000-000000000002",
+  },
+  shares: {
+    first: "80808080-0000-4000-8000-000000000001",
+    second: "80808080-0000-4000-8000-000000000002",
+    revoked: "80808080-0000-4000-8000-000000000003",
+    expired: "80808080-0000-4000-8000-000000000004",
+  },
+} as const;
+
+const readerFixtureToken = (label: string) =>
+  createHash("sha256").update(`sopher-reader-e2e:${label}`, "utf8").digest("base64url");
+const readerFixtureTokenHash = (token: string) =>
+  createHash("sha256").update(token, "utf8").digest("hex");
+
+const READER_TOKENS = {
+  first: readerFixtureToken("first"),
+  second: readerFixtureToken("second"),
+  revoked: readerFixtureToken("revoked"),
+  expired: readerFixtureToken("expired"),
+} as const;
+
 const CREATED_AT = new Date("2026-07-27T16:00:00.000Z");
 const RUN_STARTED_AT = new Date("2026-07-28T15:00:00.000Z");
 const RUN_COMPLETED_AT = new Date("2026-07-28T15:18:00.000Z");
@@ -138,6 +171,8 @@ const UPDATED_AT = new Date("2026-07-29T16:00:00.000Z");
 const JOURNEY_UPDATED_AT = new Date("2026-07-29T12:00:00.000Z");
 const ACTIVE_RUN_AT = new Date(Date.now() - 5 * 60_000);
 const STALE_DISPATCH_AT = new Date(Date.now() - 20 * 60_000);
+const READER_CREATED_AT = new Date(Date.now() - 48 * 60 * 60_000);
+const READER_EXPIRED_AT = new Date(Date.now() - 24 * 60 * 60_000);
 
 function indentedManuscriptFixture(markdown: string): string {
   return markdown
@@ -362,6 +397,140 @@ const chapterRows = chapterContents.map((content, index) => ({
   createdAt: CREATED_AT,
   updatedAt: UPDATED_AT,
 }));
+
+const readerNormalizedProse = normalizeManuscriptMarkdown(
+  chapterContents[1].split("\n").slice(2).join("\n"),
+);
+
+const readerSnapshots: [schema.PublicationEditionSnapshot, schema.PublicationEditionSnapshot] = [
+  {
+    schemaVersion: 1,
+    capturedAt: UPDATED_AT.toISOString(),
+    incomplete: false,
+    title: "The Clockmaker's Map — Reader Proof",
+    author: "E2E Sample Author",
+    synopsis: "A private reader proof about a clockmaker, a compass, and a city losing time.",
+    genre: "Science Fiction",
+    editionNote: "Private reader proof",
+    matter: {
+      subtitle: "A Bellweather Story",
+      author: "E2E Sample Author",
+      dedication: "For every careful reader.",
+    },
+    coverUrl: null,
+    assetUrls: [],
+    chapters: [
+      {
+        number: 1,
+        title: "The Room Beneath the Hour",
+        markdown: readerNormalizedProse,
+        wordCount: countWords(readerNormalizedProse),
+      },
+    ],
+    figures: {},
+  },
+  {
+    schemaVersion: 1,
+    capturedAt: new Date(UPDATED_AT.getTime() + 60_000).toISOString(),
+    incomplete: true,
+    title: "The Observatory Ledger — Reader Proof",
+    author: "E2E Sample Author",
+    synopsis: "A separate immutable proof used to verify simultaneous reader links.",
+    genre: "Mystery",
+    editionNote: "In-progress reader proof",
+    matter: {
+      author: "E2E Sample Author",
+      epigraphText: "Every city keeps one hour for itself.",
+    },
+    coverUrl: null,
+    assetUrls: [],
+    chapters: [
+      {
+        number: 1,
+        title: "The Sealed Observatory",
+        markdown:
+          "Rain silvered the observatory dome while the last clock in Bellweather kept time.\n\nMara opened the ledger and found tomorrow's date written in her own hand.",
+        wordCount: countWords(
+          "Rain silvered the observatory dome while the last clock in Bellweather kept time.\n\nMara opened the ledger and found tomorrow's date written in her own hand.",
+        ),
+      },
+    ],
+    figures: {},
+  },
+];
+
+const readerEditionRows: (typeof schema.publicationEditions.$inferInsert)[] = [
+  {
+    id: READER_IDS.editions.first,
+    projectId: IDS.project,
+    bookId: IDS.book,
+    userId: IDS.user,
+    sourceDigest: createHash("sha256").update("reader-edition:first").digest("hex"),
+    snapshot: readerSnapshots[0],
+    incomplete: readerSnapshots[0].incomplete,
+    chapterCount: readerSnapshots[0].chapters.length,
+    totalWords: readerSnapshots[0].chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0),
+    createdAt: READER_CREATED_AT,
+  },
+  {
+    id: READER_IDS.editions.second,
+    projectId: IDS.project,
+    bookId: IDS.book,
+    userId: IDS.user,
+    sourceDigest: createHash("sha256").update("reader-edition:second").digest("hex"),
+    snapshot: readerSnapshots[1],
+    incomplete: readerSnapshots[1].incomplete,
+    chapterCount: readerSnapshots[1].chapters.length,
+    totalWords: readerSnapshots[1].chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0),
+    createdAt: new Date(READER_CREATED_AT.getTime() + 60_000),
+  },
+];
+
+const readerShareRows: (typeof schema.readerShares.$inferInsert)[] = [
+  {
+    id: READER_IDS.shares.first,
+    editionId: READER_IDS.editions.first,
+    projectId: IDS.project,
+    userId: IDS.user,
+    tokenHash: readerFixtureTokenHash(READER_TOKENS.first),
+    label: "Downloadable reader proof",
+    allowDownload: true,
+    createdAt: READER_CREATED_AT,
+  },
+  {
+    id: READER_IDS.shares.second,
+    editionId: READER_IDS.editions.second,
+    projectId: IDS.project,
+    userId: IDS.user,
+    tokenHash: readerFixtureTokenHash(READER_TOKENS.second),
+    label: "Browser-only reader proof",
+    allowDownload: false,
+    createdAt: new Date(READER_CREATED_AT.getTime() + 60_000),
+  },
+  {
+    id: READER_IDS.shares.revoked,
+    editionId: READER_IDS.editions.first,
+    projectId: IDS.project,
+    userId: IDS.user,
+    tokenHash: readerFixtureTokenHash(READER_TOKENS.revoked),
+    label: "Revoked reader proof",
+    status: "revoked",
+    allowDownload: true,
+    revokedAt: new Date(READER_CREATED_AT.getTime() + 2 * 60_000),
+    createdAt: READER_CREATED_AT,
+  },
+  {
+    id: READER_IDS.shares.expired,
+    editionId: READER_IDS.editions.second,
+    projectId: IDS.project,
+    userId: IDS.user,
+    tokenHash: readerFixtureTokenHash(READER_TOKENS.expired),
+    label: "Expired reader proof",
+    allowDownload: true,
+    expiresAt: READER_EXPIRED_AT,
+    createdAt: READER_CREATED_AT,
+  },
+];
 
 const suggestionRows = [
   {
@@ -850,10 +1019,17 @@ function validateFixtureShape() {
     ["journey outlines", Object.keys(JOURNEY_IDS.outlines).length, journeyOutlines.length],
     ["journey chapters", Object.keys(JOURNEY_IDS.chapters).length, journeyChapters.length],
     ["journey runs", Object.keys(JOURNEY_IDS.runs).length, journeyRuns.length],
+    ["reader editions", Object.keys(READER_IDS.editions).length, readerEditionRows.length],
+    ["reader shares", Object.keys(READER_IDS.shares).length, readerShareRows.length],
   ];
   for (const [label, actual, expected] of checks) {
     if (actual !== expected) {
       throw new Error(`Invalid E2E fixture: ${label} has ${actual} entries; expected ${expected}.`);
+    }
+  }
+  for (const [label, token] of Object.entries(READER_TOKENS)) {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      throw new Error(`Invalid E2E fixture: reader token ${label} is not 256-bit base64url.`);
     }
   }
 }
@@ -866,7 +1042,7 @@ async function main() {
 
   if (process.argv.includes("--dry-run")) {
     console.log(
-      `E2E seed validated for ${targetLabel}: 1 user, ${journeyProjects.length + 1} projects, ${chapterRows.length + journeyChapters.length} chapters, ${suggestionRows.length} pending suggestions. No database connection opened.`,
+      `E2E seed validated for ${targetLabel}: 1 user, ${journeyProjects.length + 1} projects, ${chapterRows.length + journeyChapters.length} chapters, ${readerShareRows.length} reader shares, ${suggestionRows.length} pending suggestions. No database connection opened.`,
     );
     return;
   }
@@ -961,6 +1137,8 @@ async function main() {
       updatedAt: UPDATED_AT,
     }),
     db.insert(schema.books).values(journeyBooks),
+    db.insert(schema.publicationEditions).values(readerEditionRows),
+    db.insert(schema.readerShares).values(readerShareRows),
     db.insert(schema.outlines).values({
       id: IDS.outline,
       bookId: IDS.book,
@@ -1203,7 +1381,7 @@ async function main() {
   ] as const);
 
   console.log(
-    `Seeded isolated E2E database ${targetLabel}: 1 admin author, ${journeyProjects.length + 1} projects, ${chapterRows.length + journeyChapters.length} chapters, ${suggestionRows.length} pending suggestions.`,
+    `Seeded isolated E2E database ${targetLabel}: 1 admin author, ${journeyProjects.length + 1} projects, ${chapterRows.length + journeyChapters.length} chapters, ${readerShareRows.length} reader shares, ${suggestionRows.length} pending suggestions.`,
   );
 }
 

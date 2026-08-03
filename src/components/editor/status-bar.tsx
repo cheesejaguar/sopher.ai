@@ -24,6 +24,7 @@ import { formatWordCount } from "@/lib/editor/chapter-status";
 import type { EditorProductionStatus } from "@/lib/editor/types";
 import { useStudioCoachmark, useStudioHelp } from "@/components/studio/studio-help-context";
 import { StudioCoachmark } from "@/components/studio/studio-coachmark";
+import { useStudioSuspension } from "@/components/studio/studio-access-context";
 
 import type { SaveState } from "./use-autosave";
 
@@ -219,6 +220,7 @@ export function MobileEditorToolbar({
   onToggleZen: () => void;
   history: React.ReactNode;
 }) {
+  const suspended = useStudioSuspension();
   const selectionCoachmark = useStudioCoachmark("selection_tools");
   const autosaveCoachmark = useStudioCoachmark("editor_autosave");
   const state = useEditorState({
@@ -275,13 +277,15 @@ export function MobileEditorToolbar({
             size="icon-lg"
             className={cn(mobileToolClass, state?.hasSelection && "text-ai")}
             aria-label={
-              state?.hasSelection
-                ? "Edit the selected passage with AI"
-                : "AI editing unavailable — select a passage first"
+              suspended
+                ? "AI editing unavailable — account suspended"
+                : state?.hasSelection
+                  ? "Edit the selected passage with AI"
+                  : "AI editing unavailable — select a passage first"
             }
             aria-haspopup="dialog"
             aria-expanded={selectionToolsOpen}
-            disabled={!state?.hasSelection}
+            disabled={!state?.hasSelection || suspended}
             onClick={onOpenSelectionTools}
           >
             <FilePenLine aria-hidden="true" className="size-4" />

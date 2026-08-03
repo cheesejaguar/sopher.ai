@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getBalance: vi.fn(),
   resumeHook: vi.fn(),
   acceptAuthoringRunInput: vi.fn(),
+  authoringInputPayloadsEqual: vi.fn(),
   authoringInputToken: vi.fn(),
   deliverAuthoringRunInput: vi.fn(),
 }));
@@ -26,6 +27,7 @@ vi.mock("@/lib/billing/credits", () => ({ getBalance: mocks.getBalance }));
 
 vi.mock("@/lib/authoring-inputs", () => ({
   acceptAuthoringRunInput: mocks.acceptAuthoringRunInput,
+  authoringInputPayloadsEqual: mocks.authoringInputPayloadsEqual,
   authoringInputToken: mocks.authoringInputToken,
   deliverAuthoringRunInput: mocks.deliverAuthoringRunInput,
 }));
@@ -92,6 +94,9 @@ describe("POST /api/runs/[runId]/input pinned-v1 compatibility", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireUser.mockResolvedValue({ userId: "author-1" });
+    mocks.authoringInputPayloadsEqual.mockImplementation(
+      (left, right) => JSON.stringify(left) === JSON.stringify(right),
+    );
     mocks.getBalance.mockResolvedValue(20);
     mocks.resumeHook.mockResolvedValue(undefined);
   });
@@ -193,6 +198,180 @@ describe("POST /api/runs/[runId]/input pinned-v1 compatibility", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ code: "cancellation_requested" });
+    expect(mocks.acceptAuthoringRunInput).not.toHaveBeenCalled();
+    expect(mocks.deliverAuthoringRunInput).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/runs/[runId]/input protocol-v3 creative decisions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.requireUser.mockResolvedValue({ userId: "author-1" });
+    mocks.authoringInputPayloadsEqual.mockImplementation(
+      (left, right) => JSON.stringify(left) === JSON.stringify(right),
+    );
+    mocks.authoringInputToken.mockReturnValue(`authoring-input:${RUN_ID}:creative_decision:3`);
+    mocks.deliverAuthoringRunInput.mockResolvedValue("delivered");
+  });
+
+  it("persists the exact registered question response before signaling its hook", async () => {
+    const questionId = "22222222-2222-4222-8222-222222222222";
+    const decisionDigest = "a".repeat(64);
+    const payload = {
+      questionId,
+      decisionDigest,
+      mode: "option",
+      selectedOptionId: "option-2",
+    };
+    const run = {
+      id: RUN_ID,
+      status: "awaiting_input",
+      config: { protocolVersion: 3 },
+      pauseKind: "creative_decision",
+      pauseVersion: 3,
+      pauseRegisteredAt: new Date("2026-08-02T12:00:00.000Z"),
+      pauseDetails: { questionId, resumeStage: "outline" },
+      cancellationRequestedAt: null,
+    };
+    const question = {
+      id: questionId,
+      decisionDigest,
+      options: [
+        { id: "option-1", label: "One", description: "First direction" },
+        { id: "option-2", label: "Two", description: "Second direction" },
+        { id: "option-3", label: "Three", description: "Third direction" },
+      ],
+      pauseVersion: 3,
+      status: "pending",
+    };
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(runQuery([run]))
+      .mockReturnValueOnce(runQuery([]))
+      .mockReturnValueOnce(runQuery([question]));
+    mocks.getDb.mockReturnValue({ select });
+    mocks.acceptAuthoringRunInput.mockResolvedValue({
+      input: {
+        id: "33333333-3333-4333-8333-333333333333",
+        kind: "creative_decision",
+        pauseVersion: 3,
+        payload,
+        status: "accepted",
+      },
+      replayed: false,
+    });
+
+    const response = await request({
+      kind: "creative-decision",
+      ...payload,
+      requestKey: "44444444-4444-4444-8444-444444444444",
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.acceptAuthoringRunInput).toHaveBeenCalledWith({
+      runId: RUN_ID,
+      userId: "author-1",
+      kind: "creative_decision",
+      pauseVersion: 3,
+      payload,
+      requestKey: "44444444-4444-4444-8444-444444444444",
+    });
+    expect(mocks.deliverAuthoringRunInput).toHaveBeenCalledWith({
+      inputId: "33333333-3333-4333-8333-333333333333",
+      token: `authoring-input:${RUN_ID}:creative_decision:3`,
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      resumed: true,
+      protocolVersion: 3,
+    });
+  });
+
+  it("replays a consumed decision after Workflow advances before the response arrives", async () => {
+    const questionId = "22222222-2222-4222-8222-222222222222";
+    const decisionDigest = "a".repeat(64);
+    const requestKey = "44444444-4444-4444-8444-444444444444";
+    const payload = { questionId, decisionDigest, mode: "sopher" };
+    const run = {
+      id: RUN_ID,
+      status: "running",
+      config: { protocolVersion: 3 },
+      pauseKind: null,
+      pauseVersion: 3,
+      pauseRegisteredAt: null,
+      pauseDetails: null,
+      cancellationRequestedAt: null,
+    };
+    const existingInput = {
+      kind: "creative_decision",
+      payload,
+      status: "consumed",
+    };
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(runQuery([run]))
+      .mockReturnValueOnce(runQuery([existingInput]));
+    mocks.getDb.mockReturnValue({ select });
+
+    const response = await request({
+      kind: "creative-decision",
+      ...payload,
+      requestKey,
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      resumed: true,
+      replayed: true,
+      delivery: "already_consumed",
+      protocolVersion: 3,
+    });
+    expect(mocks.acceptAuthoringRunInput).not.toHaveBeenCalled();
+    expect(mocks.deliverAuthoringRunInput).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale question digest before accepting an input", async () => {
+    const questionId = "22222222-2222-4222-8222-222222222222";
+    const run = {
+      id: RUN_ID,
+      status: "awaiting_input",
+      config: { protocolVersion: 3 },
+      pauseKind: "creative_decision",
+      pauseVersion: 3,
+      pauseRegisteredAt: new Date("2026-08-02T12:00:00.000Z"),
+      pauseDetails: { questionId, resumeStage: "outline" },
+      cancellationRequestedAt: null,
+    };
+    const question = {
+      id: questionId,
+      decisionDigest: "a".repeat(64),
+      options: [
+        { id: "option-1", label: "One", description: "First direction" },
+        { id: "option-2", label: "Two", description: "Second direction" },
+        { id: "option-3", label: "Three", description: "Third direction" },
+      ],
+      pauseVersion: 3,
+      status: "pending",
+    };
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(runQuery([run]))
+      .mockReturnValueOnce(runQuery([question]));
+    mocks.getDb.mockReturnValue({ select });
+
+    const response = await request({
+      kind: "creative-decision",
+      questionId,
+      decisionDigest: "b".repeat(64),
+      mode: "sopher",
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "stale_creative_question",
+      error: expect.stringMatching(/question changed/i),
+    });
     expect(mocks.acceptAuthoringRunInput).not.toHaveBeenCalled();
     expect(mocks.deliverAuthoringRunInput).not.toHaveBeenCalled();
   });

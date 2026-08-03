@@ -44,7 +44,10 @@ const lifecycle = [
   },
   {
     label: "Publish",
-    stages: [{ slug: "manuscript", label: "Manuscript" }],
+    stages: [
+      { slug: "book", label: "Book setup" },
+      { slug: "manuscript", label: "Read & export" },
+    ],
   },
 ] as const;
 
@@ -54,7 +57,7 @@ const secondary = [
 ] as const;
 
 type StageSlug =
-  "brief" | "outline" | "bible" | "write" | "editor" | "manuscript" | "usage" | "settings";
+  "brief" | "outline" | "bible" | "write" | "editor" | "book" | "manuscript" | "usage" | "settings";
 
 type Stage = { slug: StageSlug; label: string };
 

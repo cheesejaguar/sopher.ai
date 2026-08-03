@@ -1,6 +1,7 @@
 import { neon, Pool } from "@neondatabase/serverless";
 import { drizzle as drizzleHttp } from "drizzle-orm/neon-http";
 import { drizzle as drizzleWebSocket } from "drizzle-orm/neon-serverless";
+import type { PgTransactionConfig } from "drizzle-orm/pg-core";
 import * as schema from "./schema";
 
 let _sql: ReturnType<typeof neon> | null = null;
@@ -38,13 +39,14 @@ export type DbTransaction = Parameters<
  */
 export async function withDbTransaction<T>(
   callback: (tx: DbTransaction) => Promise<T>,
+  config?: PgTransactionConfig,
 ): Promise<T> {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL!,
     max: 1,
   });
   try {
-    return await createTransactionalDb(pool).transaction(callback);
+    return await createTransactionalDb(pool).transaction(callback, config);
   } finally {
     await pool.end();
   }

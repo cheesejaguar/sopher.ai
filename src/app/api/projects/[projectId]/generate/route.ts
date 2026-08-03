@@ -50,8 +50,13 @@ function buildBaseGenerationConfig(input: {
 }): GenerationConfig {
   const { project } = input;
   const trial = project.experience === "trial_short_story";
+  const authoringMode = project.settings.authoringMode ?? "guided";
   return {
-    protocolVersion: 2,
+    protocolVersion: 3,
+    interaction: {
+      mode: authoringMode,
+      maxQuestions: authoringMode === "guided" ? 1 : 0,
+    },
     productionMode: project.experience,
     tier: trial ? TRIAL_STORY_CONFIG.tier : input.tier,
     requireOutlineApproval: trial

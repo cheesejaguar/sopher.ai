@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { schema } from "@/db";
 import { buildDispatchReadyFullBookConfig } from "@/lib/authoring-dispatch";
-import type { GenerationConfig } from "@/lib/run-events";
+import { generationBillingScope, type GenerationConfig } from "@/lib/run-events";
 
 function project(
   overrides: Partial<typeof schema.projects.$inferSelect> = {},
@@ -107,5 +107,61 @@ describe("dispatch-ready full-book snapshot", () => {
       targetChapters: 3,
       targetWordsPerChapter: 1_000,
     });
+  });
+
+  it("preserves the billing lineage for exact-input guided work interrupted before preparation", () => {
+    const sourceBase = buildDispatchReadyFullBookConfig({
+      project: project({ settings: { authoringMode: "guided" } }),
+      requested: {},
+      chapterRows: [],
+      latestOutline: undefined,
+      priorRuns: [],
+    });
+    const source: GenerationConfig = {
+      ...sourceBase,
+      stagedConcept: {
+        title: "The Final Persisted Title",
+        logline: "A road vanishes behind its travelers.",
+        synopsis: "A cartographer follows a road that refuses to stay mapped.",
+        themes: ["memory"],
+        setting: "A borderland of moving roads",
+        centralConflict: "The map changes faster than it can be drawn.",
+        uniqueElements: ["living maps"],
+        characters: [],
+        moderation: { flagged: false },
+      },
+      creativeDecisions: {
+        afterConcept: {
+          questionId: "11111111-1111-4111-8111-111111111111",
+          questionKey: "after_concept",
+          mode: "sopher",
+          selectedOptionId: "option-1",
+          answer: "Make the map itself the unreliable guide.",
+        },
+      },
+    };
+
+    const retry = buildDispatchReadyFullBookConfig({
+      project: project({ settings: { authoringMode: "guided" } }),
+      requested: {},
+      chapterRows: [],
+      latestOutline: undefined,
+      priorRuns: [{ id: "failed-guided-run", status: "failed", config: source }],
+    });
+
+    expect(retry).toMatchObject({
+      resumeFromRunId: "failed-guided-run",
+      billingLineageRunId: "failed-guided-run",
+    });
+    expect(generationBillingScope(retry, "new-guided-run", "concept")).toBe(
+      "generation:failed-guided-run:concept",
+    );
+    expect(generationBillingScope(retry, "new-guided-run", "creative-question:after-concept")).toBe(
+      "generation:failed-guided-run:creative-question:after-concept",
+    );
+    // The Workflow hydrates only the safe pre-manuscript subset after it
+    // revalidates the source. Dispatch never copies chapter/completion state.
+    expect(retry).not.toHaveProperty("stagedConcept");
+    expect(retry).not.toHaveProperty("creativeDecisions");
   });
 });

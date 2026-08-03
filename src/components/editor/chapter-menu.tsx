@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { addChapter, deleteChapter, moveChapter, renameChapter } from "@/lib/actions/chapters";
 import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
+import { useStudioSuspension } from "@/components/studio/studio-access-context";
 
 /**
  * Structural chapter actions: rename, reorder, insert, delete. Content is the
@@ -52,6 +53,7 @@ export function ChapterMenu({
   isLast: boolean;
 }) {
   const router = useRouter();
+  const suspended = useStudioSuspension();
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
@@ -110,8 +112,9 @@ export function ChapterMenu({
           >
             <Plus aria-hidden="true" className="size-3.5" /> Insert chapter after
           </DropdownMenuItem>
-          <DropdownMenuItem disabled={pending} onClick={() => setRegenOpen(true)}>
-            <RefreshCw aria-hidden="true" className="size-3.5" /> Regenerate…
+          <DropdownMenuItem disabled={pending || suspended} onClick={() => setRegenOpen(true)}>
+            <RefreshCw aria-hidden="true" className="size-3.5" />
+            {suspended ? "Regenerate unavailable · account suspended" : "Regenerate…"}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem variant="destructive" onClick={() => setDeleteOpen(true)}>

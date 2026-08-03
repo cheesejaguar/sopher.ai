@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 
+import { reconcileActiveExportRuns } from "@/lib/export-dispatch";
 import { reconcileActiveAuthoringRuns } from "@/lib/run-health";
 
 export const maxDuration = 300;
@@ -19,13 +20,26 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const results = await reconcileActiveAuthoringRuns({ limit: 250 });
+  const [authoringResults, exportResults] = await Promise.all([
+    reconcileActiveAuthoringRuns({ limit: 250 }),
+    reconcileActiveExportRuns({ limit: 250 }),
+  ]);
   return Response.json({
-    inspected: results.length,
-    completed: results.filter((result) => result.outcome === "completed").length,
-    failed: results.filter((result) => result.outcome === "failed").length,
-    cancelled: results.filter((result) => result.outcome === "cancelled").length,
-    unchanged: results.filter((result) => result.outcome === "unchanged").length,
-    errors: results.filter((result) => result.outcome === "error").length,
+    inspected: authoringResults.length + exportResults.length,
+    completed:
+      authoringResults.filter((result) => result.outcome === "completed").length +
+      exportResults.filter((result) => result.outcome === "completed").length,
+    failed:
+      authoringResults.filter((result) => result.outcome === "failed").length +
+      exportResults.filter((result) => result.outcome === "failed").length,
+    cancelled:
+      authoringResults.filter((result) => result.outcome === "cancelled").length +
+      exportResults.filter((result) => result.outcome === "cancelled").length,
+    unchanged:
+      authoringResults.filter((result) => result.outcome === "unchanged").length +
+      exportResults.filter((result) => result.outcome === "unchanged").length,
+    errors:
+      authoringResults.filter((result) => result.outcome === "error").length +
+      exportResults.filter((result) => result.outcome === "error").length,
   });
 }

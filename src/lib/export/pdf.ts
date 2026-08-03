@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
 import { markdownToBlocks, stripInline, type AssembledManuscript } from "./assemble";
+import { closingBookMatter, openingBookMatter } from "@/lib/book-package";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 // 6in × 9in trade page, in PDF points.
@@ -57,6 +58,13 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
     width: BODY_WIDTH,
     align: "center",
   });
+  if (m.matter.subtitle) {
+    doc.moveDown(0.8);
+    doc
+      .font(SERIF)
+      .fontSize(15)
+      .text(pdfSafe(m.matter.subtitle), { width: BODY_WIDTH, align: "center" });
+  }
   if (m.synopsis) {
     doc.moveDown(1.5);
     doc
@@ -65,13 +73,135 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
       .text(pdfSafe(m.synopsis), { width: BODY_WIDTH, align: "center" });
   }
   doc.moveDown(2);
-  doc.font(SERIF).fontSize(9).text(pdfSafe(m.editionNote), { width: BODY_WIDTH, align: "center" });
+  doc
+    .font(SERIF)
+    .fontSize(9)
+    .text(pdfSafe(m.matter.editionName ?? m.editionNote), {
+      width: BODY_WIDTH,
+      align: "center",
+    });
   doc.moveDown(0.5);
   doc.text(pdfSafe(m.author), { width: BODY_WIDTH, align: "center" });
 
+  if (m.matter.copyrightHolder || m.matter.publisher || m.matter.isbn) {
+    doc.addPage();
+    doc.font(SERIF_BOLD).fontSize(16).text("Copyright", MARGIN, 150, {
+      width: BODY_WIDTH,
+      align: "left",
+    });
+    doc.moveDown(1.5);
+    doc.font(SERIF).fontSize(10);
+    if (m.matter.copyrightHolder) {
+      doc.text(
+        pdfSafe(
+          m.matter.copyrightYear
+            ? `© ${m.matter.copyrightYear} ${m.matter.copyrightHolder}. All rights reserved.`
+            : `Copyright © ${m.matter.copyrightHolder}. All rights reserved.`,
+        ),
+        { width: BODY_WIDTH },
+      );
+      doc.moveDown(0.5);
+    }
+    if (m.matter.publisher) {
+      doc.text(pdfSafe(`Published by ${m.matter.publisher}.`), { width: BODY_WIDTH });
+      doc.moveDown(0.5);
+    }
+    if (m.matter.isbn) doc.text(pdfSafe(`ISBN ${m.matter.isbn}`), { width: BODY_WIDTH });
+  }
+
+  if (m.matter.dedication) {
+    doc.addPage();
+    doc.font(SERIF_ITALIC).fontSize(13).text(pdfSafe(m.matter.dedication), MARGIN, 240, {
+      width: BODY_WIDTH,
+      align: "center",
+    });
+  }
+
+  if (m.matter.epigraphText) {
+    doc.addPage();
+    doc
+      .font(SERIF_ITALIC)
+      .fontSize(12)
+      .text(pdfSafe(m.matter.epigraphText), MARGIN + 30, 210, {
+        width: BODY_WIDTH - 60,
+        align: "left",
+        lineGap: 3,
+      });
+    if (m.matter.epigraphAttribution) {
+      doc.moveDown(1);
+      doc
+        .font(SERIF)
+        .fontSize(10)
+        .text(pdfSafe(`— ${m.matter.epigraphAttribution}`), {
+          width: BODY_WIDTH - 60,
+          align: "right",
+        });
+    }
+  }
+
+  const renderMatter = (title: string, markdown: string) => {
+    doc.addPage();
+    doc.font(SERIF_BOLD).fontSize(18).text(pdfSafe(title), MARGIN, 120, {
+      width: BODY_WIDTH,
+      align: "center",
+    });
+    doc.moveDown(2);
+    for (const block of markdownToBlocks(markdown, m.figures)) {
+      if (block.kind === "scene-break") {
+        doc.moveDown(0.5);
+        doc.font(SERIF).fontSize(11).text("* * *", { width: BODY_WIDTH, align: "center" });
+        doc.moveDown(0.5);
+      } else if (block.kind === "heading") {
+        doc.moveDown(0.5);
+        doc
+          .font(SERIF_BOLD)
+          .fontSize(13)
+          .text(pdfSafe(stripInline(block.text)), {
+            width: BODY_WIDTH,
+          });
+        doc.moveDown(0.25);
+      } else if (block.kind === "quote") {
+        doc
+          .font(SERIF_ITALIC)
+          .fontSize(11)
+          .text(pdfSafe(stripInline(block.text)), {
+            width: BODY_WIDTH,
+            align: "justify",
+            paragraphGap: 8,
+          });
+      } else if (block.kind === "paragraph" || block.kind === "code") {
+        doc
+          .font(block.kind === "code" ? "Courier" : SERIF)
+          .fontSize(block.kind === "code" ? 8 : 11)
+          .text(pdfSafe(stripInline(block.text)), {
+            width: BODY_WIDTH,
+            align: block.kind === "code" ? "left" : "justify",
+            lineGap: 3,
+            paragraphGap: 8,
+          });
+      } else if (block.kind === "figure" && block.figure.pngBytes) {
+        doc.moveDown(0.8);
+        doc.image(Buffer.from(block.figure.pngBytes), {
+          fit: [BODY_WIDTH, 320],
+          align: "center",
+        });
+        doc.moveDown(0.8);
+      }
+    }
+  };
+
+  for (const section of openingBookMatter(m.matter)) {
+    renderMatter(section.title, section.markdown);
+  }
+
   // Chapters — each opens on a fresh page with a title block.
+  let firstNumberedPageIndex: number | null = null;
   for (const chapter of m.chapters) {
     doc.addPage();
+    if (firstNumberedPageIndex === null) {
+      const range = doc.bufferedPageRange();
+      firstNumberedPageIndex = range.start + range.count - 1;
+    }
     doc.font(SERIF).fontSize(10).text(`CHAPTER ${chapter.number}`, MARGIN, 140, {
       width: BODY_WIDTH,
       align: "center",
@@ -153,16 +283,28 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
     }
   }
 
-  // Page numbers, skipping the title page.
+  for (const section of closingBookMatter(m.matter)) {
+    renderMatter(section.title, section.markdown);
+  }
+
+  // Page numbers begin on chapter one, regardless of cover/front-matter count.
   const range = doc.bufferedPageRange();
-  for (let i = range.start + 1; i < range.start + range.count; i++) {
+  for (
+    let i = firstNumberedPageIndex ?? range.start + range.count;
+    i < range.start + range.count;
+    i++
+  ) {
     doc.switchToPage(i);
     const bottom = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
     doc
       .font(SERIF)
       .fontSize(9)
-      .text(String(i), 0, PAGE[1] - 36, { width: PAGE[0], align: "center", lineBreak: false });
+      .text(String(i - (firstNumberedPageIndex ?? i) + 1), 0, PAGE[1] - 36, {
+        width: PAGE[0],
+        align: "center",
+        lineBreak: false,
+      });
     doc.page.margins.bottom = bottom;
   }
 
