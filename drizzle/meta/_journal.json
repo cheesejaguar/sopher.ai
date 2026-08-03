@@ -113,6 +113,20 @@
       "when": 1785717165000,
       "tag": "0015_truthful_active_projection",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785738709890,
+      "tag": "0016_creative_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785740988478,
+      "tag": "0017_publication_editions",
+      "breakpoints": true
     }
   ]
 }

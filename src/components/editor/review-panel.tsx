@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { useStudioSuspension } from "@/components/studio/studio-access-context";
 import type { SuggestionDTO } from "@/lib/editor/types";
 
 import { severityLabels, suggestionTypeLabel } from "./suggestion-card";
@@ -223,6 +224,7 @@ export function ReviewPanel({
   /** Keeps actions visible and at least 44px inside touch-oriented sheets. */
   touchFriendly?: boolean;
 }) {
+  const suspended = useStudioSuspension();
   const [instruction, setInstruction] = useState("");
   const [focusOpen, setFocusOpen] = useState(false);
   const count = suggestions.length;
@@ -274,8 +276,13 @@ export function ReviewPanel({
                   // The tinted icon is the only visual cue that a focus is
                   // set; carry that state in the name too.
                   aria-label={
-                    instruction ? "Review focus set — change it" : "Set a focus for the review"
+                    suspended
+                      ? "Review focus unavailable while account is suspended"
+                      : instruction
+                        ? "Review focus set — change it"
+                        : "Set a focus for the review"
                   }
+                  disabled={suspended}
                   className={cn(touchFriendly && "size-11 rounded-sm", instruction && "text-ai")}
                 />
               }
@@ -302,7 +309,7 @@ export function ReviewPanel({
             variant="outline"
             size="sm"
             className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
-            disabled={reviewing || busy}
+            disabled={reviewing || busy || suspended}
             onClick={() => onReview(instruction.trim() || undefined)}
           >
             <BookOpenCheck aria-hidden="true" className="text-ai" />
@@ -310,6 +317,13 @@ export function ReviewPanel({
           </Button>
         </div>
       </div>
+
+      {suspended ? (
+        <p className="border-b border-destructive/30 px-3 py-2 text-xs text-muted-foreground">
+          New AI reviews are unavailable while this account is suspended. Existing suggestions can
+          still be accepted, edited, or dismissed.
+        </p>
+      ) : null}
 
       <div
         ref={listRef}

@@ -44,8 +44,10 @@ describe("ProjectSettingsForm", () => {
 
     const chapters = screen.getByLabelText("Chapters");
     const tone = screen.getByLabelText("Tone");
+    const autopilot = screen.getByRole("radio", { name: /autopilot/i });
     fireEvent.change(chapters, { target: { value: "14" } });
     fireEvent.change(tone, { target: { value: "Hopeful and strange" } });
+    fireEvent.click(autopilot);
     fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
 
     await waitFor(() => expect(mocks.updateProject).toHaveBeenCalledOnce());
@@ -53,7 +55,10 @@ describe("ProjectSettingsForm", () => {
       "project-1",
       expect.objectContaining({
         targetChapters: 14,
-        settings: expect.objectContaining({ tone: "Hopeful and strange" }),
+        settings: expect.objectContaining({
+          tone: "Hopeful and strange",
+          authoringMode: "autopilot",
+        }),
       }),
     );
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Saved."));
@@ -85,6 +90,7 @@ describe("ProjectSettingsForm", () => {
     expect(screen.queryByLabelText("Words per chapter")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Quality tier")).not.toBeInTheDocument();
     expect(screen.getByLabelText("Point of view")).toBeVisible();
+    expect(screen.getByRole("radio", { name: /collaborative/i })).toBeChecked();
     expect(
       screen.getByRole("checkbox", {
         name: /pause for my approval before writing chapters/i,

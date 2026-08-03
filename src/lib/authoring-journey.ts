@@ -15,6 +15,7 @@ export type AuthoringNextActionKind =
   | "start_production"
   | "recover_dispatch"
   | "watch_production"
+  | "answer_question"
   | "review_outline"
   | "add_credits"
   | "finish_cancellation"
@@ -81,7 +82,7 @@ export type AuthoringJourneyRun = {
   supportReference?: string | null;
   cancellationRequestedAt?: string | null;
   pause?: {
-    kind: "outline_approval" | "credits" | "unknown";
+    kind: "outline_approval" | "credits" | "creative_decision" | "unknown";
     version?: number;
     balanceCredits?: number;
     requiredCredits?: number;
@@ -152,6 +153,7 @@ const ACTION_STATUS_LABELS: Record<AuthoringNextActionKind, string> = {
   start_production: "Ready",
   recover_dispatch: "Reconnect",
   watch_production: "Writing",
+  answer_question: "Your choice",
   review_outline: "Review needed",
   add_credits: "Credits needed",
   finish_cancellation: "Stopping",
@@ -277,6 +279,7 @@ function phaseFor(input: {
     case "complete_setup":
     case "start_production":
     case "recover_dispatch":
+    case "answer_question":
     case "review_outline":
       return "plan";
     case "watch_production":
@@ -357,6 +360,15 @@ function actionForSeed(
       );
     }
 
+    if (run.stage === "awaiting_guidance" || run.pause?.kind === "creative_decision") {
+      return nextAction(
+        "answer_question",
+        `${projectWriteHref}#creative-decision`,
+        "Choose your story direction",
+        "Sopher developed the premise and needs one creative choice from you before building the chapter plan.",
+      );
+    }
+
     if (
       run.stage === "awaiting_approval" ||
       run.pause?.kind === "outline_approval" ||
@@ -381,8 +393,10 @@ function actionForSeed(
       return nextAction(
         "recover_dispatch",
         projectWriteHref,
-        "Reconnect this start",
-        "The book request is saved, but the studio did not receive a start confirmation. Reconnect the same run without creating another.",
+        run.kind === "edit_pass" ? "Reconnect this review" : "Reconnect this start",
+        run.kind === "edit_pass"
+          ? "The manuscript direction is saved, but the studio did not receive a start confirmation. Reconnect the same review without creating another."
+          : "The book request is saved, but the studio did not receive a start confirmation. Reconnect the same run without creating another.",
         true,
       );
     }
@@ -391,6 +405,17 @@ function actionForSeed(
       return supportAction(
         reference,
         "Production has not reported progress within its expected window. Your saved work is preserved.",
+      );
+    }
+
+    if (run.kind === "edit_pass") {
+      return nextAction(
+        "watch_production",
+        projectWriteHref,
+        run.stage === "queued" ? "Watch the manuscript review" : "Follow the manuscript review",
+        run.health === "degraded"
+          ? "The live status is delayed. The durable review remains active, and the Editor will keep checking it."
+          : "Follow the chapter-by-chapter review, real progress, and credit use in the Editor.",
       );
     }
 
@@ -427,6 +452,14 @@ function actionForSeed(
   if (completionReported && finalArtifactsReady) return readAction(project.id);
 
   if (run && RECOVERY_STATUSES.has(run.effectiveStatus)) {
+    if (run.kind === "edit_pass") {
+      return nextAction(
+        "edit_manuscript",
+        projectWriteHref,
+        "Review saved suggestions",
+        "The manuscript review stopped without overwriting your prose. Suggestions from completed chapters remain ready, and you can deliberately start another pass from the Editor.",
+      );
+    }
     if (project.experience === "full_book" && !access.fullBookUnlocked) {
       return artifacts.savedChapters > 0
         ? editAction(project.id, artifacts.savedChapters)
@@ -621,7 +654,9 @@ export function authoringJourneyWithProgress(
     workflowStatus: existingRun?.workflowStatus ?? null,
     effectiveStatus:
       terminalStatus ??
-      (progress.stage === "awaiting_approval" || progress.stage === "awaiting_credits"
+      (progress.stage === "awaiting_guidance" ||
+      progress.stage === "awaiting_approval" ||
+      progress.stage === "awaiting_credits"
         ? "awaiting_input"
         : (existingRun?.effectiveStatus ?? (progress.stage === "queued" ? "queued" : "running"))),
     stage: progress.stage,
@@ -653,12 +688,17 @@ export function authoringJourneyWithProgress(
             ...(existingRun?.pause?.kind === "outline_approval" ? existingRun.pause : {}),
             kind: "outline_approval",
           }
-        : progress.stage === "awaiting_credits"
+        : progress.stage === "awaiting_guidance"
           ? {
-              ...(existingRun?.pause?.kind === "credits" ? existingRun.pause : {}),
-              kind: "credits",
+              ...(existingRun?.pause?.kind === "creative_decision" ? existingRun.pause : {}),
+              kind: "creative_decision",
             }
-          : null,
+          : progress.stage === "awaiting_credits"
+            ? {
+                ...(existingRun?.pause?.kind === "credits" ? existingRun.pause : {}),
+                kind: "credits",
+              }
+            : null,
     health:
       terminalStatus === "failed" || terminalStatus === "cancelled"
         ? "needs_attention"

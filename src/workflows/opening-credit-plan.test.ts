@@ -12,8 +12,11 @@ import type { GenerationConfig } from "@/lib/run-events";
 
 import {
   chapterWaveRequiredUsd,
+  conceptRequiredUsd,
   continuityPhaseRequiredUsd,
+  creativeQuestionRequiredUsd,
   freshOpeningRequiredUsd,
+  initialOutlineRequiredUsd,
   resumeOpeningRequiredUsd,
   singleChapterRequiredUsd,
 } from "./opening-credit-plan";
@@ -75,6 +78,32 @@ describe("opening credit plan", () => {
     );
 
     expect(creditsForUsd(freshOpeningRequiredUsd(config))).toBeCloseTo(childCredits, 10);
+  });
+
+  it("splits protocol-v3 concept, question, and outline gates at exact operation ceilings", () => {
+    expect(conceptRequiredUsd(config)).toBe(
+      meteredOperationCeilingUsd({
+        model: MODELS.standard.concept,
+        operation: "concept.expand",
+      }) +
+        meteredOperationCeilingUsd({
+          model: MODELS.standard.concept,
+          operation: "concept.refine",
+        }),
+    );
+    expect(creativeQuestionRequiredUsd(config)).toBe(
+      meteredOperationCeilingUsd({
+        model: MODELS.standard.outline,
+        operation: "creative.question",
+      }),
+    );
+    expect(initialOutlineRequiredUsd(config)).toBe(
+      ["outliner.plan", "outliner.outline", "outliner.selfCheck"].reduce(
+        (total, operation) =>
+          total + meteredOperationCeilingUsd({ model: MODELS.standard.outline, operation }),
+        0,
+      ),
+    );
   });
 
   it("keeps the welcome grant viable for opening and Starter viable for a standard wave", () => {

@@ -2,7 +2,7 @@ import type { GenerationConfig } from "@/lib/run-events";
 import type { RunHealth } from "@/lib/run-health";
 
 export type AdminRunCheckpointSummary = {
-  protocolVersion: 1 | 2;
+  protocolVersion: 1 | 2 | 3;
   dispatchReady: boolean;
   stagedConcept: boolean;
   stagedOutline: boolean;
@@ -33,7 +33,7 @@ export function summarizeAdminRunCheckpoints(
   const finalization = completion?.finalized;
 
   return {
-    protocolVersion: config.protocolVersion === 2 ? 2 : 1,
+    protocolVersion: config.protocolVersion === 3 ? 3 : config.protocolVersion === 2 ? 2 : 1,
     dispatchReady: config.dispatchReady === true,
     stagedConcept: config.stagedConcept !== undefined,
     stagedOutline: config.stagedOutline !== undefined,
@@ -117,7 +117,9 @@ export function recommendAdminRunAction(input: {
       description:
         health.pause.kind === "outline_approval"
           ? "The run is durably paused for outline approval; no operator mutation is required."
-          : "The run is durably paused for credits; keep the saved work and wait for the author.",
+          : health.pause.kind === "creative_decision"
+            ? "The run is durably paused for one author story-direction choice; no operator mutation is required."
+            : "The run is durably paused for credits; keep the saved work and wait for the author.",
     };
   }
 

@@ -20,6 +20,7 @@ export type StudioAccessReason =
 export type StudioAccess = {
   emailVerified: boolean;
   isAdmin: boolean;
+  suspended: boolean;
   hasSettledPurchase: boolean;
   hasPriorMeteredUsage: boolean;
   fullBookUnlocked: boolean;
@@ -34,6 +35,7 @@ export type StudioAccessFacts = Pick<
   StudioAccess,
   | "emailVerified"
   | "isAdmin"
+  | "suspended"
   | "hasSettledPurchase"
   | "hasPriorMeteredUsage"
   | "trialProjectId"
@@ -160,7 +162,7 @@ export async function getStudioAccess(
     [generatedAsset],
   ] = await Promise.all([
     db
-      .select({ role: schema.users.role })
+      .select({ role: schema.users.role, suspended: schema.users.suspended })
       .from(schema.users)
       .where(eq(schema.users.id, userId))
       .limit(1),
@@ -259,6 +261,7 @@ export async function getStudioAccess(
   return deriveStudioAccess({
     emailVerified,
     isAdmin,
+    suspended: user?.suspended === true,
     hasSettledPurchase,
     hasPriorMeteredUsage,
     trialProjectId,

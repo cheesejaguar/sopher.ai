@@ -54,6 +54,7 @@ vi.mock("@/lib/analytics/track", () => ({
 const fullBookAccess: StudioAccess = {
   emailVerified: true,
   isAdmin: false,
+  suspended: false,
   hasSettledPurchase: true,
   hasPriorMeteredUsage: false,
   fullBookUnlocked: true,
@@ -67,6 +68,7 @@ const fullBookAccess: StudioAccess = {
 const trialAccess: StudioAccess = {
   emailVerified: true,
   isAdmin: false,
+  suspended: false,
   hasSettledPurchase: false,
   hasPriorMeteredUsage: false,
   fullBookUnlocked: false,
@@ -80,6 +82,7 @@ const trialAccess: StudioAccess = {
 const existingTrialAccess: StudioAccess = {
   emailVerified: true,
   isAdmin: false,
+  suspended: false,
   hasSettledPurchase: false,
   hasPriorMeteredUsage: false,
   fullBookUnlocked: false,
@@ -240,6 +243,7 @@ describe("NewBookWizard", () => {
           brief: "A cartographer finds a river that remembers every traveler it has carried.",
           targetChapters: 12,
           targetWordsPerChapter: 3_000,
+          settings: expect.objectContaining({ authoringMode: "guided" }),
         }),
       ),
     );

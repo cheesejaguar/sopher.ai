@@ -12,11 +12,12 @@ export const metadata: Metadata = publicPageMetadata({
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy Policy" updated="July 29, 2026">
+    <LegalPage title="Privacy Policy" updated="August 2, 2026">
       <p>
         This policy explains what we collect when you use sopher.ai, why we collect it, and what
         control you have over it. The short version: we collect what the product needs to work, your
-        manuscripts are private to your account, and we do not sell data.
+        manuscripts are private unless you deliberately create a reader link, and we do not sell
+        data.
       </p>
 
       <h2>What we collect</h2>
@@ -59,18 +60,33 @@ export default function PrivacyPage() {
       </ul>
       <p>
         We do not sell personal data, run third-party advertising trackers, or share your
-        manuscripts with anyone except the processors above, as needed to run the Service.
+        manuscripts with anyone except the processors above, as needed to run the Service, and the
+        people you deliberately invite through a reader link.
+      </p>
+
+      <h2>Reader links</h2>
+      <p>
+        If you create a reader link, we capture an immutable edition of the manuscript and make it
+        available to anyone who has that secret link until it expires or you revoke it. Reader pages
+        carry search-engine exclusion directives, do not run marketing analytics, and do not create
+        or update attribution cookies. A recipient can still copy, print, save, or redistribute what
+        they can read. The secret stays in the browser-only fragment of the shared URL and is
+        exchanged for a scoped, HttpOnly reader-session cookie. Our database stores a one-way
+        fingerprint, not the bearer secret. After creation you can revoke a link but cannot ask us
+        to reveal it again. Revocation disables the reader page and optional download; it cannot
+        recall copies a recipient already made.
       </p>
 
       <h2>Cookies</h2>
       <p>
-        We use cookies for sign-in sessions (set by Clerk), your theme preference, Google Analytics
-        measurement (the <code>_ga</code> family), and two first-party cookies of our own:{" "}
-        <code>sopher_aid</code>, a random identifier that lets us count a visit as one visit, and{" "}
-        <code>sopher_attr</code>, which records how you first arrived (a campaign tag or referring
-        site) so we know which channels are worth continuing. Neither contains personal information,
-        and the referring site is stored as a domain only, never a full address. There are no
-        advertising cookies. You can block analytics cookies in your browser or with Google&rsquo;s{" "}
+        We use cookies for sign-in sessions (set by Clerk), reader sessions opened from a deliberate
+        secret link, your theme preference, Google Analytics measurement (the <code>_ga</code>{" "}
+        family), and two first-party cookies of our own: <code>sopher_aid</code>, a random
+        identifier that lets us count a visit as one visit, and <code>sopher_attr</code>, which
+        records how you first arrived (a campaign tag or referring site) so we know which channels
+        are worth continuing. Neither contains personal information, and the referring site is
+        stored as a domain only, never a full address. There are no advertising cookies. You can
+        block analytics cookies in your browser or with Google&rsquo;s{" "}
         <a href="https://tools.google.com/dlpage/gaoptout">opt-out add-on</a> without affecting the
         product.
       </p>
@@ -84,9 +100,10 @@ export default function PrivacyPage() {
       <p>
         Your content is kept while your account exists. We may review content when required to
         enforce our terms or comply with law; such review is limited to that purpose. Deleting a
-        project removes its manuscript, story bible, and generated files. Deleting your account
-        removes your account record and all projects; transaction records are retained as required
-        for tax and accounting. To delete your account, use your account menu or email us.
+        project removes its manuscript, story bible, reader editions, reader links, and generated
+        files. Deleting your account removes your account record and all projects; transaction
+        records are retained as required for tax and accounting. To delete your account, use your
+        account menu or email us.
       </p>
 
       <h2>Your rights</h2>

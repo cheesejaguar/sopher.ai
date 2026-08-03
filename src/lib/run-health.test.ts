@@ -915,6 +915,39 @@ describe("runCompletionArtifactsAreReady", () => {
       }),
     ).toBe(true);
   });
+
+  it("accepts a run-owned manuscript review even when it correctly produced zero suggestions", () => {
+    const config = {
+      tier: "standard" as const,
+      editPass: {
+        completion: {
+          sourceRunId: "run-review",
+          reviewedChapterCount: 5,
+          suggestionCount: 0,
+          completedAt: "2026-08-02T20:00:00.000Z",
+        },
+      },
+    };
+
+    expect(
+      runCompletionArtifactsAreReady({
+        runId: "run-review",
+        kind: "edit_pass",
+        projectCompletedAt: null,
+        finalChapterCount: 0,
+        config,
+      }),
+    ).toBe(true);
+    expect(
+      runCompletionArtifactsAreReady({
+        runId: "another-run",
+        kind: "edit_pass",
+        projectCompletedAt: null,
+        finalChapterCount: 0,
+        config,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("summarizeChapterRowsForRun", () => {

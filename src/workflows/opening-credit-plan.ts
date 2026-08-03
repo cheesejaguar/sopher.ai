@@ -24,19 +24,21 @@ function operationCeiling(config: GenerationConfig, operation: string): number {
   const model =
     operation === "concept.expand" || operation === "concept.refine"
       ? models.concept
-      : operation.startsWith("outliner.")
+      : operation === "creative.question"
         ? models.outline
-        : operation === "entity.bible" || operation === "summarizer.chapter"
-          ? models.summarizer
-          : operation === "writer.plan"
-            ? models.planner
-            : operation === "writer.draft" || operation === "writer.revise"
-              ? models.prose
-              : operation === "writer.critique"
-                ? models.critic
-                : operation === "editor.edit"
-                  ? models.editor
-                  : models.continuity;
+        : operation.startsWith("outliner.")
+          ? models.outline
+          : operation === "entity.bible" || operation === "summarizer.chapter"
+            ? models.summarizer
+            : operation === "writer.plan"
+              ? models.planner
+              : operation === "writer.draft" || operation === "writer.revise"
+                ? models.prose
+                : operation === "writer.critique"
+                  ? models.critic
+                  : operation === "editor.edit"
+                    ? models.editor
+                    : models.continuity;
   const maxOutputTokensPerStep =
     operation === "writer.draft"
       ? Math.round(Math.min(10_000, config.targetWordsPerChapter * 1.2) * 1.5)
@@ -118,6 +120,21 @@ export function outlineRevisionRequiredUsd(config: GenerationConfig): number {
     operationCeiling(config, "outliner.outline"),
     operationCeiling(config, "outliner.selfCheck"),
   ].reduce((total, ceiling) => total + ceiling, 0);
+}
+
+export function conceptRequiredUsd(config: GenerationConfig): number {
+  return ["concept.expand", "concept.refine"].reduce(
+    (total, operation) => total + operationCeiling(config, operation),
+    0,
+  );
+}
+
+export function creativeQuestionRequiredUsd(config: GenerationConfig): number {
+  return operationCeiling(config, "creative.question");
+}
+
+export function initialOutlineRequiredUsd(config: GenerationConfig): number {
+  return outlineRevisionRequiredUsd(config);
 }
 
 /** Authorization ceiling for the concept + complete outline actually run here. */

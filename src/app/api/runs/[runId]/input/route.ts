@@ -6,10 +6,12 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { getBalance } from "@/lib/billing/credits";
 import {
   acceptAuthoringRunInput,
+  authoringInputPayloadsEqual,
   authoringInputToken,
   deliverAuthoringRunInput,
 } from "@/lib/authoring-inputs";
 import { runEventSchema, type GenerationConfig, type Stage } from "@/lib/run-events";
+import { creativeDecisionPayloadSchema } from "@/lib/creative-decisions";
 
 export const maxDuration = 30;
 
@@ -23,6 +25,15 @@ const bodySchema = z.discriminatedUnion("kind", [
   // Resumes a run suspended mid-book because the wallet ran short. The balance
   // is re-checked here so a resume cannot be forced without actually paying.
   z.object({ kind: z.literal("credits-topup"), requestKey: z.uuid().optional() }),
+  z.object({
+    kind: z.literal("creative-decision"),
+    questionId: z.uuid(),
+    decisionDigest: z.string(),
+    mode: z.enum(["option", "custom", "sopher"]),
+    selectedOptionId: z.enum(["option-1", "option-2", "option-3"]).optional(),
+    customResponse: z.string().optional(),
+    requestKey: z.uuid().optional(),
+  }),
 ]);
 
 async function latestValidLegacyStage(
@@ -77,6 +88,77 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     .where(and(eq(schema.generationRuns.id, runId), eq(schema.generationRuns.userId, userId)))
     .limit(1);
   if (!run) return Response.json({ error: "Run not found" }, { status: 404 });
+  const protocolVersion = (run.config as Partial<GenerationConfig>).protocolVersion;
+  const usesDurableInputs = protocolVersion === 2 || protocolVersion === 3;
+  const creativePayload =
+    parsed.data.kind === "creative-decision"
+      ? creativeDecisionPayloadSchema.safeParse({
+          questionId: parsed.data.questionId,
+          decisionDigest: parsed.data.decisionDigest,
+          mode: parsed.data.mode,
+          selectedOptionId: parsed.data.selectedOptionId,
+          customResponse: parsed.data.customResponse,
+        })
+      : null;
+  if (creativePayload && !creativePayload.success) {
+    return Response.json({ error: creativePayload.error.flatten() }, { status: 400 });
+  }
+  const durableKind =
+    parsed.data.kind === "outline-approval"
+      ? "outline_approval"
+      : parsed.data.kind === "credits-topup"
+        ? "credits_topup"
+        : "creative_decision";
+  const payload =
+    creativePayload?.success === true
+      ? creativePayload.data
+      : parsed.data.kind === "outline-approval"
+        ? {
+            approved: parsed.data.approved,
+            ...(parsed.data.notes ? { notes: parsed.data.notes } : {}),
+          }
+        : { toppedUp: true };
+
+  // A successful hook delivery can advance the run before the HTTP response
+  // reaches the browser. The caller's stable request key must still replay as
+  // accepted after that transition, without applying the answer twice.
+  if (usesDurableInputs && parsed.data.requestKey) {
+    const [existingInput] = await db
+      .select({
+        kind: schema.authoringRunInputs.kind,
+        payload: schema.authoringRunInputs.payload,
+        status: schema.authoringRunInputs.status,
+      })
+      .from(schema.authoringRunInputs)
+      .where(
+        and(
+          eq(schema.authoringRunInputs.runId, runId),
+          eq(schema.authoringRunInputs.requestKey, parsed.data.requestKey),
+        ),
+      )
+      .limit(1);
+    if (existingInput) {
+      if (
+        existingInput.kind !== durableKind ||
+        !authoringInputPayloadsEqual(existingInput.payload, payload)
+      ) {
+        return Response.json(
+          { error: "This authoring input was already answered differently" },
+          { status: 409 },
+        );
+      }
+      if (existingInput.status === "delivered" || existingInput.status === "consumed") {
+        return Response.json({
+          resumed: true,
+          accepted: true,
+          replayed: true,
+          delivery: existingInput.status === "consumed" ? "already_consumed" : "already_delivered",
+          protocolVersion,
+        });
+      }
+    }
+  }
+
   if (run.status !== "awaiting_input") {
     return Response.json({ error: "Run is not waiting for input" }, { status: 409 });
   }
@@ -90,8 +172,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     );
   }
 
-  const protocolVersion = (run.config as Partial<GenerationConfig>).protocolVersion;
-  if (protocolVersion !== 2) {
+  if (!usesDurableInputs) {
+    if (parsed.data.kind === "creative-decision") {
+      return Response.json({ error: "Run is not waiting for this input" }, { status: 409 });
+    }
     const stage = await latestValidLegacyStage(db, runId);
     const expectedStage =
       parsed.data.kind === "outline-approval" ? "awaiting_approval" : "awaiting_credits";
@@ -148,18 +232,47 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     }
   }
 
-  const durableKind =
-    parsed.data.kind === "outline-approval" ? "outline_approval" : "credits_topup";
+  if (creativePayload?.success) {
+    const checked = creativePayload;
+    const [question] = await db
+      .select({
+        id: schema.authoringQuestions.id,
+        decisionDigest: schema.authoringQuestions.decisionDigest,
+        options: schema.authoringQuestions.options,
+        pauseVersion: schema.authoringQuestions.pauseVersion,
+        status: schema.authoringQuestions.status,
+      })
+      .from(schema.authoringQuestions)
+      .where(
+        and(
+          eq(schema.authoringQuestions.id, checked.data.questionId),
+          eq(schema.authoringQuestions.runId, runId),
+        ),
+      )
+      .limit(1);
+    const selectedOptionIsValid =
+      checked.data.mode !== "option" ||
+      question?.options.some((option) => option.id === checked.data.selectedOptionId);
+    if (
+      !question ||
+      question.status !== "pending" ||
+      question.pauseVersion !== run.pauseVersion ||
+      question.decisionDigest !== checked.data.decisionDigest ||
+      run.pauseDetails?.questionId !== question.id ||
+      !selectedOptionIsValid
+    ) {
+      return Response.json(
+        {
+          error: "This story question changed. Review the latest directions and choose again.",
+          code: "stale_creative_question",
+        },
+        { status: 409 },
+      );
+    }
+  }
   if (run.pauseKind !== durableKind || !run.pauseRegisteredAt || run.pauseVersion < 1) {
     return Response.json({ error: "Run is not waiting for this input" }, { status: 409 });
   }
-  const payload =
-    parsed.data.kind === "outline-approval"
-      ? {
-          approved: parsed.data.approved,
-          ...(parsed.data.notes ? { notes: parsed.data.notes } : {}),
-        }
-      : { toppedUp: true };
   let accepted: Awaited<ReturnType<typeof acceptAuthoringRunInput>>;
   try {
     accepted = await acceptAuthoringRunInput({
@@ -203,7 +316,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
       replayed: accepted.replayed,
       delivery,
       ...(parsed.data.kind === "credits-topup" ? { balance: await getBalance(userId) } : {}),
-      protocolVersion: 2,
+      protocolVersion,
     });
   } catch {
     // The input is durable. A retry or evidence-gated watchdog redelivery can
@@ -214,7 +327,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
         accepted: true,
         replayed: accepted.replayed,
         deliveryPending: true,
-        protocolVersion: 2,
+        protocolVersion,
       },
       { status: 202 },
     );

@@ -144,6 +144,7 @@ export async function getProjectProductionProgress(
     [
       "queued",
       "concept",
+      "awaiting_guidance",
       "outline",
       "awaiting_approval",
       "bible",

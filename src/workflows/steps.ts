@@ -4,6 +4,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
 import { getDb, schema, withDbTransaction, type DbTransaction } from "@/db";
 import { generateConcept, persistConcept } from "@/ai/agents/concept";
+import { generateCreativeQuestion } from "@/ai/agents/creative-director";
 import {
   generateOutline,
   persistOutline,
@@ -43,7 +44,7 @@ import {
   generationBillingScope,
   nextGenerationPreparationAction,
   PROGRESS_NS,
-  resumableRunId,
+  retryRunFromSavedWork,
   severResumeBillingLineage,
   stagedArtifactsMatch,
   type GenerationConfig,
@@ -63,6 +64,9 @@ import {
   editorialWaveRequiredUsd,
   entityBibleRequiredUsd,
   freshOpeningRequiredUsd,
+  conceptRequiredUsd,
+  creativeQuestionRequiredUsd,
+  initialOutlineRequiredUsd,
   outlineRevisionRequiredUsd,
   resumeOpeningRequiredUsd,
   type ResumeChapterMeteredWork,
@@ -95,6 +99,14 @@ import {
 } from "@/lib/authoring-inputs";
 import type { AuthoringRunInputKind } from "@/db/schema";
 import type { AuthoringPauseDetails } from "@/db/schema";
+import {
+  consumeCreativeDecision,
+  creativeDecisionPrompt,
+  markCreativeQuestionPauseRegistered,
+  persistCreativeQuestion,
+  readPendingCreativeQuestion,
+  type CreativeQuestionForAuthor,
+} from "@/lib/creative-decisions";
 
 type RunRef = {
   dbRunId: string;
@@ -415,10 +427,10 @@ async function updateStoredGenerationConfigInTransaction(
   return stored.config as GenerationConfig;
 }
 
-async function loadPreparedResumeSource(
+async function loadCompatibleRetrySource(
   ref: RunRef,
   config: GenerationConfig,
-): Promise<GenerationConfig | null> {
+): Promise<{ id: string; config: GenerationConfig } | null> {
   if (!config.resumeFromRunId) return null;
   const [source] = await getDb()
     .select({
@@ -431,21 +443,90 @@ async function loadPreparedResumeSource(
       and(
         eq(schema.generationRuns.id, config.resumeFromRunId),
         eq(schema.generationRuns.projectId, ref.projectId),
+        eq(schema.generationRuns.userId, ref.userId),
         eq(schema.generationRuns.kind, "full_book"),
       ),
     )
     .limit(1);
   if (!source) return null;
   const sourceConfig = source.config as Partial<GenerationConfig>;
-  return sourceConfig.stagedConcept &&
-    sourceConfig.stagedOutline &&
-    resumableRunId(config, {
-      id: source.id,
-      status: source.status,
-      config: sourceConfig,
-    }) === source.id
-    ? (sourceConfig as GenerationConfig)
+  return retryRunFromSavedWork(config, {
+    id: source.id,
+    status: source.status,
+    config: sourceConfig,
+  }) === source.id
+    ? { id: source.id, config: sourceConfig as GenerationConfig }
     : null;
+}
+
+async function loadPreparedResumeSource(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<GenerationConfig | null> {
+  const source = await loadCompatibleRetrySource(ref, config);
+  if (!source) return null;
+  const sourceConfig = source.config;
+  return sourceConfig.manuscriptPrepared === true &&
+    sourceConfig.stagedConcept &&
+    sourceConfig.stagedOutline
+    ? sourceConfig
+    : null;
+}
+
+/**
+ * Copies only input-compatible pre-manuscript work into an explicit retry.
+ * This runs before any wallet gate, so paid concept/question/outline work and
+ * a consumed author decision are observed by the new run instead of repeated.
+ * Destructive preparation state, chapter work, and completion checkpoints are
+ * deliberately left behind unless `loadPreparedResumeSource` proves the full
+ * manuscript boundary.
+ */
+export async function hydratePreManuscriptRetryStep(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<{ inherited: boolean; pendingQuestion: boolean }> {
+  "use step";
+  const source = await loadCompatibleRetrySource(ref, config);
+  if (!source || source.config.manuscriptPrepared === true) {
+    return { inherited: false, pendingQuestion: false };
+  }
+
+  const sourceConfig = source.config;
+  await updateStoredGenerationConfig(ref, (current) => ({
+    ...current,
+    stagedConcept: current.stagedConcept ?? sourceConfig.stagedConcept,
+    stagedOutline: current.stagedOutline ?? sourceConfig.stagedOutline,
+    creativeDecisions: {
+      ...sourceConfig.creativeDecisions,
+      ...current.creativeDecisions,
+    },
+    work: {
+      ...current.work,
+      ...(current.work?.conceptExpanded || !sourceConfig.work?.conceptExpanded
+        ? {}
+        : { conceptExpanded: sourceConfig.work.conceptExpanded }),
+      ...(current.work?.outline || !sourceConfig.work?.outline
+        ? {}
+        : { outline: sourceConfig.work.outline }),
+    },
+  }));
+
+  if (sourceConfig.creativeDecisions?.afterConcept) {
+    return { inherited: true, pendingQuestion: false };
+  }
+  const pending = await readPendingCreativeQuestion(source.id);
+  if (!pending) return { inherited: true, pendingQuestion: false };
+  await persistCreativeQuestion({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    question: {
+      question: pending.question,
+      rationale: pending.rationale,
+      options: pending.options,
+      recommendedOptionId: pending.recommendedOptionId,
+    },
+  });
+  return { inherited: true, pendingQuestion: true };
 }
 
 function stableJson(value: unknown): string {
@@ -816,6 +897,50 @@ export async function openingCreditCheckStep(
   const required = canonicalizeCreditRequirement(creditsForUsd(requiredUsd));
   const balance = await getBalance(ref.userId);
   return { balance, required, sufficient: required <= 0 || balance >= required };
+}
+
+/** Protocol-v3 concept/question authorization. It never survives a human pause. */
+export async function creativeOpeningCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<{ balance: number; required: number; sufficient: boolean }> {
+  "use step";
+  const [stored, source, existingQuestion] = await Promise.all([
+    loadStoredGenerationConfig(ref.dbRunId),
+    loadPreparedResumeSource(ref, config),
+    readPendingCreativeQuestion(ref.dbRunId),
+  ]);
+  const conceptReady = Boolean(stored.stagedConcept ?? source?.stagedConcept);
+  const guidanceEnabled =
+    config.protocolVersion === 3 &&
+    config.interaction?.mode === "guided" &&
+    config.interaction.maxQuestions === 1;
+  const questionReady = Boolean(
+    !guidanceEnabled ||
+    stored.creativeDecisions?.afterConcept ||
+    source?.stagedOutline ||
+    existingQuestion,
+  );
+  const requiredUsd =
+    (conceptReady ? 0 : conceptRequiredUsd(config)) +
+    (questionReady ? 0 : creativeQuestionRequiredUsd(config));
+  return checkWalletForUsd(ref, requiredUsd);
+}
+
+/** Re-authorizes outline work only after the v3 decision pause has closed. */
+export async function initialOutlineCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<{ balance: number; required: number; sufficient: boolean }> {
+  "use step";
+  const [stored, source] = await Promise.all([
+    loadStoredGenerationConfig(ref.dbRunId),
+    loadPreparedResumeSource(ref, config),
+  ]);
+  return checkWalletForUsd(
+    ref,
+    stored.stagedOutline || source?.stagedOutline ? 0 : initialOutlineRequiredUsd(config),
+  );
 }
 
 type CreditCheck = { balance: number; required: number; sufficient: boolean };
@@ -1429,6 +1554,86 @@ export async function conceptStep(
   }
 }
 
+export async function prepareCreativeQuestionStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  concept: BookConcept,
+  reservationRef?: string,
+): Promise<CreativeQuestionForAuthor | null> {
+  "use step";
+  if (
+    config.protocolVersion !== 3 ||
+    config.interaction?.mode !== "guided" ||
+    config.interaction.maxQuestions !== 1
+  ) {
+    return null;
+  }
+  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  if (stored.creativeDecisions?.afterConcept) return null;
+  const source = await loadPreparedResumeSource(ref, config);
+  if (source?.stagedOutline) return null;
+  const existing = await readPendingCreativeQuestion(ref.dbRunId);
+  if (existing) return existing;
+
+  const { meter } = await loadRunContext(ref);
+  try {
+    const question = await generateCreativeQuestion({
+      meter: await meteredScope(
+        meter,
+        ref,
+        config,
+        "creative-question:after-concept",
+        reservationRef,
+      ),
+      tier: config.tier,
+      concept,
+      brief: config.inputSnapshot.brief,
+      genre: config.inputSnapshot.genre ?? undefined,
+    });
+    return persistCreativeQuestion({
+      runId: ref.dbRunId,
+      projectId: ref.projectId,
+      question,
+    });
+  } catch (error) {
+    toWorkflowError(error);
+  }
+}
+
+export async function markCreativeQuestionPauseRegisteredStep(
+  ref: RunRef,
+  questionId: string,
+  pauseVersion: number,
+) {
+  "use step";
+  const registered = await markCreativeQuestionPauseRegistered({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    questionId,
+    pauseVersion,
+  });
+  if (!registered) {
+    await throwIfAuthoringCancellationRequested(ref.dbRunId);
+    throw new FatalError("Generation run is no longer active");
+  }
+}
+
+export async function consumeCreativeDecisionStep(
+  ref: RunRef,
+  pauseVersion: number,
+  inputId: string,
+) {
+  "use step";
+  return consumeCreativeDecision({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    pauseVersion,
+    inputId,
+  });
+}
+
 export async function outlineStep(
   ref: RunRef,
   config: GenerationConfig,
@@ -1489,6 +1694,7 @@ export async function outlineStep(
         chapterCount: config.targetChapters,
         targetWordsPerChapter: config.targetWordsPerChapter,
         revisionNotes,
+        creativeDirection: creativeDecisionPrompt(stored),
         contentGuidelines,
       },
       {

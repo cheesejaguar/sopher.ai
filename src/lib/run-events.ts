@@ -17,6 +17,7 @@ import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
 export const stageSchema = z.enum([
   "queued",
   "concept",
+  "awaiting_guidance",
   "outline",
   "awaiting_approval",
   "awaiting_credits",
@@ -230,13 +231,29 @@ export type GenerationWorkState = {
   >;
 };
 
+export type CreativeDecision = {
+  questionId: string;
+  questionKey: "after_concept";
+  mode: "option" | "custom" | "sopher";
+  selectedOptionId: string | null;
+  answer: string;
+};
+
 export type GenerationConfig = {
   /**
-   * Version 2 uses registered, versioned durable inputs. Historical and
-   * deployment-pinned runs may omit this or explicitly store v1; new snapshots
-   * write v2.
+   * Version 2 uses registered, versioned durable inputs. Version 3 adds
+   * durable creative decisions. Historical and deployment-pinned runs may
+   * omit this or explicitly store v1/v2.
    */
-  protocolVersion?: 1 | 2;
+  protocolVersion?: 1 | 2 | 3;
+  interaction?: {
+    mode: "guided" | "autopilot";
+    /** Version 3 intentionally asks at most one post-concept question. */
+    maxQuestions: 0 | 1;
+  };
+  creativeDecisions?: {
+    afterConcept?: CreativeDecision;
+  };
   /**
    * Set only after the post-insert, project-locked snapshot has been frozen.
    * An uncertain Workflow retry must never dispatch a config without this
@@ -369,6 +386,8 @@ export function sameGenerationShape(
   if (!priorInput) return false;
   return (
     (prior?.productionMode ?? "full_book") === (next.productionMode ?? "full_book") &&
+    (prior?.protocolVersion ?? 1) === (next.protocolVersion ?? 1) &&
+    stableJson(prior?.interaction ?? null) === stableJson(next.interaction ?? null) &&
     prior?.tier === next.tier &&
     prior.requireOutlineApproval === next.requireOutlineApproval &&
     prior.waveSize === next.waveSize &&
@@ -406,7 +425,43 @@ export function resumableRunId(
   return prior.id;
 }
 
-/** Candidates must be newest-first; returns the latest compatible prepared run. */
+/**
+ * A guided v3 attempt can fail before the destructive manuscript-preparation
+ * boundary after it has already paid for a concept, stored an author decision,
+ * or checkpointed outline work. Those pre-manuscript artifacts are safe to
+ * carry forward only for the exact frozen input. Manuscript/entity/completion
+ * checkpoints remain gated by `resumableRunId` and `manuscriptPrepared`.
+ */
+export function retryRunFromSavedWork(
+  next: GenerationShape,
+  prior:
+    | {
+        id: string;
+        status: string;
+        config: Partial<GenerationConfig> | null | undefined;
+      }
+    | null
+    | undefined,
+): string | undefined {
+  if (!prior || (prior.status !== "failed" && prior.status !== "cancelled")) return undefined;
+  if (!sameGenerationShape(next, prior.config)) return undefined;
+  if (prior.config?.manuscriptPrepared === true) return prior.id;
+
+  const guided =
+    prior.config?.protocolVersion === 3 &&
+    prior.config.interaction?.mode === "guided" &&
+    prior.config.interaction.maxQuestions === 1;
+  const hasSafePreManuscriptWork = Boolean(
+    prior.config?.stagedConcept ||
+    prior.config?.creativeDecisions?.afterConcept ||
+    prior.config?.stagedOutline ||
+    prior.config?.work?.conceptExpanded ||
+    prior.config?.work?.outline,
+  );
+  return guided && hasSafePreManuscriptWork ? prior.id : undefined;
+}
+
+/** Candidates must be newest-first; returns the latest exact-compatible saved-work retry. */
 export function latestResumableRunId(
   next: GenerationShape,
   candidates: Array<{
@@ -418,7 +473,7 @@ export function latestResumableRunId(
   // Attempts are newest-first. Any newer attempt is a provenance barrier:
   // skipping over it could attach old number-keyed checkpoints to live state
   // produced, completed, or invalidated by the newer run.
-  return candidates[0] ? resumableRunId(next, candidates[0]) : undefined;
+  return candidates[0] ? retryRunFromSavedWork(next, candidates[0]) : undefined;
 }
 
 /** Logical metering lineage used by every durable paid artifact. */

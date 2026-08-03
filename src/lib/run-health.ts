@@ -19,6 +19,11 @@ import { sendAuthoringNeedsAttentionEmail } from "@/lib/email/send";
 import { resolveAuthoringEmailAction } from "@/lib/authoring-email-action";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 import { requiresRunOwnedFullBookCompletionProof } from "@/lib/run-completion-proof";
+import { manuscriptEditPassCompletionIsReady } from "@/lib/manuscript-edit-pass";
+import {
+  readPendingCreativeQuestion,
+  type CreativeQuestionForAuthor,
+} from "@/lib/creative-decisions";
 
 export type WorkflowHealthStatus =
   "pending" | "running" | "completed" | "failed" | "cancelled" | "missing" | "unavailable";
@@ -64,6 +69,7 @@ export function countSavedAuthoringCheckpoints(rawConfig: unknown): number {
       completion?.entityBible,
       completion?.continuityReport,
       completion?.finalized,
+      config.creativeDecisions?.afterConcept,
     ]) +
     Object.values(config.preparation ?? {}).filter((value) => value === true).length +
     chapterWorkCount +
@@ -119,15 +125,17 @@ export type RunHealth = {
     reason: string | null;
   } | null;
   pause: {
-    kind: "outline_approval" | "credits_topup";
+    kind: "outline_approval" | "credits_topup" | "creative_decision";
     version: number;
     registeredAt: string;
     details: {
       balanceCredits?: number;
       requiredCredits?: number;
       resumeStage?: string;
+      questionId?: string;
     } | null;
   } | null;
+  question?: CreativeQuestionForAuthor | null;
   savedChapterCount: number;
   savedCheckpointCount: number;
   supportReference: string;
@@ -204,12 +212,13 @@ type RunForHealth = {
   dispatchAttempts: number;
   cancellationRequestedAt: Date | null;
   cancellationReason: string | null;
-  pauseKind: "outline_approval" | "credits_topup" | null;
+  pauseKind: "outline_approval" | "credits_topup" | "creative_decision" | null;
   pauseVersion: number;
   pauseDetails: {
     balanceCredits?: number;
     requiredCredits?: number;
     resumeStage?: string;
+    questionId?: string;
   } | null;
   pauseRegisteredAt: Date | null;
   supportReference: string;
@@ -709,11 +718,14 @@ export function runCompletionArtifactsAreReady(input: {
     );
   }
   if (input.kind === "edit_pass") {
-    return [
-      ...Object.values(completion?.editedChapters ?? {}),
-      ...Object.values(completion?.revisionChapters ?? {}),
-    ].some(
-      (checkpoint) => checkpoint.sourceRunId === input.runId && Boolean(checkpoint.contentDigest),
+    return (
+      manuscriptEditPassCompletionIsReady(input.runId, input.config) ||
+      [
+        ...Object.values(completion?.editedChapters ?? {}),
+        ...Object.values(completion?.revisionChapters ?? {}),
+      ].some(
+        (checkpoint) => checkpoint.sourceRunId === input.runId && Boolean(checkpoint.contentDigest),
+      )
     );
   }
   if (input.kind === "continuity") {
@@ -1032,6 +1044,10 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
     cancellationRequestedAt: currentRun.cancellationRequestedAt,
     remainingEstimateMs,
   });
+  const question =
+    currentRun.pauseKind === "creative_decision" && currentRun.pauseRegisteredAt
+      ? await readPendingCreativeQuestion(currentRun.id)
+      : null;
 
   return {
     databaseStatus,
@@ -1080,6 +1096,7 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
             details: currentRun.pauseDetails,
           }
         : null,
+    question,
     savedChapterCount:
       facts.chapterCounts.drafted + facts.chapterCounts.edited + facts.chapterCounts.final,
     savedCheckpointCount: countSavedAuthoringCheckpoints(config),
@@ -1110,7 +1127,7 @@ type AcceptedInputRedeliveryOutcome = Awaited<
 type WatchdogInputRedeliveryDependencies = {
   findAcceptedInputId(input: {
     runId: string;
-    kind: "outline_approval" | "credits_topup";
+    kind: NonNullable<RunHealth["pause"]>["kind"];
     pauseVersion: number;
   }): Promise<string | null>;
   redeliver(input: { inputId: string }): Promise<AcceptedInputRedeliveryOutcome>;
@@ -1154,7 +1171,7 @@ export async function redeliverAcceptedInputForWatchdog(
 ): Promise<AcceptedInputRedeliveryOutcome> {
   const protocolVersion = (input.config as Partial<GenerationConfig> | null)?.protocolVersion;
   if (
-    protocolVersion !== 2 ||
+    (protocolVersion !== 2 && protocolVersion !== 3) ||
     input.databaseStatus !== "awaiting_input" ||
     input.effectiveStatus !== "awaiting_input" ||
     input.cancellation ||

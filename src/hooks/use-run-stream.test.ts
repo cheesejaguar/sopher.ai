@@ -114,6 +114,51 @@ describe("parseRunHealthResponse", () => {
     });
   });
 
+  it("uses the registered creative pause even before its stage event arrives", () => {
+    const question = {
+      id: "11111111-1111-4111-8111-111111111111",
+      questionKey: "after_concept",
+      question: "What should pull Mara beyond the lighthouse?",
+      rationale: "This choice shapes the chapter plan.",
+      options: [
+        { id: "option-1", label: "Family", description: "She searches for her brother." },
+        { id: "option-2", label: "Duty", description: "She carries a warning inland." },
+        { id: "option-3", label: "Wonder", description: "She follows an impossible map." },
+      ],
+      recommendedOptionId: "option-2",
+      decisionDigest: "a".repeat(64),
+    };
+    expect(
+      parseRunHealthResponse(
+        {
+          run: { status: "awaiting_input", error: null },
+          health: {
+            databaseStatus: "awaiting_input",
+            effectiveStatus: "awaiting_input",
+            stage: "concept",
+            progressPct: 6,
+            noWorkStarted: false,
+            pause: {
+              kind: "creative_decision",
+              version: 1,
+              registeredAt: "2026-08-02T20:00:00.000Z",
+              details: { questionId: question.id, resumeStage: "outline" },
+            },
+            question,
+          },
+        },
+        previous,
+      ),
+    ).toMatchObject({
+      stage: "awaiting_guidance",
+      pct: 6,
+      health: {
+        pause: { kind: "creative_decision" },
+        question: { id: question.id },
+      },
+    });
+  });
+
   it("surfaces a safe ambiguous-start retry and recognizes the later durable Workflow link", () => {
     const uncertain = parseRunHealthResponse(
       {

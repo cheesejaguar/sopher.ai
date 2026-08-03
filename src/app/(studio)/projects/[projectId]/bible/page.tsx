@@ -2,10 +2,12 @@ import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { EntityCard } from "@/components/bible/entity-card";
+import { EntityCanonDialog } from "@/components/bible/entity-canon-dialog";
 import { requireUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 import { listEntities, openContradictions } from "@/db/queries/entities";
 import { ENTITY_KINDS, type EntityKind } from "@/ai/schemas/entities";
+import { hasActiveAuthoringRun } from "@/lib/generation-runs";
 import { cn } from "@/lib/utils";
 
 const KIND_LABELS: Record<EntityKind, string> = {
@@ -23,15 +25,46 @@ export default async function BiblePage({ params }: { params: Promise<{ projectI
   if (!data) notFound();
   const { book } = data;
 
-  const [entities, contradictions] = await Promise.all([
+  const [entities, contradictions, activeRun] = await Promise.all([
     book ? listEntities(book.id) : Promise.resolve([]),
     book ? openContradictions(book.id) : Promise.resolve([]),
+    hasActiveAuthoringRun(projectId),
   ]);
+  const readOnlyReason = activeRun
+    ? "Story canon and image generation are locked while production is active. Finish or stop the current run to make changes."
+    : undefined;
 
-  if (entities.length === 0) {
-    return (
-      <div className="space-y-4">
-        <h2 className="font-display text-xl font-semibold tracking-tight">Story bible</h2>
+  /** Contradictions are per-book; match them to entities by name mention. */
+  const contradictionsFor = (name: string) =>
+    contradictions.filter((issue) => issue.description.toLowerCase().includes(name.toLowerCase()));
+
+  return (
+    <div className="space-y-8">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-display text-xl font-semibold tracking-tight">Story bible</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Canon every chapter must honor. {entities.length}{" "}
+            {entities.length === 1 ? "entry" : "entries"}.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {contradictions.length > 0 ? (
+            <Badge variant="destructive">
+              {contradictions.length} open {contradictions.length === 1 ? "conflict" : "conflicts"}
+            </Badge>
+          ) : null}
+          <EntityCanonDialog projectId={projectId} readOnlyReason={readOnlyReason} />
+        </div>
+      </header>
+
+      {readOnlyReason ? (
+        <p className="rounded-sm border border-ai/35 bg-ai/5 px-4 py-3 text-sm text-foreground">
+          {readOnlyReason}
+        </p>
+      ) : null}
+
+      {entities.length === 0 ? (
         <div className="manuscript-sheet flex flex-col items-center gap-3 px-6 py-16 text-center">
           <p aria-hidden="true" className="text-2xl text-paper-muted">
             ⁂
@@ -40,34 +73,11 @@ export default async function BiblePage({ params }: { params: Promise<{ projectI
             Nothing recorded yet
           </h3>
           <p className="max-w-md font-serif text-paper-muted italic">
-            The bible fills in as your book is written — the cast and world are established before
-            drafting, then every chapter adds what it establishes.
+            The bible fills in as your book is written. You can also establish a character, place,
+            or important object before drafting begins.
           </p>
         </div>
-      </div>
-    );
-  }
-
-  /** Contradictions are per-book; match them to entities by name mention. */
-  const contradictionsFor = (name: string) =>
-    contradictions.filter((issue) => issue.description.toLowerCase().includes(name.toLowerCase()));
-
-  return (
-    <div className="space-y-8">
-      <header className="flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <h2 className="font-display text-xl font-semibold tracking-tight">Story bible</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Canon every chapter must honor. {entities.length}{" "}
-            {entities.length === 1 ? "entry" : "entries"}.
-          </p>
-        </div>
-        {contradictions.length > 0 ? (
-          <Badge variant="destructive">
-            {contradictions.length} open {contradictions.length === 1 ? "conflict" : "conflicts"}
-          </Badge>
-        ) : null}
-      </header>
+      ) : null}
 
       {ENTITY_KINDS.map((kind) => {
         const group = entities.filter((e) => e.kind === kind);
@@ -93,7 +103,12 @@ export default async function BiblePage({ params }: { params: Promise<{ projectI
             >
               {group.map((entity) => (
                 <li key={entity.id} className="min-w-0">
-                  <EntityCard entity={entity} conflicts={contradictionsFor(entity.name)} />
+                  <EntityCard
+                    projectId={projectId}
+                    entity={entity}
+                    conflicts={contradictionsFor(entity.name)}
+                    readOnlyReason={readOnlyReason}
+                  />
                 </li>
               ))}
             </ul>

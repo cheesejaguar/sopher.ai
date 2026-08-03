@@ -147,16 +147,25 @@ test.describe("new book wizard", () => {
     await expect(page.getByRole("heading", { name: "Give the book its shape" })).toBeVisible();
     await page.getByRole("button", { name: "Next", exact: true }).click();
 
-    // Step 4 — Estimate: three tier cards with quoted prices.
+    // Step 4 — Estimate: three tier cards plus the separate production-style
+    // choice. Scope radio assertions to their named groups so a new creative
+    // control cannot silently invalidate the pricing coverage.
     await expect(
       page.getByRole("heading", { name: "The quote, before anything runs" }),
     ).toBeVisible();
     // Each radio's accessible name comes from its whole tier card (aria-labelledby),
     // so anchor at the start: "Draft ..." must not match "... Drafted ...".
-    await expect(page.getByRole("radio")).toHaveCount(3);
+    const qualityTiers = page.getByRole("radiogroup", { name: "Quality tier" });
+    await expect(qualityTiers.getByRole("radio")).toHaveCount(3);
     for (const tier of ["Draft", "Standard", "Premium"]) {
-      await expect(page.getByRole("radio", { name: new RegExp(`^${tier}\\b`) })).toBeVisible();
+      await expect(
+        qualityTiers.getByRole("radio", { name: new RegExp(`^${tier}\\b`) }),
+      ).toBeVisible();
     }
+    const authoringMode = page.getByRole("radiogroup", { name: "Authoring mode" });
+    await expect(authoringMode.getByRole("radio")).toHaveCount(2);
+    await expect(authoringMode.getByRole("radio", { name: /^Collaborative/ })).toBeChecked();
+    await expect(authoringMode.getByRole("radio", { name: /^Autopilot/ })).not.toBeChecked();
     // Estimate values arrive from POST /api/estimates (debounced ~350ms).
     await expect(page.getByText(/~\d+ min/).first()).toBeVisible();
     // The itemized receipt renders once the selected tier's quote is in.
@@ -199,7 +208,10 @@ test.describe("stubbed new-book starts", () => {
       value: requestKey,
     });
     await completeWizardSetup(page, title, { includedStory: true });
-    await expect(page.getByRole("radio")).toHaveCount(0);
+    await expect(page.getByRole("radiogroup", { name: "Quality tier" })).toHaveCount(0);
+    const authoringMode = page.getByRole("radiogroup", { name: "Authoring mode" });
+    await expect(authoringMode.getByRole("radio")).toHaveCount(2);
+    await expect(authoringMode.getByRole("radio", { name: /^Collaborative/ })).toBeChecked();
     await expect(page.getByText("Included", { exact: true }).first()).toBeVisible();
     await page.getByRole("button", { name: "Create my short story" }).click();
 

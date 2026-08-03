@@ -186,6 +186,7 @@ export default async function CreditsPage({
           returnTo={resolvedReturnTo ?? undefined}
           unlockingFullBook={showFullBookUnlock}
           recommendedCredits={recommendedCredits}
+          suspended={access.suspended}
         />
       </section>
 

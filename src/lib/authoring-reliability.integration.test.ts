@@ -21,13 +21,18 @@ import {
   throwIfAuthoringCancellationRequested,
 } from "@/lib/authoring-cancellation";
 import { persistRunEvent } from "@/lib/run-event-store";
+import type { GenerationConfig } from "@/lib/run-events";
 import {
   claimUncertainAuthoringRun,
   insertQueuedAuthoringRun,
   requestAuthoringRunCancellation,
   transitionAuthoringRunState,
 } from "@/lib/generation-runs";
-import { withActiveAuthoringMutation } from "@/workflows/steps";
+import {
+  hydratePreManuscriptRetryStep,
+  prepareCreativeQuestionStep,
+  withActiveAuthoringMutation,
+} from "@/workflows/steps";
 
 function isolatedDatabaseUrl(): string | null {
   const isolated = process.env.E2E_DATABASE_ISOLATED;
@@ -205,6 +210,168 @@ describeIsolated("authoring reliability against isolated Neon", () => {
       `) as unknown as Array<{ status: string; registeredAt: string | null }>;
     expect(afterRegistration?.status).toBe("awaiting_input");
     expect(afterRegistration?.registeredAt).not.toBeNull();
+  });
+
+  it("hydrates only exact-input guided checkpoints before manuscript preparation", async () => {
+    const projectId = randomUUID();
+    const sourceRunId = randomUUID();
+    const retryRunId = randomUUID();
+    const incompatibleRunId = randomUUID();
+    const inputSnapshot = {
+      workingTitle: "The Cartographer's Door",
+      brief: "A cartographer follows a road that disappears behind her.",
+      genre: "Fantasy",
+      styleGuide: null,
+      voiceProfile: null,
+      pov: "third_limited",
+      tense: "past",
+      tone: "wondrous",
+      styleProfile: null,
+      heatLevel: "none",
+      violenceLevel: "mild",
+      profanity: "none",
+      avoidTopics: [],
+    };
+    const shape = {
+      protocolVersion: 3,
+      interaction: { mode: "guided", maxQuestions: 1 },
+      productionMode: "full_book",
+      tier: "standard",
+      requireOutlineApproval: true,
+      waveSize: 4,
+      targetChapters: 3,
+      targetWordsPerChapter: 1000,
+      inputSnapshot,
+    };
+    const concept = {
+      title: "The Cartographer's Door",
+      logline: "A disappearing road leads beyond the edge of every map.",
+      synopsis: "Mara follows a living road into a city erased from memory.",
+      themes: ["memory", "belonging"],
+      setting: "A borderland crossed by living roads",
+      centralConflict: "Mara must map a place that refuses to remain found.",
+      uniqueElements: ["living maps"],
+      characters: [],
+      moderation: { flagged: false },
+    };
+    const decision = {
+      questionId: randomUUID(),
+      questionKey: "after_concept",
+      mode: "option",
+      selectedOptionId: "option-2",
+      answer: "Follow the road into the archive the city tried to forget.",
+    };
+    const sourceConfig = {
+      ...shape,
+      stagedConcept: concept,
+      creativeDecisions: { afterConcept: decision },
+      preparation: { manuscriptReset: true },
+      work: {
+        conceptExpanded: concept,
+        outline: { revisionNotes: null, plan: { beats: ["arrival", "choice"] } },
+        chapters: { "1": { draft: "This manuscript work must stay behind." } },
+      },
+      completion: {
+        chapterSummaries: {
+          "1": { sourceRunId, contentDigest: "unsafe-manuscript-checkpoint" },
+        },
+      },
+    };
+    const retryConfig = {
+      ...shape,
+      resumeFromRunId: sourceRunId,
+      billingLineageRunId: sourceRunId,
+    };
+
+    await observer!`
+      insert into projects (
+        id, user_id, title, brief, genre, experience,
+        target_chapters, target_words_per_chapter, settings
+      )
+      values (
+        ${projectId}, ${userId}, ${inputSnapshot.workingTitle}, ${inputSnapshot.brief},
+        'Fantasy', 'full_book', 3, 1000, '{"authoringMode":"guided"}'::jsonb
+      )
+    `;
+    await observer!`
+      insert into generation_runs (
+        id, project_id, user_id, request_key, kind, status, config
+      )
+      values
+        (
+          ${sourceRunId}, ${projectId}, ${userId}, ${randomUUID()}, 'full_book', 'failed',
+          ${JSON.stringify(sourceConfig)}::jsonb
+        ),
+        (
+          ${retryRunId}, ${projectId}, ${userId}, ${randomUUID()}, 'full_book', 'running',
+          ${JSON.stringify(retryConfig)}::jsonb
+        )
+    `;
+
+    await expect(
+      hydratePreManuscriptRetryStep(
+        { dbRunId: retryRunId, projectId, userId },
+        retryConfig as Parameters<typeof hydratePreManuscriptRetryStep>[1],
+      ),
+    ).resolves.toEqual({ inherited: true, pendingQuestion: false });
+    const [hydrated] = (await observer!`
+      select config
+      from generation_runs
+      where id = ${retryRunId}
+    `) as unknown as Array<{ config: Partial<GenerationConfig> }>;
+    expect(hydrated?.config).toMatchObject({
+      stagedConcept: concept,
+      creativeDecisions: { afterConcept: decision },
+      work: {
+        conceptExpanded: concept,
+        outline: sourceConfig.work.outline,
+      },
+      resumeFromRunId: sourceRunId,
+      billingLineageRunId: sourceRunId,
+    });
+    expect(hydrated?.config.work).not.toHaveProperty("chapters");
+    expect(hydrated?.config).not.toHaveProperty("preparation");
+    expect(hydrated?.config).not.toHaveProperty("completion");
+    expect(hydrated?.config).not.toHaveProperty("manuscriptPrepared");
+    await expect(
+      prepareCreativeQuestionStep(
+        { dbRunId: retryRunId, projectId, userId },
+        retryConfig as Parameters<typeof prepareCreativeQuestionStep>[1],
+        concept,
+      ),
+    ).resolves.toBeNull();
+
+    const incompatibleConfig = {
+      ...retryConfig,
+      inputSnapshot: { ...inputSnapshot, brief: "A changed author brief." },
+    };
+    await observer!`
+      update generation_runs
+      set status = 'failed', current_stage = 'failed', completed_at = now()
+      where id = ${retryRunId}
+    `;
+    await observer!`
+      insert into generation_runs (
+        id, project_id, user_id, request_key, kind, status, config
+      )
+      values (
+        ${incompatibleRunId}, ${projectId}, ${userId}, ${randomUUID()}, 'full_book', 'running',
+        ${JSON.stringify(incompatibleConfig)}::jsonb
+      )
+    `;
+    await expect(
+      hydratePreManuscriptRetryStep(
+        { dbRunId: incompatibleRunId, projectId, userId },
+        incompatibleConfig as Parameters<typeof hydratePreManuscriptRetryStep>[1],
+      ),
+    ).resolves.toEqual({ inherited: false, pendingQuestion: false });
+    const [incompatible] = (await observer!`
+      select config
+      from generation_runs
+      where id = ${incompatibleRunId}
+    `) as unknown as Array<{ config: Partial<GenerationConfig> }>;
+    expect(incompatible?.config).not.toHaveProperty("stagedConcept");
+    expect(incompatible?.config).not.toHaveProperty("creativeDecisions");
   });
 
   it("accepts concurrent response-loss retries once and consumes the stored answer idempotently", async () => {

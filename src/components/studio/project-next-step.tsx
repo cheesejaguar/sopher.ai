@@ -35,6 +35,7 @@ const ACTION_ICONS: Record<
   start_production: Play,
   recover_dispatch: RefreshCcw,
   watch_production: Sparkles,
+  answer_question: Sparkles,
   review_outline: ScrollText,
   add_credits: Coins,
   finish_cancellation: CircleStop,

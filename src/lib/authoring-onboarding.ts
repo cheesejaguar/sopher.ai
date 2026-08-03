@@ -37,6 +37,30 @@ type ChecklistFacts = {
   continuedFullLength: boolean;
 };
 
+type OnboardingProject = {
+  id: string;
+  experience: "trial_short_story" | "full_book";
+  status: string;
+};
+
+/**
+ * Keep guidance attached to the work the author is actively paying to finish.
+ * The query is already newest-first, so the first active full book is the most
+ * recently touched one. A historical included story remains the fallback.
+ */
+export function selectAuthoringOnboardingProject<T extends OnboardingProject>(
+  projects: readonly T[],
+): T | null {
+  const activeProjects = projects.filter((candidate) => candidate.status !== "archived");
+  return (
+    activeProjects.find((candidate) => candidate.experience === "full_book") ??
+    activeProjects.find((candidate) => candidate.experience === "trial_short_story") ??
+    activeProjects[0] ??
+    projects[0] ??
+    null
+  );
+}
+
 export function deriveProductionChecklistMilestones(
   projects: Array<{ id: string; experience: "trial_short_story" | "full_book" }>,
   productionProjectIds: Iterable<string>,
@@ -183,12 +207,7 @@ export async function getAuthoringOnboardingSnapshot(
       ),
   ]);
 
-  const activeProjects = projects.filter((candidate) => candidate.status !== "archived");
-  const project =
-    activeProjects.find((candidate) => candidate.experience === "trial_short_story") ??
-    activeProjects[0] ??
-    projects[0] ??
-    null;
+  const project = selectAuthoringOnboardingProject(projects);
   const projectIds = projects.map((candidate) => candidate.id);
   const empty = Promise.resolve([] as Array<{ id: string }>);
 

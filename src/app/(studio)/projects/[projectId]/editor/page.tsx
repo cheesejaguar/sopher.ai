@@ -1,10 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, PenLine } from "lucide-react";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { ArchivedChaptersPanel } from "@/components/editor/archived-chapters-panel";
+import {
+  ManuscriptRevisionPanel,
+  type ManuscriptRevisionRun,
+} from "@/components/editor/manuscript-revision-panel";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/lib/auth";
+import { getDb, schema } from "@/db";
 import {
   getArchivedChapterRecoveries,
   getChapterList,
@@ -17,6 +23,11 @@ import {
 } from "@/lib/editor/chapter-status";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
+import {
+  manuscriptEditMaximumCredits,
+  readManuscriptEditPassCompletion,
+  type ManuscriptEditPassConfig,
+} from "@/lib/manuscript-edit-pass";
 
 export default async function EditorIndexPage({
   params,
@@ -28,15 +39,88 @@ export default async function EditorIndexPage({
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
 
-  const [chapters, archivedChapters] = data.book
-    ? await Promise.all([getChapterList(data.book.id), getArchivedChapterRecoveries(data.book.id)])
-    : [[], []];
+  const [chapters, archivedChapters, pendingSuggestionRows] = data.book
+    ? await Promise.all([
+        getChapterList(data.book.id),
+        getArchivedChapterRecoveries(data.book.id),
+        getDb()
+          .select({
+            chapterId: schema.suggestions.chapterId,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(schema.suggestions)
+          .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
+          .where(
+            and(eq(schema.chapters.bookId, data.book.id), eq(schema.suggestions.status, "pending")),
+          )
+          .groupBy(schema.suggestions.chapterId),
+      ])
+    : [[], [], []];
   const journey = await getAuthoringJourneySnapshot({
     userId,
     projectId,
     data,
     chapters,
   });
+  const [latestEditRun] = await getDb()
+    .select({
+      id: schema.generationRuns.id,
+      status: schema.generationRuns.status,
+      config: schema.generationRuns.config,
+      workflowRunId: schema.generationRuns.workflowRunId,
+      error: schema.generationRuns.error,
+      acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
+    })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        eq(schema.generationRuns.userId, userId),
+        eq(schema.generationRuns.kind, "edit_pass"),
+      ),
+    )
+    .orderBy(desc(schema.generationRuns.createdAt))
+    .limit(1);
+  const [latestSuggestionFacts, firstLatestSuggestion] = latestEditRun
+    ? await Promise.all([
+        getDb()
+          .select({ count: sql<number>`count(*)::int` })
+          .from(schema.suggestions)
+          .where(
+            and(
+              eq(schema.suggestions.runId, latestEditRun.id),
+              eq(schema.suggestions.status, "pending"),
+            ),
+          )
+          .then((rows) => rows[0] ?? { count: 0 }),
+        getDb()
+          .select({ chapterNumber: schema.chapters.chapterNumber })
+          .from(schema.suggestions)
+          .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
+          .where(
+            and(
+              eq(schema.suggestions.runId, latestEditRun.id),
+              eq(schema.suggestions.status, "pending"),
+            ),
+          )
+          .orderBy(schema.chapters.chapterNumber)
+          .limit(1)
+          .then((rows) => rows[0] ?? null),
+      ])
+    : [{ count: 0 }, null];
+  const initialRevisionRun: ManuscriptRevisionRun | null = latestEditRun
+    ? {
+        id: latestEditRun.id,
+        status: latestEditRun.status,
+        error: latestEditRun.error,
+        instruction:
+          (latestEditRun.config as Partial<ManuscriptEditPassConfig>).editPass?.instruction ?? "",
+        confirmationPending: Boolean(
+          latestEditRun.acceptanceUncertainAt && !latestEditRun.workflowRunId,
+        ),
+        completion: readManuscriptEditPassCompletion(latestEditRun.config),
+      }
+    : null;
 
   return (
     <div className="space-y-5">
@@ -52,6 +136,20 @@ export default async function EditorIndexPage({
       </header>
 
       {journey ? <IncompleteProductionNotice journey={journey} /> : null}
+
+      {chapters.some((chapter) => chapter.wordCount > 0) ? (
+        <ManuscriptRevisionPanel
+          projectId={projectId}
+          chapterCount={chapters.filter((chapter) => chapter.wordCount > 0).length}
+          maximumCredits={manuscriptEditMaximumCredits(
+            data.project.settings.qualityTier ?? "standard",
+            chapters.filter((chapter) => chapter.wordCount > 0).length,
+          )}
+          initialRun={initialRevisionRun}
+          initialSuggestionCount={Number(latestSuggestionFacts.count)}
+          initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
+        />
+      ) : null}
 
       {chapters.length === 0 ? (
         <div className="instrument-surface relative flex min-h-56 flex-col items-center justify-center overflow-hidden px-6 py-12 text-center">
@@ -82,6 +180,8 @@ export default async function EditorIndexPage({
           <ul className="divide-y divide-border">
             {chapters.map((chapter) => {
               const editable = chapter.status !== "planned";
+              const pendingSuggestions =
+                pendingSuggestionRows.find((row) => row.chapterId === chapter.id)?.count ?? 0;
               const inner = (
                 <>
                   <span className="folio-label w-9 shrink-0 text-primary tabular-nums">
@@ -101,7 +201,7 @@ export default async function EditorIndexPage({
                     </span>
                     <span className="mt-0.5 block font-mono text-[11px] text-muted-foreground tabular-nums">
                       {editable
-                        ? `${formatWordCount(chapter.wordCount)} words · ${chapterStatusLabels[chapter.status]}`
+                        ? `${formatWordCount(chapter.wordCount)} words · ${chapterStatusLabels[chapter.status]}${pendingSuggestions > 0 ? ` · ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? "" : "s"}` : ""}`
                         : "Awaiting first draft"}
                     </span>
                   </span>

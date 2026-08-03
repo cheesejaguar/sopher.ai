@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { CreditPack } from "@/lib/billing/credits-shared";
 import { PUBLIC_BOOK_WORDS, PUBLIC_TIER_COSTS } from "@/lib/billing/public-pricing";
 import { track } from "@/lib/analytics/track";
+import { SUSPENDED_AUTHORING_MESSAGE } from "@/components/studio/studio-access-context";
 
 /** Starts Stripe Checkout. Credits are granted by the webhook, never here. */
 export function PackButtons({
@@ -14,12 +15,14 @@ export function PackButtons({
   returnTo,
   unlockingFullBook = false,
   recommendedCredits,
+  suspended = false,
 }: {
   packs: CreditPack[];
   returnTo?: string;
   unlockingFullBook?: boolean;
   /** Additional balance the current saved action needs, used only to highlight a pack. */
   recommendedCredits?: number;
+  suspended?: boolean;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +37,7 @@ export function PackButtons({
         : null;
 
   async function buy(packId: string) {
+    if (suspended) return;
     setBusy(packId);
     setError(null);
     // Fired before the request, not after: the success path is a full-page
@@ -104,7 +108,7 @@ export function PackButtons({
                 className="mt-4 w-full"
                 variant={pack.id === recommendedPackId ? "default" : "outline"}
                 onClick={() => buy(pack.id)}
-                disabled={busy !== null}
+                disabled={busy !== null || suspended}
                 aria-label={
                   busy === pack.id
                     ? `Opening checkout for ${pack.name}`
@@ -124,6 +128,17 @@ export function PackButtons({
           </li>
         ))}
       </ul>
+      {suspended ? (
+        <p className="mt-3 border-y border-destructive/35 py-3 text-sm text-foreground">
+          {SUSPENDED_AUTHORING_MESSAGE}{" "}
+          <a
+            href="mailto:support@sopher.ai?subject=Suspended%20account%20help"
+            className="font-medium underline underline-offset-4"
+          >
+            Contact support.
+          </a>
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="mt-3 text-sm text-destructive">
           {error}

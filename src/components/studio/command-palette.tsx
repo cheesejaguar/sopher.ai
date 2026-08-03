@@ -137,8 +137,9 @@ function CommandPaletteInner({ open, onOpenChange, onOpenHelp, nextAction }: Com
         ) : null}
         {projectId ? (
           <CommandGroup heading="Publish">
+            <CommandItem onSelect={() => go(`/projects/${projectId}/book`)}>Book setup</CommandItem>
             <CommandItem onSelect={() => go(`/projects/${projectId}/manuscript`)}>
-              Manuscript
+              Read and export
             </CommandItem>
           </CommandGroup>
         ) : null}

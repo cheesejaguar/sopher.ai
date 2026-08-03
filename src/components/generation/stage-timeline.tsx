@@ -30,7 +30,7 @@ type Step = {
  */
 function buildSteps(tier: QualityTier): Step[] {
   const steps: Step[] = [
-    { key: "concept", label: "Concept", stages: ["concept"] },
+    { key: "concept", label: "Concept", stages: ["concept", "awaiting_guidance"] },
     { key: "outline", label: "Outline", stages: ["outline", "awaiting_approval"] },
     { key: "bible", label: "Story bible", stages: ["bible"] },
     { key: "chapters", label: "Chapters", stages: ["chapters"] },
@@ -44,6 +44,7 @@ function buildSteps(tier: QualityTier): Step[] {
 const STAGE_RANK: Record<Stage, number> = {
   queued: 0,
   concept: 1,
+  awaiting_guidance: 1,
   outline: 2,
   awaiting_approval: 2,
   bible: 3,

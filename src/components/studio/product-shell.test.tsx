@@ -47,6 +47,23 @@ describe("ProductShell credit label", () => {
     expect(screen.getAllByText("14.3 cr").length).toBeGreaterThan(0);
   });
 
+  it("proactively explains suspended access without replacing the page heading", () => {
+    render(
+      <ProductShell suspended>
+        <h1>My library</h1>
+      </ProductShell>,
+    );
+
+    expect(screen.getByRole("heading", { level: 1, name: "My library" })).toBeVisible();
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByText("Account access is limited")).toBeVisible();
+    expect(screen.getByText(/AI authoring and purchases are unavailable/i)).toBeVisible();
+    expect(screen.getByRole("link", { name: "Contact support" })).toHaveAttribute(
+      "href",
+      "mailto:support@sopher.ai?subject=Suspended%20account%20help",
+    );
+  });
+
   it("keeps accessible Help available from the Studio shell", async () => {
     navigation.pathname = "/projects/project-1/write";
     vi.stubGlobal(

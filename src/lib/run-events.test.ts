@@ -5,6 +5,7 @@ import {
   generationBillingScope,
   OUTLINE_REVISION_RESERVATION_KEY,
   rebaseGenerationStartState,
+  retryRunFromSavedWork,
   severResumeBillingLineage,
   latestResumableRunId,
   resumableRunId,
@@ -31,6 +32,18 @@ describe("generation run events", () => {
       pct: 13,
       detail: "Building shared canon",
     });
+  });
+
+  it("treats the creative-direction pause as a first-class stage", () => {
+    expect(stageSchema.parse("awaiting_guidance")).toBe("awaiting_guidance");
+    expect(
+      runEventSchema.parse({
+        type: "stage",
+        stage: "awaiting_guidance",
+        pct: 6,
+        detail: "Choose the direction that should shape the chapter plan",
+      }),
+    ).toMatchObject({ stage: "awaiting_guidance", pct: 6 });
   });
 
   it("preserves the concrete phase behind a credit pause", () => {
@@ -97,6 +110,132 @@ describe("generation retry boundaries", () => {
     ]) {
       expect(resumableRunId(next, { id: "old-run", status: "failed", config })).toBeUndefined();
     }
+  });
+
+  it("keeps pinned protocols isolated from guided protocol-v3 retries", () => {
+    const guided = {
+      ...next,
+      protocolVersion: 3 as const,
+      interaction: { mode: "guided" as const, maxQuestions: 1 as const },
+    };
+    expect(sameGenerationShape(guided, { ...matchingConfig, protocolVersion: 2 })).toBe(false);
+    expect(
+      sameGenerationShape(guided, {
+        ...matchingConfig,
+        protocolVersion: 3,
+        interaction: { mode: "guided", maxQuestions: 1 },
+      }),
+    ).toBe(true);
+    expect(sameGenerationShape(next, matchingConfig)).toBe(true);
+  });
+
+  it("reattaches exact-input guided work before manuscript preparation without exposing manuscript checkpoints", () => {
+    const guided = {
+      ...next,
+      protocolVersion: 3 as const,
+      interaction: { mode: "guided" as const, maxQuestions: 1 as const },
+    };
+    const interrupted = {
+      ...guided,
+      stagedConcept: { title: "The Disappearing Road" } as BookConcept,
+      creativeDecisions: {
+        afterConcept: {
+          questionId: "11111111-1111-4111-8111-111111111111",
+          questionKey: "after_concept" as const,
+          mode: "option" as const,
+          selectedOptionId: "option-2",
+          answer: "Follow the road into the drowned archive.",
+        },
+      },
+      work: {
+        conceptExpanded: { title: "The Disappearing Road" } as BookConcept,
+        chapters: { "1": { draft: "Never inherit this before preparation." } },
+      },
+      completion: {
+        chapterSummaries: {
+          "1": { sourceRunId: "guided-source", contentDigest: "unsafe-manuscript-digest" },
+        },
+      },
+    };
+
+    expect(
+      retryRunFromSavedWork(guided, {
+        id: "guided-source",
+        status: "failed",
+        config: interrupted,
+      }),
+    ).toBe("guided-source");
+    expect(
+      resumableRunId(guided, {
+        id: "guided-source",
+        status: "failed",
+        config: interrupted,
+      }),
+    ).toBeUndefined();
+    expect(
+      latestResumableRunId(guided, [
+        { id: "guided-source", status: "failed", config: interrupted },
+      ]),
+    ).toBe("guided-source");
+  });
+
+  it("rejects pre-manuscript guided work after any frozen-input change", () => {
+    const guided = {
+      ...next,
+      protocolVersion: 3 as const,
+      interaction: { mode: "guided" as const, maxQuestions: 1 as const },
+    };
+    const interrupted = {
+      ...guided,
+      inputSnapshot: { ...guided.inputSnapshot, brief: "The old brief." },
+      stagedConcept: { title: "Old concept" } as BookConcept,
+      creativeDecisions: {
+        afterConcept: {
+          questionId: "11111111-1111-4111-8111-111111111111",
+          questionKey: "after_concept" as const,
+          mode: "custom" as const,
+          selectedOptionId: null,
+          answer: "An old answer that must not shape the changed story.",
+        },
+      },
+    };
+    expect(
+      retryRunFromSavedWork(guided, {
+        id: "changed-input-source",
+        status: "failed",
+        config: interrupted,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("does not broaden pre-manuscript reuse to autopilot or empty guided attempts", () => {
+    const autopilot = {
+      ...next,
+      protocolVersion: 3 as const,
+      interaction: { mode: "autopilot" as const, maxQuestions: 0 as const },
+    };
+    expect(
+      retryRunFromSavedWork(autopilot, {
+        id: "autopilot-source",
+        status: "failed",
+        config: {
+          ...autopilot,
+          stagedConcept: { title: "Autopilot concept" } as BookConcept,
+        },
+      }),
+    ).toBeUndefined();
+    const guided = {
+      ...next,
+      protocolVersion: 3 as const,
+      interaction: { mode: "guided" as const, maxQuestions: 1 as const },
+    };
+    expect(
+      retryRunFromSavedWork(guided, {
+        id: "empty-guided-source",
+        status: "failed",
+        config: guided,
+      }),
+    ).toBeUndefined();
   });
 
   it("never reuses full-book artifacts for an included story", () => {

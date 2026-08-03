@@ -67,6 +67,23 @@ describe("withDbTransaction", () => {
     expect(mocks.poolEnds[0]).toHaveBeenCalledOnce();
   });
 
+  it("forwards an explicit transaction isolation level", async () => {
+    const tx = { execute: vi.fn().mockResolvedValue({ rows: [] }) };
+    mocks.transaction.mockImplementation(
+      async (callback: (transaction: typeof tx) => Promise<unknown>) => callback(tx),
+    );
+
+    await withDbTransaction(async () => "captured", {
+      isolationLevel: "repeatable read",
+      accessMode: "read write",
+    });
+
+    expect(mocks.transaction).toHaveBeenCalledWith(expect.any(Function), {
+      isolationLevel: "repeatable read",
+      accessMode: "read write",
+    });
+  });
+
   it("closes the connection without masking a transaction failure", async () => {
     const failure = new Error("rollback");
     mocks.transaction.mockRejectedValue(failure);

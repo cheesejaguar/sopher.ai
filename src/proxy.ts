@@ -1,5 +1,5 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { devAuthAllowed } from "@/lib/clerk";
 import { hasCompleteClerkConfiguration, isProtectedPath } from "@/lib/auth-route-policy";
 import {
@@ -7,6 +7,7 @@ import {
   ATTRIBUTION_COOKIE,
   ATTRIBUTION_MAX_AGE_SECONDS,
   isEmptyAttribution,
+  isReaderPath,
   readAttribution,
 } from "@/lib/analytics/attribution";
 
@@ -36,7 +37,7 @@ const hasClerkKeys = hasCompleteClerkConfiguration(
  * only mint cookies for crawlers.
  */
 function stampAttribution(req: NextRequest, res: NextResponse): NextResponse {
-  if (req.nextUrl.pathname.startsWith("/api/")) return res;
+  if (req.nextUrl.pathname.startsWith("/api/") || isReaderPath(req.nextUrl.pathname)) return res;
 
   if (!req.cookies.get(ANON_COOKIE)) {
     res.cookies.set(ANON_COOKIE, crypto.randomUUID(), {
@@ -67,18 +68,25 @@ function stampAttribution(req: NextRequest, res: NextResponse): NextResponse {
   return res;
 }
 
+/** Reader recipients never need Clerk, including for the fragment exchange. */
+export function isAnonymousReaderRequest(pathname: string): boolean {
+  return isReaderPath(pathname) || pathname === "/api/reader-session";
+}
+
 // Without Clerk keys: pass through only when dev auth is explicitly allowed
 // (development or ALLOW_DEV_AUTH=1); otherwise fail closed on protected routes.
-export default hasClerkKeys
-  ? clerkMiddleware(async (auth, req) => {
-      if (isProtectedPath(req.nextUrl.pathname)) {
-        // Returning the redirect/404 unmodified — a visitor being sent to
-        // sign-in has not landed yet, and their utm parameters survive on the
-        // redirect_url for the page they eventually reach.
-        await auth.protect();
-      }
-      return stampAttribution(req, NextResponse.next());
-    })
+const clerkProxy = clerkMiddleware(async (auth, req) => {
+  if (isProtectedPath(req.nextUrl.pathname)) {
+    // Returning the redirect/404 unmodified — a visitor being sent to
+    // sign-in has not landed yet, and their utm parameters survive on the
+    // redirect_url for the page they eventually reach.
+    await auth.protect();
+  }
+  return stampAttribution(req, NextResponse.next());
+});
+
+const selectedProxy = hasClerkKeys
+  ? clerkProxy
   : devAuthAllowed
     ? function proxy(req: NextRequest) {
         return stampAttribution(req, NextResponse.next());
@@ -89,6 +97,11 @@ export default hasClerkKeys
         }
         return stampAttribution(req, NextResponse.next());
       };
+
+export default function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (isAnonymousReaderRequest(req.nextUrl.pathname)) return NextResponse.next();
+  return selectedProxy(req, event);
+}
 
 export const config = {
   matcher: [

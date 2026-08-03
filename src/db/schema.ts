@@ -11,6 +11,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -70,6 +71,8 @@ export type AuthoringOnboarding = {
 };
 
 export type ProjectSettings = {
+  /** Whether production pauses for the versioned post-concept creative decision. */
+  authoringMode?: "guided" | "autopilot";
   pov?: "first" | "third_limited" | "third_omniscient";
   tense?: "past" | "present";
   tone?: string;
@@ -83,7 +86,51 @@ export type ProjectSettings = {
   requireOutlineApproval?: boolean;
 };
 
+export type AuthoringQuestionOption = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type AuthoringQuestionDecision = {
+  questionId: string;
+  questionKey: "after_concept";
+  mode: "option" | "custom" | "sopher";
+  selectedOptionId: string | null;
+  answer: string;
+};
+
 export type ProjectExperience = "trial_short_story" | "full_book";
+
+export type PublicationEditionSnapshot = {
+  schemaVersion: 1;
+  capturedAt: string;
+  incomplete: boolean;
+  title: string;
+  author: string;
+  synopsis: string | null;
+  genre: string | null;
+  editionNote: string;
+  matter: Record<string, unknown>;
+  coverUrl: string | null;
+  assetUrls: string[];
+  chapters: Array<{
+    number: number;
+    title: string;
+    markdown: string;
+    wordCount: number;
+  }>;
+  figures: Record<
+    string,
+    {
+      svgUrl: string | null;
+      pngUrl: string | null;
+      alt: string;
+      width?: number;
+      height?: number;
+    }
+  >;
+};
 
 export const projects = pgTable(
   "projects",
@@ -159,7 +206,10 @@ export const books = pgTable(
     frontMatter: jsonb("front_matter").default({}).notNull(),
     ...timestamps,
   },
-  (t) => [uniqueIndex("uq_books_project").on(t.projectId)],
+  (t) => [
+    uniqueIndex("uq_books_project").on(t.projectId),
+    unique("uq_books_id_project").on(t.id, t.projectId),
+  ],
 );
 
 export const outlines = pgTable(
@@ -308,6 +358,7 @@ export const generationRuns = pgTable(
       enum: [
         "queued",
         "concept",
+        "awaiting_guidance",
         "outline",
         "awaiting_approval",
         "awaiting_credits",
@@ -346,7 +397,9 @@ export const generationRuns = pgTable(
      */
     cancellationRequestedAt: timestamp("cancellation_requested_at", { withTimezone: true }),
     cancellationReason: text("cancellation_reason"),
-    pauseKind: text("pause_kind", { enum: ["outline_approval", "credits_topup"] }),
+    pauseKind: text("pause_kind", {
+      enum: ["outline_approval", "credits_topup", "creative_decision"],
+    }),
     pauseVersion: integer("pause_version").default(0).notNull(),
     /** Stable Workflow step id that makes pause allocation replay-safe. */
     pauseKey: text("pause_key"),
@@ -392,7 +445,7 @@ export const generationRuns = pgTable(
     check(
       "generation_runs_current_stage_check",
       sql`${t.currentStage} in (
-        'queued', 'concept', 'outline', 'awaiting_approval', 'awaiting_credits',
+        'queued', 'concept', 'awaiting_guidance', 'outline', 'awaiting_approval', 'awaiting_credits',
         'bible', 'chapters', 'editing', 'continuity', 'revising',
         'finalizing', 'done', 'failed', 'cancelled'
       )`,
@@ -471,11 +524,12 @@ export const authoringStreamLeases = pgTable(
   ],
 );
 
-export type AuthoringRunInputKind = "outline_approval" | "credits_topup";
+export type AuthoringRunInputKind = "outline_approval" | "credits_topup" | "creative_decision";
 export type AuthoringPauseDetails = {
   balanceCredits?: number;
   requiredCredits?: number;
   resumeStage?: string;
+  questionId?: string;
 };
 
 /**
@@ -490,7 +544,9 @@ export const authoringRunInputs = pgTable(
     runId: uuid("run_id")
       .notNull()
       .references(() => generationRuns.id, { onDelete: "cascade" }),
-    kind: text("kind", { enum: ["outline_approval", "credits_topup"] }).notNull(),
+    kind: text("kind", {
+      enum: ["outline_approval", "credits_topup", "creative_decision"],
+    }).notNull(),
     pauseVersion: integer("pause_version").notNull(),
     requestKey: uuid("request_key").defaultRandom().notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
@@ -515,8 +571,61 @@ export const authoringRunInputs = pgTable(
     ),
     check(
       "authoring_run_inputs_kind_check",
-      sql`${t.kind} in ('outline_approval', 'credits_topup')`,
+      sql`${t.kind} in ('outline_approval', 'credits_topup', 'creative_decision')`,
     ),
+  ],
+);
+
+/**
+ * One durable, run-owned creative decision. Question text stays out of the
+ * operational event/incident streams and is exposed only through an
+ * authenticated run-health response.
+ */
+export const authoringQuestions = pgTable(
+  "authoring_questions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    questionKey: text("question_key").notNull(),
+    stage: text("stage", { enum: ["after_concept"] }).notNull(),
+    prompt: text("prompt").notNull(),
+    rationale: text("rationale"),
+    options: jsonb("options").$type<AuthoringQuestionOption[]>().notNull(),
+    recommendedOptionId: text("recommended_option_id").notNull(),
+    decisionDigest: text("decision_digest").notNull(),
+    pauseVersion: integer("pause_version"),
+    status: text("status", { enum: ["pending", "answered"] })
+      .default("pending")
+      .notNull(),
+    inputId: uuid("input_id").references(() => authoringRunInputs.id, {
+      onDelete: "set null",
+    }),
+    decision: jsonb("decision").$type<AuthoringQuestionDecision | null>(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "authoring_questions_run_project_generation_runs_fk",
+      columns: [t.runId, t.projectId],
+      foreignColumns: [generationRuns.id, generationRuns.projectId],
+    }).onDelete("cascade"),
+    uniqueIndex("uq_authoring_question_run_key").on(t.runId, t.questionKey),
+    uniqueIndex("uq_authoring_question_pause")
+      .on(t.runId, t.pauseVersion)
+      .where(sql`${t.pauseVersion} is not null`),
+    uniqueIndex("uq_authoring_question_input")
+      .on(t.inputId)
+      .where(sql`${t.inputId} is not null`),
+    index("idx_authoring_questions_pending").on(t.runId, t.status),
+    check("authoring_questions_options_count_check", sql`jsonb_array_length(${t.options}) = 3`),
+    check(
+      "authoring_questions_pause_version_check",
+      sql`${t.pauseVersion} is null or ${t.pauseVersion} >= 1`,
+    ),
+    check("authoring_questions_status_check", sql`${t.status} in ('pending', 'answered')`),
+    check("authoring_questions_stage_check", sql`${t.stage} = 'after_concept'`),
   ],
 );
 
@@ -805,6 +914,94 @@ export const assets = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("idx_assets_project").on(t.projectId, t.kind)],
+);
+
+/**
+ * Immutable editions power revocable reader links. A live book may continue
+ * changing after it is shared; the reader must never drift underneath someone
+ * who was sent a particular edition.
+ */
+export const publicationEditions = pgTable(
+  "publication_editions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    bookId: uuid("book_id")
+      .notNull()
+      .references(() => books.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    sourceDigest: text("source_digest").notNull(),
+    snapshot: jsonb("snapshot").$type<PublicationEditionSnapshot>().notNull(),
+    incomplete: boolean("incomplete").default(false).notNull(),
+    chapterCount: integer("chapter_count").notNull(),
+    totalWords: integer("total_words").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "publication_editions_book_project_fk",
+      columns: [t.bookId, t.projectId],
+      foreignColumns: [books.id, books.projectId],
+    }).onDelete("cascade"),
+    uniqueIndex("uq_publication_edition_source").on(t.projectId, t.sourceDigest),
+    unique("uq_publication_edition_id_project_user").on(t.id, t.projectId, t.userId),
+    index("idx_publication_editions_owner").on(t.userId, t.projectId, t.createdAt),
+    check("publication_editions_digest_check", sql`length(${t.sourceDigest}) = 64`),
+    check("publication_editions_chapter_count_check", sql`${t.chapterCount} > 0`),
+    check("publication_editions_total_words_check", sql`${t.totalWords} > 0`),
+  ],
+);
+
+/**
+ * The raw 256-bit bearer token is returned once and never stored. Only its
+ * SHA-256 digest reaches the database, so a database read cannot reveal live
+ * reader URLs. Authors can revoke a link or create a replacement at any time.
+ */
+export const readerShares = pgTable(
+  "reader_shares",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    editionId: uuid("edition_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    userId: text("user_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    label: text("label"),
+    status: text("status", { enum: ["active", "revoked"] })
+      .default("active")
+      .notNull(),
+    allowDownload: boolean("allow_download").default(false).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "reader_shares_edition_project_user_fk",
+      columns: [t.editionId, t.projectId, t.userId],
+      foreignColumns: [
+        publicationEditions.id,
+        publicationEditions.projectId,
+        publicationEditions.userId,
+      ],
+    }).onDelete("cascade"),
+    uniqueIndex("uq_reader_shares_token_hash").on(t.tokenHash),
+    index("idx_reader_shares_owner").on(t.userId, t.projectId, t.createdAt),
+    index("idx_reader_shares_active").on(t.status, t.expiresAt),
+    check("reader_shares_token_hash_check", sql`length(${t.tokenHash}) = 64`),
+    check(
+      "reader_shares_status_check",
+      sql`(${t.status} = 'active' and ${t.revokedAt} is null)
+        or (${t.status} = 'revoked' and ${t.revokedAt} is not null)`,
+    ),
+    check(
+      "reader_shares_expiry_check",
+      sql`${t.expiresAt} is null or ${t.expiresAt} > ${t.createdAt}`,
+    ),
+  ],
 );
 
 /**

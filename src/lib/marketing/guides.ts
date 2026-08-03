@@ -281,7 +281,7 @@ const contentGuide: Guide = {
     {
       question: "Are my settings visible to anyone else?",
       answer:
-        "Your work is private to your account. We may review content when required to enforce our terms or comply with law, which is disclosed in the privacy policy.",
+        "Your work is private to your account unless you deliberately create a revocable reader link. We may review content when required to enforce our terms or comply with law, which is disclosed in the privacy policy.",
     },
   ],
 };

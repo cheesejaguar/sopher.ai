@@ -185,6 +185,46 @@ describe("useRunStream telemetry recovery", () => {
     unmount();
   });
 
+  it("renders a registered creative question before its progress event is streamed", () => {
+    const durableSnapshot = snapshot();
+    durableSnapshot.run.status = "awaiting_input";
+    durableSnapshot.health = {
+      ...durableSnapshot.health,
+      databaseStatus: "awaiting_input",
+      effectiveStatus: "awaiting_input",
+      stage: "concept",
+      progressPct: 6,
+      pause: {
+        kind: "creative_decision",
+        version: 1,
+        registeredAt: "2026-08-02T20:00:00.000Z",
+        details: { questionId: "11111111-1111-4111-8111-111111111111" },
+      },
+      question: {
+        id: "11111111-1111-4111-8111-111111111111",
+        questionKey: "after_concept",
+        question: "What should pull Mara beyond the lighthouse?",
+        rationale: "This choice shapes the chapter plan.",
+        options: [
+          { id: "option-1", label: "Family", description: "She searches for her brother." },
+          { id: "option-2", label: "Duty", description: "She carries a warning inland." },
+          { id: "option-3", label: "Wonder", description: "She follows an impossible map." },
+        ],
+        recommendedOptionId: "option-2",
+        decisionDigest: "a".repeat(64),
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    const { result, unmount } = renderHook(() => useRunStream("run-1", durableSnapshot));
+
+    expect(result.current.state.stage).toBe("awaiting_guidance");
+    unmount();
+  });
+
   it("counts malformed and schema-invalid progress records without hiding later valid progress", async () => {
     const fetchMock = vi.fn(async (request: RequestInfo | URL) => {
       const url = String(request);

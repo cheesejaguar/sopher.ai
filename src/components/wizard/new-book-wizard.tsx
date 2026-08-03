@@ -193,6 +193,12 @@ function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuote
         <dt className="folio-label text-muted-foreground">Tier</dt>
         <dd className="mt-1 font-medium capitalize">{state.tier}</dd>
       </div>
+      <div className="col-span-2">
+        <dt className="folio-label text-muted-foreground">Authoring mode</dt>
+        <dd className="mt-1 font-medium">
+          {state.authoringMode === "guided" ? "Collaborative" : "Autopilot"}
+        </dd>
+      </div>
       <div className="col-span-2 border-t border-border pt-3">
         <dt className="folio-label text-muted-foreground">Current quote</dt>
         <dd className="mt-1 font-mono font-semibold tabular-nums">
@@ -625,6 +631,7 @@ function NewBookSetupWizard({
         heatLevel: state.heatLevel,
         violenceLevel: state.violenceLevel,
         profanity: state.profanity,
+        authoringMode: state.authoringMode,
         qualityTier: state.tier,
         requireOutlineApproval: state.requireOutlineApproval,
         ...(state.voiceProfile !== "none" ? { voiceProfile: state.voiceProfile } : {}),
@@ -642,6 +649,7 @@ function NewBookSetupWizard({
             chapters: state.chapters,
             wordsPerChapter: state.wordsPerChapter,
             outlineApproval: state.requireOutlineApproval,
+            authoringMode: state.authoringMode,
             experience,
             reattached: result.status === "reattached",
           });

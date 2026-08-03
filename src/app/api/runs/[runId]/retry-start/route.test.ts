@@ -62,6 +62,7 @@ vi.mock("@/lib/e2e-workflow-stub", () => ({
 vi.mock("workflow/api", () => ({ start: mocks.start }));
 vi.mock("@/workflows/generate-book", () => ({ generateBook: vi.fn() }));
 vi.mock("@/workflows/generate-chapter", () => ({ generateChapter: vi.fn() }));
+vi.mock("@/workflows/edit-manuscript", () => ({ editManuscript: vi.fn() }));
 
 import { POST } from "./route";
 
@@ -302,6 +303,46 @@ describe("POST /api/runs/[runId]/retry-start", () => {
       userId: "user-1",
       workflowRunId: "workflow-1",
     });
+  });
+
+  it("redispatches an uncertain manuscript review as the same edit-pass run", async () => {
+    const editConfig = {
+      protocolVersion: 3 as const,
+      dispatchReady: true as const,
+      tier: "standard" as const,
+      targetChapters: 3,
+      targetWordsPerChapter: 1_000,
+      waveSize: 1 as const,
+      requireOutlineApproval: false as const,
+      editPass: {
+        version: 1 as const,
+        instruction: "Make the dialogue sharper",
+        instructionDigest: "digest",
+      },
+    };
+    mockSelectRows([snapshot({ kind: "edit_pass", config: editConfig })]);
+    mocks.claimUncertainAuthoringRun.mockResolvedValue({
+      id: runId,
+      projectId,
+      userId: "user-1",
+      kind: "edit_pass",
+      config: editConfig,
+    });
+
+    const response = await request();
+
+    expect(response.status).toBe(202);
+    expect(mocks.authorizeProjectSpend).toHaveBeenCalledWith({
+      userId: "user-1",
+      projectId,
+      operationKind: "authoring",
+    });
+    expect(mocks.start).toHaveBeenCalledWith(expect.any(Function), [
+      runId,
+      projectId,
+      "user-1",
+      editConfig,
+    ]);
   });
 
   it("reattaches when a competing retry links Workflow before this claim lands", async () => {

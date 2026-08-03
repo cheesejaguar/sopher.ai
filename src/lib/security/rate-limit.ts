@@ -30,6 +30,10 @@ export const LIMITS = {
   bookStart: "book-start",
   /** Long-lived authoring stream handshakes and reconnect churn. */
   authoringStream: "authoring-stream",
+  /** Capturing immutable web-reader editions and issuing bearer links. */
+  readerShare: "reader-share",
+  /** Anonymous fragment-to-cookie reader session exchanges, keyed by IP. */
+  readerSession: "reader-session",
   /** The one unauthenticated route — keyed by IP, not user. */
   estimates: "estimates",
 } as const;

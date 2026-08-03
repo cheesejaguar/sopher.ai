@@ -29,7 +29,7 @@ import { clerkEnabled } from "@/lib/clerk";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/brand-mark";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Sheet,
   SheetClose,
@@ -49,6 +49,10 @@ import { StudioHelpProvider } from "@/components/studio/studio-help-context";
 import { StudioCoachmark } from "@/components/studio/studio-coachmark";
 import { ThemeToggle } from "@/components/studio/theme-toggle";
 import type { AuthoringOnboardingPreferences } from "@/lib/authoring-onboarding-shared";
+import {
+  SUSPENDED_AUTHORING_MESSAGE,
+  StudioSuspensionProvider,
+} from "@/components/studio/studio-access-context";
 
 type ShellVariant = "studio" | "admin";
 
@@ -318,6 +322,7 @@ type ProductShellProps = {
   variant?: ShellVariant;
   credits?: number;
   creditLabel?: string;
+  suspended?: boolean;
 };
 
 function ProductShellFallback({ variant }: { variant: ShellVariant }) {
@@ -352,15 +357,23 @@ export function ProductShell({
   variant = "studio",
   credits,
   creditLabel,
+  suspended = false,
 }: ProductShellProps) {
   return (
-    <AuthoringJourneyCommandProvider>
-      <React.Suspense fallback={<ProductShellFallback variant={variant} />}>
-        <ProductShellWithPathname variant={variant} credits={credits} creditLabel={creditLabel}>
-          {children}
-        </ProductShellWithPathname>
-      </React.Suspense>
-    </AuthoringJourneyCommandProvider>
+    <StudioSuspensionProvider suspended={suspended}>
+      <AuthoringJourneyCommandProvider>
+        <React.Suspense fallback={<ProductShellFallback variant={variant} />}>
+          <ProductShellWithPathname
+            variant={variant}
+            credits={credits}
+            creditLabel={creditLabel}
+            suspended={suspended}
+          >
+            {children}
+          </ProductShellWithPathname>
+        </React.Suspense>
+      </AuthoringJourneyCommandProvider>
+    </StudioSuspensionProvider>
   );
 }
 
@@ -369,6 +382,7 @@ function ProductShellWithPathname({
   variant = "studio",
   credits,
   creditLabel,
+  suspended = false,
 }: ProductShellProps) {
   const pathname = usePathname() ?? (variant === "admin" ? "/admin" : "/studio");
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
@@ -533,7 +547,32 @@ function ProductShellWithPathname({
             tabIndex={-1}
             className="safe-area-page min-h-[calc(100dvh-3.5rem)] min-w-0 pt-6 sm:pt-8 lg:min-h-dvh"
           >
-            <div className="mx-auto w-full max-w-[92rem] min-w-0">{children}</div>
+            <div className="mx-auto w-full max-w-[92rem] min-w-0">
+              {variant === "studio" && suspended ? (
+                <section
+                  aria-labelledby="account-suspension-title"
+                  className="mx-4 mb-5 border-y border-destructive/35 bg-destructive/5 py-3 sm:mx-6 lg:mx-8"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3 px-1">
+                    <div className="min-w-0">
+                      <p id="account-suspension-title" className="text-sm font-semibold">
+                        Account access is limited
+                      </p>
+                      <p className="mt-1 max-w-4xl text-xs leading-relaxed text-muted-foreground">
+                        {SUSPENDED_AUTHORING_MESSAGE}
+                      </p>
+                    </div>
+                    <a
+                      href="mailto:support@sopher.ai?subject=Suspended%20account%20help"
+                      className={buttonVariants({ variant: "outline", size: "sm" })}
+                    >
+                      Contact support
+                    </a>
+                  </div>
+                </section>
+              ) : null}
+              {children}
+            </div>
           </main>
         </div>
 

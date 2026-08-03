@@ -2,14 +2,19 @@ import { notFound } from "next/navigation";
 
 import { ChapterPager } from "@/components/manuscript/chapter-pager";
 import Image from "next/image";
+import Link from "next/link";
+import { BookMarked } from "lucide-react";
 
 import { BookIdentityDialog } from "@/components/manuscript/book-identity-dialog";
 import { CoverButton } from "@/components/manuscript/cover-button";
 import { ExportDialog } from "@/components/manuscript/export-dialog";
+import { ShareReaderDialog } from "@/components/manuscript/share-reader-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
+import { Button } from "@/components/ui/button";
 import { markdownToHtml } from "@/lib/export/assemble";
 import { loadFigures } from "@/lib/export/figures";
 import { requireUser } from "@/lib/auth";
+import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book-package";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
@@ -80,8 +85,12 @@ export default async function ManuscriptPage({
   const previous = activeIndex > 0 ? readable[activeIndex - 1] : null;
   const next = activeIndex < readable.length - 1 ? readable[activeIndex + 1] : null;
   const isOpening = activeIndex === 0;
+  const isClosing = activeIndex === readable.length - 1;
   const chapterTitle = chapter.title?.trim() || `Chapter ${chapter.chapterNumber}`;
   const totalWords = readable.reduce((sum, c) => sum + c.wordCount, 0);
+  const matter = readBookMatter(book.frontMatter);
+  const openingMatter = openingBookMatter(matter);
+  const closingMatter = closingBookMatter(matter);
 
   return (
     <div className="space-y-4">
@@ -111,16 +120,18 @@ export default async function ManuscriptPage({
           </div>
         </div>
         <div className="flex max-w-full flex-wrap items-center gap-2">
-          <CoverButton
-            projectId={projectId}
-            hasCover={Boolean((book.frontMatter as { coverUrl?: string }).coverUrl)}
-          />
+          <CoverButton projectId={projectId} hasCover={Boolean(matter.coverUrl)} />
+          <Button variant="ghost" size="sm" render={<Link href={`/projects/${projectId}/book`} />}>
+            <BookMarked aria-hidden="true" />
+            Book setup
+          </Button>
           <BookIdentityDialog
             projectId={projectId}
             title={book.title}
             synopsis={book.synopsis}
-            author={(book.frontMatter as { author?: string }).author ?? null}
+            author={matter.author ?? null}
           />
+          <ShareReaderDialog projectId={projectId} />
           <ExportDialog projectId={projectId} />
         </div>
       </header>
@@ -128,9 +139,9 @@ export default async function ManuscriptPage({
       <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (
           <header className="mx-auto max-w-2xl py-6 text-center sm:py-16 [content-visibility:auto]">
-            {(book.frontMatter as { coverUrl?: string }).coverUrl ? (
+            {matter.coverUrl ? (
               <Image
-                src={(book.frontMatter as { coverUrl?: string }).coverUrl as string}
+                src={matter.coverUrl}
                 alt={`Cover of ${book.title}`}
                 width={288}
                 height={432}
@@ -147,19 +158,75 @@ export default async function ManuscriptPage({
             <h2 className="mt-5 font-display text-4xl font-semibold text-balance text-paper-foreground sm:text-5xl">
               {book.title}
             </h2>
-            {book.synopsis ? (
-              <p className="mx-auto mt-6 max-w-prose font-serif text-paper-muted">
-                {book.synopsis}
+            {matter.subtitle ? (
+              <p className="mx-auto mt-4 max-w-prose font-serif text-xl text-paper-muted">
+                {matter.subtitle}
               </p>
             ) : null}
-            <p className="mt-6 font-serif text-paper-muted italic">an early reading copy</p>
+            <p className="mt-8 font-serif text-paper-muted">
+              {matter.author ?? "Written with sopher.ai"}
+            </p>
+            <p className="mt-3 font-serif text-sm text-paper-muted italic">
+              {matter.editionName ?? "an early reading copy"}
+            </p>
             <p aria-hidden="true" className="mt-12 text-paper-muted">
               ⁂
             </p>
           </header>
         ) : null}
 
-        <section className="prose-manuscript prose-manuscript--book mx-auto [content-visibility:auto]">
+        {isOpening && (matter.copyrightHolder || matter.publisher || matter.isbn) ? (
+          <section className="mx-auto max-w-2xl border-t border-paper-edge py-12 font-serif text-sm leading-relaxed text-paper-muted sm:py-16">
+            <h2 className="sr-only">Copyright and edition details</h2>
+            {matter.copyrightHolder ? (
+              <p>
+                © {matter.copyrightYear ?? new Date().getFullYear()} {matter.copyrightHolder}. All
+                rights reserved.
+              </p>
+            ) : null}
+            {matter.publisher ? <p>Published by {matter.publisher}.</p> : null}
+            {matter.isbn ? <p>ISBN {matter.isbn}</p> : null}
+          </section>
+        ) : null}
+
+        {isOpening && matter.dedication ? (
+          <section className="mx-auto max-w-xl border-t border-paper-edge py-16 text-center sm:py-24">
+            <h2 className="sr-only">Dedication</h2>
+            <p className="font-serif text-lg italic text-paper-foreground">{matter.dedication}</p>
+          </section>
+        ) : null}
+
+        {isOpening && matter.epigraphText ? (
+          <section className="mx-auto max-w-xl border-t border-paper-edge py-16 sm:py-24">
+            <h2 className="sr-only">Epigraph</h2>
+            <blockquote className="font-serif text-lg leading-relaxed text-paper-foreground">
+              <p>{matter.epigraphText}</p>
+              {matter.epigraphAttribution ? (
+                <footer className="mt-4 text-right text-sm text-paper-muted">
+                  — {matter.epigraphAttribution}
+                </footer>
+              ) : null}
+            </blockquote>
+          </section>
+        ) : null}
+
+        {isOpening
+          ? openingMatter.map((section) => (
+              <section
+                key={section.key}
+                className="prose-manuscript mx-auto border-t border-paper-edge py-12 sm:py-16"
+              >
+                <h2>{section.title}</h2>
+                <div
+                  dangerouslySetInnerHTML={{
+                    __html: markdownToHtml(section.markdown, figures),
+                  }}
+                />
+              </section>
+            ))
+          : null}
+
+        <section className="prose-manuscript prose-manuscript--book mx-auto border-t border-paper-edge pt-12 [content-visibility:auto] sm:pt-16">
           <h2>
             Chapter {chapter.chapterNumber}
             {chapterTitle !== `Chapter ${chapter.chapterNumber}` ? (
@@ -174,6 +241,22 @@ export default async function ManuscriptPage({
             dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content, figures) }}
           />
         </section>
+
+        {isClosing
+          ? closingMatter.map((section) => (
+              <section
+                key={section.key}
+                className="prose-manuscript mx-auto mt-16 border-t border-paper-edge pt-12 sm:mt-24 sm:pt-16"
+              >
+                <h2>{section.title}</h2>
+                <div
+                  dangerouslySetInnerHTML={{
+                    __html: markdownToHtml(section.markdown, figures),
+                  }}
+                />
+              </section>
+            ))
+          : null}
       </div>
 
       <ChapterPager

@@ -7,6 +7,7 @@ import { Expand, ImagePlus, Loader2, TriangleAlert } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EntityCanonDialog } from "@/components/bible/entity-canon-dialog";
 import {
   Dialog,
   DialogContent,
@@ -19,6 +20,10 @@ import type { BibleEntity } from "@/db/queries/entities";
 import { PORTRAIT_USD, PORTRAIT_KINDS } from "@/lib/bible/portraits";
 import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
 import { creditsForUsd } from "@/lib/billing/credits-shared";
+import {
+  SUSPENDED_AUTHORING_MESSAGE,
+  useStudioSuspension,
+} from "@/components/studio/studio-access-context";
 import { setContinuityIssueStatus } from "@/lib/actions/continuity";
 import { cn } from "@/lib/utils";
 
@@ -118,6 +123,16 @@ const PROFILE_SECTIONS: Record<BibleEntity["kind"], ProfileSection[]> = {
         { key: "owner", label: "Owner" },
       ],
     },
+    {
+      title: "Story role",
+      fields: [
+        { key: "background", label: "History" },
+        { key: "goals", label: "Story purpose", list: true },
+        { key: "personality", label: "Character", list: true },
+        { key: "voice", label: "Sensory voice" },
+        { key: "arc", label: "How it changes" },
+      ],
+    },
   ],
   object: [
     {
@@ -128,6 +143,15 @@ const PROFILE_SECTIONS: Record<BibleEntity["kind"], ProfileSection[]> = {
         { key: "provenance", label: "Origin" },
         { key: "holder", label: "Held by" },
         { key: "capabilities", label: "Capabilities", list: true },
+      ],
+    },
+    {
+      title: "Story role",
+      fields: [
+        { key: "goals", label: "Story purpose", list: true },
+        { key: "personality", label: "Character", list: true },
+        { key: "voice", label: "Voice or presence" },
+        { key: "arc", label: "How it changes" },
       ],
     },
   ],
@@ -141,6 +165,17 @@ const PROFILE_SECTIONS: Record<BibleEntity["kind"], ProfileSection[]> = {
         { key: "reputation", label: "Reputation" },
       ],
     },
+    {
+      title: "Author canon",
+      fields: [
+        { key: "appearance", label: "Visible identity" },
+        { key: "background", label: "Background" },
+        { key: "goals", label: "Goals", list: true },
+        { key: "personality", label: "Character", list: true },
+        { key: "voice", label: "Voice" },
+        { key: "arc", label: "Arc" },
+      ],
+    },
   ],
   event: [
     {
@@ -150,6 +185,17 @@ const PROFILE_SECTIONS: Record<BibleEntity["kind"], ProfileSection[]> = {
         { key: "participants", label: "Participants", list: true },
         { key: "outcome", label: "Outcome" },
         { key: "significance", label: "Significance" },
+      ],
+    },
+    {
+      title: "Author canon",
+      fields: [
+        { key: "appearance", label: "Visible details" },
+        { key: "background", label: "Background" },
+        { key: "goals", label: "Forces in motion", list: true },
+        { key: "personality", label: "Tone", list: true },
+        { key: "voice", label: "Voice" },
+        { key: "arc", label: "Arc" },
       ],
     },
   ],
@@ -195,8 +241,19 @@ function visualCanonSummary(
   return summary || null;
 }
 
-export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflicts: Conflict[] }) {
+export function EntityCard({
+  projectId,
+  entity,
+  conflicts,
+  readOnlyReason,
+}: {
+  projectId: string;
+  entity: BibleEntity;
+  conflicts: Conflict[];
+  readOnlyReason?: string;
+}) {
   const router = useRouter();
+  const suspended = useStudioSuspension();
   const [portraitUrl, setPortraitUrl] = useState(entity.portraitUrl);
   const [busy, setBusy] = useState(false);
   const [busyIssue, setBusyIssue] = useState<{
@@ -245,6 +302,8 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
   const visualSummary = visualCanonSummary(entity.kind, attrs);
   const generatedImageCopy = GENERATED_IMAGE_COPY[entity.kind];
   const canHavePortrait = PORTRAIT_KINDS.includes(entity.kind);
+  const imageDisabled = busy || suspended || Boolean(readOnlyReason);
+  const imageHintId = `entity-${entity.id}-image-hint`;
   const populatedSections = PROFILE_SECTIONS[entity.kind]
     .map((section) => ({
       ...section,
@@ -255,7 +314,7 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
     .filter((section) => section.fields.length > 0);
 
   async function generatePortrait() {
-    if (busy) return;
+    if (busy || suspended || readOnlyReason) return;
     setBusy(true);
     setError(null);
     setActivityStatus(`${generatedImageCopy.pending} for ${entity.name}…`);
@@ -357,16 +416,23 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
               </p>
             ) : null}
           </div>
-          {conflicts.length > 0 ? (
-            <Badge
-              variant="destructive"
-              className="shrink-0 gap-1"
-              aria-label={`${conflicts.length} open ${conflicts.length === 1 ? "conflict" : "conflicts"}`}
-            >
-              <TriangleAlert aria-hidden="true" className="size-3" />
-              {conflicts.length} {conflicts.length === 1 ? "conflict" : "conflicts"}
-            </Badge>
-          ) : null}
+          <div className="flex shrink-0 flex-col items-end gap-2">
+            {conflicts.length > 0 ? (
+              <Badge
+                variant="destructive"
+                className="gap-1"
+                aria-label={`${conflicts.length} open ${conflicts.length === 1 ? "conflict" : "conflicts"}`}
+              >
+                <TriangleAlert aria-hidden="true" className="size-3" />
+                {conflicts.length} {conflicts.length === 1 ? "conflict" : "conflicts"}
+              </Badge>
+            ) : null}
+            <EntityCanonDialog
+              projectId={projectId}
+              entity={entity}
+              readOnlyReason={readOnlyReason}
+            />
+          </div>
         </div>
 
         {populatedSections.map((section) => (
@@ -476,8 +542,9 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
               size="sm"
               onClick={generatePortrait}
               aria-busy={busy || undefined}
-              aria-disabled={busy}
-              className={cn("w-full", busy && "opacity-50")}
+              aria-disabled={imageDisabled}
+              aria-describedby={imageHintId}
+              className={cn("w-full", imageDisabled && "cursor-not-allowed opacity-50")}
             >
               {busy ? (
                 <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -488,8 +555,10 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
                 ? "Generating…"
                 : `${generatedImageCopy.action} · ${creditsForUsd(PORTRAIT_USD).toFixed(1)} credits`}
             </Button>
-            <p className="mt-1 text-[0.65rem] text-muted-foreground">
-              ${PORTRAIT_USD.toFixed(3)} metered image cost
+            <p id={imageHintId} className="mt-1 text-[0.65rem] text-muted-foreground">
+              {suspended
+                ? SUSPENDED_AUTHORING_MESSAGE
+                : (readOnlyReason ?? `$${PORTRAIT_USD.toFixed(3)} metered image cost`)}
             </p>
             {error ? (
               <p role="alert" className={cn("mt-1 text-xs text-destructive")}>

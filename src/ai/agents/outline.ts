@@ -35,6 +35,8 @@ export type OutlineInput = {
   plotStructure?: string;
   /** Author feedback on a rejected outline; the regenerated outline must address it. */
   revisionNotes?: string;
+  /** One author-owned direction selected after concept development. */
+  creativeDirection?: string;
   /** Frozen POV, tense, tone, and content-boundary contract. */
   contentGuidelines?: string;
 };
@@ -153,6 +155,9 @@ function structurePlanPrompt(input: OutlineInput): string {
     input.revisionNotes
       ? `## Revision notes from the author\n${input.revisionNotes}\nAccount for these when choosing the structure and act boundaries.`
       : "",
+    input.creativeDirection
+      ? `## Author-selected story direction\n${input.creativeDirection}\nTreat this as a binding creative choice when selecting the structure.`
+      : "",
     input.contentGuidelines
       ? `## Authoring constraints\n${input.contentGuidelines}\nThe structure must make these constraints feasible.`
       : "",
@@ -197,6 +202,9 @@ function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: st
     `## Act plan (${structureId})\n${actPlan}`,
     input.revisionNotes
       ? `## Revision notes (must address)\nThe author rejected a previous outline with this feedback:\n${input.revisionNotes}`
+      : "",
+    input.creativeDirection
+      ? `## Author-selected story direction (must shape the chapter plan)\n${input.creativeDirection}`
       : "",
     input.contentGuidelines
       ? `## Authoring constraints (must hold in every chapter)\n${input.contentGuidelines}`

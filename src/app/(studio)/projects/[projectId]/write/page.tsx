@@ -118,6 +118,7 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
           : {}),
         cancellation: health.cancellation,
         pause: health.pause,
+        question: health.question,
         savedChapterCount: health.savedChapterCount,
         savedCheckpointCount: health.savedCheckpointCount,
         supportReference: health.supportReference,

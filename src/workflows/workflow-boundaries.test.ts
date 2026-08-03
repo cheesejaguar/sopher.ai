@@ -169,4 +169,39 @@ describe("workflow sandbox boundaries", () => {
       "nextEventSeq: existingDone ? allocatedDoneSeq : allocatedDoneSeq + 1",
     );
   });
+
+  it("registers the versioned creative hook before exposing the question", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/workflows/generate-book.ts"), "utf8");
+    const pauseStart = source.indexOf('allocateAuthoringPauseStep(ref, "creative_decision"');
+    const hookCreated = source.indexOf("createHook<{ inputId: string }>", pauseStart);
+    const conflictChecked = source.indexOf("await hook.getConflict()", hookCreated);
+    const registered = source.indexOf(
+      "await markCreativeQuestionPauseRegisteredStep",
+      conflictChecked,
+    );
+    const exposed = source.indexOf('stage: "awaiting_guidance"', registered);
+    const consumed = source.indexOf("await consumeCreativeDecisionStep", exposed);
+    const cleared = source.indexOf('clearAuthoringPauseStep(ref, "creative_decision"', consumed);
+
+    expect(pauseStart).toBeGreaterThanOrEqual(0);
+    expect(hookCreated).toBeGreaterThan(pauseStart);
+    expect(conflictChecked).toBeGreaterThan(hookCreated);
+    expect(registered).toBeGreaterThan(conflictChecked);
+    expect(exposed).toBeGreaterThan(registered);
+    expect(consumed).toBeGreaterThan(exposed);
+    expect(cleared).toBeGreaterThan(consumed);
+  });
+
+  it("hydrates an exact-input guided retry before any wallet or provider work", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/workflows/generate-book.ts"), "utf8");
+    const running = source.indexOf('await markRunStatus(ref, "running")');
+    const hydrated = source.indexOf("await hydratePreManuscriptRetryStep(ref, config)", running);
+    const wallet = source.indexOf("await creativeOpeningCreditCheckStep(ref, config)", hydrated);
+    const provider = source.indexOf("const developedConcept = await conceptStep(", hydrated);
+
+    expect(running).toBeGreaterThanOrEqual(0);
+    expect(hydrated).toBeGreaterThan(running);
+    expect(wallet).toBeGreaterThan(hydrated);
+    expect(provider).toBeGreaterThan(wallet);
+  });
 });

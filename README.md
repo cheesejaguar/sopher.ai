@@ -66,6 +66,30 @@ costs and credit packs live on the [pricing page](https://sopher.ai/pricing).
 
 Authors own the resulting manuscript and can edit, export, and publish it wherever they choose.
 
+## Current branch preview
+
+The following capabilities are implemented in `codex/creative-authoring-journeys` but are not part
+of the production deployment described above. When a later production deployment includes this
+branch, this section should be folded into **What is live**.
+
+- A choice between **Collaborative** production—which can ask one post-concept question with
+  exactly three suggested directions, one recommended, plus a custom response—and **Autopilot**,
+  which continues without that pause. A collaborative author can also let Sopher choose.
+- A stage-backed “living manuscript” production animation that reflects saved workflow progress and
+  has a complete reduced-motion presentation.
+- Author-managed Story Bible canon, including structured character profiles, additions and edits,
+  duplicate safeguards, and an active-production lock.
+- A non-destructive whole-manuscript direction pass that turns one author instruction into anchored
+  suggestions to accept, edit, or reject.
+- A book package for title-page identity, rights details, dedication, epigraph, opening matter, and
+  closing matter, propagated through the manuscript reader and exports.
+- Immutable browser reader editions shared through unlisted bearer links with optional expiry and
+  download, explicit revocation, noindex protections, and only a token fingerprint stored in the
+  database.
+
+Reader-link environments should set an independent `READER_LINK_SECRET`; do not commit that value
+or any other `.env*` file.
+
 ## How a book is written
 
 The public workflow has five stages:

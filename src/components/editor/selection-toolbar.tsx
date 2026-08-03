@@ -34,6 +34,10 @@ import {
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  SUSPENDED_AUTHORING_MESSAGE,
+  useStudioSuspension,
+} from "@/components/studio/studio-access-context";
 
 export type ContentToolId = "mermaid" | "illustration";
 
@@ -80,6 +84,7 @@ export function SelectionToolbar({
   onEdit: (instruction: string) => void;
   onTool: (toolId: ContentToolId) => void;
 }) {
+  const suspended = useStudioSuspension();
   const [customOpen, setCustomOpen] = useState(false);
   const [custom, setCustom] = useState("");
 
@@ -102,7 +107,11 @@ export function SelectionToolbar({
       aria-label="AI tools for the selected passage"
       className="z-30 flex max-w-[calc(100vw-1rem)] items-center gap-0.5 overflow-x-auto rounded-sm border border-border bg-popover p-1 shadow-md"
     >
-      {busy ? (
+      {suspended ? (
+        <span className="max-w-sm px-2 py-1 text-xs text-muted-foreground">
+          AI tools unavailable while this account is suspended.
+        </span>
+      ) : busy ? (
         <span role="status" className="flex items-center gap-2 px-2 py-1 text-xs text-ai">
           <Spinner aria-hidden="true" className="size-3.5" />
           Working on it…
@@ -199,6 +208,7 @@ export function SelectionToolsSheet({
   onEdit: (instruction: string) => void;
   onTool: (toolId: ContentToolId) => void;
 }) {
+  const suspended = useStudioSuspension();
   const [custom, setCustom] = useState("");
 
   function runEdit(instruction: string) {
@@ -235,7 +245,11 @@ export function SelectionToolsSheet({
         </SheetHeader>
 
         <div className="space-y-5 px-4 py-4">
-          {busy ? (
+          {suspended ? (
+            <p className="border-y border-destructive/35 py-3 text-sm text-muted-foreground">
+              {SUSPENDED_AUTHORING_MESSAGE}
+            </p>
+          ) : busy ? (
             <p role="status" className="flex min-h-11 items-center gap-2 text-sm text-ai">
               <Spinner aria-hidden="true" className="size-4" />
               Working on the selected passage…

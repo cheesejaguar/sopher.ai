@@ -7,6 +7,7 @@ export const projectGenreSchema = z.string().min(1).max(60);
 
 export const projectSettingsSchema = z
   .object({
+    authoringMode: z.enum(["guided", "autopilot"]).optional(),
     pov: z.enum(["first", "third_limited", "third_omniscient"]).optional(),
     tense: z.enum(["past", "present"]).optional(),
     tone: z.string().max(200).optional(),

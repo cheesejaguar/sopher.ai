@@ -55,6 +55,7 @@ export type AuthorInputs = {
 };
 
 const SETTING_LABELS: Record<keyof ProjectSettings, string> = {
+  authoringMode: "Authoring mode",
   pov: "Point of view",
   tense: "Tense",
   tone: "Tone",

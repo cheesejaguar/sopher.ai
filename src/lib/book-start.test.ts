@@ -47,6 +47,8 @@ describe("book start snapshot", () => {
         }),
       ),
     ).toMatchObject({
+      protocolVersion: 3,
+      interaction: { mode: "guided", maxQuestions: 1 },
       productionMode: "trial_short_story",
       tier: "standard",
       requireOutlineApproval: true,
@@ -71,6 +73,8 @@ describe("book start snapshot", () => {
         }),
       ),
     ).toMatchObject({
+      protocolVersion: 3,
+      interaction: { mode: "guided", maxQuestions: 1 },
       productionMode: "full_book",
       tier: "premium",
       requireOutlineApproval: false,
@@ -78,6 +82,17 @@ describe("book start snapshot", () => {
       targetChapters: 12,
       targetWordsPerChapter: 3_000,
     });
+  });
+
+  it("freezes an author's autopilot choice without a creative-decision pause", () => {
+    expect(
+      buildBookGenerationConfig(
+        project({
+          experience: "full_book",
+          settings: { authoringMode: "autopilot" },
+        }),
+      ).interaction,
+    ).toEqual({ mode: "autopilot", maxQuestions: 0 });
   });
 
   it("regenerates trial chapters with the same fixed entitlement and title snapshot", () => {

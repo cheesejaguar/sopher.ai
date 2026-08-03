@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import Script from "next/script";
 import { Analytics, type BeforeSendEvent } from "@vercel/analytics/next";
 
+import { isReaderPath } from "@/lib/analytics/attribution";
+
 type AnalyticsWindow = Window & {
   dataLayer?: unknown[][];
   gtag?: (...args: unknown[]) => void;
@@ -12,9 +14,14 @@ type AnalyticsWindow = Window & {
 
 const PRIVATE_PATH_PREFIXES = ["/studio", "/projects", "/admin", "/sign-in", "/sign-up", "/api"];
 
-function publicVercelEvent(event: BeforeSendEvent): BeforeSendEvent | null {
+export function publicVercelEvent(event: BeforeSendEvent): BeforeSendEvent | null {
   const url = new URL(event.url, window.location.origin);
-  if (PRIVATE_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return null;
+  if (
+    isReaderPath(url.pathname) ||
+    PRIVATE_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))
+  ) {
+    return null;
+  }
   return { ...event, url: `${url.origin}${url.pathname}` };
 }
 

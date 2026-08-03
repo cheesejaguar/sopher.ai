@@ -58,6 +58,7 @@ export function ProjectSettingsForm({
           styleGuide: read("styleGuide") || undefined,
           settings: {
             ...defaults.settings,
+            authoringMode: read("authoringMode") === "autopilot" ? "autopilot" : "guided",
             pov: (read("pov") || undefined) as ProjectSettings["pov"],
             tense: (read("tense") || undefined) as ProjectSettings["tense"],
             tone: read("tone") || undefined,
@@ -317,6 +318,50 @@ export function ProjectSettingsForm({
           placeholder="Wry, warm, a little melancholy…"
         />
       </div>
+
+      <fieldset className="space-y-3 border-t border-border pt-5">
+        <legend className="folio-label px-1 text-muted-foreground">Authoring mode</legend>
+        <p id="ps-authoring-mode-help" className="text-xs leading-relaxed text-muted-foreground">
+          Choose whether the next full production pauses once after the concept so you can steer a
+          meaningful creative decision. This setting is frozen when a run starts.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2" aria-describedby="ps-authoring-mode-help">
+          <label className="flex min-h-24 cursor-pointer gap-3 rounded-sm border border-border p-4 text-sm has-checked:border-primary has-checked:ring-1 has-checked:ring-primary">
+            <input
+              type="radio"
+              name="authoringMode"
+              value="guided"
+              defaultChecked={(defaults.settings.authoringMode ?? "guided") === "guided"}
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+            />
+            <span>
+              <span className="flex flex-wrap items-baseline gap-2 font-medium">
+                Collaborative
+                <span className="folio-label text-primary">Recommended</span>
+              </span>
+              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                Answer one focused question with three suggested directions, a custom response, or
+                let Sopher choose.
+              </span>
+            </span>
+          </label>
+          <label className="flex min-h-24 cursor-pointer gap-3 rounded-sm border border-border p-4 text-sm has-checked:border-primary has-checked:ring-1 has-checked:ring-primary">
+            <input
+              type="radio"
+              name="authoringMode"
+              value="autopilot"
+              defaultChecked={defaults.settings.authoringMode === "autopilot"}
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+            />
+            <span>
+              <span className="font-medium">Autopilot</span>
+              <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                Sopher makes that decision and continues without the creative check-in.
+              </span>
+            </span>
+          </label>
+        </div>
+      </fieldset>
 
       <label
         htmlFor="ps-outline-approval"

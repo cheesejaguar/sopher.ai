@@ -220,7 +220,7 @@ export function EditorShell({
   const [busy, setBusy] = useState<Busy>(null);
   const [conflict, setConflict] = useState<{ currentVersion: number } | null>(null);
   const [chaptersOpen, setChaptersOpen] = useState(false);
-  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(searchParams.get("suggestions") === "1");
   const [findOpen, setFindOpen] = useState(false);
   const [selectionToolsOpen, setSelectionToolsOpen] = useState(false);
   const [, forceLayout] = useReducer((n: number) => n + 1, 0);

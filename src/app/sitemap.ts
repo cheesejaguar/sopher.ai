@@ -16,7 +16,7 @@ import { GUIDES } from "@/lib/marketing/guides";
 const UPDATED = {
   home: new Date("2026-07-29"),
   pricing: new Date("2026-07-29"),
-  legal: new Date("2026-07-29"),
+  legal: new Date("2026-08-02"),
   content: new Date("2026-07-29"),
 };
 

@@ -25,6 +25,7 @@ vi.mock("@/workflows/export", () => ({ exportBook: vi.fn() }));
 import {
   dispatchExportWorkflow,
   exportDispatchRecoveryAction,
+  reconcileLinkedExportWorkflow,
   type ExportDispatchSnapshot,
 } from "@/lib/export-dispatch";
 
@@ -135,5 +136,133 @@ describe("export dispatch recovery", () => {
     expect(selfLink).toBeGreaterThan(0);
     expect(guardedTry).toBeGreaterThan(selfLink);
     expect(upload).toBeGreaterThan(guardedTry);
+  });
+
+  it("repairs a lost completed transition only when the saved export asset exists", async () => {
+    const snapshot = run({ status: "running", workflowRunId: "workflow-1" });
+    const transition = vi.fn(async () => true);
+    const observeWorkflow = vi.fn(async () => ({
+      status: "completed" as const,
+      missingCount: 0,
+      missingSince: null,
+    }));
+
+    await expect(
+      reconcileLinkedExportWorkflow(snapshot, {
+        readWorkflow: vi.fn(async () => ({
+          status: "completed" as const,
+          startedAt: now,
+          completedAt: now,
+        })),
+        observeWorkflow,
+        hasSavedAsset: vi.fn(async () => true),
+        transition,
+      }),
+    ).resolves.toBe("completed");
+    expect(transition).toHaveBeenCalledWith(snapshot, "completed", null);
+  });
+
+  it("fails a completed Workflow whose immutable export file is missing", async () => {
+    const snapshot = run({ status: "running", workflowRunId: "workflow-1" });
+    const transition = vi.fn(async () => true);
+
+    await expect(
+      reconcileLinkedExportWorkflow(snapshot, {
+        readWorkflow: vi.fn(async () => ({
+          status: "completed" as const,
+          startedAt: now,
+          completedAt: now,
+        })),
+        observeWorkflow: vi.fn(async () => ({
+          status: "completed" as const,
+          missingCount: 0,
+          missingSince: null,
+        })),
+        hasSavedAsset: vi.fn(async () => false),
+        transition,
+      }),
+    ).resolves.toBe("failed");
+    expect(transition).toHaveBeenCalledWith(
+      snapshot,
+      "failed",
+      "The export Workflow completed without a saved export file",
+    );
+  });
+
+  it.each(["failed", "cancelled"] as const)(
+    "repairs a remotely %s linked export",
+    async (workflowStatus) => {
+      const snapshot = run({ status: "running", workflowRunId: "workflow-1" });
+      const transition = vi.fn(async () => true);
+      await expect(
+        reconcileLinkedExportWorkflow(snapshot, {
+          readWorkflow: vi.fn(async () => ({
+            status: workflowStatus,
+            startedAt: now,
+            completedAt: now,
+          })),
+          observeWorkflow: vi.fn(async () => ({
+            status: workflowStatus,
+            missingCount: 0,
+            missingSince: null,
+          })),
+          hasSavedAsset: vi.fn(async () => false),
+          transition,
+        }),
+      ).resolves.toBe(workflowStatus);
+      expect(transition).toHaveBeenCalledWith(
+        snapshot,
+        workflowStatus,
+        workflowStatus === "failed"
+          ? "The export Workflow stopped before the file was saved"
+          : null,
+      );
+    },
+  );
+
+  it("preserves unavailable and inconclusively missing Workflows", async () => {
+    const snapshot = run({ status: "running", workflowRunId: "workflow-1" });
+    const transition = vi.fn(async () => true);
+    for (const workflowStatus of ["unavailable", "missing"] as const) {
+      await expect(
+        reconcileLinkedExportWorkflow(snapshot, {
+          readWorkflow: vi.fn(async () => ({
+            status: workflowStatus,
+            startedAt: null,
+            completedAt: null,
+          })),
+          observeWorkflow: vi.fn(async () => ({
+            status: workflowStatus,
+            missingCount: workflowStatus === "missing" ? 1 : 0,
+            missingSince: workflowStatus === "missing" ? now : null,
+          })),
+          hasSavedAsset: vi.fn(async () => false),
+          transition,
+        }),
+      ).resolves.toBe("unchanged");
+    }
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes only after conclusive missing observations, recovering a saved asset", async () => {
+    const snapshot = run({ status: "running", workflowRunId: "workflow-1" });
+    const transition = vi.fn(async () => true);
+    await expect(
+      reconcileLinkedExportWorkflow(snapshot, {
+        readWorkflow: vi.fn(async () => ({
+          status: "missing" as const,
+          startedAt: null,
+          completedAt: null,
+        })),
+        observeWorkflow: vi.fn(async () => ({
+          status: "missing" as const,
+          missingCount: 3,
+          missingSince: new Date(Date.now() - 11 * 60_000),
+        })),
+        hasSavedAsset: vi.fn(async () => true),
+        transition,
+      }),
+    ).resolves.toBe("completed");
+    expect(transition).toHaveBeenCalledWith(snapshot, "completed", null);
   });
 });

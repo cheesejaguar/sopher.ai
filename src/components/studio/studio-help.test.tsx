@@ -137,6 +137,8 @@ describe("StudioHelp", () => {
     );
     await screen.findByText(/3 of 7 milestones complete/i);
 
+    expect(screen.getByText("Writing a useful brief")).toBeVisible();
+    expect(screen.getByText(/working title and brief remain editable/i)).toBeVisible();
     expect(screen.getByRole("button", { name: "Science Fiction craft guide" })).toHaveAttribute(
       "href",
       "/genres/science-fiction",
@@ -145,6 +147,7 @@ describe("StudioHelp", () => {
       "href",
       "/guides",
     );
+    expect(track).toHaveBeenCalledWith("help_opened", { area: "brief" });
   });
 
   it("copies the owned run statuses and support reference without manuscript content", async () => {
