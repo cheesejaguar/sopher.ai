@@ -13,14 +13,30 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Toaster } from "@/components/ui/sonner";
 import {
   exportIsActive,
   type ExportHistoryItem,
   type ExportHistoryResponse,
 } from "@/lib/export/history";
-import type { ExportFormat } from "@/lib/export/types";
+import {
+  DEFAULT_PRINT_OPTIONS,
+  TRIM_SIZE_IDS,
+  TRIM_SIZES,
+  type ExportFormat,
+  type PrintOptions,
+  type TrimSizeId,
+} from "@/lib/export/types";
 import { cn } from "@/lib/utils";
 
 const FORMATS: {
@@ -50,8 +66,35 @@ const FORMATS: {
   {
     id: "pdf",
     name: "Proof PDF",
-    blurb: "Review the reading layout or share a fixed proof; not a press-ready interior",
+    blurb: "Share a fixed proof, or set the print layout below for a press-ready interior",
     icon: FileDown,
+  },
+];
+
+const TRIM_ITEMS = Object.fromEntries(
+  TRIM_SIZE_IDS.map((id) => [id, `${TRIM_SIZES[id].label} — ${TRIM_SIZES[id].blurb}`] as const),
+) as Record<TrimSizeId, string>;
+
+type PrintToggle = Exclude<keyof PrintOptions, "trim">;
+
+const PRINT_TOGGLES: { key: PrintToggle; label: string; description: string }[] = [
+  {
+    key: "bindingMargins",
+    label: "Mirrored margins with a binding gutter",
+    description:
+      "Widens the margin against the spine and swaps it side to side, growing with the page count the way a bound book needs.",
+  },
+  {
+    key: "runningHeads",
+    label: "Running heads and outside page numbers",
+    description:
+      "Your name on left-hand pages, the title on right-hand pages, and folios at the outside edge — none of them on chapter openings.",
+  },
+  {
+    key: "rectoChapterStarts",
+    label: "Open chapters on a right-hand page",
+    description:
+      "Adds a blank left-hand page where a chapter would otherwise start on the back of a leaf.",
   },
 ];
 
@@ -114,6 +157,7 @@ export function ExportDialog({ projectId }: { projectId: string }) {
   const [phase, setPhase] = React.useState<Phase>({ name: "loading" });
   const [history, setHistory] = React.useState<ExportHistoryItem[]>([]);
   const [historyError, setHistoryError] = React.useState("");
+  const [print, setPrint] = React.useState<PrintOptions>(DEFAULT_PRINT_OPTIONS);
   const generation = React.useRef(0);
 
   const upsertHistory = React.useCallback((record: ExportHistoryItem) => {
@@ -274,7 +318,8 @@ export function ExportDialog({ projectId }: { projectId: string }) {
       const response = await fetch(`/api/projects/${projectId}/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format }),
+        // Print layout only shapes the PDF; the other formats have no pages.
+        body: JSON.stringify(format === "pdf" ? { format, print } : { format }),
       });
       const body = (await response.json().catch(() => ({}))) as {
         runId?: string;
@@ -393,6 +438,84 @@ export function ExportDialog({ projectId }: { projectId: string }) {
             );
           })}
         </div>
+
+        <section
+          aria-labelledby="print-layout-heading"
+          className="space-y-3 border-t border-border pt-4"
+        >
+          <div className="space-y-1">
+            <h3 id="print-layout-heading" className="text-sm font-semibold">
+              PDF print layout
+            </h3>
+            <p id="print-layout-hint" className="text-xs text-muted-foreground">
+              Shapes the Proof PDF only. Left alone, it exports the reading proof it always has;
+              switched on, it prepares an interior a printer can bind.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {/* A Select's trigger is a button, which a <label> cannot name — the
+                matching aria-label on the trigger carries it instead. */}
+            <span className="text-sm leading-none font-medium">Trim size</span>
+            <Select
+              items={TRIM_ITEMS}
+              value={print.trim}
+              disabled={busy}
+              onValueChange={(value) => {
+                if (typeof value === "string" && value in TRIM_SIZES) {
+                  setPrint((current) => ({ ...current, trim: value as TrimSizeId }));
+                }
+              }}
+            >
+              <SelectTrigger
+                className="w-full sm:w-72"
+                aria-label="Trim size"
+                aria-describedby="print-layout-hint"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TRIM_SIZE_IDS.map((id) => (
+                  <SelectItem key={id} value={id}>
+                    {TRIM_ITEMS[id]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <fieldset disabled={busy} className="space-y-2">
+            <legend className="sr-only">Print interior options</legend>
+            {PRINT_TOGGLES.map((toggle) => {
+              const inputId = `print-${toggle.key}`;
+              const descriptionId = `${inputId}-description`;
+              return (
+                <div
+                  key={toggle.key}
+                  className="flex min-w-0 items-center justify-between gap-4 py-1"
+                >
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <Label htmlFor={inputId}>{toggle.label}</Label>
+                    <p id={descriptionId} className="text-xs leading-relaxed text-muted-foreground">
+                      {toggle.description}
+                    </p>
+                  </div>
+                  <span className="flex min-h-11 min-w-11 shrink-0 items-center justify-end">
+                    <Switch
+                      id={inputId}
+                      aria-label={toggle.label}
+                      aria-describedby={descriptionId}
+                      checked={print[toggle.key]}
+                      onCheckedChange={(checked) => {
+                        setPrint((current) => ({ ...current, [toggle.key]: checked === true }));
+                      }}
+                    />
+                  </span>
+                </div>
+              );
+            })}
+          </fieldset>
+        </section>
 
         <p role="status" className="sr-only">
           {status}

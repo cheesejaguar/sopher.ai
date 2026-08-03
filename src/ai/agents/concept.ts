@@ -11,7 +11,11 @@ import {
   meteredMaxOutputTokens,
 } from "@/ai/metering-limits";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
-import { CONCEPT_SYSTEM_PROMPT, buildConceptUserPrompt } from "@/ai/prompts/concept";
+import {
+  buildConceptUserPrompt,
+  conceptGenreFraming,
+  CONCEPT_SYSTEM_PROMPT,
+} from "@/ai/prompts/concept";
 import { conceptSchema, type BookConcept } from "@/ai/schemas";
 import { anthropicCachedSystem } from "@/ai/cache";
 
@@ -43,6 +47,10 @@ function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
     ctx.genre ? `## Genre\n${ctx.genre}` : "",
     ctx.targetAudience ? `## Target audience\n${ctx.targetAudience}` : "",
     ctx.contentGuidelines ? `## Authoring constraints\n${ctx.contentGuidelines}` : "",
+    // Refine runs after expand and rewrites elements wholesale. Without the same
+    // non-fiction/audience framing the expand pass got, it happily re-invents a
+    // memoir's real cast to make the concept "stronger".
+    ...conceptGenreFraming(ctx.genre),
     `Identify the 2-3 weakest elements of this concept judged against what ${
       ctx.genre ? `${ctx.genre} readers` : "readers of this genre"
     } expect — a generic logline, a low-stakes central conflict, interchangeable characters, themes that don't connect to the plot, or "unique" elements that are actually common tropes.`,

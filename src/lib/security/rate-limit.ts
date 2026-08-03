@@ -24,6 +24,11 @@ export const LIMITS = {
   llmTool: "llm-tool",
   /** Cover and character portrait generation. */
   imageGen: "image-gen",
+  /**
+   * Re-compositing cover lettering. Free and deterministic, so it must not
+   * consume the paid image-generation bucket.
+   */
+  coverCompose: "cover-compose",
   /** Stripe Checkout session creation. */
   checkout: "checkout",
   /** Starting or restarting a full book run. */

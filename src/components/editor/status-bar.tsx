@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useEditorState, type Editor } from "@tiptap/react";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Check,
   CircleHelp,
   FilePenLine,
@@ -21,14 +23,21 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatWordCount } from "@/lib/editor/chapter-status";
+import {
+  CHAPTER_PACE_LABELS,
+  chapterPace,
+  estimatePages,
+  estimateReadingMinutes,
+  formatReadingTime,
+  WORDS_PER_PAGE,
+  type ChapterPace,
+} from "@/lib/manuscript-stats";
 import type { EditorProductionStatus } from "@/lib/editor/types";
 import { useStudioCoachmark, useStudioHelp } from "@/components/studio/studio-help-context";
 import { StudioCoachmark } from "@/components/studio/studio-coachmark";
 import { useStudioSuspension } from "@/components/studio/studio-access-context";
 
 import type { SaveState } from "./use-autosave";
-
-const READING_WPM = 230;
 
 /**
  * Announcements for the save state. "Unsaved changes" and "Saving…" are
@@ -344,6 +353,33 @@ export function MobileEditorToolbar({
   );
 }
 
+/**
+ * How this chapter is running against its target. Over and under are ordinary
+ * states of a draft, so only landing on target is coloured; the rest stay in the
+ * status bar's own muted voice rather than nagging on every keystroke.
+ */
+function ChapterPaceReadout({ pace, delta }: { pace: ChapterPace; delta: number }) {
+  if (pace === "empty") return null;
+  const Icon = pace === "on_target" ? Check : pace === "over" ? ArrowUp : ArrowDown;
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-0.5",
+        pace === "on_target" ? "text-success" : "text-muted-foreground",
+      )}
+    >
+      <Icon aria-hidden="true" className="size-3" />
+      <span aria-hidden="true">
+        {pace === "on_target" ? "on target" : formatWordCount(Math.abs(delta))}
+      </span>
+      <span className="sr-only">
+        {CHAPTER_PACE_LABELS[pace]}
+        {pace === "on_target" ? "" : ` by ${formatWordCount(Math.abs(delta))} words`}
+      </span>
+    </span>
+  );
+}
+
 export function getEditorCoachmarkKind({
   autosaveVisible,
   selectionVisible,
@@ -399,7 +435,9 @@ export function StatusBar({
     hasSelection: historyState?.hasSelection ?? false,
   });
   const wordCount = words ?? 0;
-  const readingMinutes = Math.max(1, Math.round(wordCount / READING_WPM));
+  const pages = estimatePages(wordCount);
+  const readingMinutes = estimateReadingMinutes(wordCount);
+  const pace = chapterPace(wordCount, targetWords);
 
   return (
     <TooltipProvider>
@@ -424,10 +462,21 @@ export function StatusBar({
           <SaveAnnouncer state={saveState} />
         </div>
 
-        <p className="hidden font-mono text-muted-foreground tabular-nums sm:block">
-          {formatWordCount(wordCount)}
-          <span className="text-muted-foreground"> / {formatWordCount(targetWords)} words</span>
-          <span className="text-muted-foreground"> · {readingMinutes} min read</span>
+        <p className="hidden min-w-0 items-baseline gap-2 font-mono text-muted-foreground tabular-nums sm:flex">
+          <span className="text-foreground">{formatWordCount(wordCount)}</span>
+          <span>/ {formatWordCount(targetWords)} words</span>
+          {/* The bar is only ~640px wide at `sm`, with the save state and the
+              tool buttons on either side. Pace and pages wait for `md` rather
+              than pushing the row into a wrap. */}
+          <span className="hidden md:contents">
+            <ChapterPaceReadout pace={pace} delta={wordCount - targetWords} />
+            <span aria-hidden="true">·</span>
+            <span title={`Estimated at ${WORDS_PER_PAGE} words a printed page`}>
+              ~{formatWordCount(pages)} {pages === 1 ? "page" : "pages"}
+            </span>
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>{formatReadingTime(readingMinutes)} read</span>
         </p>
 
         <div className="flex items-center gap-1">

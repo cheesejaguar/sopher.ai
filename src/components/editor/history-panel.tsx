@@ -39,6 +39,11 @@ const SOURCE_LABELS: Record<string, string> = {
   "pre-restore": "Before a restore",
   suggestion: "Suggestion applied",
   workflow: "Generated",
+  "pre-split": "Before a chapter split",
+  "pre-merge": "Before a chapter merge",
+  "pre-merge-absorbed": "Merged into the previous chapter",
+  "book-replace": "Before a book-wide replace",
+  import: "Imported draft",
 };
 
 export function revisionSourceLabel(source: string): string {

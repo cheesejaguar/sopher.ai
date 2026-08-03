@@ -141,6 +141,13 @@
       "when": 1785753600000,
       "tag": "0019_notification_preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1785840000000,
+      "tag": "0020_manuscript_content_fts",
+      "breakpoints": true
     }
   ]
 }

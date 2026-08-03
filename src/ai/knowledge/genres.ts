@@ -12,7 +12,19 @@
  *
  * Ported from `_port/backend/genre_templates.py`. All descriptions, guidance,
  * tips, tropes, avoid lists, and reader expectations are preserved verbatim.
+ *
+ * Five further genres — historical fiction, young adult, middle grade,
+ * children's, and memoir — live in `./genres-extended` and are registered here.
+ * They import only types from this module, so there is no runtime cycle.
  */
+
+import {
+  CHILDRENS_TEMPLATE,
+  HISTORICAL_FICTION_TEMPLATE,
+  MEMOIR_TEMPLATE,
+  MIDDLE_GRADE_TEMPLATE,
+  YOUNG_ADULT_TEMPLATE,
+} from "./genres-extended";
 
 /** Canonical genre identifiers. */
 export type GenreId =
@@ -22,7 +34,19 @@ export type GenreId =
   | "thriller"
   | "literary_fiction"
   | "science_fiction"
-  | "horror";
+  | "horror"
+  | "historical_fiction"
+  | "young_adult"
+  | "middle_grade"
+  | "childrens"
+  | "memoir";
+
+/**
+ * Reader age band. Drives chapter-length defaults and the content guardrails
+ * that must hold regardless of the author's own settings — a children's book
+ * never carries adult heat or graphic violence, whatever the project says.
+ */
+export type GenreAudience = "adult" | "young_adult" | "middle_grade" | "children";
 
 /** Chapter positions used for genre-specific chapter guidance. */
 export type ChapterPosition = "opening" | "early" | "midpoint" | "late" | "climax" | "ending";
@@ -43,6 +67,24 @@ export interface GenreTemplate {
   /** Display name, e.g. "Literary Fiction". */
   genre: string;
   description: string;
+  /**
+   * Reader age band. Absent means adult, which is what every one of the
+   * original seven templates is — so omitting it keeps them unchanged.
+   */
+  audience?: GenreAudience;
+  /**
+   * True for forms with no invented cast and no plotted arc. The outline and
+   * Story Bible layers branch on this: a memoir has real people and a driving
+   * question, not characters and a three-act structure.
+   */
+  nonFiction?: boolean;
+  /** Suggested chapter count when the author has not chosen one. */
+  defaultChapters?: number;
+  /**
+   * Suggested words per chapter. A children's chapter is a fraction of an adult
+   * one, and defaulting them to the same 3,000 words produces an unreadable book.
+   */
+  defaultWordsPerChapter?: number;
   coreElements: readonly GenreElement[];
   chapterGuidance: Readonly<Record<ChapterPosition, string>>;
   toneRecommendations: readonly string[];
@@ -974,6 +1016,11 @@ export const GENRE_IDS = [
   "literary_fiction",
   "science_fiction",
   "horror",
+  "historical_fiction",
+  "young_adult",
+  "middle_grade",
+  "childrens",
+  "memoir",
 ] as const satisfies readonly GenreId[];
 
 export const GENRE_TEMPLATES: Record<GenreId, GenreTemplate> = {
@@ -984,6 +1031,11 @@ export const GENRE_TEMPLATES: Record<GenreId, GenreTemplate> = {
   literary_fiction: LITERARY_FICTION_TEMPLATE,
   science_fiction: SCIENCE_FICTION_TEMPLATE,
   horror: HORROR_TEMPLATE,
+  historical_fiction: HISTORICAL_FICTION_TEMPLATE,
+  young_adult: YOUNG_ADULT_TEMPLATE,
+  middle_grade: MIDDLE_GRADE_TEMPLATE,
+  childrens: CHILDRENS_TEMPLATE,
+  memoir: MEMOIR_TEMPLATE,
 };
 
 /** Alias names accepted by lookups, mapped to canonical genre ids. */
@@ -993,7 +1045,35 @@ export const GENRE_ALIASES: Readonly<Record<string, GenreId>> = {
   sci_fi: "science_fiction",
   scifi: "science_fiction",
   sf: "science_fiction",
+  historical: "historical_fiction",
+  ya: "young_adult",
+  teen: "young_adult",
+  mg: "middle_grade",
+  "middle-grade": "middle_grade",
+  children: "childrens",
+  // Lookups normalize spaces to underscores before matching, so alias keys are
+  // written in their post-normalization form.
+  "children's": "childrens",
+  childrens_book: "childrens",
+  kids: "childrens",
+  picture_book: "childrens",
+  chapter_book: "childrens",
+  autobiography: "memoir",
+  personal_essay: "memoir",
+  nonfiction: "memoir",
 };
+
+/** The audience a genre is written for. Unknown genres are treated as adult. */
+export function genreAudience(genre: string | null | undefined): GenreAudience {
+  if (!genre) return "adult";
+  return getGenreTemplate(genre)?.audience ?? "adult";
+}
+
+/** True when the genre is a non-fiction form (no invented cast, no plotted arc). */
+export function isNonFictionGenre(genre: string | null | undefined): boolean {
+  if (!genre) return false;
+  return getGenreTemplate(genre)?.nonFiction === true;
+}
 
 /** Get a genre template by name (case-insensitive; accepts aliases, spaces, and hyphens). */
 export function getGenreTemplate(genre: string): GenreTemplate | undefined {

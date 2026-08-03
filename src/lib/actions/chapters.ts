@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { revalidatePath } from "next/cache";
@@ -8,6 +8,12 @@ import { revalidatePath } from "next/cache";
 import { getDb, getSqlClient, schema } from "@/db";
 import { getChapterOwnership } from "@/db/queries/books";
 import { requireUser } from "@/lib/auth";
+import {
+  chapterSplitPoints,
+  mergeChapterContent,
+  splitChapterContent,
+  type ChapterSplitPoint,
+} from "@/lib/chapter-split";
 import { countWords } from "@/lib/editor/anchors";
 import { generationResetMetadata, isGenerationResetSource } from "@/lib/generation-archive";
 import {
@@ -341,6 +347,298 @@ export async function moveChapter(chapterId: string, direction: "up" | "down"): 
   ]);
   if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
     throw new Error("Finish or stop the current run before changing the manuscript");
+  }
+  revalidatePath(`/projects/${ownership.projectId}`);
+}
+
+/** How many split points the dialog will offer before it stops being a menu. */
+const MAX_SPLIT_POINTS = 200;
+
+/**
+ * The paragraph starts the split dialog offers. Read-only, so it deliberately
+ * does not care whether a run is in flight — the author may look before the
+ * manuscript is theirs to change.
+ */
+export async function getChapterSplitPoints(chapterId: string): Promise<ChapterSplitPoint[]> {
+  const { userId } = await requireUser();
+  if (!z.uuid().safeParse(chapterId).success) throw new Error("Chapter not found");
+
+  const ownership = await getChapterOwnership(chapterId);
+  if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+
+  const [chapter] = await getDb()
+    .select({ content: schema.chapters.content })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.id, chapterId))
+    .limit(1);
+  if (!chapter) throw new Error("Chapter not found");
+  return chapterSplitPoints(chapter.content, MAX_SPLIT_POINTS);
+}
+
+/**
+ * Cuts a chapter in two at a character offset: the prose before the cut stays
+ * where it is and everything after it becomes a new chapter in the next slot.
+ *
+ * Renumbering reuses addChapter's parking offset — everything from the new slot
+ * onward jumps to +100000 and settles one higher — so uq_chapter_num never sees
+ * two rows claiming the same number partway through. Every statement also
+ * re-checks the version this split was computed from and the row is locked for
+ * the duration, so an editor save racing the split makes the whole transaction
+ * a no-op instead of leaving the second half duplicated.
+ */
+export async function splitChapter(
+  chapterId: string,
+  offset: number,
+): Promise<{ chapterNumber: number }> {
+  const { userId } = await requireUser();
+  if (!z.uuid().safeParse(chapterId).success) throw new Error("Chapter not found");
+
+  const ownership = await getChapterOwnership(chapterId);
+  if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+  await assertNoActiveAuthoringRun(ownership.projectId);
+
+  const db = getDb();
+  const [chapter] = await db
+    .select({
+      chapterNumber: schema.chapters.chapterNumber,
+      content: schema.chapters.content,
+      version: schema.chapters.version,
+    })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.id, chapterId))
+    .limit(1);
+  if (!chapter) throw new Error("Chapter not found");
+
+  const halves = splitChapterContent(chapter.content, offset);
+  if (!halves) throw new Error("Pick a split point with text on both sides");
+
+  // History first: the undivided chapter stops existing when this commits.
+  await db
+    .insert(schema.chapterRevisions)
+    .values({ chapterId, content: chapter.content, source: "pre-split" });
+
+  const insertAt = chapter.chapterNumber + 1;
+  const [, , allowedRows, , , , appliedRows] = await getSqlClient().transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
+    )`,
+    tx`select id from chapters where id = ${chapterId} for update`,
+    tx`
+      select not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      ) as allowed
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number + 100000
+      where book_id = ${ownership.bookId}
+        and chapter_number >= ${insertAt}
+        and exists (
+          select 1 from chapters as source
+          where source.id = ${chapterId} and source.version = ${chapter.version}
+        )
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number - 99999
+      where book_id = ${ownership.bookId}
+        and chapter_number > 100000
+        and exists (
+          select 1 from chapters as source
+          where source.id = ${chapterId} and source.version = ${chapter.version}
+        )
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      insert into chapters (book_id, chapter_number, status, content, word_count)
+      select ${ownership.bookId}, ${insertAt}, 'drafted', ${halves.after}, ${countWords(halves.after)}
+      where exists (
+        select 1 from chapters as source
+        where source.id = ${chapterId} and source.version = ${chapter.version}
+      )
+      and not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      )
+    `,
+    // Last, because this is the statement that moves the version the guards
+    // above are keyed to.
+    tx`
+      update chapters
+      set content = ${halves.before},
+          word_count = ${countWords(halves.before)},
+          version = version + 1,
+          updated_at = now()
+      where id = ${chapterId}
+        and version = ${chapter.version}
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+      returning id
+    `,
+  ]);
+  if (!(allowedRows as Array<{ allowed: boolean }>)[0]?.allowed) {
+    throw new Error("Finish or stop the current run before changing the manuscript");
+  }
+  if ((appliedRows as unknown[]).length === 0) {
+    throw new Error("This chapter changed while you were splitting it — reopen it and try again");
+  }
+  revalidatePath(`/projects/${ownership.projectId}`);
+  return { chapterNumber: insertAt };
+}
+
+/**
+ * Folds the following chapter into this one and closes the numbering gap with
+ * deleteChapter's parking offset. The absorbed chapter's revision rows cascade
+ * away with it, so its text is copied onto the surviving chapter's history
+ * first — otherwise a merge would be the one manuscript edit with no undo.
+ */
+export async function mergeChapterWithNext(chapterId: string): Promise<void> {
+  const { userId } = await requireUser();
+  if (!z.uuid().safeParse(chapterId).success) throw new Error("Chapter not found");
+
+  const ownership = await getChapterOwnership(chapterId);
+  if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
+  await assertNoActiveAuthoringRun(ownership.projectId);
+
+  const db = getDb();
+  const neighbours = await db
+    .select({
+      id: schema.chapters.id,
+      chapterNumber: schema.chapters.chapterNumber,
+      title: schema.chapters.title,
+      content: schema.chapters.content,
+      version: schema.chapters.version,
+    })
+    .from(schema.chapters)
+    .where(
+      and(
+        eq(schema.chapters.bookId, ownership.bookId),
+        inArray(schema.chapters.chapterNumber, [
+          ownership.chapterNumber,
+          ownership.chapterNumber + 1,
+        ]),
+      ),
+    );
+  const current = neighbours.find((row) => row.id === chapterId);
+  if (!current) throw new Error("Chapter not found");
+  const next = neighbours.find((row) => row.chapterNumber === current.chapterNumber + 1);
+  if (!next) throw new Error("There is no chapter after this one to merge in");
+
+  const merged = mergeChapterContent(current.content, next.content, next.title);
+  await db.insert(schema.chapterRevisions).values([
+    { chapterId, content: current.content, source: "pre-merge" },
+    { chapterId, content: next.content, source: "pre-merge-absorbed" },
+  ]);
+
+  const [, , allowedRows, , , , appliedRows] = await getSqlClient().transaction((tx) => [
+    tx`select pg_advisory_xact_lock(
+      hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
+    )`,
+    tx`select id from chapters where id = ${chapterId} or id = ${next.id} for update`,
+    tx`
+      select not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      ) as allowed
+    `,
+    // Park before the delete, exactly as deleteChapter does: the gap-closing
+    // subquery needs the absorbed chapter's number while the row still exists.
+    tx`
+      update chapters
+      set chapter_number = chapter_number + 100000
+      where book_id = ${ownership.bookId}
+        and chapter_number > (
+          select chapter_number from chapters as absorbed where absorbed.id = ${next.id}
+        )
+        and exists (
+          select 1 from chapters as keeper
+          where keeper.id = ${chapterId} and keeper.version = ${current.version}
+        )
+        and exists (
+          select 1 from chapters as absorbed
+          where absorbed.id = ${next.id} and absorbed.version = ${next.version}
+        )
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      delete from chapters
+      where id = ${next.id}
+        and version = ${next.version}
+        and exists (
+          select 1 from chapters as keeper
+          where keeper.id = ${chapterId} and keeper.version = ${current.version}
+        )
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number - 100001
+      where book_id = ${ownership.bookId}
+        and chapter_number > 100000
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+    `,
+    // The merged prose only lands once the absorbed chapter is actually gone,
+    // so a failed delete can never leave its text sitting in both places.
+    tx`
+      update chapters
+      set content = ${merged},
+          word_count = ${countWords(merged)},
+          version = version + 1,
+          updated_at = now()
+      where id = ${chapterId}
+        and version = ${current.version}
+        and not exists (select 1 from chapters as absorbed where absorbed.id = ${next.id})
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${ownership.projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
+      returning id
+    `,
+  ]);
+  if (!(allowedRows as Array<{ allowed: boolean }>)[0]?.allowed) {
+    throw new Error("Finish or stop the current run before changing the manuscript");
+  }
+  if ((appliedRows as unknown[]).length === 0) {
+    throw new Error("These chapters changed while you were merging — reopen them and try again");
   }
   revalidatePath(`/projects/${ownership.projectId}`);
 }

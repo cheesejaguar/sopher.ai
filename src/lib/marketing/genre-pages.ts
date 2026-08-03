@@ -214,6 +214,141 @@ const CONTENT: Record<GenreId, GenrePageContent> = {
       },
     ],
   },
+  historical_fiction: {
+    heading: "Write a historical novel",
+    metaDescription:
+      "Set a story in a real past without writing modern people in costume. sopher.ai anchors the period, then writes and edits the whole manuscript.",
+    intro: [
+      "Historical fiction fails in a specific, recognizable way: a character who thinks, speaks, and wants exactly like someone alive today, wearing period clothes. What makes the form work is constraint — the era decides what a person is permitted to do, and the drama comes from pressing against that.",
+      "So the period is pinned down before drafting begins: a named place, a narrow span of time, and the rules of law, class, work, and custom that hold there. The outline then places the private story inside the public event rather than beside it, and chapters are drafted against that plan so research arrives as texture — food, money, weather, work — instead of as explanation.",
+      "Continuity review afterwards checks the things period fiction most often gets wrong across a long manuscript: dates, ages, travel times, and whether a detail established in chapter three still holds in chapter twenty.",
+    ],
+    faqs: [
+      {
+        question: "How accurate will the history be?",
+        answer:
+          "Load-bearing details are treated as constraints rather than decoration. It is still fiction, and you should verify anything that matters to you — an author's note distinguishing fact from invention is a supported part of the book's front matter.",
+      },
+      {
+        question: "Can I write about a real historical figure?",
+        answer:
+          "Yes, though the genre works best with invented characters at the center and real figures at the edges. Say what you want in the brief and the outline will follow it.",
+      },
+      {
+        question: "Will it avoid anachronisms?",
+        answer:
+          "The genre guidance explicitly rules out modern idiom, anachronistic metaphor, and phonetic dialect spelling, and the editorial pass looks for them. It is worth reading for the ones that slip through.",
+      },
+    ],
+  },
+  young_adult: {
+    heading: "Write a young adult novel",
+    metaDescription:
+      "YA lives on voice and real consequences. sopher.ai plans the arc, drafts every chapter in a close first-person voice, and edits the result.",
+    intro: [
+      "Young adult is defined less by subject than by proximity. The voice sits directly inside the protagonist's head, the peer world carries the weight that adults carry elsewhere, and the consequences are allowed to be permanent — which is the line that separates it from middle grade.",
+      "The structure is built around two anchors: a moment of genuine autonomy near the middle, where the protagonist makes a decision nobody sanctioned, and a real cost late on that does not get undone. The outline places both before drafting, so the book earns its ending instead of arriving at one.",
+      "You set the content boundaries yourself — heat, violence, and profanity are all explicit settings — and they hold consistently across the manuscript rather than drifting from chapter to chapter.",
+    ],
+    faqs: [
+      {
+        question: "Is the content appropriate for teenage readers?",
+        answer:
+          "That is under your control. Heat, violence, and profanity are separate settings you choose before writing, and they are applied consistently. Review the result yourself before sharing it with a young reader.",
+      },
+      {
+        question: "Will it write in first person and present tense?",
+        answer:
+          "Yes. Point of view and tense are both settings, and close first person — common in YA — is fully supported.",
+      },
+      {
+        question: "Can the ending be sad?",
+        answer:
+          "Yes. The genre guidance treats permanent consequence as a structural feature, while keeping a visible way forward. Say what you want the ending to feel like in your brief.",
+      },
+    ],
+  },
+  middle_grade: {
+    heading: "Write a middle grade novel",
+    metaDescription:
+      "A book for eight to twelve year olds, with a hero their own age and a quest they can follow. sopher.ai outlines, writes, and edits the whole thing.",
+    intro: [
+      "Middle grade is written for readers roughly eight to twelve, and the rules are firm: the young protagonist solves the problem themselves, adults are well-meaning but absent when it counts, and the ending is hopeful. Friendship, not romance, is the emotional engine.",
+      "Because chapters are short and end on pulls, structure matters more than it does at longer lengths — something has to change every chapter. The outline places the quest, the friendship rupture, and the earned climax, and the drafting keeps interiority tethered to action, which is what holds this reader.",
+      "Chapter length defaults to a middle-grade scale rather than an adult one, so the finished book is the size a young reader can actually finish.",
+    ],
+    faqs: [
+      {
+        question: "How long will the finished book be?",
+        answer:
+          "Middle grade defaults to shorter chapters than adult fiction — around 1,600 words — and you can adjust both chapter count and length before writing begins. You see the estimate first.",
+      },
+      {
+        question: "Will the content stay age-appropriate?",
+        answer:
+          "The genre guidance rules out graphic violence, on-page cruelty, and romance beyond a first crush, and the content settings are yours to set. As with any generated book, read it before handing it to a child.",
+      },
+      {
+        question: "Can my child be the main character?",
+        answer:
+          "Yes. Put their name, their age, and what they are like in the brief, and the outline and story bible will build the book around them.",
+      },
+    ],
+  },
+  childrens: {
+    heading: "Write a children's book",
+    metaDescription:
+      "A short chapter book for a child you know, built on one problem and a warm ending. sopher.ai plans it, writes it, and gives you a book to read aloud.",
+    intro: [
+      "A children's chapter book is the shortest thing sopher.ai writes and in some ways the most exacting. One clear problem, a hero the child's own age who fixes it themselves, a repeated phrase to hold onto, and an ending that is completely safe — with no room anywhere for a wasted paragraph.",
+      "Chapters run to roughly five minutes read aloud, which is the real unit of design. Each one is a single scene with a single event, ending on a small pull rather than genuine peril, because this is a book that gets read at bedtime.",
+      "Name the child it is for in your brief and the book will be built around them — their name, their dog, their street, the thing they are worried about this week.",
+    ],
+    faqs: [
+      {
+        question: "Can I write it for a specific child?",
+        answer:
+          "That is the intended use. Put their name, age, and the details of their world in the brief, and the story is built around them.",
+      },
+      {
+        question: "Is it illustrated?",
+        answer:
+          "Not as a picture book. You can generate a cover, and the editor can add illustrations to individual passages, but the form here is a short chapter book rather than an illustrated picture book.",
+      },
+      {
+        question: "How long does it take and what does it cost?",
+        answer:
+          "Because a children's book is a fraction of the length of a novel, it is the fastest and cheapest thing to produce. You get a project-specific estimate before anything runs.",
+      },
+    ],
+  },
+  memoir: {
+    heading: "Write your memoir",
+    metaDescription:
+      "Tell a true story from your own life. sopher.ai helps shape it into chapters, drafts them in your voice, and edits the complete manuscript.",
+    intro: [
+      "Memoir is the one non-fiction form here, and it works differently from everything else. There is no invented cast and no plotted arc. What supplies the forward pull is a question you are genuinely trying to answer, and what makes it readable is scene — remembered life dramatized rather than summarized.",
+      "The most common mistake is scope. A memoir is one bounded thread of a life, not the whole of it; a year, an illness, a marriage, a move. Structure is built around meaning rather than chronology, so chapters are free to move in time as long as the reader is oriented in the first lines.",
+      "Because the people in it are real, the guidance treats them as people rather than devices — including the ones who hurt you — and expects the narrator to be at fault somewhere. That honesty is what earns a reader's trust for the harder passages.",
+    ],
+    faqs: [
+      {
+        question: "How does it know what happened to me?",
+        answer:
+          "From what you tell it. The brief is where you put the events, the people, and the period; the more specific you are, the more the book is genuinely yours. You can also revise the outline before any chapter is drafted.",
+      },
+      {
+        question: "Will it invent things that did not happen?",
+        answer:
+          "It is instructed not to, and the genre guidance explicitly rules out inventing events or presenting composite scenes as literal fact. This is your account, so read it closely and correct anything that is not true — the editor is built for exactly that.",
+      },
+      {
+        question: "What about the privacy of people in my story?",
+        answer:
+          "You decide. Consider changing identifying details for private individuals, and say so in the brief if you want that done. The book is yours; nothing is published unless you publish it.",
+      },
+    ],
+  },
 };
 
 export type GenrePage = GenrePageContent & {

@@ -16,6 +16,9 @@ import { loadFigures } from "@/lib/export/figures";
 import { requireUser } from "@/lib/auth";
 import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book-package";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
+import { ManuscriptSearch } from "@/components/editor/manuscript-search";
+import { ManuscriptStatsPanel } from "@/components/manuscript/manuscript-stats-panel";
+import { manuscriptStats } from "@/lib/manuscript-stats";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
@@ -140,6 +143,22 @@ export default async function ManuscriptPage({
           <ExportDialog projectId={projectId} />
         </div>
       </HashFocusTarget>
+
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <ManuscriptStatsPanel
+          stats={manuscriptStats({
+            chapters: chapterRows.map((chapter) => ({
+              number: chapter.chapterNumber,
+              title: chapter.title,
+              words: chapter.wordCount,
+            })),
+            targetChapters: project.targetChapters,
+            targetWordsPerChapter: project.targetWordsPerChapter,
+            matter,
+          })}
+        />
+        <ManuscriptSearch projectId={projectId} />
+      </div>
 
       <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (

@@ -30,6 +30,7 @@ import {
   composeTitle,
   DEFAULT_TIER_KEY,
   applyTrialStoryShape,
+  resolvedGenre,
   clearLegacyWizardStorage,
   initialWizardState,
   maxReachableStep,
@@ -175,7 +176,7 @@ function SetupSummary({ state, quote }: { state: WizardState; quote: WizardQuote
       </div>
       <div className="col-span-2">
         <dt className="folio-label text-muted-foreground">Shelf</dt>
-        <dd className="mt-1 font-medium capitalize">{state.genre ?? "Not chosen"}</dd>
+        <dd className="mt-1 font-medium capitalize">{resolvedGenre(state) ?? "Not chosen"}</dd>
       </div>
       <div className="col-span-2">
         <dt className="folio-label text-muted-foreground">Brief</dt>
@@ -226,6 +227,12 @@ type NewBookWizardProps = {
    * Step 1, including the explicit Resume flow.
    */
   resumeAfterCheckout?: boolean;
+  /**
+   * Whether the carried-forward project is the included short story. Any book
+   * the author owns can now seed a new setup, so the included-story wording is
+   * only correct when the source actually was one.
+   */
+  carriedFromIncludedStory?: boolean;
   /**
    * Isolated browser-test failure injection. The server page passes this only
    * when the non-production, disposable-DB Workflow stub gate is active.
@@ -426,13 +433,15 @@ function NewBookSetupWizard({
   experience,
   e2eStartMode,
   resumeAfterCheckout = false,
+  carriedFromIncludedStory: carriedFromIncludedStoryProp = false,
 }: Omit<NewBookWizardProps, "access"> & { experience: ProjectExperience }) {
   const router = useRouter();
   const freshState = React.useMemo(
     () => initialStateFor(experience, initialGenre, initialSetup),
     [experience, initialGenre, initialSetup],
   );
-  const carriedFromIncludedStory = experience === "full_book" && Boolean(initialSetup);
+  const carriedForward = experience === "full_book" && Boolean(initialSetup);
+  const carriedFromIncludedStory = carriedForward && carriedFromIncludedStoryProp;
   const [ui, dispatch] = React.useReducer(uiReducer, {
     wizard: freshState,
     resumed: false,
@@ -488,6 +497,9 @@ function NewBookSetupWizard({
         step,
         stepId: WIZARD_STEPS[step]?.id ?? "unknown",
         ...(step < state.step ? { inferred: true } : {}),
+        // Free-text genres are deliberately reported as one bucket: an
+        // analytics dimension must stay a closed set, and the author's own
+        // words are their content, not a label.
         ...(state.genre ? { genre: state.genre } : {}),
       });
     }
@@ -594,7 +606,8 @@ function NewBookSetupWizard({
   }
 
   function handleSubmit() {
-    if (!state.genre || !stepComplete(state, 1)) return;
+    const submittedGenre = resolvedGenre(state);
+    if (!submittedGenre || !stepComplete(state, 1)) return;
     if (
       quoteSummary?.chapters !== state.chapters ||
       quoteSummary.wordsPerChapter !== state.wordsPerChapter ||
@@ -602,7 +615,7 @@ function NewBookSetupWizard({
     ) {
       return;
     }
-    const genre = state.genre;
+    const genre = submittedGenre;
     setError(null);
     let requestKey = requestKeyRef.current;
     if (!requestKey && userId) {
@@ -619,7 +632,7 @@ function NewBookSetupWizard({
       ...(e2eStartMode ? { e2eStartMode } : {}),
       title: composeTitle(state),
       brief: composeBrief(state),
-      genre: state.genre,
+      genre: submittedGenre,
       ...(state.subgenre ? { subgenre: state.subgenre } : {}),
       ...(state.protagonist.trim() ? { protagonist: state.protagonist.trim() } : {}),
       ...(state.setting.trim() ? { setting: state.setting.trim() } : {}),
@@ -758,7 +771,9 @@ function NewBookSetupWizard({
             with its answers restored, or{" "}
             {carriedFromIncludedStory
               ? "use the included story carried into this full-length setup"
-              : "begin with a clean setup"}
+              : carriedForward
+                ? "use the setup carried over from your other book"
+                : "begin with a clean setup"}
             . Either choice opens on Step 1.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
@@ -766,7 +781,11 @@ function NewBookSetupWizard({
               Resume saved setup
             </Button>
             <Button variant="outline" onClick={handleStartFresh} className="rounded-sm">
-              {carriedFromIncludedStory ? "Use included story" : "Start fresh"}
+              {carriedFromIncludedStory
+                ? "Use included story"
+                : carriedForward
+                  ? "Use carried setup"
+                  : "Start fresh"}
             </Button>
           </div>
         </div>
@@ -811,12 +830,17 @@ function NewBookSetupWizard({
       </aside>
 
       <div className="min-w-0">
-        {carriedFromIncludedStory ? (
+        {carriedForward ? (
           <div className="border-b border-ai/30 bg-ai-soft px-5 py-3 text-sm sm:px-8">
-            <p className="font-medium text-ai">Your included story is carried forward.</p>
+            <p className="font-medium text-ai">
+              {carriedFromIncludedStory
+                ? "Your included story is carried forward."
+                : "Your earlier book's setup is carried forward."}
+            </p>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Its title, genre, and brief are ready to review. This creates a separate full-length
-              production, so the completed short story remains unchanged.
+              {carriedFromIncludedStory
+                ? "Its title, genre, and brief are ready to review. This creates a separate full-length production, so the completed short story remains unchanged."
+                : "Its title, genre, brief, and writing settings are ready to review. This creates a separate production, so the book you started from remains unchanged."}
             </p>
           </div>
         ) : null}
@@ -839,7 +863,9 @@ function NewBookSetupWizard({
         </header>
 
         <div className="min-w-0 px-5 py-6 sm:px-8 sm:py-8">
-          {stepId === "genre" ? <StepGenre state={state} dispatch={updateWizard} /> : null}
+          {stepId === "genre" ? (
+            <StepGenre state={state} dispatch={updateWizard} experience={experience} />
+          ) : null}
           {stepId === "brief" ? <StepBrief state={state} dispatch={updateWizard} /> : null}
           {stepId === "shape" ? (
             <StepShape state={state} dispatch={updateWizard} experience={experience} />

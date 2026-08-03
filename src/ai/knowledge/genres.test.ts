@@ -8,10 +8,12 @@ import {
   LITERARY_FICTION_TEMPLATE,
   SCIENCE_FICTION_TEMPLATE,
   chapterPromptForGenre,
+  genreAudience,
   genreAvoidList,
   genreReaderExpectations,
   getGenreSummary,
   getGenreTemplate,
+  isNonFictionGenre,
   outlinePromptAdditions,
   type ChapterPosition,
 } from "./genres";
@@ -26,8 +28,8 @@ const CHAPTER_POSITIONS: ChapterPosition[] = [
 ];
 
 describe("genre data completeness", () => {
-  it("has exactly 7 canonical genres", () => {
-    expect(GENRE_IDS).toHaveLength(7);
+  it("has exactly 12 canonical genres", () => {
+    expect(GENRE_IDS).toHaveLength(12);
     expect([...GENRE_IDS].sort()).toEqual(
       [
         "romance",
@@ -37,13 +39,18 @@ describe("genre data completeness", () => {
         "literary_fiction",
         "science_fiction",
         "horror",
+        "historical_fiction",
+        "young_adult",
+        "middle_grade",
+        "childrens",
+        "memoir",
       ].sort(),
     );
   });
 
   it("maps every genre id to a template with a unique display name", () => {
     const names = GENRE_IDS.map((id) => GENRE_TEMPLATES[id].genre);
-    expect(new Set(names).size).toBe(7);
+    expect(new Set(names).size).toBe(12);
     expect(names).toEqual([
       "Romance",
       "Mystery",
@@ -52,7 +59,54 @@ describe("genre data completeness", () => {
       "Literary Fiction",
       "Science Fiction",
       "Horror",
+      "Historical Fiction",
+      "Young Adult",
+      "Middle Grade",
+      "Children's",
+      "Memoir",
     ]);
+  });
+
+  it("bands the audience genres and marks memoir as the only non-fiction form", () => {
+    expect(genreAudience("childrens")).toBe("children");
+    expect(genreAudience("middle_grade")).toBe("middle_grade");
+    expect(genreAudience("young_adult")).toBe("young_adult");
+    // The original seven carry no explicit audience and must read as adult.
+    expect(genreAudience("romance")).toBe("adult");
+    expect(genreAudience("memoir")).toBe("adult");
+    // An unknown or free-text genre must degrade to adult rather than throw.
+    expect(genreAudience("steampunk western")).toBe("adult");
+    expect(genreAudience(null)).toBe("adult");
+
+    const nonFiction = GENRE_IDS.filter((id) => GENRE_TEMPLATES[id].nonFiction === true);
+    expect(nonFiction).toEqual(["memoir"]);
+    expect(isNonFictionGenre("memoir")).toBe(true);
+    expect(isNonFictionGenre("fantasy")).toBe(false);
+    expect(isNonFictionGenre("steampunk western")).toBe(false);
+  });
+
+  it("gives the young-reader genres shorter chapter defaults than adult genres", () => {
+    // A children's chapter defaulting to an adult 3,000 words produces a book
+    // no six-year-old can read; the defaults are the guard against that.
+    expect(GENRE_TEMPLATES.childrens.defaultWordsPerChapter).toBeLessThan(1_000);
+    expect(GENRE_TEMPLATES.middle_grade.defaultWordsPerChapter).toBeLessThan(2_000);
+    expect(GENRE_TEMPLATES.childrens.defaultWordsPerChapter).toBeLessThan(
+      GENRE_TEMPLATES.middle_grade.defaultWordsPerChapter!,
+    );
+    expect(GENRE_TEMPLATES.middle_grade.defaultWordsPerChapter).toBeLessThan(
+      GENRE_TEMPLATES.young_adult.defaultWordsPerChapter!,
+    );
+    // The original seven stay unopinionated so existing projects are unchanged.
+    expect(GENRE_TEMPLATES.romance.defaultWordsPerChapter).toBeUndefined();
+  });
+
+  it("resolves the new aliases people actually type", () => {
+    expect(getGenreTemplate("YA")?.genre).toBe("Young Adult");
+    expect(getGenreTemplate("children's")?.genre).toBe("Children's");
+    expect(getGenreTemplate("chapter book")?.genre).toBe("Children's");
+    expect(getGenreTemplate("middle-grade")?.genre).toBe("Middle Grade");
+    expect(getGenreTemplate("historical")?.genre).toBe("Historical Fiction");
+    expect(getGenreTemplate("autobiography")?.genre).toBe("Memoir");
   });
 
   it.each(GENRE_IDS.map((id) => [id] as const))("%s template is fully populated", (id) => {

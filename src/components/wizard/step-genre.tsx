@@ -4,15 +4,41 @@ import { Check } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { GENRES } from "@/lib/genres";
-import type { WizardActionEvent, WizardState } from "@/components/wizard/wizard-state";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  CUSTOM_GENRE,
+  MAX_CUSTOM_GENRE_LENGTH,
+  shapeDefaultsForGenre,
+  type WizardActionEvent,
+  type WizardGenre,
+  type WizardState,
+} from "@/components/wizard/wizard-state";
 
 export function StepGenre({
   state,
   dispatch,
+  experience = "full_book",
 }: {
   state: WizardState;
   dispatch: React.Dispatch<WizardActionEvent>;
+  experience?: "trial_short_story" | "full_book";
 }) {
+  /**
+   * Picking a genre also moves the shape sliders to that genre's defaults, so a
+   * children's book does not start life at twelve 3,000-word chapters. The
+   * included story has a server-enforced shape, so it is left alone.
+   */
+  function selectGenre(genre: WizardGenre) {
+    const defaults = experience === "full_book" ? shapeDefaultsForGenre(genre) : null;
+    dispatch({
+      type: "patch",
+      patch: { genre, subgenre: null, ...(defaults ?? {}) },
+    });
+  }
+
+  const customSelected = state.genre === CUSTOM_GENRE;
+
   return (
     <fieldset className="space-y-4">
       <legend className="sr-only">Choose a genre</legend>
@@ -31,12 +57,9 @@ export function StepGenre({
                 type="button"
                 aria-pressed={selected}
                 onClick={() =>
-                  dispatch({
-                    type: "patch",
-                    patch: selected
-                      ? { genre: null, subgenre: null }
-                      : { genre: genre.id, subgenre: null },
-                  })
+                  selected
+                    ? dispatch({ type: "patch", patch: { genre: null, subgenre: null } })
+                    : selectGenre(genre.id)
                 }
                 className="flex min-h-11 w-full flex-col gap-1.5 rounded-sm p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
@@ -98,6 +121,61 @@ export function StepGenre({
             </div>
           );
         })}
+
+        <div
+          className={cn(
+            "rounded-sm border bg-card transition-colors",
+            customSelected ? "border-primary ring-1 ring-primary" : "hover:border-foreground/25",
+          )}
+        >
+          <button
+            type="button"
+            aria-pressed={customSelected}
+            onClick={() =>
+              customSelected
+                ? dispatch({ type: "patch", patch: { genre: null, subgenre: null } })
+                : selectGenre(CUSTOM_GENRE)
+            }
+            className="flex min-h-11 w-full flex-col gap-1.5 rounded-sm p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span className="flex items-center justify-between gap-2">
+              <span className="font-display text-base font-semibold tracking-tight">
+                Something else
+              </span>
+              {customSelected ? (
+                <span className="flex size-4.5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                  <Check aria-hidden="true" className="size-3" />
+                </span>
+              ) : null}
+            </span>
+            <span className="text-xs leading-relaxed text-muted-foreground">
+              Your book does not have to fit a shelf. Describe it in your own words and the writing
+              follows what you say rather than a template.
+            </span>
+          </button>
+
+          {customSelected ? (
+            <div className="border-t px-4 py-3">
+              <Label htmlFor="wizard-custom-genre" className="text-xs font-medium">
+                What are you writing?
+              </Label>
+              <Input
+                id="wizard-custom-genre"
+                value={state.customGenre}
+                maxLength={MAX_CUSTOM_GENRE_LENGTH}
+                autoComplete="off"
+                placeholder="A cozy western, a poetry collection, a business book…"
+                onChange={(event) =>
+                  dispatch({ type: "patch", patch: { customGenre: event.target.value } })
+                }
+                className="mt-2"
+              />
+              <p className="mt-2 text-xs text-muted-foreground">
+                A few words is enough. You can say more in your brief on the next step.
+              </p>
+            </div>
+          ) : null}
+        </div>
       </div>
     </fieldset>
   );

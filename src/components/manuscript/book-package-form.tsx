@@ -1,13 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
-import { Check, Save } from "lucide-react";
+import { Check, Copy, Loader2, Save, Sparkles } from "lucide-react";
 
+import {
+  SUSPENDED_AUTHORING_MESSAGE,
+  useStudioSuspension,
+} from "@/components/studio/studio-access-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { BookMatter } from "@/lib/book-package";
+import type { BookMatter, BookMatterDraftField, PublishingKit } from "@/lib/book-package";
+import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
 import { updateBookPackage } from "@/lib/actions/books";
 
 type TextField = {
@@ -16,6 +21,26 @@ type TextField = {
   help: string;
   placeholder?: string;
   rows?: number;
+  /** Set when this page can be drafted for the author to accept or edit. */
+  draftField?: BookMatterDraftField;
+};
+
+/** A proposed page, and the one the author has accepted into the textarea. */
+type DraftState = {
+  proposed?: string;
+  accepted?: { text: string; attribution?: string; seq: number };
+  busy?: boolean;
+  error?: string;
+};
+
+type DraftControl = {
+  field: BookMatterDraftField;
+  label: string;
+  state: DraftState;
+  suspended: boolean;
+  onRequest: () => void;
+  onAccept: () => void;
+  onDismiss: () => void;
 };
 
 const OPENING_FIELDS: TextField[] = [
@@ -25,6 +50,7 @@ const OPENING_FIELDS: TextField[] = [
     help: "A brief page before the story, often addressed to one person or group.",
     placeholder: "For…",
     rows: 3,
+    draftField: "dedication",
   },
   {
     name: "foreword",
@@ -58,31 +84,100 @@ const CLOSING_FIELDS: TextField[] = [
     label: "Author's note",
     help: "Context, research notes, or a final word in your own voice.",
     rows: 5,
+    draftField: "authorNote",
   },
   {
     name: "acknowledgments",
     label: "Acknowledgments",
     help: "Thank the people who helped shape the work.",
     rows: 5,
+    draftField: "acknowledgments",
   },
   {
     name: "aboutAuthor",
     label: "About the author",
     help: "A short biography for the final page and reader editions.",
     rows: 5,
+    draftField: "aboutAuthor",
   },
 ];
 
-function MatterTextarea({ field, value }: { field: TextField; value?: string }) {
+const KIT_BLOCKS: Array<{ key: "blurb" | "storeDescription" | "authorBio"; label: string }> = [
+  { key: "blurb", label: "Back-cover blurb" },
+  { key: "storeDescription", label: "Store description" },
+  { key: "authorBio", label: "Author bio" },
+];
+
+/**
+ * A drafted page is never written into the form on its own. It is shown first,
+ * and only replaces what the author has in the field when they say so.
+ */
+function MatterDraft({ control }: { control: DraftControl }) {
+  const { state } = control;
+  return (
+    <div className="space-y-2">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={control.onRequest}
+        disabled={state.busy || control.suspended}
+        aria-busy={state.busy || undefined}
+      >
+        {state.busy ? (
+          <Loader2 aria-hidden="true" className="animate-spin" />
+        ) : (
+          <Sparkles aria-hidden="true" />
+        )}
+        {state.busy ? "Drafting…" : `Draft a ${control.label.toLowerCase()}`}
+      </Button>
+      {state.error ? (
+        <p role="alert" className="text-xs text-destructive">
+          {state.error}
+        </p>
+      ) : null}
+      {state.proposed ? (
+        <div className="space-y-3 rounded-md border border-ai/40 bg-ai-soft/50 p-3">
+          <p className="folio-label text-ai">Suggested {control.label.toLowerCase()}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">{state.proposed}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={control.onAccept}>
+              Use this draft
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={control.onDismiss}>
+              Discard
+            </Button>
+          </div>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Using it only fills the field. Nothing replaces your page until you save.
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function MatterTextarea({
+  field,
+  value,
+  draft,
+}: {
+  field: TextField;
+  value?: string;
+  draft?: DraftControl;
+}) {
   const id = `book-${field.name}`;
   const helpId = `${id}-help`;
+  const accepted = draft?.state.accepted;
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{field.label}</Label>
       <Textarea
+        // Remounting is how an accepted draft reaches an uncontrolled field.
+        key={accepted?.seq ?? 0}
         id={id}
         name={field.name}
-        defaultValue={value ?? ""}
+        defaultValue={accepted?.text ?? value ?? ""}
         rows={field.rows ?? 4}
         maxLength={20_000}
         placeholder={field.placeholder}
@@ -91,6 +186,50 @@ function MatterTextarea({ field, value }: { field: TextField; value?: string }) 
       <p id={helpId} className="text-xs leading-relaxed text-muted-foreground">
         {field.help}
       </p>
+      {draft ? <MatterDraft control={draft} /> : null}
+    </div>
+  );
+}
+
+function CopyableCopy({ label, text }: { label: string; text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // Clipboard permission is not something to interrupt the author over —
+      // the text is on screen and selectable either way.
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2 border-t border-border pt-4 first:border-t-0 first:pt-0">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="folio-label text-muted-foreground">{label}</h3>
+        <Button type="button" variant="ghost" size="sm" onClick={copy}>
+          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <p className="text-sm leading-relaxed whitespace-pre-wrap">{text}</p>
+    </div>
+  );
+}
+
+function CopyableList({ label, items }: { label: string; items: string[] }) {
+  return (
+    <div className="space-y-2 border-t border-border pt-4">
+      <h3 className="folio-label text-muted-foreground">{label}</h3>
+      <ul className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <li key={item} className="rounded-sm bg-muted px-2 py-1 text-xs text-foreground">
+            {item}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -106,10 +245,15 @@ export function BookPackageForm({
   synopsis: string | null;
   matter: BookMatter;
 }) {
+  const suspended = useStudioSuspension();
   const [pending, startTransition] = useTransition();
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [kit, setKit] = useState<Partial<PublishingKit> | undefined>(matter.publishingKit);
+  const [kitBusy, setKitBusy] = useState(false);
+  const [kitError, setKitError] = useState<string | null>(null);
+  const [drafts, setDrafts] = useState<Partial<Record<BookMatterDraftField, DraftState>>>({});
   const revisionRef = useRef(0);
   const dirtyRef = useRef(false);
   const confirmedNavigationRef = useRef(false);
@@ -171,6 +315,114 @@ export function BookPackageForm({
       window.removeEventListener("beforeunload", confirmReload);
     };
   }, []);
+
+  async function requestPublishingCopy(
+    body: { kind: "kit" } | { kind: "matter"; field: BookMatterDraftField },
+  ) {
+    const response = await idempotentPaidFetch(`/api/projects/${projectId}/publishing-kit`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const payload = (await response.json().catch(() => ({}))) as {
+      error?: unknown;
+      kit?: Partial<PublishingKit>;
+      text?: string;
+    };
+    if (!response.ok) {
+      throw new Error(
+        typeof payload.error === "string" ? payload.error : "Could not write that copy",
+      );
+    }
+    return { response, payload };
+  }
+
+  async function generateKit() {
+    if (kitBusy || suspended) return;
+    setKitBusy(true);
+    setKitError(null);
+    try {
+      const { response, payload } = await requestPublishingCopy({ kind: "kit" });
+      if (!payload.kit) throw new Error("The copy kit came back empty. Try again.");
+      setKit(payload.kit);
+      acknowledgePaidResponse(response);
+    } catch (failure) {
+      setKitError(
+        failure instanceof Error ? failure.message : "Could not write the publishing copy",
+      );
+    } finally {
+      setKitBusy(false);
+    }
+  }
+
+  async function draftMatter(field: BookMatterDraftField) {
+    if (suspended || drafts[field]?.busy) return;
+    setDrafts((previous) => ({
+      ...previous,
+      [field]: { ...previous[field], busy: true, error: undefined },
+    }));
+    try {
+      const { response, payload } = await requestPublishingCopy({ kind: "matter", field });
+      const text = typeof payload.text === "string" ? payload.text.trim() : "";
+      if (!text) throw new Error("The draft came back empty. Try again.");
+      setDrafts((previous) => ({
+        ...previous,
+        [field]: { ...previous[field], busy: false, proposed: text },
+      }));
+      acknowledgePaidResponse(response);
+    } catch (failure) {
+      setDrafts((previous) => ({
+        ...previous,
+        [field]: {
+          ...previous[field],
+          busy: false,
+          error: failure instanceof Error ? failure.message : "Could not draft that page",
+        },
+      }));
+    }
+  }
+
+  function acceptDraft(field: BookMatterDraftField) {
+    setDrafts((previous) => {
+      const state = previous[field];
+      if (!state?.proposed) return previous;
+      // An epigraph arrives as its line plus an attribution; the book stores
+      // those separately, so split them here rather than making the author do it.
+      const lines = state.proposed.split("\n").map((part) => part.trim());
+      const last = lines.at(-1) ?? "";
+      const isAttribution = field === "epigraph" && lines.length > 1 && /^[—–-]/.test(last);
+      return {
+        ...previous,
+        [field]: {
+          accepted: {
+            text: (isAttribution ? lines.slice(0, -1) : lines).join("\n").trim(),
+            ...(isAttribution ? { attribution: last.replace(/^[—–-]+\s*/, "") } : {}),
+            seq: (state.accepted?.seq ?? 0) + 1,
+          },
+        },
+      };
+    });
+    markDirty();
+  }
+
+  function dismissDraft(field: BookMatterDraftField) {
+    setDrafts((previous) => ({
+      ...previous,
+      [field]: { ...previous[field], proposed: undefined },
+    }));
+  }
+
+  function draftControl(field: BookMatterDraftField, label: string): DraftControl {
+    return {
+      field,
+      label,
+      state: drafts[field] ?? {},
+      suspended,
+      onRequest: () => void draftMatter(field),
+      onAccept: () => acceptDraft(field),
+      onDismiss: () => dismissDraft(field),
+    };
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -372,28 +624,38 @@ export function BookPackageForm({
           <div className="space-y-1.5 lg:col-span-2">
             <Label htmlFor="book-epigraph">Epigraph</Label>
             <Textarea
+              key={drafts.epigraph?.accepted?.seq ?? 0}
               id="book-epigraph"
               name="epigraphText"
-              defaultValue={matter.epigraphText ?? ""}
+              defaultValue={drafts.epigraph?.accepted?.text ?? matter.epigraphText ?? ""}
               rows={3}
               maxLength={2_000}
               placeholder="A quotation or line that opens the work"
             />
             <Input
+              key={drafts.epigraph?.accepted?.seq ?? 0}
               name="epigraphAttribution"
               aria-label="Epigraph attribution"
-              defaultValue={matter.epigraphAttribution ?? ""}
+              defaultValue={
+                drafts.epigraph?.accepted?.attribution ?? matter.epigraphAttribution ?? ""
+              }
               maxLength={300}
               placeholder="Attribution"
             />
+            <MatterDraft control={draftControl("epigraph", "Epigraph")} />
           </div>
           {OPENING_FIELDS.map((field) => (
-            <MatterTextarea key={field.name} field={field} value={matter[field.name] as string} />
+            <MatterTextarea
+              key={field.name}
+              field={field}
+              value={matter[field.name] as string}
+              {...(field.draftField ? { draft: draftControl(field.draftField, field.label) } : {})}
+            />
           ))}
         </div>
       </section>
 
-      <section aria-labelledby="closing-heading" className="space-y-6">
+      <section aria-labelledby="closing-heading" className="space-y-6 border-b border-border pb-9">
         <div>
           <h2 id="closing-heading" className="text-lg font-semibold tracking-tight">
             After the final chapter
@@ -404,9 +666,69 @@ export function BookPackageForm({
         </div>
         <div className="grid gap-6 lg:grid-cols-2">
           {CLOSING_FIELDS.map((field) => (
-            <MatterTextarea key={field.name} field={field} value={matter[field.name] as string} />
+            <MatterTextarea
+              key={field.name}
+              field={field}
+              value={matter[field.name] as string}
+              {...(field.draftField ? { draft: draftControl(field.draftField, field.label) } : {})}
+            />
           ))}
         </div>
+      </section>
+
+      <section aria-labelledby="publishing-heading" className="space-y-5">
+        <div>
+          <h2 id="publishing-heading" className="text-lg font-semibold tracking-tight">
+            Publishing copy
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            The copy a store asks for and nobody teaches you to write. Drafted from your own title,
+            synopsis, and chapters — then paste it into your retailer listing.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void generateKit()}
+            disabled={kitBusy || suspended}
+            aria-busy={kitBusy || undefined}
+          >
+            {kitBusy ? (
+              <Loader2 aria-hidden="true" className="animate-spin" />
+            ) : (
+              <Sparkles aria-hidden="true" />
+            )}
+            {kitBusy ? "Writing…" : kit ? "Write it again" : "Write my publishing copy"}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            Uses credits. Saved with your book as soon as it is written.
+          </p>
+        </div>
+        {suspended ? (
+          <p className="max-w-2xl text-xs text-muted-foreground">{SUSPENDED_AUTHORING_MESSAGE}</p>
+        ) : null}
+        {kitError ? (
+          <p role="alert" className="text-sm text-destructive">
+            {kitError}
+          </p>
+        ) : null}
+        {kit ? (
+          <div className="space-y-4 rounded-sm border border-border p-4" aria-live="polite">
+            {KIT_BLOCKS.map(({ key, label }) =>
+              kit[key] ? <CopyableCopy key={key} label={label} text={kit[key]} /> : null,
+            )}
+            {kit.keywords?.length ? <CopyableList label="Keywords" items={kit.keywords} /> : null}
+            {kit.categories?.length ? (
+              <CopyableList label="Categories" items={kit.categories} />
+            ) : null}
+          </div>
+        ) : (
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            Nothing written yet. A blurb, a store description, keywords, categories, and an author
+            bio arrive together.
+          </p>
+        )}
       </section>
     </form>
   );

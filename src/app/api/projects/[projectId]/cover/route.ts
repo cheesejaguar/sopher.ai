@@ -1,6 +1,6 @@
 import { put } from "@vercel/blob";
 import { generateText } from "ai";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import {
   gatewayOptions,
@@ -34,11 +34,26 @@ import {
 } from "@/lib/blob/orphan-cleanup";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
 import { optionalDeliveryReceiptRef } from "@/lib/billing/optional-delivery";
+import { readBookMatter } from "@/lib/book-package";
+import {
+  COVER_ART_ASSET_KIND,
+  COVER_ART_ROLE,
+  DEFAULT_COVER_LAYOUT,
+  DEFAULT_COVER_PALETTE,
+  renderTitledCover,
+  type TitledCover,
+} from "@/lib/cover";
+import { resolveBlobUploads } from "@/lib/blob/lifecycle";
 
 /**
  * Generates a book cover from the book's own identity — title, synopsis,
  * genre — and stores it as the project's cover asset. On demand only, priced
  * like every other image call, metered into llm_calls.
+ *
+ * Two objects come out of one paid call: the painting, kept as its own asset,
+ * and the finished cover with the title set on it. Only the second is the
+ * `cover` asset every consumer reads; the first exists so the author can
+ * re-letter for free afterwards (`./compose`).
  */
 
 export const maxDuration = 120;
@@ -51,7 +66,8 @@ function coverPrompt(input: { title: string; synopsis: string | null; genre: str
     input.genre ? `Genre: ${input.genre}.` : "",
     input.synopsis ? `The story: ${input.synopsis}` : "",
     `Portrait orientation, strong single focal image, atmospheric literary illustration,`,
-    `painterly, muted palette, space at the top third where a title would sit.`,
+    `painterly, muted palette. Leave the top third quiet and uncluttered —`,
+    `the title is set there afterwards, so nothing important belongs in it.`,
     `No text, no lettering, no watermark, no borders.`,
   ]
     .filter(Boolean)
@@ -258,23 +274,69 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     return refundAndFail("The image model returned no image");
   }
 
-  const contentType = file.mediaType ?? "image/png";
-  let blob: Awaited<ReturnType<typeof put>>;
+  const artContentType = file.mediaType ?? "image/png";
+  const matter = readBookMatter(row.frontMatter);
+
+  // Lettering is free and local, so a failure here is never a reason to fail a
+  // paid delivery: the painting still ships, exactly as it did before covers
+  // had type, and the author can letter it afterwards at no cost.
+  let lettered: TitledCover | null = null;
   try {
-    blob = await put(
-      `covers/${projectId}/${crypto.randomUUID()}.png`,
-      Buffer.from(file.uint8Array),
-      { access: "public", contentType },
-    );
+    lettered = await renderTitledCover({
+      art: file.uint8Array,
+      artContentType,
+      title: row.title,
+      subtitle: matter.subtitle ?? null,
+      author: matter.author ?? null,
+      layout: DEFAULT_COVER_LAYOUT,
+      palette: DEFAULT_COVER_PALETTE,
+    });
+  } catch (error) {
+    console.error("Cover lettering failed; delivering the painting untitled", {
+      projectId,
+      error,
+    });
+  }
+
+  const uploadId = crypto.randomUUID();
+  const contentType = lettered ? lettered.contentType : artContentType;
+  let blob: Awaited<ReturnType<typeof put>>;
+  let artBlob: Awaited<ReturnType<typeof put>> | null = null;
+  try {
+    if (lettered) {
+      // Both objects or neither: a stored cover whose art went missing cannot
+      // be re-lettered, and stored art nobody points at is litter.
+      const uploaded = await resolveBlobUploads(
+        [
+          put(`covers/${projectId}/${uploadId}.png`, Buffer.from(lettered.bytes), {
+            access: "public",
+            contentType: lettered.contentType,
+          }),
+          put(`covers/${projectId}/${uploadId}-art.png`, Buffer.from(file.uint8Array), {
+            access: "public",
+            contentType: artContentType,
+          }),
+        ],
+        "cover",
+      );
+      blob = uploaded[0]!;
+      artBlob = uploaded[1]!;
+    } else {
+      blob = await put(`covers/${projectId}/${uploadId}.png`, Buffer.from(file.uint8Array), {
+        access: "public",
+        contentType: artContentType,
+      });
+    }
   } catch {
     return refundAndFail("Could not store the cover");
   }
 
+  const uploadedPathnames = [blob.pathname, ...(artBlob ? [artBlob.pathname] : [])];
   try {
-    await scheduleUnreferencedBlobCleanup({ projectId, pathnames: [blob.pathname] });
+    await scheduleUnreferencedBlobCleanup({ projectId, pathnames: uploadedPathnames });
   } catch (scheduleError) {
     try {
-      await compensateUnreferencedBlobUpload({ projectId, pathnames: [blob.pathname] });
+      await compensateUnreferencedBlobUpload({ projectId, pathnames: uploadedPathnames });
     } catch (cleanupError) {
       try {
         await refundMeteredDelivery(meter, "Cover generation failed after billing — refunded");
@@ -301,10 +363,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
 
   let displacedCover: { id: string; pathname: string } | undefined;
   let displacedCandidate: { id: string; pathname: string } | undefined;
+  let displacedArt: Array<{ id: string; pathname: string }> = [];
   let deliveredUrl = blob.url;
   try {
-    const delivery = await withDbTransaction((tx) =>
-      persistCoverDeliveryTransaction(tx, {
+    const delivery = await withDbTransaction(async (tx) => {
+      const persisted = await persistCoverDeliveryTransaction(tx, {
         userId,
         projectId,
         bookId: row.bookId,
@@ -314,16 +377,50 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         url: blob.url,
         pathname: blob.pathname,
         contentType,
-        sizeBytes: file.uint8Array.byteLength,
+        sizeBytes: lettered ? lettered.bytes.byteLength : file.uint8Array.byteLength,
         usd: (meter.lastSettlement?.meteredUsd ?? 0).toFixed(6),
         optionalLeaseRefs: meter.optionalOperationLeaseRefs,
         onDisplacedCandidate: (candidate) => {
           displacedCandidate = candidate;
         },
-      }),
-    );
+      });
+      // The painting rides in the same transaction as the cover it backs, under
+      // the same authoring lock, so the two can never disagree.
+      let superseded: Array<{ id: string; pathname: string }> = [];
+      if (artBlob && !persisted.replayed) {
+        superseded = await tx
+          .select({ id: schema.assets.id, pathname: schema.assets.blobPathname })
+          .from(schema.assets)
+          .where(
+            and(
+              eq(schema.assets.projectId, projectId),
+              eq(schema.assets.kind, COVER_ART_ASSET_KIND),
+              sql`${schema.assets.meta}->>'role' = ${COVER_ART_ROLE}`,
+            ),
+          )
+          .orderBy(desc(schema.assets.createdAt))
+          .limit(4);
+        await tx.insert(schema.assets).values({
+          projectId,
+          kind: COVER_ART_ASSET_KIND,
+          blobUrl: artBlob.url,
+          blobPathname: artBlob.pathname,
+          contentType: artContentType,
+          sizeBytes: file.uint8Array.byteLength,
+          meta: {
+            role: COVER_ART_ROLE,
+            layout: DEFAULT_COVER_LAYOUT,
+            palette: DEFAULT_COVER_PALETTE,
+          },
+        });
+      }
+      return { ...persisted, superseded };
+    });
     deliveredUrl = delivery.output.url;
     displacedCover = delivery.displaced;
+    // Only after a clean commit: an ambiguous one may have rolled back, and a
+    // painting deleted on a guess cannot be re-lettered ever again.
+    displacedArt = delivery.superseded;
   } catch (error) {
     // COMMIT acknowledgement is ambiguous. The immutable content-tool row and
     // its unique ledger receipt are stronger evidence than a replaceable asset.
@@ -360,5 +457,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     assetId: displacedCover?.id,
     pathname: displacedCover?.pathname,
   });
-  return Response.json({ url: deliveredUrl });
+  // Superseded paintings are nobody's source any more: the new cover has its
+  // own, and no edition ever referenced these.
+  await Promise.all(
+    displacedArt.map((asset) =>
+      scheduleReplacedAssetCleanup({ projectId, assetId: asset.id, pathname: asset.pathname }),
+    ),
+  );
+  return Response.json({
+    url: deliveredUrl,
+    lettered: Boolean(lettered),
+    layout: lettered ? DEFAULT_COVER_LAYOUT : null,
+  });
 }
