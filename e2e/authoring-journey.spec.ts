@@ -67,7 +67,7 @@ test("library exposes one truthful action for every authoring state", async ({
     {
       title: "Signal at Low Tide",
       label: "Reconnect this start",
-      href: `/projects/${PROJECTS.dispatchUncertain}/write`,
+      href: `/projects/${PROJECTS.dispatchUncertain}/write#production-status`,
       detail: "did not receive a start confirmation",
     },
     {
@@ -93,19 +93,19 @@ test("library exposes one truthful action for every authoring state", async ({
     {
       title: "The Last Weather Station",
       label: "Watch production",
-      href: `/projects/${PROJECTS.degradedTelemetry}/write`,
+      href: `/projects/${PROJECTS.degradedTelemetry}/write#production-status`,
       detail: "live connection is delayed",
     },
     {
       title: "Glasswing County",
       label: "View the safe stop",
-      href: `/projects/${PROJECTS.cancellationRequested}/write`,
+      href: `/projects/${PROJECTS.cancellationRequested}/write#production-status`,
       detail: "stopping before another model call",
     },
     {
       title: "The House That Counted",
-      label: "Contact support",
-      href: /^mailto:support@sopher\.ai/,
+      label: "Review production status",
+      href: `/projects/${PROJECTS.invalidCompletion}/write#authoring-recovery`,
       detail: "without a complete, verifiable manuscript",
     },
   ] as const;
@@ -123,6 +123,61 @@ test("library exposes one truthful action for every authoring state", async ({
   await expectNoPageOverflow(page, "authoring-state library");
   await axeCheck(page);
   await screenshot(page, testInfo.project.name, "journey-library");
+});
+
+test("a contradictory completion opens its recovery evidence", async ({ page }) => {
+  await page.goto("/studio");
+  await page
+    .getByRole("link", {
+      name: "Review production status: The House That Counted",
+      exact: true,
+    })
+    .click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${PROJECTS.invalidCompletion}/write#authoring-recovery$`),
+  );
+  const recovery = page.locator("#authoring-recovery");
+  await expect(recovery).toBeVisible();
+  await expect(recovery).toBeFocused();
+});
+
+test("an active book card opens and focuses live production status", async ({ page }) => {
+  await page.goto("/studio");
+  await page
+    .getByRole("link", {
+      name: "Watch production: The Last Weather Station",
+      exact: true,
+    })
+    .click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${PROJECTS.degradedTelemetry}/write#production-status$`),
+  );
+  const productionStatus = page.locator("#production-status");
+  await expect(productionStatus).toBeVisible();
+  await expect(productionStatus).toBeFocused();
+});
+
+test("cross-page Editor and Manuscript actions focus their destination", async ({ page }) => {
+  const destinations = [
+    {
+      route: `/projects/${PROJECTS.partialFailure}/editor#editor-production-status`,
+      target: "#editor-production-status",
+    },
+    {
+      route: `/projects/${PROJECTS.partialFailure}/manuscript#manuscript-actions`,
+      target: "#manuscript-actions",
+    },
+  ] as const;
+
+  for (const destination of destinations) {
+    await page.goto(destination.route);
+    await expect(page).toHaveURL(new RegExp(`${destination.target}$`));
+    const target = page.locator(destination.target).filter({ visible: true });
+    await expect(target).toBeVisible();
+    await expect(target).toBeFocused();
+  }
 });
 
 test("project surfaces repeat the authoritative next step", async ({ page }, testInfo) => {

@@ -14,7 +14,7 @@ import {
 import { StudioInlineChecklist } from "@/components/studio/first-book-checklist";
 import { listAuthoringJourneySnapshots } from "@/db/queries/authoring-journey";
 import { requireUser } from "@/lib/auth";
-import type { AuthoringJourneySnapshot } from "@/lib/authoring-journey";
+import { authoringStatusHref, type AuthoringJourneySnapshot } from "@/lib/authoring-journey";
 import { getAuthoringOnboardingSnapshot } from "@/lib/authoring-onboarding";
 import { getStudioAccess, shouldOfferFullBookUnlock } from "@/lib/studio-access";
 import { getBalance } from "@/lib/billing/credits";
@@ -43,6 +43,7 @@ function toCard(journey: AuthoringJourneySnapshot): ProjectCardData {
       project.targetWordsPerChapter,
     ).totalUsd,
     nextAction: journey.nextAction,
+    statusHref: authoringStatusHref(project.id, journey.run),
   };
 }
 

@@ -23,6 +23,7 @@ import {
 } from "@/lib/editor/chapter-status";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
+import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import {
   manuscriptEditMaximumCredits,
   readManuscriptEditPassCompletion,
@@ -135,21 +136,28 @@ export default async function EditorIndexPage({
         </p>
       </header>
 
-      {journey ? <IncompleteProductionNotice journey={journey} /> : null}
+      <HashFocusTarget
+        id="editor-production-status"
+        role="region"
+        aria-label="Editor production status"
+        className="scroll-mt-28 space-y-5 rounded-sm"
+      >
+        {journey ? <IncompleteProductionNotice journey={journey} /> : null}
 
-      {chapters.some((chapter) => chapter.wordCount > 0) ? (
-        <ManuscriptRevisionPanel
-          projectId={projectId}
-          chapterCount={chapters.filter((chapter) => chapter.wordCount > 0).length}
-          maximumCredits={manuscriptEditMaximumCredits(
-            data.project.settings.qualityTier ?? "standard",
-            chapters.filter((chapter) => chapter.wordCount > 0).length,
-          )}
-          initialRun={initialRevisionRun}
-          initialSuggestionCount={Number(latestSuggestionFacts.count)}
-          initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
-        />
-      ) : null}
+        {chapters.some((chapter) => chapter.wordCount > 0) ? (
+          <ManuscriptRevisionPanel
+            projectId={projectId}
+            chapterCount={chapters.filter((chapter) => chapter.wordCount > 0).length}
+            maximumCredits={manuscriptEditMaximumCredits(
+              data.project.settings.qualityTier ?? "standard",
+              chapters.filter((chapter) => chapter.wordCount > 0).length,
+            )}
+            initialRun={initialRevisionRun}
+            initialSuggestionCount={Number(latestSuggestionFacts.count)}
+            initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
+          />
+        ) : null}
+      </HashFocusTarget>
 
       {chapters.length === 0 ? (
         <div className="instrument-surface relative flex min-h-56 flex-col items-center justify-center overflow-hidden px-6 py-12 text-center">

@@ -105,8 +105,9 @@
       "ejs>jake": "12.10.1",
       "external-editor>tmp": "0.2.7",
       "jayson>uuid": "11.1.1",
-      "minimatch@3.1.5>brace-expansion": "1.1.17",
-      "next>postcss": "8.5.18",
+      "minimatch@3.1.5>brace-expansion": "1.1.18",
+      "minimatch@10.2.6>brace-expansion": "5.0.9",
+      "next>postcss": "8.5.23",
       "next>sharp": "0.35.0"
     }
   }

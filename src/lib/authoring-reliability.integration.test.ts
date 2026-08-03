@@ -942,7 +942,7 @@ describeIsolated("authoring reliability against isolated Neon", () => {
     expect(libraryProject?.nextAction).toEqual(openProject?.nextAction);
     expect(openProject?.nextAction).toMatchObject({
       kind: "read_or_export",
-      href: `/projects/${projectId}/manuscript`,
+      href: `/projects/${projectId}/manuscript#manuscript-actions`,
     });
   });
 

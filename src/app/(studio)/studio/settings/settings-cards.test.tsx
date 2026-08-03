@@ -32,6 +32,7 @@ describe("NotificationPreferencesCard", () => {
 
     for (const name of ["My book needs me", "Follow-up reminders", "My book is finished"]) {
       expect(screen.getByRole("switch", { name })).toBeChecked();
+      expect(screen.getByRole("switch", { name })).toHaveAttribute("aria-label", name);
       expect(screen.getByRole("switch", { name })).toHaveAccessibleDescription();
     }
     expect(screen.getByText("author@example.com")).toBeVisible();

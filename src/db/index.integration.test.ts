@@ -969,6 +969,81 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
     }
   });
 
+  it("allows a durable authoring retry after malformed structured output is settled and compensated", async () => {
+    const fixture = await createMeteringFixture("structured-output-retry");
+    const intentPrefix = `metering-intent:generation:${fixture.runId}:entity-bible:attempt:`;
+    const usagePrefix = `llm:generation:${fixture.runId}:entity-bible:`;
+    const firstIntentRef = `${intentPrefix}one`;
+    const firstUsageRef = `${usagePrefix}attempt:one`;
+    try {
+      const first = await beginMeteredCallIntent({
+        ...fixture,
+        intentRef: firstIntentRef,
+        intentPrefix,
+        usagePrefix,
+        maxCredits: 1,
+        description: "Structured-output provider attempt",
+      });
+      expect(first.status).toBe("started");
+      if (first.status !== "started") throw new Error("First provider attempt was not authorized");
+
+      await recordLlmCallsAndDebit(
+        [
+          {
+            userId: fixture.userId,
+            projectId: fixture.projectId,
+            runId: fixture.runId,
+            agentRole: "entity-bible",
+            operation: "entity.bible",
+            model: "anthropic/claude-sonnet-5",
+            usage: {
+              inputTokens: 1_000,
+              outputTokens: 500,
+              cachedInputTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          },
+        ],
+        {
+          description: "entity.bible",
+          externalRefPrefix: firstUsageRef,
+          intentRef: firstIntentRef,
+          reservationRef: first.reservationRef,
+          compensateDelivery: {
+            description: "Malformed structured output was not delivered",
+          },
+        },
+      );
+
+      const retry = await beginMeteredCallIntent({
+        ...fixture,
+        intentRef: `${intentPrefix}two`,
+        intentPrefix,
+        usagePrefix,
+        maxCredits: 1,
+        description: "Safe structured-output retry",
+      });
+      expect(retry.status).toBe("started");
+
+      const facts = firstRow<{ refunds: number; settled: number }>(
+        await observer`
+          select
+            count(*) filter (
+              where external_ref = ${`delivery-refund:${firstUsageRef}`}
+            )::int as refunds,
+            count(*) filter (
+              where external_ref = ${`intent-settled:${firstIntentRef}`}
+            )::int as settled
+          from credit_ledger
+          where user_id = ${fixture.userId}
+        `,
+      );
+      expect(facts).toEqual({ refunds: 1, settled: 1 });
+    } finally {
+      await observer`delete from users where id = ${fixture.userId}`;
+    }
+  });
+
   it("blocks compensated redo while optional delivery is pending and after its receipt commits", async () => {
     const userId = `e2e-optional-delivery-${suffix}`;
     const projectId = randomUUID();

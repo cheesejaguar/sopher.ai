@@ -169,6 +169,37 @@ function projectHref(projectId: string, stage: string): string {
   return `/projects/${projectId}/${stage}`;
 }
 
+/**
+ * Points a library status action at a surface that is actually mounted for the
+ * current run. Active full-book runs expose live telemetry, terminal failures
+ * expose recovery details, and completed runs render their completion moment
+ * without either fragment target.
+ */
+export function authoringStatusHref(
+  projectId: string,
+  run: Pick<
+    AuthoringJourneyRun,
+    "kind" | "databaseStatus" | "effectiveStatus" | "stage" | "completionArtifactsReady"
+  > | null,
+): string {
+  const writeHref = projectHref(projectId, "write");
+  if (!run) return writeHref;
+  if (run.kind !== undefined && run.kind !== "full_book") {
+    return `${projectHref(projectId, "editor")}#editor-production-status`;
+  }
+  if (
+    run.effectiveStatus === "failed" ||
+    run.effectiveStatus === "cancelled" ||
+    run.stage === "failed" ||
+    run.stage === "cancelled" ||
+    (run.databaseStatus === "completed" && run.completionArtifactsReady === false)
+  ) {
+    return `${writeHref}#authoring-recovery`;
+  }
+  if (run.effectiveStatus === "completed" || run.stage === "done") return writeHref;
+  return `${writeHref}#production-status`;
+}
+
 function supportReferenceFor(projectId: string, runId?: string | null): string {
   const projectPart = projectId.replaceAll("-", "").slice(0, 8).toUpperCase();
   const runPart = runId ? runId.replaceAll("-", "").slice(0, 8).toUpperCase() : "PROJECT";
@@ -210,7 +241,7 @@ function fullBookContinuationAction(
 function readAction(projectId: string): AuthoringNextAction {
   return nextAction(
     "read_or_export",
-    projectHref(projectId, "manuscript"),
+    `${projectHref(projectId, "manuscript")}#manuscript-actions`,
     "Read or export the manuscript",
     "Your assembled manuscript is ready to read, download, or take back into the editor.",
   );
@@ -298,6 +329,10 @@ function actionForSeed(
     run?.kind && run.kind !== "full_book"
       ? projectHref(project.id, "editor")
       : projectHref(project.id, "write");
+  const projectStatusHref =
+    run?.kind && run.kind !== "full_book"
+      ? `${projectWriteHref}#editor-production-status`
+      : `${projectWriteHref}#production-status`;
 
   if (project.status === "archived") {
     return artifacts.savedChapters > 0
@@ -313,7 +348,7 @@ function actionForSeed(
   if (run?.cancellationRequestedAt && ACTIVE_RUN_STATUSES.has(run.effectiveStatus)) {
     return nextAction(
       "finish_cancellation",
-      projectWriteHref,
+      projectStatusHref,
       "View the safe stop",
       "The studio is stopping before another model call or manuscript commit begins.",
     );
@@ -385,7 +420,7 @@ function actionForSeed(
     if (run.acceptanceUncertain && run.safeToRetry) {
       return nextAction(
         "recover_dispatch",
-        projectWriteHref,
+        projectStatusHref,
         run.kind === "edit_pass" ? "Reconnect this review" : "Reconnect this start",
         run.kind === "edit_pass"
           ? "The manuscript direction is saved, but the studio did not receive a start confirmation. Reconnect the same review without creating another."
@@ -404,7 +439,7 @@ function actionForSeed(
     if (run.kind === "edit_pass") {
       return nextAction(
         "watch_production",
-        projectWriteHref,
+        projectStatusHref,
         run.stage === "queued" ? "Watch the manuscript review" : "Follow the manuscript review",
         run.health === "degraded"
           ? "The live status is delayed. The durable review remains active, and the Editor will keep checking it."
@@ -414,7 +449,7 @@ function actionForSeed(
 
     return nextAction(
       "watch_production",
-      projectWriteHref,
+      projectStatusHref,
       run.stage === "queued" ? "Watch the writing room" : "Watch production",
       run.health === "degraded"
         ? "The live connection is delayed. The durable run remains active, and the Write page will keep checking it."

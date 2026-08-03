@@ -23,6 +23,7 @@ import {
   creativeDecisionCardKey,
 } from "@/components/generation/creative-decision-card";
 import { ResponsiveInspector } from "@/components/studio/product-primitives";
+import { useHashTargetFocus } from "@/components/studio/hash-focus-target";
 import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
 import { PRODUCTION_STAGE_LABELS } from "@/lib/project-progress";
@@ -113,6 +114,7 @@ function ProductionTelemetry({
   estimatedMinutes?: number;
   cancellationRequested: boolean;
 }) {
+  const statusTargetRef = useHashTargetFocus<HTMLElement>("production-status");
   const acceptedAt = state.health.acceptedAt ? Date.parse(state.health.acceptedAt) : Number.NaN;
   const completedAt = state.health.completedAt ? Date.parse(state.health.completedAt) : Number.NaN;
   const elapsedMs = Number.isFinite(acceptedAt)
@@ -139,8 +141,11 @@ function ProductionTelemetry({
 
   return (
     <section
+      ref={statusTargetRef}
+      id="production-status"
+      tabIndex={-1}
       aria-labelledby="production-now-title"
-      className="instrument-surface-raised overflow-hidden rounded-sm"
+      className="instrument-surface-raised scroll-mt-28 overflow-hidden rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
     >
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
         <div>
@@ -776,22 +781,7 @@ function RecoveryCard({
   error: string | null;
 }) {
   const [copied, setCopied] = React.useState(false);
-  const recoveryTargetRef = React.useRef<HTMLElement | null>(null);
-  React.useEffect(() => {
-    let frame: number | undefined;
-    const focusRecoveryTarget = () => {
-      if (window.location.hash !== "#authoring-recovery") return;
-      frame = window.requestAnimationFrame(() => {
-        recoveryTargetRef.current?.focus({ preventScroll: true });
-      });
-    };
-    focusRecoveryTarget();
-    window.addEventListener("hashchange", focusRecoveryTarget);
-    return () => {
-      window.removeEventListener("hashchange", focusRecoveryTarget);
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-    };
-  }, []);
+  const recoveryTargetRef = useHashTargetFocus<HTMLElement>("authoring-recovery");
   const saved = Math.max(savedChapterCount, state.health.savedChapterCount ?? 0);
   const checkpoints = Math.max(0, state.health.savedCheckpointCount ?? 0);
   const noWorkStarted = state.health.noWorkStarted && state.totalCredits <= 0 && saved === 0;
