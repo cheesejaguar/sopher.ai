@@ -95,7 +95,12 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">{outline.plotStructure}</Badge>
+          <Badge
+            variant="outline"
+            className="border-paper-edge bg-transparent text-paper-foreground"
+          >
+            {outline.plotStructure}
+          </Badge>
           {outline.themes.map((theme) => (
             <Badge key={theme} variant="secondary">
               {theme}
