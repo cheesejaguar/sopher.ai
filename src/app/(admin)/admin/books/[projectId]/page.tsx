@@ -86,7 +86,7 @@ export default async function AdminBookView({
               </span>
             </h2>
             <div
-              className="prose-manuscript mt-4 [content-visibility:auto]"
+              className="prose-manuscript mt-4 bg-paper text-paper-foreground"
               // Same escaped-HTML renderer as the author-facing reading view.
               dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content) }}
             />

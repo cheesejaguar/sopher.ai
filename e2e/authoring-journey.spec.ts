@@ -183,7 +183,7 @@ test("project surfaces repeat the authoritative next step", async ({ page }, tes
   await expect(page.getByText("Writing now", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel(/being written/i)).toHaveCount(0);
   await expect(page.getByRole("link", { name: "View the safe stop" })).toHaveCount(0);
-  await expect(page.getByText("Stopping", { exact: true })).toBeVisible();
+  await expect(page.locator("#main-content").getByText("Stopping", { exact: true })).toBeVisible();
   await expect(page.getByText("Generating", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Stopping safely" })).toBeDisabled();
   await expect(
