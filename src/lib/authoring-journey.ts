@@ -298,6 +298,10 @@ function actionForSeed(
     run?.kind && run.kind !== "full_book"
       ? projectHref(project.id, "editor")
       : projectHref(project.id, "write");
+  const projectStatusHref =
+    run?.kind && run.kind !== "full_book"
+      ? `${projectWriteHref}#editor-production-status`
+      : `${projectWriteHref}#production-status`;
 
   if (project.status === "archived") {
     return artifacts.savedChapters > 0
@@ -313,7 +317,7 @@ function actionForSeed(
   if (run?.cancellationRequestedAt && ACTIVE_RUN_STATUSES.has(run.effectiveStatus)) {
     return nextAction(
       "finish_cancellation",
-      projectWriteHref,
+      projectStatusHref,
       "View the safe stop",
       "The studio is stopping before another model call or manuscript commit begins.",
     );
@@ -385,7 +389,7 @@ function actionForSeed(
     if (run.acceptanceUncertain && run.safeToRetry) {
       return nextAction(
         "recover_dispatch",
-        projectWriteHref,
+        projectStatusHref,
         run.kind === "edit_pass" ? "Reconnect this review" : "Reconnect this start",
         run.kind === "edit_pass"
           ? "The manuscript direction is saved, but the studio did not receive a start confirmation. Reconnect the same review without creating another."
@@ -404,7 +408,7 @@ function actionForSeed(
     if (run.kind === "edit_pass") {
       return nextAction(
         "watch_production",
-        projectWriteHref,
+        projectStatusHref,
         run.stage === "queued" ? "Watch the manuscript review" : "Follow the manuscript review",
         run.health === "degraded"
           ? "The live status is delayed. The durable review remains active, and the Editor will keep checking it."
@@ -414,9 +418,7 @@ function actionForSeed(
 
     return nextAction(
       "watch_production",
-      run.kind && run.kind !== "full_book"
-        ? projectWriteHref
-        : `${projectWriteHref}#production-status`,
+      projectStatusHref,
       run.stage === "queued" ? "Watch the writing room" : "Watch production",
       run.health === "degraded"
         ? "The live connection is delayed. The durable run remains active, and the Write page will keep checking it."

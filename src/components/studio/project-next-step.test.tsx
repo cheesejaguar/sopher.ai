@@ -153,7 +153,9 @@ function renderNextStep(journey: ReturnType<typeof snapshot>) {
 afterEach(() => {
   cleanup();
   document
-    .querySelectorAll("#authoring-recovery, #production-status, #manuscript-actions")
+    .querySelectorAll(
+      "#authoring-recovery, #production-status, #editor-production-status, #manuscript-actions",
+    )
     .forEach((target) => target.remove());
   navigation.pathname = `/projects/${PROJECT_ID}/write`;
   window.history.replaceState({}, "", navigation.pathname);
@@ -179,6 +181,42 @@ describe("ProjectNextStep presentation", () => {
     expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
     expect(target).toHaveFocus();
   });
+
+  it.each(["chapter", "edit_pass", "continuity"] as const)(
+    "moves a same-page %s action to the editor production status",
+    (kind) => {
+      navigation.pathname = `/projects/${PROJECT_ID}/editor`;
+      window.history.replaceState({}, "", navigation.pathname);
+      const target = document.createElement("section");
+      target.id = "editor-production-status";
+      target.tabIndex = -1;
+      target.scrollIntoView = vi.fn();
+      target.getClientRects = vi.fn(() => [{ width: 1, height: 1 }] as unknown as DOMRectList);
+      document.body.append(target);
+
+      renderNextStep(
+        snapshot(
+          run({
+            kind,
+            stage: kind === "continuity" ? "continuity" : "editing",
+            progressPct: 41,
+          }),
+        ),
+      );
+      const label = kind === "edit_pass" ? "Follow the manuscript review" : "Watch production";
+      const link = screen.getByRole("link", { name: label });
+      expect(link).toHaveAttribute(
+        "href",
+        `/projects/${PROJECT_ID}/editor#editor-production-status`,
+      );
+
+      fireEvent.click(link);
+
+      expect(window.location.hash).toBe("#editor-production-status");
+      expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+      expect(target).toHaveFocus();
+    },
+  );
 
   it("moves the same-page manuscript action to the reading and export controls", () => {
     navigation.pathname = `/projects/${PROJECT_ID}/manuscript`;

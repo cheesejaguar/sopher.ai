@@ -105,7 +105,7 @@ describe("deriveAuthoringJourney", () => {
       name: "keeps an active run in the writing room",
       input: seed({ run: run() }),
       action: "watch_production",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#production-status`,
     },
     {
       name: "takes a creative pause to the exact Write decision",
@@ -186,13 +186,13 @@ describe("deriveAuthoringJourney", () => {
         }),
       }),
       action: "recover_dispatch",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#production-status`,
     },
     {
       name: "shows an explicit safe-stop state",
       input: seed({ run: run({ cancellationRequestedAt: NOW }) }),
       action: "finish_cancellation",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#production-status`,
     },
     {
       name: "offers checkpoint recovery after an interrupted included story",
@@ -520,7 +520,7 @@ describe("deriveAuthoringJourney", () => {
 
     expect(journey.nextAction).toMatchObject({
       kind: "finish_cancellation",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#production-status`,
       requiresMeteredAccess: false,
     });
     expect(journey.nextAction.label).toMatch(/safe stop/i);
@@ -589,7 +589,9 @@ describe("deriveAuthoringJourney", () => {
       );
 
       expect(journey.nextAction.kind).toBe("watch_production");
-      expect(journey.nextAction.href).toBe(`/projects/${PROJECT_ID}/editor`);
+      expect(journey.nextAction.href).toBe(
+        `/projects/${PROJECT_ID}/editor#editor-production-status`,
+      );
       if (kind === "edit_pass") {
         expect(journey.nextAction.label).toMatch(/manuscript review/i);
         expect(journey.nextAction.description).toMatch(/chapter-by-chapter review/i);
@@ -921,7 +923,7 @@ describe("authoringJourneyWithProgress", () => {
     expect(stopping.nextAction).toMatchObject({
       kind: "finish_cancellation",
       label: "View the safe stop",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#production-status`,
     });
   });
 

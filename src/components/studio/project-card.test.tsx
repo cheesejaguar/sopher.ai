@@ -98,6 +98,32 @@ describe("project journey destinations", () => {
     expect(screen.getByText("Review production status")).toBeVisible();
     expect(screen.getByText("Needs attention")).toBeVisible();
   });
+
+  it("opens a failed scoped run at the editor status surface", () => {
+    render(
+      <ProjectCard
+        project={{
+          ...project,
+          statusHref:
+            "/projects/11111111-1111-4111-8111-111111111111/editor#editor-production-status",
+          nextAction: {
+            kind: "contact_support",
+            href: "mailto:support@sopher.ai?subject=Authoring%20help",
+            label: "Contact support",
+            description: "The manuscript review needs a safe evidence check.",
+            requiresMeteredAccess: false,
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Review production status: The Night Ferry" }),
+    ).toHaveAttribute(
+      "href",
+      "/projects/11111111-1111-4111-8111-111111111111/editor#editor-production-status",
+    );
+  });
 });
 
 describe("NewBookCard", () => {

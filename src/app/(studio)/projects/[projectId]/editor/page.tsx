@@ -135,21 +135,29 @@ export default async function EditorIndexPage({
         </p>
       </header>
 
-      {journey ? <IncompleteProductionNotice journey={journey} /> : null}
+      <div
+        id="editor-production-status"
+        tabIndex={-1}
+        role="region"
+        aria-label="Editor production status"
+        className="scroll-mt-28 space-y-5 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+      >
+        {journey ? <IncompleteProductionNotice journey={journey} /> : null}
 
-      {chapters.some((chapter) => chapter.wordCount > 0) ? (
-        <ManuscriptRevisionPanel
-          projectId={projectId}
-          chapterCount={chapters.filter((chapter) => chapter.wordCount > 0).length}
-          maximumCredits={manuscriptEditMaximumCredits(
-            data.project.settings.qualityTier ?? "standard",
-            chapters.filter((chapter) => chapter.wordCount > 0).length,
-          )}
-          initialRun={initialRevisionRun}
-          initialSuggestionCount={Number(latestSuggestionFacts.count)}
-          initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
-        />
-      ) : null}
+        {chapters.some((chapter) => chapter.wordCount > 0) ? (
+          <ManuscriptRevisionPanel
+            projectId={projectId}
+            chapterCount={chapters.filter((chapter) => chapter.wordCount > 0).length}
+            maximumCredits={manuscriptEditMaximumCredits(
+              data.project.settings.qualityTier ?? "standard",
+              chapters.filter((chapter) => chapter.wordCount > 0).length,
+            )}
+            initialRun={initialRevisionRun}
+            initialSuggestionCount={Number(latestSuggestionFacts.count)}
+            initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
+          />
+        ) : null}
+      </div>
 
       {chapters.length === 0 ? (
         <div className="instrument-surface relative flex min-h-56 flex-col items-center justify-center overflow-hidden px-6 py-12 text-center">
