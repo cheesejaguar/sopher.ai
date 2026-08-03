@@ -438,7 +438,9 @@ export async function splitChapter(
         and chapter_number >= ${insertAt}
         and exists (
           select 1 from chapters as source
-          where source.id = ${chapterId} and source.version = ${chapter.version}
+          where source.id = ${chapterId}
+            and source.version = ${chapter.version}
+            and source.chapter_number = ${chapter.chapterNumber}
         )
         and not exists (
           select 1 from generation_runs
@@ -454,7 +456,9 @@ export async function splitChapter(
         and chapter_number > 100000
         and exists (
           select 1 from chapters as source
-          where source.id = ${chapterId} and source.version = ${chapter.version}
+          where source.id = ${chapterId}
+            and source.version = ${chapter.version}
+            and source.chapter_number = ${chapter.chapterNumber}
         )
         and not exists (
           select 1 from generation_runs
@@ -468,7 +472,9 @@ export async function splitChapter(
       select ${ownership.bookId}, ${insertAt}, 'drafted', ${halves.after}, ${countWords(halves.after)}
       where exists (
         select 1 from chapters as source
-        where source.id = ${chapterId} and source.version = ${chapter.version}
+        where source.id = ${chapterId}
+            and source.version = ${chapter.version}
+            and source.chapter_number = ${chapter.chapterNumber}
       )
       and not exists (
         select 1 from generation_runs
@@ -487,6 +493,7 @@ export async function splitChapter(
           updated_at = now()
       where id = ${chapterId}
         and version = ${chapter.version}
+        and chapter_number = ${chapter.chapterNumber}
         and not exists (
           select 1 from generation_runs
           where project_id = ${ownership.projectId}
@@ -500,7 +507,9 @@ export async function splitChapter(
     throw new Error("Finish or stop the current run before changing the manuscript");
   }
   if ((appliedRows as unknown[]).length === 0) {
-    throw new Error("This chapter changed while you were splitting it — reopen it and try again");
+    throw new Error(
+      "This chapter moved or changed while you were splitting it — reopen it and try again",
+    );
   }
   revalidatePath(`/projects/${ownership.projectId}`);
   return { chapterNumber: insertAt };
@@ -550,7 +559,11 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
     { chapterId, content: next.content, source: "pre-merge-absorbed" },
   ]);
 
-  const [, , allowedRows, , , , appliedRows] = await getSqlClient().transaction((tx) => [
+  // Identity is pinned on both rows in every guard. addChapter, deleteChapter
+  // and moveChapter renumber without bumping `version`, so a version-only guard
+  // cannot see a renumber that happened between the read above and this
+  // transaction taking the project lock.
+  const [, , allowedRows, , appliedRows] = await getSqlClient().transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
     )`,
@@ -574,11 +587,15 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
         )
         and exists (
           select 1 from chapters as keeper
-          where keeper.id = ${chapterId} and keeper.version = ${current.version}
+          where keeper.id = ${chapterId}
+            and keeper.version = ${current.version}
+            and keeper.chapter_number = ${current.chapterNumber}
         )
         and exists (
           select 1 from chapters as absorbed
-          where absorbed.id = ${next.id} and absorbed.version = ${next.version}
+          where absorbed.id = ${next.id}
+            and absorbed.version = ${next.version}
+            and absorbed.chapter_number = ${next.chapterNumber}
         )
         and not exists (
           select 1 from generation_runs
@@ -587,36 +604,31 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
             and kind <> 'export'
         )
     `,
+    // The delete and the merged write are ONE statement so the write can be
+    // gated on `removed` — proof that *this* transaction removed the absorbed
+    // chapter. Testing `not exists (absorbed)` instead would also pass when
+    // somebody else had already deleted it, which silently resurrected that
+    // chapter's prose inside this one.
     tx`
-      delete from chapters
-      where id = ${next.id}
-        and version = ${next.version}
-        and exists (
-          select 1 from chapters as keeper
-          where keeper.id = ${chapterId} and keeper.version = ${current.version}
-        )
-        and not exists (
-          select 1 from generation_runs
-          where project_id = ${ownership.projectId}
-            and status in ('queued', 'running', 'awaiting_input')
-            and kind <> 'export'
-        )
-    `,
-    tx`
-      update chapters
-      set chapter_number = chapter_number - 100001
-      where book_id = ${ownership.bookId}
-        and chapter_number > 100000
-        and not exists (
-          select 1 from generation_runs
-          where project_id = ${ownership.projectId}
-            and status in ('queued', 'running', 'awaiting_input')
-            and kind <> 'export'
-        )
-    `,
-    // The merged prose only lands once the absorbed chapter is actually gone,
-    // so a failed delete can never leave its text sitting in both places.
-    tx`
+      with removed as (
+        delete from chapters
+        where id = ${next.id}
+          and version = ${next.version}
+          and chapter_number = ${next.chapterNumber}
+          and exists (
+            select 1 from chapters as keeper
+            where keeper.id = ${chapterId}
+              and keeper.version = ${current.version}
+              and keeper.chapter_number = ${current.chapterNumber}
+          )
+          and not exists (
+            select 1 from generation_runs
+            where project_id = ${ownership.projectId}
+              and status in ('queued', 'running', 'awaiting_input')
+              and kind <> 'export'
+          )
+        returning id
+      )
       update chapters
       set content = ${merged},
           word_count = ${countWords(merged)},
@@ -624,21 +636,26 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
           updated_at = now()
       where id = ${chapterId}
         and version = ${current.version}
-        and not exists (select 1 from chapters as absorbed where absorbed.id = ${next.id})
-        and not exists (
-          select 1 from generation_runs
-          where project_id = ${ownership.projectId}
-            and status in ('queued', 'running', 'awaiting_input')
-            and kind <> 'export'
-        )
+        and chapter_number = ${current.chapterNumber}
+        and exists (select 1 from removed)
       returning id
+    `,
+    // Only rows this transaction parked can be here, and they are parked only
+    // when the delete's guards also held, so closing the gap by one is safe.
+    tx`
+      update chapters
+      set chapter_number = chapter_number - 100001
+      where book_id = ${ownership.bookId}
+        and chapter_number > 100000
     `,
   ]);
   if (!(allowedRows as Array<{ allowed: boolean }>)[0]?.allowed) {
     throw new Error("Finish or stop the current run before changing the manuscript");
   }
   if ((appliedRows as unknown[]).length === 0) {
-    throw new Error("These chapters changed while you were merging — reopen them and try again");
+    throw new Error(
+      "These chapters moved or changed while you were merging — reopen them and try again",
+    );
   }
   revalidatePath(`/projects/${ownership.projectId}`);
 }

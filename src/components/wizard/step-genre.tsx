@@ -8,7 +8,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   CUSTOM_GENRE,
+  MAX_CHAPTERS,
   MAX_CUSTOM_GENRE_LENGTH,
+  MAX_WORDS_PER_CHAPTER,
+  MIN_CHAPTERS,
+  minWordsForGenre,
   shapeDefaultsForGenre,
   type WizardActionEvent,
   type WizardGenre,
@@ -30,10 +34,30 @@ export function StepGenre({
    * included story has a server-enforced shape, so it is left alone.
    */
   function selectGenre(genre: WizardGenre) {
-    const defaults = experience === "full_book" ? shapeDefaultsForGenre(genre) : null;
+    if (experience !== "full_book") {
+      dispatch({ type: "patch", patch: { genre, subgenre: null } });
+      return;
+    }
+    // The seven original genres carry no defaults, so switching to one leaves
+    // the sliders where they are — which, coming from a children's book, would
+    // strand wordsPerChapter below the adult floor the shape step then renders
+    // as its minimum. Clamp on every change, the same way restoreDraft does.
+    const defaults = shapeDefaultsForGenre(genre);
+    const minWords = minWordsForGenre(genre);
     dispatch({
       type: "patch",
-      patch: { genre, subgenre: null, ...(defaults ?? {}) },
+      patch: {
+        genre,
+        subgenre: null,
+        chapters: Math.min(
+          Math.max(defaults?.chapters ?? state.chapters, MIN_CHAPTERS),
+          MAX_CHAPTERS,
+        ),
+        wordsPerChapter: Math.min(
+          Math.max(defaults?.wordsPerChapter ?? state.wordsPerChapter, minWords),
+          MAX_WORDS_PER_CHAPTER,
+        ),
+      },
     });
   }
 

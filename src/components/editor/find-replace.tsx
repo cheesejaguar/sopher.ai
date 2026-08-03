@@ -52,14 +52,16 @@ function findMatches(editor: Editor, query: string, options: ReplaceOptions): Ma
 }
 
 function Snippet({ snippet }: { snippet: MatchSnippet }) {
+  // A span, not a p: this renders inside the chapter row's phrasing-content
+  // span, where flow content is invalid nesting. `block` keeps the layout.
   return (
-    <p className="truncate font-serif text-xs text-muted-foreground">
+    <span className="block truncate font-serif text-xs text-muted-foreground">
       {snippet.before}
       <mark className="rounded-xs bg-accent px-0.5 font-medium text-accent-foreground">
         {snippet.match}
       </mark>
       {snippet.after}
-    </p>
+    </span>
   );
 }
 
