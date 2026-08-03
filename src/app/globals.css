@@ -464,7 +464,10 @@
    The browser replaces the estimate with the measured size after first view. */
 .defer-offscreen {
   content-visibility: auto;
-  contain-intrinsic-block-size: auto var(--defer-block-size, 52rem);
+  /* Reserve a few lines beyond the measured macOS footprint. Linux font
+     metrics can wrap an offscreen section slightly taller; an estimate that
+     grows after a native End jump leaves keyboard users above the footer. */
+  contain-intrinsic-block-size: auto calc(var(--defer-block-size, 52rem) + 3rem);
 }
 
 /* Firefox does not preserve the document-end anchor when content-visibility
