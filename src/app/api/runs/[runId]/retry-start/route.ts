@@ -26,6 +26,55 @@ import { generateChapter } from "@/workflows/generate-chapter";
 
 export const maxDuration = 60;
 
+type RetryRunState = Pick<
+  typeof schema.generationRuns.$inferSelect,
+  "status" | "workflowRunId" | "cancellationRequestedAt"
+>;
+
+function settledRetryResponse(runId: string, run: RetryRunState | null | undefined) {
+  if (!run) return null;
+
+  if (run.cancellationRequestedAt) {
+    return Response.json(
+      {
+        error: "This run is stopping and cannot be redispatched",
+        code: "cancellation_requested",
+        runId,
+        status: run.status,
+        handoffConfirmed: false,
+        confirmationPending: false,
+      },
+      { status: 409 },
+    );
+  }
+  if (run.workflowRunId) {
+    return Response.json(
+      {
+        runId,
+        status: run.status,
+        reattached: true,
+        handoffConfirmed: true,
+        confirmationPending: false,
+      },
+      { status: 202 },
+    );
+  }
+  if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") {
+    return Response.json(
+      {
+        error: `This run is ${run.status} and cannot be redispatched`,
+        runId,
+        status: run.status,
+        handoffConfirmed: false,
+        confirmationPending: false,
+      },
+      { status: 409 },
+    );
+  }
+
+  return null;
+}
+
 /**
  * Re-dispatches the same durable run only after `start()` acceptance was
  * ambiguous. The marker claim is atomic, so duplicate clicks/reloads reattach
@@ -77,47 +126,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     acceptanceUncertainAt: snapshot.acceptanceUncertainAt,
     acceptanceDispatchClaimedAt: snapshot.acceptanceDispatchClaimedAt,
   });
-  if (snapshot.cancellationRequestedAt) {
-    return Response.json(
-      {
-        error: "This run is stopping and cannot be redispatched",
-        code: "cancellation_requested",
-        runId,
-        status: snapshot.status,
-        handoffConfirmed: false,
-        confirmationPending: false,
-      },
-      { status: 409 },
-    );
-  }
-  if (snapshot.workflowRunId) {
-    return Response.json(
-      {
-        runId,
-        status: snapshot.status,
-        reattached: true,
-        handoffConfirmed: true,
-        confirmationPending: false,
-      },
-      { status: 202 },
-    );
-  }
-  if (
-    snapshot.status === "completed" ||
-    snapshot.status === "failed" ||
-    snapshot.status === "cancelled"
-  ) {
-    return Response.json(
-      {
-        error: `This run is ${snapshot.status} and cannot be redispatched`,
-        runId,
-        status: snapshot.status,
-        handoffConfirmed: false,
-        confirmationPending: false,
-      },
-      { status: 409 },
-    );
-  }
+  const settledSnapshotResponse = settledRetryResponse(runId, snapshot);
+  if (settledSnapshotResponse) return settledSnapshotResponse;
   if (snapshot.status !== "queued" || !acceptanceState.acceptanceUncertain) {
     return Response.json(
       {
@@ -236,47 +246,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
       .from(schema.generationRuns)
       .where(and(eq(schema.generationRuns.id, runId), eq(schema.generationRuns.userId, userId)))
       .limit(1);
-    if (current?.cancellationRequestedAt) {
-      return Response.json(
-        {
-          error: "This run is stopping and cannot be redispatched",
-          code: "cancellation_requested",
-          runId,
-          status: current.status,
-          handoffConfirmed: false,
-          confirmationPending: false,
-        },
-        { status: 409 },
-      );
-    }
-    if (current?.workflowRunId) {
-      return Response.json(
-        {
-          runId,
-          status: current.status,
-          reattached: true,
-          handoffConfirmed: true,
-          confirmationPending: false,
-        },
-        { status: 202 },
-      );
-    }
-    if (
-      current?.status === "completed" ||
-      current?.status === "failed" ||
-      current?.status === "cancelled"
-    ) {
-      return Response.json(
-        {
-          error: `This run is ${current.status} and cannot be redispatched`,
-          runId,
-          status: current.status,
-          handoffConfirmed: false,
-          confirmationPending: false,
-        },
-        { status: 409 },
-      );
-    }
+    const settledCurrentResponse = settledRetryResponse(runId, current);
+    if (settledCurrentResponse) return settledCurrentResponse;
     const currentAcceptanceState = deriveAuthoringRunAcceptanceState({
       acceptanceUncertainAt: current?.acceptanceUncertainAt ?? null,
       acceptanceDispatchClaimedAt: current?.acceptanceDispatchClaimedAt ?? null,

@@ -304,6 +304,34 @@ describe("POST /api/runs/[runId]/retry-start", () => {
     });
   });
 
+  it("reattaches when a competing retry links Workflow before this claim lands", async () => {
+    mockSelectRows(
+      [snapshot()],
+      [
+        {
+          status: "queued",
+          workflowRunId: "workflow-from-competing-retry",
+          acceptanceUncertainAt: null,
+          acceptanceDispatchClaimedAt: null,
+          cancellationRequestedAt: null,
+        },
+      ],
+    );
+    mocks.claimUncertainAuthoringRun.mockResolvedValue(null);
+
+    const response = await request();
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      runId,
+      status: "queued",
+      reattached: true,
+      handoffConfirmed: true,
+      confirmationPending: false,
+    });
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
   it("rebuilds an unfinished full-book snapshot before claiming or dispatching it", async () => {
     const staleConfig = {
       ...config,

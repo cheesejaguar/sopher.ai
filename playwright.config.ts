@@ -15,9 +15,9 @@
  *    disposable Neon branch.
  *
  * Auth: the webServer command blanks NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and
- * CLERK_SECRET_KEY, which forces guest mode (shared dev-user, no sign-in)
- * even when .env.local carries real Clerk keys — variables already set in the
- * process environment take precedence over .env files in Next.js.
+ * CLERK_SECRET_KEY even when .env.local carries real Clerk keys. Public-only
+ * optimized builds then prove that private access fails closed. Full isolated
+ * acceptance explicitly sets ALLOW_DEV_AUTH and uses the shared test identity.
  *
  * Theming is class-based via next-themes (localStorage key "theme", "dark"
  * class on <html>). The light and dark projects run the same specs; the theme

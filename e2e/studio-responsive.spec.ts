@@ -83,7 +83,8 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       {
         name: "project brief",
         route: `${base}/brief`,
-        ready: () => page.getByText("The brief, as written", { exact: true }),
+        ready: () =>
+          page.locator("#main-content").getByText("The brief, as written", { exact: true }),
       },
       {
         name: "story bible",

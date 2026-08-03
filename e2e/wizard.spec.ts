@@ -18,6 +18,7 @@ const wizardRequestKey = (userId: string, experience: "trial_short_story" | "ful
   `sopher.new-book-request.v2:${userId}:${experience}`;
 const DEV_WIZARD_REQUEST_KEY = wizardRequestKey("dev-user", "full_book");
 const E2E_USER_HEADER = "x-sopher-e2e-user";
+const START_HANDOFF_TIMEOUT_MS = 30_000;
 const stubbedStartsEnabled =
   process.env.E2E_DATABASE_ISOLATED === "1" && process.env.E2E_STUB_WORKFLOW === "1";
 
@@ -86,8 +87,14 @@ async function completeWizardSetup(
   const start = page.getByRole("button", {
     name: options.includedStory ? "Create my short story" : "Start the book",
   });
+  // The receipt is painted by StepEstimate before its effect publishes the
+  // matching quote to the parent wizard. Waiting for both the receipt and the
+  // React-owned aria-describedby transition proves hydration has attached the
+  // handlers and that handleSubmit sees the authoritative quote revision.
+  await expect(page.getByText("Total", { exact: true })).toBeVisible();
   await expect(start).toBeVisible();
   await expect(start).toBeEnabled();
+  await expect(start).not.toHaveAttribute("aria-describedby", "wizard-quote-hint");
 }
 
 async function inspectStart(page: Page, requestKey: string): Promise<StartState> {
@@ -338,15 +345,17 @@ test.describe("stubbed new-book starts", () => {
 
     // Two activations in the same browser task exercise the durable request
     // key before React has a chance to paint the pending state.
-    await page.getByRole("button", { name: "Start the book" }).evaluate((button) => {
+    const start = page.getByRole("button", { name: "Start the book" });
+    await start.evaluate((button) => {
       (button as HTMLButtonElement).click();
       (button as HTMLButtonElement).click();
     });
-    await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/write$/);
-    const firstWritePath = new URL(page.url()).pathname;
 
     await expect
-      .poll(async () => inspectStart(page, requestKey))
+      .poll(async () => inspectStart(page, requestKey), {
+        timeout: START_HANDOFF_TIMEOUT_MS,
+        message: "the duplicate activation must persist one authoritative project and run",
+      })
       .toMatchObject({
         projectCount: 1,
         runCount: 1,
@@ -354,9 +363,16 @@ test.describe("stubbed new-book starts", () => {
         distinctRequestKeyCount: 1,
         runs: [{ requestKey, status: "queued", workflowRunId: null }],
       });
+    const persistedStart = await inspectStart(page, requestKey);
+    const persistedProjectId = persistedStart.projects[0]?.id;
+    expect(persistedProjectId).toBeTruthy();
+    if (!persistedProjectId) throw new Error("The idempotent start did not persist a project id");
+    const firstWritePath = `/projects/${persistedProjectId}/write`;
+    const firstWriteUrl = new URL(firstWritePath, page.url()).toString();
+    await expect(page).toHaveURL(firstWriteUrl, { timeout: START_HANDOFF_TIMEOUT_MS });
 
     await page.reload();
-    await expect(page).toHaveURL(firstWritePath);
+    await expect(page).toHaveURL(firstWriteUrl, { timeout: START_HANDOFF_TIMEOUT_MS });
     await expect(
       page.getByLabel("Book production status").getByText("Production now", { exact: true }),
     ).toBeVisible();
@@ -377,7 +393,7 @@ test.describe("stubbed new-book starts", () => {
     });
     await completeWizardSetup(page, title);
     await page.getByRole("button", { name: "Start the book" }).click();
-    await expect(page).toHaveURL(firstWritePath);
+    await expect(page).toHaveURL(firstWriteUrl, { timeout: START_HANDOFF_TIMEOUT_MS });
     await expect(inspectStart(page, requestKey)).resolves.toMatchObject({
       projectCount: 1,
       runCount: 1,
