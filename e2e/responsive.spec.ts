@@ -58,6 +58,11 @@ test("mobile homepage keeps the transforming notebook in the first viewport", as
     const hero = page.locator(".marketing-hero-stage");
     const primaryAction = hero.getByRole("link", { name: "Start your book" });
     const artifact = hero.locator(".journey-artifact");
+    // Wait for the same-URL reload to settle before measuring. The count
+    // assertions still fail on a durable duplicate, while avoiding a strict
+    // locator failure against a transient outgoing tree under throttled CI.
+    await expect(hero).toHaveCount(1);
+    await expect(artifact).toHaveCount(1);
     await expect(primaryAction).toBeVisible();
     await expect(artifact).toBeVisible();
 

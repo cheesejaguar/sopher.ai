@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { Pause, Play } from "lucide-react";
 
 import { useElementVisibility } from "@/hooks/use-element-visibility";
@@ -253,7 +252,7 @@ export function ManuscriptRail() {
               const isActive = index === visibleActive;
               return (
                 <li key={step.name} className="relative min-w-0">
-                  <Link
+                  <a
                     href={`#pipeline-${step.name.toLowerCase()}`}
                     aria-current={isActive ? "step" : undefined}
                     onFocus={() => selectStage(index)}
@@ -279,7 +278,7 @@ export function ManuscriptRail() {
                     >
                       {step.name}
                     </span>
-                  </Link>
+                  </a>
                 </li>
               );
             })}
