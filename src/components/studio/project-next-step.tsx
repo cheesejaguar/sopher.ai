@@ -58,9 +58,28 @@ export function JourneyActionLink({
   variant?: "primary" | "secondary";
 }) {
   const Icon = ACTION_ICONS[action.kind];
+  const focusRepeatedHashTarget = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      const destination = new URL(action.href, window.location.href);
+      if (
+        !destination.hash ||
+        destination.hash !== window.location.hash ||
+        normalizedRoute(destination.pathname) !== normalizedRoute(window.location.pathname)
+      ) {
+        return;
+      }
+      const target = document.getElementById(decodeURIComponent(destination.hash.slice(1)));
+      if (!target) return;
+      event.preventDefault();
+      target.scrollIntoView?.({ block: "start" });
+      target.focus({ preventScroll: true });
+    },
+    [action.href],
+  );
   return (
     <Link
       href={action.href as Route}
+      onClick={focusRepeatedHashTarget}
       className={cn(
         "inline-flex min-h-11 items-center justify-center gap-2 rounded-sm px-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:border forced-colors:border-[ButtonText] forced-colors:bg-[ButtonFace] forced-colors:text-[ButtonText]",
         variant === "primary"

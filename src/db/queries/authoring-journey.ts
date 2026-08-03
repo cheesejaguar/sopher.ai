@@ -20,6 +20,7 @@ import {
 } from "@/lib/authoring-journey";
 import { creditsForUsd } from "@/lib/billing/credits-shared";
 import { getBalance } from "@/lib/billing/credits";
+import { findRunsWithUnresolvedMetering } from "@/lib/billing/unresolved-metering";
 import { deriveAuthoringRunAcceptanceState, type AuthoringRunStatus } from "@/lib/generation-runs";
 import {
   canonicalRunProgress,
@@ -163,22 +164,6 @@ function latestStageForRun(
   };
 }
 
-function blockingRecoveryEvidence(input: {
-  error: string | null;
-  incidentCategories?: string[];
-}): string[] {
-  const categories = new Set(input.incidentCategories ?? []);
-  const error = input.error?.toLowerCase() ?? "";
-  if (
-    error.includes("unresolved local metering") ||
-    error.includes("reconciliation is required") ||
-    (error.includes("already settled") && error.includes("checkpoint is missing"))
-  ) {
-    categories.add("unresolved_metering");
-  }
-  return [...categories];
-}
-
 function persistedRunToJourney(input: {
   run: PersistedRun;
   stageEvent?: StageEventRow;
@@ -316,10 +301,10 @@ function persistedRunToJourney(input: {
     dispatchAttempts: input.workflow?.dispatchAttempts ?? input.run.dispatchAttempts,
     rootErrorCode: input.run.rootErrorCode,
     rootErrorStage: input.run.rootErrorStage,
-    blockingIncidentCategories: blockingRecoveryEvidence({
-      error: input.run.error,
-      incidentCategories: input.blockingIncidentCategories,
-    }),
+    // Root errors remain immutable audit history. Recovery safety is derived
+    // from currently open incidents and pending metering intents so a verified
+    // operator reconciliation can unblock the author without erasing history.
+    blockingIncidentCategories: [...new Set(input.blockingIncidentCategories ?? [])],
     supportReference: input.workflow?.supportReference ?? input.run.supportReference,
     cancellationRequestedAt:
       input.workflow?.cancellation?.requestedAt ?? toIso(input.run.cancellationRequestedAt),
@@ -489,6 +474,7 @@ async function readBlockingIncidentCategories(
           "completion_contradiction",
           "event_persistence",
           "invalid_pause",
+          "unresolved_metering",
         ]),
       ),
     );
@@ -519,17 +505,32 @@ export async function listAuthoringJourneySnapshots(
   const balanceCredits = access.balanceCredits ?? (await getBalance(userId));
 
   const runs = await readJourneyRuns(projects.map((project) => project.id));
-  const [stageEvents, blockingIncidents] = await Promise.all([
+  const [stageEvents, blockingIncidents, unresolvedMeteringRuns] = await Promise.all([
     readLatestStageEvents(runs.map((run) => run.id)),
     readBlockingIncidentCategories(runs.map((run) => run.id)),
+    findRunsWithUnresolvedMetering(runs),
   ]);
   const runsByProject = new Map(runs.map((run) => [run.projectId, run]));
   const stagesByRun = new Map(stageEvents.map((event) => [event.runId, event]));
   const incidentCategoriesByRun = new Map<string, string[]>();
   for (const incident of blockingIncidents) {
+    // Metering incidents are derived from the live ledger. If reconciliation
+    // committed but incident cleanup was interrupted, the stale incident must
+    // not strand the author after the financial evidence is terminal.
+    if (
+      incident.category === "unresolved_metering" &&
+      !unresolvedMeteringRuns.has(incident.runId)
+    ) {
+      continue;
+    }
     const categories = incidentCategoriesByRun.get(incident.runId) ?? [];
     categories.push(incident.category);
     incidentCategoriesByRun.set(incident.runId, categories);
+  }
+  for (const runId of unresolvedMeteringRuns) {
+    const categories = incidentCategoriesByRun.get(runId) ?? [];
+    if (!categories.includes("unresolved_metering")) categories.push("unresolved_metering");
+    incidentCategoriesByRun.set(runId, categories);
   }
 
   return projects.map((project) => {
@@ -617,12 +618,14 @@ export async function getAuthoringJourneySnapshot(input: {
   ]);
   if (!data) return null;
 
-  const [chapters, outline, workflowHealth, blockingIncidents] = await Promise.all([
-    input.chapters ?? (data.book ? getChapterList(data.book.id) : Promise.resolve([])),
-    data.book ? getLatestOutline(data.book.id) : Promise.resolve(null),
-    run ? getRunHealth(run) : Promise.resolve(null),
-    run ? readBlockingIncidentCategories([run.id]) : Promise.resolve([]),
-  ]);
+  const [chapters, outline, workflowHealth, blockingIncidents, unresolvedMeteringRuns] =
+    await Promise.all([
+      input.chapters ?? (data.book ? getChapterList(data.book.id) : Promise.resolve([])),
+      data.book ? getLatestOutline(data.book.id) : Promise.resolve(null),
+      run ? getRunHealth(run) : Promise.resolve(null),
+      run ? readBlockingIncidentCategories([run.id]) : Promise.resolve([]),
+      run ? findRunsWithUnresolvedMetering([run]) : Promise.resolve(new Set<string>()),
+    ]);
   const artifacts = singleProjectArtifacts(
     data,
     chapters,
@@ -636,7 +639,15 @@ export async function getAuthoringJourneySnapshot(input: {
         artifacts,
         projectSpendUsd,
         projectCompletedAt: data.project.completedAt,
-        blockingIncidentCategories: blockingIncidents.map((incident) => incident.category),
+        blockingIncidentCategories: [
+          ...blockingIncidents
+            .filter(
+              (incident) =>
+                incident.category !== "unresolved_metering" || unresolvedMeteringRuns.has(run.id),
+            )
+            .map((incident) => incident.category),
+          ...(unresolvedMeteringRuns.has(run.id) ? ["unresolved_metering"] : []),
+        ],
         workflow: workflowHealth
           ? {
               databaseStatus: workflowHealth.databaseStatus,

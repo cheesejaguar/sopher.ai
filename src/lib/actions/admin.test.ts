@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   reconcileRun: vi.fn(),
   getWorkflowRun: vi.fn(),
   cancelWorkflow: vi.fn(),
+  reconcileCharged: vi.fn(),
+  reconcileUncharged: vi.fn(),
+  resolveReconciledIncidents: vi.fn(),
+  isMeteringIntentResolved: vi.fn(),
 }));
 
 vi.mock("next/cache", () => ({
@@ -49,8 +53,13 @@ vi.mock("@/lib/billing/credits", () => ({
 }));
 
 vi.mock("@/lib/billing/meter", () => ({
-  reconcileMeteredCallAsCharged: vi.fn(),
-  reconcileMeteredCallAsUncharged: vi.fn(),
+  reconcileMeteredCallAsCharged: mocks.reconcileCharged,
+  reconcileMeteredCallAsUncharged: mocks.reconcileUncharged,
+}));
+
+vi.mock("@/lib/billing/unresolved-metering", () => ({
+  isMeteringIntentResolved: mocks.isMeteringIntentResolved,
+  resolveReconciledMeteringIncidents: mocks.resolveReconciledIncidents,
 }));
 
 vi.mock("@/lib/generation-runs", () => ({
@@ -68,6 +77,8 @@ vi.mock("workflow/api", () => ({
 
 import {
   adminCancelRun,
+  adminReconcileChargedMeteringIntent,
+  adminReconcileUnchargedMeteringIntent,
   adminRecheckRun,
   adminRedeliverRunInput,
   adminRedispatchRun,
@@ -98,6 +109,10 @@ beforeEach(() => {
   mocks.resolveIncident.mockResolvedValue(undefined);
   mocks.scheduleCleanup.mockResolvedValue(undefined);
   mocks.cancelWorkflow.mockResolvedValue(undefined);
+  mocks.reconcileCharged.mockResolvedValue(undefined);
+  mocks.reconcileUncharged.mockResolvedValue(true);
+  mocks.resolveReconciledIncidents.mockResolvedValue(1);
+  mocks.isMeteringIntentResolved.mockResolvedValue(false);
   mocks.getWorkflowRun.mockReturnValue({ cancel: mocks.cancelWorkflow });
   mocks.reconcileRun.mockResolvedValue({
     runId: RUN_ID,
@@ -329,5 +344,72 @@ describe("Admin authoring recovery actions", () => {
       }),
     );
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("clears only derived blocking incidents after an uncharged intent is resolved", async () => {
+    const intentRef = `metering-intent:generation:${RUN_ID}:creative.question:attempt:test`;
+
+    await expect(
+      adminReconcileUnchargedMeteringIntent({
+        intentRef,
+        confirmation: "verified_no_gateway_charge",
+        note: "Gateway showed no billable generation for this attempt.",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.reconcileUncharged).toHaveBeenCalledWith({
+      intentRef,
+      adminId: "admin-1",
+      note: "Gateway showed no billable generation for this attempt.",
+    });
+    expect(mocks.resolveReconciledIncidents).toHaveBeenCalledWith(intentRef);
+  });
+
+  it("retries stale incident cleanup after an uncharged ledger reconciliation already committed", async () => {
+    const intentRef = `metering-intent:generation:${RUN_ID}:creative.question:attempt:test`;
+    mocks.reconcileUncharged.mockResolvedValue(false);
+    mocks.isMeteringIntentResolved.mockResolvedValue(true);
+
+    await expect(
+      adminReconcileUnchargedMeteringIntent({
+        intentRef,
+        confirmation: "verified_no_gateway_charge",
+        note: "Gateway showed no billable generation for this attempt.",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.isMeteringIntentResolved).toHaveBeenCalledWith(intentRef);
+    expect(mocks.resolveReconciledIncidents).toHaveBeenCalledWith(intentRef);
+  });
+
+  it("clears only derived blocking incidents after a charged intent is settled", async () => {
+    const intentRef = `metering-intent:generation:${RUN_ID}:creative.question:attempt:test`;
+
+    await expect(
+      adminReconcileChargedMeteringIntent({
+        intentRef,
+        confirmation: "verified_gateway_charge",
+        note: "Gateway usage was verified against the provider generation.",
+        calls: [{ model: "provider/model", inputTokens: 100, outputTokens: 20 }],
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.reconcileCharged).toHaveBeenCalledWith({
+      intentRef,
+      adminId: "admin-1",
+      note: "Gateway usage was verified against the provider generation.",
+      calls: [
+        {
+          model: "provider/model",
+          inputTokens: 100,
+          outputTokens: 20,
+          cachedInputTokens: 0,
+          cacheWriteTokens: 0,
+          reasoningTokens: 0,
+          imageCount: 0,
+        },
+      ],
+    });
+    expect(mocks.resolveReconciledIncidents).toHaveBeenCalledWith(intentRef);
   });
 });

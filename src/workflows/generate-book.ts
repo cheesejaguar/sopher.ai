@@ -4,6 +4,7 @@ import {
   AUTHORING_RUN_INACTIVE_MESSAGE,
 } from "@/lib/authoring-cancellation";
 import { withPreservedPrimaryError } from "@/lib/async-cleanup";
+import { authoringFailureMessage, classifyAuthoringFailure } from "@/lib/authoring-failures";
 import { notifyAuthoringFailureStep } from "./notify-authoring-failure";
 import { OUTLINE_REVISION_RESERVATION_KEY, type GenerationConfig } from "@/lib/run-events";
 import type { Stage } from "@/lib/run-events";
@@ -565,13 +566,19 @@ export async function generateBook(
     await finalizeStep(ref, report.recommendation);
     return { score: report.score, recommendation: report.recommendation };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Generation failed";
+    const message = authoringFailureMessage(error);
+    const failure = classifyAuthoringFailure(error);
     if (message === AUTHORING_RUN_INACTIVE_MESSAGE) {
       throw error instanceof FatalError ? error : new FatalError(message);
     }
     const cancelled = message === AUTHORING_CANCELLATION_MESSAGE;
     try {
-      await markRunStatus(ref, cancelled ? "cancelled" : "failed", message);
+      await markRunStatus(
+        ref,
+        cancelled ? "cancelled" : "failed",
+        message,
+        cancelled ? undefined : failure,
+      );
       if (!cancelled) await notifyAuthoringFailureStep(ref);
     } catch (statusError) {
       console.error("Could not persist the initiating authoring failure", {

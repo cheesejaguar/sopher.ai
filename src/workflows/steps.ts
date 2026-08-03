@@ -86,6 +86,7 @@ import { buildFrozenAuthoringContract } from "@/ai/authoring-guidelines";
 import { linkAuthoringRunWorkflow, transitionAuthoringRunState } from "@/lib/generation-runs";
 import { nextRunEventSequence, persistRunEvent } from "@/lib/run-event-store";
 import { recordAuthoringIncident, resolveAuthoringIncident } from "@/lib/authoring-incidents";
+import type { AuthoringFailureDetails } from "@/lib/authoring-failures";
 import {
   AUTHORING_CANCELLATION_MESSAGE,
   AUTHORING_RUN_INACTIVE_MESSAGE,
@@ -659,6 +660,7 @@ export async function markRunStatus(
   ref: RunRef,
   status: RequestedRunStatus,
   error?: string,
+  failure?: AuthoringFailureDetails,
 ): Promise<MarkRunStatusOutcome> {
   "use step";
   const result = await transitionAuthoringRunState({
@@ -667,6 +669,8 @@ export async function markRunStatus(
     userId: ref.userId,
     status,
     error,
+    ...(failure?.errorCode ? { errorCode: failure.errorCode } : {}),
+    ...(failure?.errorStage ? { errorStage: failure.errorStage } : {}),
     ...(status === "completed" ? { resolveCancellationOnComplete: true } : {}),
   });
   if (status !== "cancelled" && result.status === "cancelled") {
@@ -680,6 +684,22 @@ export async function markRunStatus(
       return { outcome: "terminal_preserved", status: result.status };
     }
     throw new FatalError("Generation run is no longer active");
+  }
+  if (status === "failed" && failure?.incidentCategory) {
+    const unresolvedMetering = failure.incidentCategory === "unresolved_metering";
+    await recordAuthoringIncident({
+      runId: ref.dbRunId,
+      projectId: ref.projectId,
+      category: failure.incidentCategory,
+      severity: "critical",
+      dedupeKey: unresolvedMetering ? "unresolved-metering" : "settled-output-missing",
+      evidence: {
+        errorCode:
+          failure.errorCode ??
+          (unresolvedMetering ? "metering_reconciliation_required" : "metered_output_missing"),
+        ...(failure.errorStage ? { stage: failure.errorStage } : {}),
+      },
+    });
   }
   return { outcome: "matched", status };
 }

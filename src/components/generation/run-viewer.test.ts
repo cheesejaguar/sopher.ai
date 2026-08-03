@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isAuthoritativeFullBookCompletion,
   isAuthoritativeRunTerminal,
+  isRecoveryActionAuthorized,
   projectProgressForRun,
   recoveryCardPrimaryAction,
 } from "./run-viewer";
@@ -183,12 +184,38 @@ describe("recoveryCardPrimaryAction", () => {
         canRecover: true,
         nextAction: {
           kind: "recover_saved_work",
-          href: `/projects/${projectId}/write`,
+          href: `/projects/${projectId}/write#authoring-recovery`,
           label: "Resume from saved work",
           description: "One checkpoint is compatible.",
           requiresMeteredAccess: true,
         },
       }),
     ).toEqual({ kind: "recover", label: "Resume from saved work" });
+  });
+});
+
+describe("isRecoveryActionAuthorized", () => {
+  const projectId = "11111111-1111-4111-8111-111111111111";
+  const recoveryAction = {
+    kind: "recover_saved_work" as const,
+    href: `/projects/${projectId}/write#authoring-recovery`,
+    label: "Resume from saved work",
+    description: "Review the recovery details before restarting.",
+    requiresMeteredAccess: true,
+  };
+
+  it("authorizes the full-book callback at the recovery fragment", () => {
+    expect(isRecoveryActionAuthorized(recoveryAction, projectId, "full_book")).toBe(true);
+  });
+
+  it("rejects a dangling page link and scoped runs", () => {
+    expect(
+      isRecoveryActionAuthorized(
+        { ...recoveryAction, href: `/projects/${projectId}/write` },
+        projectId,
+        "full_book",
+      ),
+    ).toBe(false);
+    expect(isRecoveryActionAuthorized(recoveryAction, projectId, "edit_pass")).toBe(false);
   });
 });

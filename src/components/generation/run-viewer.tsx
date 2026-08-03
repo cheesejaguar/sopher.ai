@@ -264,10 +264,7 @@ export function RunViewer({
     snapshot,
   );
   const { nextAction } = useAuthoringJourneyCommand();
-  const recoveryAuthorized =
-    runKind === "full_book" &&
-    nextAction?.kind === "recover_saved_work" &&
-    nextAction.href === `/projects/${projectId}/write`;
+  const recoveryAuthorized = isRecoveryActionAuthorized(nextAction, projectId, runKind);
   const terminal =
     state.stage === "done" || state.stage === "failed" || state.stage === "cancelled";
   const runSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -745,6 +742,18 @@ export function recoveryCardPrimaryAction(input: {
   };
 }
 
+export function isRecoveryActionAuthorized(
+  nextAction: AuthoringNextAction | null,
+  projectId: string,
+  runKind: "full_book" | "chapter" | "edit_pass" | "continuity" | "export",
+): boolean {
+  return (
+    runKind === "full_book" &&
+    nextAction?.kind === "recover_saved_work" &&
+    nextAction.href === `/projects/${projectId}/write#authoring-recovery`
+  );
+}
+
 function RecoveryCard({
   runId,
   projectId,
@@ -767,6 +776,22 @@ function RecoveryCard({
   error: string | null;
 }) {
   const [copied, setCopied] = React.useState(false);
+  const recoveryTargetRef = React.useRef<HTMLElement | null>(null);
+  React.useEffect(() => {
+    let frame: number | undefined;
+    const focusRecoveryTarget = () => {
+      if (window.location.hash !== "#authoring-recovery") return;
+      frame = window.requestAnimationFrame(() => {
+        recoveryTargetRef.current?.focus({ preventScroll: true });
+      });
+    };
+    focusRecoveryTarget();
+    window.addEventListener("hashchange", focusRecoveryTarget);
+    return () => {
+      window.removeEventListener("hashchange", focusRecoveryTarget);
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
+  }, []);
   const saved = Math.max(savedChapterCount, state.health.savedChapterCount ?? 0);
   const checkpoints = Math.max(0, state.health.savedCheckpointCount ?? 0);
   const noWorkStarted = state.health.noWorkStarted && state.totalCredits <= 0 && saved === 0;
@@ -793,8 +818,11 @@ function RecoveryCard({
 
   return (
     <section
+      ref={recoveryTargetRef}
+      id="authoring-recovery"
+      tabIndex={-1}
       aria-labelledby="authoring-recovery-title"
-      className="instrument-surface-raised rounded-sm border-l-destructive px-5 py-6 sm:px-7"
+      className="instrument-surface-raised scroll-mt-28 rounded-sm border-l-destructive px-5 py-6 outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring sm:px-7"
     >
       <p className="folio-label text-destructive">
         {cancelled ? "Production stopped" : "Production needs attention"}

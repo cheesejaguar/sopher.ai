@@ -652,6 +652,7 @@ export const authoringIncidents = pgTable(
         "cancellation_unconfirmed",
         "stale_reservation",
         "event_persistence",
+        "unresolved_metering",
         "operator_action",
       ],
     }).notNull(),
@@ -681,7 +682,7 @@ export const authoringIncidents = pgTable(
       sql`${t.category} in (
         'dispatch', 'workflow_missing', 'stalled_heartbeat', 'invalid_pause',
         'completion_contradiction', 'cancellation_unconfirmed',
-        'stale_reservation', 'event_persistence', 'operator_action'
+        'stale_reservation', 'event_persistence', 'unresolved_metering', 'operator_action'
       )`,
     ),
   ],

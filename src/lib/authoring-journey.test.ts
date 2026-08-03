@@ -10,6 +10,7 @@ import {
 
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
 const RUN_ID = "22222222-2222-4222-8222-222222222222";
+const RESUMED_RUN_ID = "33333333-3333-4333-8333-333333333333";
 const NOW = "2026-07-30T12:00:00.000Z";
 
 function run(overrides: Partial<AuthoringJourneyRun> = {}): AuthoringJourneyRun {
@@ -206,7 +207,7 @@ describe("deriveAuthoringJourney", () => {
         }),
       }),
       action: "recover_saved_work",
-      href: `/projects/${PROJECT_ID}/write`,
+      href: `/projects/${PROJECT_ID}/write#authoring-recovery`,
     },
     {
       name: "keeps legacy saved prose editable without presenting purchase as a failure remedy",
@@ -362,8 +363,7 @@ describe("deriveAuthoringJourney", () => {
     "completion_contradiction",
     "invalid_pause",
     "event_persistence",
-    "metering_reconciliation_required",
-    "unresolved_metering",
+    "metered_output_missing",
   ])("never offers restart or recovery for evidence-unsafe error code %s", (rootErrorCode) => {
     const journey = deriveAuthoringJourney(
       seed({
@@ -381,6 +381,25 @@ describe("deriveAuthoringJourney", () => {
 
     expect(journey.nextAction.kind).toBe("contact_support");
     expect(journey.nextAction.description).toMatch(/will not restart it automatically/i);
+  });
+
+  it("keeps a reconciled metering root error as audit history without blocking recovery", () => {
+    const journey = deriveAuthoringJourney(
+      seed({
+        artifacts: { savedChapters: 2, wordCount: 1900 },
+        run: run({
+          databaseStatus: "failed",
+          workflowStatus: "failed",
+          effectiveStatus: "failed",
+          stage: "failed",
+          rootErrorCode: "metering_reconciliation_required",
+          blockingIncidentCategories: [],
+          health: "needs_attention",
+        }),
+      }),
+    );
+
+    expect(journey.nextAction.kind).toBe("recover_saved_work");
   });
 
   it.each([
@@ -904,5 +923,107 @@ describe("authoringJourneyWithProgress", () => {
       label: "View the safe stop",
       href: `/projects/${PROJECT_ID}/write`,
     });
+  });
+
+  it("replaces a failed run with a distinct active recovery run without inheriting failure state", () => {
+    const interrupted = deriveAuthoringJourney(
+      seed({
+        artifacts: { savedChapters: 2, savedCheckpoints: 4, wordCount: 1900 },
+        run: run({
+          databaseStatus: "failed",
+          workflowStatus: "failed",
+          effectiveStatus: "failed",
+          stage: "failed",
+          progressPct: 58,
+          completedAt: NOW,
+          rootErrorCode: "provider_failure",
+          rootErrorStage: "chapters",
+          health: "needs_attention",
+        }),
+      }),
+    );
+    expect(interrupted.nextAction.kind).toBe("recover_saved_work");
+
+    const resumed = authoringJourneyWithProgress(interrupted, {
+      runId: RESUMED_RUN_ID,
+      stage: "concept",
+      pct: 2,
+      detail: "Developing the premise",
+      draftedCount: 2,
+      totalChapters: 3,
+    });
+
+    expect(resumed.run).toMatchObject({
+      id: RESUMED_RUN_ID,
+      kind: "full_book",
+      databaseStatus: "running",
+      workflowStatus: null,
+      effectiveStatus: "running",
+      stage: "concept",
+      progressPct: 2,
+      completedAt: null,
+      rootErrorCode: undefined,
+      rootErrorStage: undefined,
+      cancellationRequestedAt: undefined,
+      pause: null,
+    });
+    expect(resumed.nextAction).toMatchObject({
+      kind: "watch_production",
+      label: "Watch production",
+      href: `/projects/${PROJECT_ID}/write`,
+    });
+  });
+
+  it("does not revive a terminal run from stale same-run progress", () => {
+    const interrupted = deriveAuthoringJourney(
+      seed({
+        artifacts: { savedChapters: 2, savedCheckpoints: 4, wordCount: 1900 },
+        run: run({
+          databaseStatus: "failed",
+          workflowStatus: "failed",
+          effectiveStatus: "failed",
+          stage: "failed",
+          progressPct: 58,
+          completedAt: NOW,
+          rootErrorCode: "provider_failure",
+          rootErrorStage: "chapters",
+          health: "needs_attention",
+        }),
+      }),
+    );
+
+    const stale = authoringJourneyWithProgress(interrupted, {
+      runId: RUN_ID,
+      stage: "concept",
+      pct: 2,
+      detail: "Developing the premise",
+      draftedCount: 2,
+      totalChapters: 3,
+    });
+
+    expect(stale).toBe(interrupted);
+    expect(stale.run).toMatchObject({
+      id: RUN_ID,
+      databaseStatus: "failed",
+      effectiveStatus: "failed",
+      stage: "failed",
+      rootErrorCode: "provider_failure",
+    });
+    expect(stale.nextAction.kind).toBe("recover_saved_work");
+  });
+
+  it("does not let a distinct live progress record displace an authoritative active run", () => {
+    const active = deriveAuthoringJourney(seed({ run: run() }));
+    const conflicting = authoringJourneyWithProgress(active, {
+      runId: RESUMED_RUN_ID,
+      stage: "concept",
+      pct: 2,
+      draftedCount: 0,
+      totalChapters: 3,
+    });
+
+    expect(conflicting).toBe(active);
+    expect(conflicting.run?.id).toBe(RUN_ID);
+    expect(conflicting.run?.stage).toBe("chapters");
   });
 });

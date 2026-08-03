@@ -87,7 +87,7 @@ test("library exposes one truthful action for every authoring state", async ({
     {
       title: "The Orchard Below",
       label: "Resume from saved work",
-      href: `/projects/${PROJECTS.partialFailure}/write`,
+      href: `/projects/${PROJECTS.partialFailure}/write#authoring-recovery`,
       detail: "2 saved chapters",
     },
     {
@@ -361,4 +361,92 @@ test("mobile next step remains below the app bar and incomplete work stays expli
 
   expect(consoleErrors, "browser console errors").toEqual([]);
   expect(serverErrors, "500 responses").toEqual([]);
+});
+
+test("mobile interrupted recovery CTA reaches the actionable recovery panel", async ({
+  page,
+}, testInfo) => {
+  const recoveredRunId = "70707070-0000-4000-8000-000000000005";
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.route(`**/api/projects/${PROJECTS.partialFailure}/generate`, async (route) => {
+    await route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({
+        runId: recoveredRunId,
+        kind: "full_book",
+        status: "queued",
+        config: {
+          tier: "standard",
+          targetChapters: 3,
+          targetWordsPerChapter: 1000,
+          requireOutlineApproval: false,
+        },
+      }),
+    });
+  });
+  await page.route(`**/api/runs/${recoveredRunId}`, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        run: { id: recoveredRunId, status: "queued", error: null },
+        health: {
+          databaseStatus: "queued",
+          effectiveStatus: "queued",
+          stage: "queued",
+          progressPct: 0,
+          stageDescription: "Preparing the writing room",
+          noWorkStarted: true,
+          health: "healthy",
+          savedChapterCount: 2,
+          savedCheckpointCount: 2,
+        },
+      }),
+    });
+  });
+  await page.route(`**/api/runs/${recoveredRunId}/stream?**`, async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: "" });
+  });
+  await page.goto(`/projects/${PROJECTS.partialFailure}/write`);
+
+  const nextStep = page.getByRole("region", {
+    name: "Next step: Resume from saved work",
+  });
+  const resumeLink = nextStep.getByRole("link", { name: "Resume from saved work" });
+  const recoveryPanel = page.locator("#authoring-recovery");
+
+  await expect(nextStep).toBeVisible({ timeout: 20_000 });
+  await expect(resumeLink).toHaveAttribute(
+    "href",
+    `/projects/${PROJECTS.partialFailure}/write#authoring-recovery`,
+  );
+  await expect(recoveryPanel).toHaveAttribute("tabindex", "-1");
+  await expectNoPageOverflow(page, "390px interrupted recovery");
+  await axeCheck(page);
+
+  await resumeLink.click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${PROJECTS.partialFailure}/write#authoring-recovery$`, "u"),
+  );
+  await expect(recoveryPanel).toBeVisible();
+  await expect(recoveryPanel).toBeFocused();
+  await expect
+    .poll(async () => {
+      const box = await recoveryPanel.boundingBox();
+      if (!box) return false;
+      return box.y < 844 && box.y + box.height > 0;
+    })
+    .toBe(true);
+  await expect(recoveryPanel.getByRole("button", { name: "Resume from saved work" })).toBeVisible();
+  await screenshot(page, testInfo.project.name, "mobile-interrupted-recovery", false);
+
+  await recoveryPanel.getByRole("button", { name: "Resume from saved work" }).click();
+
+  await expect(page.getByRole("region", { name: "Next step: Watch production" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Resume from saved work" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Book generation run" })).toBeFocused();
+  await expectNoPageOverflow(page, "390px recovered production");
 });

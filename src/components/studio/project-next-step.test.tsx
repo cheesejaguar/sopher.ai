@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { AuthoringJourneyCommandProvider } from "@/components/studio/authoring-journey-command";
-import { ProjectNextStep } from "@/components/studio/project-next-step";
+import { JourneyActionLink, ProjectNextStep } from "@/components/studio/project-next-step";
 import { ProjectProgressProvider, useProjectProgress } from "@/components/studio/project-progress";
 import {
   deriveAuthoringJourney,
@@ -24,6 +24,7 @@ import {
 
 const NOW = "2026-07-30T12:00:00.000Z";
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+const RESUMED_RUN_ID = "33333333-3333-4333-8333-333333333333";
 
 function run(overrides: Partial<AuthoringJourneyRun> = {}): AuthoringJourneyRun {
   return {
@@ -108,6 +109,27 @@ function CancellationPublisher({ runId }: { runId: string }) {
   );
 }
 
+function RecoveryProgressPublisher() {
+  const { publishProgress } = useProjectProgress();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        publishProgress({
+          runId: RESUMED_RUN_ID,
+          stage: "concept",
+          pct: 2,
+          detail: "Developing the premise",
+          draftedCount: 2,
+          totalChapters: 3,
+        })
+      }
+    >
+      Publish recovery progress
+    </button>
+  );
+}
+
 function renderNextStep(journey: ReturnType<typeof snapshot>) {
   return render(
     <AuthoringJourneyCommandProvider>
@@ -135,6 +157,30 @@ afterEach(() => {
 });
 
 describe("ProjectNextStep presentation", () => {
+  it("refocuses an already-active recovery hash instead of leaving the CTA inert", () => {
+    window.history.replaceState({}, "", `/projects/${PROJECT_ID}/write#authoring-recovery`);
+    const target = document.createElement("section");
+    target.id = "authoring-recovery";
+    target.tabIndex = -1;
+    target.scrollIntoView = vi.fn();
+    document.body.append(target);
+
+    render(
+      <JourneyActionLink
+        action={{
+          kind: "recover_saved_work",
+          href: `/projects/${PROJECT_ID}/write#authoring-recovery`,
+          label: "Resume from saved work",
+          description: "Review the saved work.",
+          requiresMeteredAccess: true,
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("link", { name: "Resume from saved work" }));
+
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(target).toHaveFocus();
+  });
   it("renders cancellation as passive status on its current route without changing nextAction", () => {
     const journey = snapshot(run({ cancellationRequestedAt: NOW }));
     expect(journey.nextAction.kind).toBe("finish_cancellation");
@@ -177,7 +223,51 @@ describe("ProjectNextStep presentation", () => {
     expect(region).toHaveClass("min-h-14");
     expect(region).not.toHaveClass("h-14");
     expect(region.querySelector(".truncate")).toBeNull();
-    expect(screen.getAllByRole("link", { name: "Resume from saved work" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Resume from saved work" })).toHaveAttribute(
+      "href",
+      `/projects/${PROJECT_ID}/write#authoring-recovery`,
+    );
+  });
+
+  it("replaces the recovery action when a distinct resumed run reports live progress", () => {
+    const interrupted = snapshot(
+      run({
+        databaseStatus: "failed",
+        workflowStatus: "failed",
+        effectiveStatus: "failed",
+        stage: "failed",
+        progressPct: 58,
+        completedAt: NOW,
+        rootErrorCode: "provider_failure",
+        rootErrorStage: "chapters",
+        health: "needs_attention",
+      }),
+    );
+
+    render(
+      <AuthoringJourneyCommandProvider>
+        <ProjectProgressProvider
+          projectId={PROJECT_ID}
+          initialProgress={{
+            runId: interrupted.run?.id ?? null,
+            stage: "failed",
+            pct: 58,
+            draftedCount: 2,
+            totalChapters: 3,
+          }}
+        >
+          <ProjectNextStep snapshot={interrupted} />
+          <RecoveryProgressPublisher />
+        </ProjectProgressProvider>
+      </AuthoringJourneyCommandProvider>,
+    );
+
+    expect(screen.getByRole("link", { name: "Resume from saved work" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Publish recovery progress" }));
+
+    expect(screen.queryByRole("link", { name: "Resume from saved work" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Watch production" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Next step: Watch production" })).toBeVisible();
   });
 
   it("switches the project-wide action to stopping safely as soon as cancellation is accepted", () => {

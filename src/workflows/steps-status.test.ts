@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   transition: vi.fn(),
   withDbTransaction: vi.fn(),
+  recordAuthoringIncident: vi.fn(),
 }));
 
 vi.mock("@/db", async (importOriginal) => {
@@ -15,12 +16,18 @@ vi.mock("@/lib/generation-runs", async (importOriginal) => {
   return { ...actual, transitionAuthoringRunState: mocks.transition };
 });
 
+vi.mock("@/lib/authoring-incidents", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authoring-incidents")>();
+  return { ...actual, recordAuthoringIncident: mocks.recordAuthoringIncident };
+});
+
 import { markRunStatus, withActiveAuthoringMutation } from "./steps";
 
 const ref = { dbRunId: "run-1", projectId: "project-1", userId: "user-1" };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.recordAuthoringIncident.mockResolvedValue(undefined);
   mocks.transition.mockImplementation(async (input: { status: string }) => ({
     status: input.status,
     transitioned: true,
@@ -43,6 +50,52 @@ describe("markRunStatus transition boundary", () => {
       });
     },
   );
+
+  it("persists unresolved metering as structured root evidence and a critical incident", async () => {
+    await markRunStatus(ref, "failed", "reconciliation is required", {
+      errorCode: "metering_reconciliation_required",
+      errorStage: "concept",
+      incidentCategory: "unresolved_metering",
+    });
+
+    expect(mocks.transition).toHaveBeenCalledWith({
+      runId: "run-1",
+      projectId: "project-1",
+      userId: "user-1",
+      status: "failed",
+      error: "reconciliation is required",
+      errorCode: "metering_reconciliation_required",
+      errorStage: "concept",
+    });
+    expect(mocks.recordAuthoringIncident).toHaveBeenCalledWith({
+      runId: "run-1",
+      projectId: "project-1",
+      category: "unresolved_metering",
+      severity: "critical",
+      dedupeKey: "unresolved-metering",
+      evidence: {
+        errorCode: "metering_reconciliation_required",
+        stage: "concept",
+      },
+    });
+  });
+
+  it("keeps settled usage with a missing output checkpoint blocked as a completion contradiction", async () => {
+    await markRunStatus(ref, "failed", "The settled output checkpoint is missing", {
+      errorCode: "metered_output_missing",
+      errorStage: "concept",
+      incidentCategory: "completion_contradiction",
+    });
+
+    expect(mocks.recordAuthoringIncident).toHaveBeenCalledWith({
+      runId: "run-1",
+      projectId: "project-1",
+      category: "completion_contradiction",
+      severity: "critical",
+      dedupeKey: "settled-output-missing",
+      evidence: { errorCode: "metered_output_missing", stage: "concept" },
+    });
+  });
 
   it("classifies a cancellation that wins before work starts as cancellation", async () => {
     mocks.transition.mockResolvedValue({ status: "cancelled", transitioned: false });

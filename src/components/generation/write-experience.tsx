@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { BookOpenText, PenLine } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,8 @@ function words(value: number): string {
 }
 
 const GENERATION_REQUEST_KEY = "sopher.generation-request.v1";
+const ACTIVE_RUN_STATUSES = new Set(["queued", "running", "awaiting_input"] as const);
+type ActiveRunStatus = "queued" | "running" | "awaiting_input";
 
 export function generationRequestStorageKey(projectId: string): string {
   return `${GENERATION_REQUEST_KEY}:${projectId}`;
@@ -41,8 +44,42 @@ export function canAttachToWholeBookRun(
   status: number,
   runId: string | undefined,
   kind: string | undefined,
+  runStatus?: string,
 ): runId is string {
-  return Boolean(runId && (status === 202 || (status === 409 && kind === "full_book")));
+  if (!runId) return false;
+  const activeStatus = ACTIVE_RUN_STATUSES.has(runStatus as ActiveRunStatus);
+  // Older accepted-start responses did not include the status. Preserve that
+  // compatibility only for 202; conflict responses must prove the run active.
+  if (status === 202) return runStatus === undefined || activeStatus;
+  return status === 409 && kind === "full_book" && activeStatus;
+}
+
+export function isTerminalRequestReplay(
+  status: number,
+  response: { code?: string; retryable?: boolean } | null,
+): boolean {
+  return (
+    status === 409 && response?.code === "terminal_request_replay" && response.retryable === true
+  );
+}
+
+export function isCompletedRequestReplay(
+  status: number,
+  response: { code?: string; retryable?: boolean; status?: string } | null,
+): boolean {
+  return (
+    status === 409 &&
+    response?.code === "terminal_request_replay" &&
+    response.retryable === false &&
+    response.status === "completed"
+  );
+}
+
+export function isSupportRequiredResponse(
+  status: number,
+  response: { code?: string } | null,
+): boolean {
+  return status === 409 && response?.code === "support_required";
 }
 
 export function clearRecoveredWizardStorage(
@@ -111,7 +148,17 @@ export function WriteExperience({
   initialSnapshot: RunSnapshot | null;
   titles: Record<number, string | null>;
 }) {
-  const [snapshot, setSnapshot] = React.useState<RunSnapshot | null>(initialSnapshot);
+  const router = useRouter();
+  const [clientSnapshot, setClientSnapshot] = React.useState<{
+    serverSnapshot: RunSnapshot | null;
+    value: RunSnapshot | null;
+  }>(() => ({ serverSnapshot: initialSnapshot, value: initialSnapshot }));
+  const snapshot =
+    clientSnapshot.serverSnapshot === initialSnapshot ? clientSnapshot.value : initialSnapshot;
+  const setSnapshot = React.useCallback(
+    (value: RunSnapshot) => setClientSnapshot({ serverSnapshot: initialSnapshot, value }),
+    [initialSnapshot],
+  );
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [runShape, setRunShape] = React.useState(() => {
@@ -126,6 +173,7 @@ export function WriteExperience({
     };
   });
   const { publishProgress } = useProjectProgress();
+  const safetyBlockedForSnapshotRef = React.useRef<RunSnapshot | null | undefined>(undefined);
   const activeRunId = snapshot?.run.id ?? null;
   const handleProgress = React.useCallback(
     (progress: RunProgressSnapshot) => {
@@ -167,28 +215,68 @@ export function WriteExperience({
   }, [snapshot]);
 
   async function startRun() {
-    if (pending) return;
+    if (pending || safetyBlockedForSnapshotRef.current === initialSnapshot) return;
     setPending(true);
     setError(null);
     try {
       const storageKey = generationRequestStorageKey(projectId);
-      const requestKey =
+      let requestKey =
         requestKeyRef.current ?? window.localStorage.getItem(storageKey) ?? createRequestKey();
       requestKeyRef.current = requestKey;
       window.localStorage.setItem(storageKey, requestKey);
-      const res = await fetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tier, requireOutlineApproval, requestKey }),
-      });
-      const json: unknown = await res.json().catch(() => null);
-      const responseBody = json as {
+      let terminalReplayRetried = false;
+      let res: Response;
+      let json: unknown;
+      let responseBody: {
         runId?: string;
         kind?: string;
+        status?: string;
         config?: Partial<GenerationConfig>;
+        code?: string;
+        retryable?: boolean;
       } | null;
+
+      while (true) {
+        res = await fetch(`/api/projects/${projectId}/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tier, requireOutlineApproval, requestKey }),
+        });
+        json = await res.json().catch(() => null);
+        responseBody = json as typeof responseBody;
+        if (isSupportRequiredResponse(res.status, responseBody)) {
+          safetyBlockedForSnapshotRef.current = initialSnapshot;
+          window.localStorage.removeItem(storageKey);
+          requestKeyRef.current = null;
+          router.refresh();
+          return;
+        }
+        if (isCompletedRequestReplay(res.status, responseBody)) {
+          safetyBlockedForSnapshotRef.current = initialSnapshot;
+          // Never turn a lost response for already-completed paid work into a
+          // second run. Retire the stale key and re-read the durable journey.
+          window.localStorage.removeItem(storageKey);
+          requestKeyRef.current = null;
+          router.refresh();
+          return;
+        }
+        if (!isTerminalRequestReplay(res.status, responseBody)) break;
+
+        // A response can be lost long enough for its durable run to become
+        // terminal while the request key remains in localStorage. It is not an
+        // active run to reattach to. Retire that key and retry once, then surface
+        // the server response rather than entering an automatic retry loop.
+        window.localStorage.removeItem(storageKey);
+        requestKeyRef.current = null;
+        if (terminalReplayRetried) break;
+        terminalReplayRetried = true;
+        requestKey = createRequestKey();
+        requestKeyRef.current = requestKey;
+        window.localStorage.setItem(storageKey, requestKey);
+      }
+
       const runId = responseBody?.runId;
-      if (canAttachToWholeBookRun(res.status, runId, responseBody?.kind)) {
+      if (canAttachToWholeBookRun(res.status, runId, responseBody?.kind, responseBody?.status)) {
         window.localStorage.removeItem(storageKey);
         requestKeyRef.current = null;
         clearRecoveredWizardState();
@@ -207,9 +295,27 @@ export function WriteExperience({
         // A duplicate full-book request attaches to its existing run. Scoped
         // chapter/edit jobs deliberately stay a busy error: their event shape
         // does not belong in this whole-manuscript viewer.
+        const returnedStatus = ACTIVE_RUN_STATUSES.has(responseBody?.status as ActiveRunStatus)
+          ? (responseBody?.status as ActiveRunStatus)
+          : "queued";
+        const draftedCount =
+          snapshot?.chapters?.filter((chapter) =>
+            ["drafted", "edited", "final"].includes(chapter.status),
+          ).length ?? 0;
+        publishProgress(
+          {
+            runId,
+            stage: "queued",
+            pct: 0,
+            detail: returnedStatus === "queued" ? "Preparing the writing room" : "Reconnecting",
+            draftedCount,
+            totalChapters: chapters,
+          },
+          { refreshAuthoritativeJourney: true },
+        );
         moveFocusToRun.current = true;
         setSnapshot({
-          run: { id: runId, status: res.status === 202 ? "queued" : "running", error: null },
+          run: { id: runId, status: returnedStatus, error: null, kind: "full_book" },
           events: [],
           chapters: [],
           totalUsd: 0,
