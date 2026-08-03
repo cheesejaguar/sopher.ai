@@ -142,6 +142,23 @@ test("a contradictory completion opens its recovery evidence", async ({ page }) 
   await expect(recovery).toBeFocused();
 });
 
+test("an active book card opens and focuses live production status", async ({ page }) => {
+  await page.goto("/studio");
+  await page
+    .getByRole("link", {
+      name: "Watch production: The Last Weather Station",
+      exact: true,
+    })
+    .click();
+
+  await expect(page).toHaveURL(
+    new RegExp(`/projects/${PROJECTS.degradedTelemetry}/write#production-status$`),
+  );
+  const productionStatus = page.locator("#production-status");
+  await expect(productionStatus).toBeVisible();
+  await expect(productionStatus).toBeFocused();
+});
+
 test("project surfaces repeat the authoritative next step", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });
