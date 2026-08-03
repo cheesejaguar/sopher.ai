@@ -15,6 +15,7 @@ async function sendOutlineReminderIfStillWaiting(
       status: schema.generationRuns.status,
       pauseKind: schema.generationRuns.pauseKind,
       pauseVersion: schema.generationRuns.pauseVersion,
+      userId: schema.generationRuns.userId,
       email: schema.users.email,
       title: schema.projects.title,
     })
@@ -32,6 +33,7 @@ async function sendOutlineReminderIfStillWaiting(
     return;
   }
   await sendOutlineApprovalEmail({
+    userId: row.userId,
     to: row.email,
     bookTitle: row.title,
     projectId,

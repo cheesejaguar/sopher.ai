@@ -907,10 +907,13 @@ describeIsolated.sequential("authoring fault matrix against isolated Neon", () =
     const completionEmailKeys = emailSendMock.mock.calls.map(
       (call) => (call[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey,
     );
-    expect(completionEmailKeys).toEqual([
-      `run:${completion.runId}:book-finished`,
-      `run:${completion.runId}:book-finished`,
-    ]);
+    expect(completionEmailKeys).toEqual([`run:${completion.runId}:book-finished`]);
+    await expect(
+      getDb()
+        .select({ status: schema.notificationDeliveries.status })
+        .from(schema.notificationDeliveries)
+        .where(eq(schema.notificationDeliveries.eventKey, `run:${completion.runId}:book-finished`)),
+    ).resolves.toEqual([{ status: "sent" }]);
     const [completedRun] = await getDb()
       .select({
         status: schema.generationRuns.status,

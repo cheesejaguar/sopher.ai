@@ -35,6 +35,7 @@ import { getOrCreateBook } from "@/db/queries/projects";
 import { listEntities, seedEntities } from "@/db/queries/entities";
 import {
   sendBookFinishedEmail,
+  sendCreativeDecisionEmail,
   sendCreditsPausedEmail,
   sendIncludedStoryPausedEmail,
   sendOutlineApprovalEmail,
@@ -2764,6 +2765,7 @@ export async function finalizeStep(ref: RunRef, detail?: string): Promise<void> 
       .limit(1);
     if (row?.email) {
       await sendBookFinishedEmail({
+        userId: ref.userId,
         to: row.email,
         bookTitle: row.title,
         projectId: ref.projectId,
@@ -2808,6 +2810,7 @@ export async function notifyCreditsPausedStep(
     if (row?.email) {
       if (row.experience === "trial_short_story") {
         await sendIncludedStoryPausedEmail({
+          userId: ref.userId,
           to: row.email,
           bookTitle: row.title,
           projectId: ref.projectId,
@@ -2817,6 +2820,7 @@ export async function notifyCreditsPausedStep(
         });
       } else {
         await sendCreditsPausedEmail({
+          userId: ref.userId,
           to: row.email,
           bookTitle: row.title,
           projectId: ref.projectId,
@@ -2845,6 +2849,7 @@ export async function notifyOutlineApprovalStep(ref: RunRef, pauseVersion: numbe
       .limit(1);
     if (row?.email) {
       await sendOutlineApprovalEmail({
+        userId: ref.userId,
         to: row.email,
         bookTitle: row.title,
         projectId: ref.projectId,
@@ -2863,5 +2868,29 @@ export async function notifyOutlineApprovalStep(ref: RunRef, pauseVersion: numbe
     }
   } catch (error) {
     console.warn("[email] outline-approval notification failed:", error);
+  }
+}
+
+/** Emails one idempotent notice only after the creative-direction hook is actionable. */
+export async function notifyCreativeDecisionStep(ref: RunRef, pauseVersion: number): Promise<void> {
+  "use step";
+  try {
+    const [row] = await getDb()
+      .select({ email: schema.users.email, title: schema.projects.title })
+      .from(schema.projects)
+      .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+      .where(and(eq(schema.projects.id, ref.projectId), eq(schema.projects.userId, ref.userId)))
+      .limit(1);
+    if (!row?.email) return;
+    await sendCreativeDecisionEmail({
+      userId: ref.userId,
+      to: row.email,
+      bookTitle: row.title,
+      projectId: ref.projectId,
+      runId: ref.dbRunId,
+      pauseVersion,
+    });
+  } catch (error) {
+    console.warn("[email] creative-decision notification failed:", error);
   }
 }

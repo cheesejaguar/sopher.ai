@@ -80,6 +80,39 @@ test.describe("studio account", () => {
     await axeCheck(page);
     await fullPageScreenshot(page, testInfo, "account-settings");
   });
+
+  test("email preferences save, survive reload, and remain keyboard operable", async ({
+    page,
+  }, testInfo) => {
+    test.skip(
+      testInfo.project.name !== "dbDependent-light",
+      "One isolated mutation proves persistence; both themes retain read-only axe coverage.",
+    );
+    await page.goto("/studio/settings#email-notifications");
+    const card = page.locator("#email-notifications");
+    await expect(card.getByRole("heading", { name: "Book email notifications" })).toBeVisible();
+    const actionRequired = card.getByRole("switch", { name: "My book needs me" });
+    await expect(actionRequired).toBeChecked();
+    await actionRequired.focus();
+    await page.keyboard.press("Space");
+    await expect(actionRequired).not.toBeChecked();
+    await card.getByRole("button", { name: "Save email preferences" }).click();
+    await expect(card.getByRole("status")).toHaveText("Email preferences saved.");
+
+    await page.reload();
+    const reloadedCard = page.locator("#email-notifications");
+    const reloadedActionRequired = reloadedCard.getByRole("switch", {
+      name: "My book needs me",
+    });
+    await expect(reloadedActionRequired).not.toBeChecked();
+    await axeCheck(page);
+    await fullPageScreenshot(page, testInfo, "account-notification-preferences");
+
+    // Restore the shared fixture for any later acceptance job using this branch.
+    await reloadedActionRequired.click();
+    await reloadedCard.getByRole("button", { name: "Save email preferences" }).click();
+    await expect(reloadedCard.getByRole("status")).toHaveText("Email preferences saved.");
+  });
 });
 
 test.describe("project management", () => {

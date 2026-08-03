@@ -35,6 +35,7 @@ import {
   markCreativeQuestionPauseRegisteredStep,
   hydratePreManuscriptRetryStep,
   notifyCreditsPausedStep,
+  notifyCreativeDecisionStep,
   notifyOutlineApprovalStep,
   openingCreditCheckStep,
   initialOutlineCreditCheckStep,
@@ -246,6 +247,7 @@ export async function generateBook(
           agent: "outliner",
           message: "Waiting for your story direction before building the outline",
         });
+        await notifyCreativeDecisionStep(ref, pause.version);
         const delivery = await hook;
         const decision = await consumeCreativeDecisionStep(ref, pause.version, delivery.inputId);
         if (!decision) {
