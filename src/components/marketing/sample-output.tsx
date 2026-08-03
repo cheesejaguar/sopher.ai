@@ -70,13 +70,13 @@ export function SampleOutput() {
           <TabsList
             aria-label="Sample genre"
             variant="line"
-            className="h-auto w-full max-w-full justify-start gap-0 overflow-x-auto border-y border-black/10 p-0 dark:border-white/10"
+            className="grid h-auto w-full min-w-0 max-w-full grid-cols-3 justify-stretch gap-0 border-y border-black/10 p-0 dark:border-white/10"
           >
             {SAMPLES.map((sample) => (
               <TabsTrigger
                 key={sample.value}
                 value={sample.value}
-                className="min-h-11 flex-none rounded-none border-r border-black/10 px-4 text-xs uppercase dark:border-white/10 sm:px-6"
+                className="min-h-11 min-w-0 rounded-none border-r border-black/10 px-1 text-center text-xs whitespace-normal uppercase [overflow-wrap:anywhere] dark:border-white/10 min-[360px]:px-2 sm:px-4"
               >
                 {sample.genre}
               </TabsTrigger>

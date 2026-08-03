@@ -34,7 +34,7 @@ function PackOffer({
   return (
     <article
       className={cn(
-        "relative flex h-full flex-col border border-black/10 bg-black/[0.018] p-5 dark:border-white/12 dark:bg-white/[0.025] sm:p-6",
+        "relative flex h-full min-w-0 max-w-full flex-col border border-black/10 bg-black/[0.018] p-5 dark:border-white/12 dark:bg-white/[0.025] sm:p-6",
         featured && "border-primary bg-primary/[0.045] dark:bg-primary/[0.07]",
       )}
     >
@@ -46,12 +46,12 @@ function PackOffer({
       >
         {featured ? "Recommended" : "Credit pack"}
       </p>
-      <div className="flex items-start justify-between gap-5">
-        <div>
-          <PackHeading className="font-display text-2xl font-semibold tracking-[-0.03em]">
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-5 gap-y-2">
+        <div className="min-w-0 flex-[1_1_10rem]">
+          <PackHeading className="font-display text-2xl font-semibold tracking-[-0.03em] break-words">
             {pack.name}
           </PackHeading>
-          <p className="mt-1 text-sm text-muted-foreground">{PACK_TAGLINES[pack.id]}</p>
+          <p className="mt-1 text-sm break-words text-muted-foreground">{PACK_TAGLINES[pack.id]}</p>
         </div>
         <p className="shrink-0 font-mono text-3xl font-semibold tracking-[-0.04em] tabular-nums sm:text-4xl">
           ${pack.usd}
@@ -82,7 +82,7 @@ function PackOffer({
         href="/studio/credits"
         className={cn(
           buttonVariants({ variant: featured ? "default" : "outline" }),
-          "mt-8 min-h-11 w-full rounded-sm",
+          "mt-8 min-h-11 w-full min-w-0 rounded-sm text-center whitespace-normal",
         )}
       >
         Get {pack.name}
@@ -137,7 +137,10 @@ export function Pricing({
             </SubHeading>
             <dl className="mt-5 divide-y divide-black/10 border-b border-black/10 dark:divide-white/10 dark:border-white/10">
               {PUBLIC_TIER_COST_ROWS.map((row) => (
-                <div key={row.tier} className="grid grid-cols-[1fr_auto] gap-3 py-3">
+                <div
+                  key={row.tier}
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3 py-3"
+                >
                   <dt className="text-sm text-muted-foreground">
                     {row.tier}
                     <span className="block text-xs">{row.blurb}</span>
@@ -165,11 +168,14 @@ export function Pricing({
             A settled purchase permanently unlocks full-length book controls. Credits never expire.
           </p>
         </div>
-        <ul aria-label="Credit packs" className="mt-5 grid gap-4 md:grid-cols-2">
+        <ul aria-label="Credit packs" className="mt-5 grid min-w-0 gap-4 md:grid-cols-2">
           {CREDIT_PACKS.map((pack) => (
             <li
               key={pack.id}
-              className={cn(compactOnMobile && pack.id !== "author" && "hidden md:block")}
+              className={cn(
+                "min-w-0 max-w-full",
+                compactOnMobile && pack.id !== "author" && "hidden md:block",
+              )}
             >
               <PackOffer pack={pack} featured={pack.id === "author"} headingLevel={headingLevel} />
             </li>
