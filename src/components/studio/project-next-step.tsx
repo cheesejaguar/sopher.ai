@@ -58,9 +58,60 @@ export function JourneyActionLink({
   variant?: "primary" | "secondary";
 }) {
   const Icon = ACTION_ICONS[action.kind];
+  const navigateToVisibleHashTarget = React.useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      const destination = new URL(action.href, window.location.href);
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey ||
+        !destination.hash ||
+        destination.origin !== window.location.origin ||
+        normalizedRoute(destination.pathname) !== normalizedRoute(window.location.pathname)
+      ) {
+        return;
+      }
+
+      // Handle same-page hashes ourselves on both the first and subsequent
+      // activations. A retained Next route tree can contain a hidden copy of
+      // the same id, while the browser's native hash navigation always chooses
+      // the first match. Keep ordinary modified-click behavior intact, update
+      // the address bar like a native anchor, then focus the rendered target.
+      event.preventDefault();
+      const previousUrl = window.location.href;
+      if (destination.href !== previousUrl) {
+        window.history.pushState(window.history.state, "", destination.href);
+        window.dispatchEvent(
+          new HashChangeEvent("hashchange", {
+            oldURL: previousUrl,
+            newURL: destination.href,
+          }),
+        );
+      }
+
+      const targetId = decodeURIComponent(destination.hash.slice(1));
+      // Next's client router can retain an inert prior route tree during a
+      // refresh. Fixed hash ids may therefore exist in both the hidden tree and
+      // the active one for a moment. Focus the rendered target instead of the
+      // first document match, which could be invisible and make the CTA appear
+      // inert to keyboard and assistive-technology users.
+      const target = Array.from(document.querySelectorAll<HTMLElement>("[id]")).find(
+        (candidate) => candidate.id === targetId && candidate.getClientRects().length > 0,
+      );
+      if (!target) return;
+      if (!target.hasAttribute("tabindex")) target.tabIndex = -1;
+      target.scrollIntoView?.({ block: "start" });
+      target.focus({ preventScroll: true });
+    },
+    [action.href],
+  );
   return (
     <Link
       href={action.href as Route}
+      onClick={navigateToVisibleHashTarget}
       className={cn(
         "inline-flex min-h-11 items-center justify-center gap-2 rounded-sm px-4 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring forced-colors:border forced-colors:border-[ButtonText] forced-colors:bg-[ButtonFace] forced-colors:text-[ButtonText]",
         variant === "primary"

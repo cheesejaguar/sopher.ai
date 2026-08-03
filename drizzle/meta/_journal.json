@@ -127,6 +127,20 @@
       "when": 1785740988478,
       "tag": "0017_publication_editions",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785750000000,
+      "tag": "0018_unresolved_metering_incidents",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785753600000,
+      "tag": "0019_notification_preferences",
+      "breakpoints": true
     }
   ]
 }

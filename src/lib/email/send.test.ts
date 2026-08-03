@@ -1,26 +1,39 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sendMock = vi.hoisted(() => vi.fn().mockResolvedValue({ data: { id: "email-1" } }));
+const notificationMocks = vi.hoisted(() => ({
+  claim: vi.fn().mockResolvedValue("claim-token"),
+  settle: vi.fn().mockResolvedValue(undefined),
+}));
 
 vi.mock("resend", () => ({
   Resend: class {
     emails = { send: sendMock };
   },
 }));
+vi.mock("@/lib/notification-preferences", () => ({
+  claimAuthoringNotificationDelivery: notificationMocks.claim,
+  settleAuthoringNotificationDelivery: notificationMocks.settle,
+}));
 
 import {
   escapeEmailHtml,
   sanitizeEmailSubject,
+  sendBookFinishedEmail,
+  sendCreativeDecisionEmail,
   sendCreditsPausedEmail,
   sendIncludedStoryPausedEmail,
   sendAuthoringNeedsAttentionEmail,
   sendOutlineApprovalEmail,
+  sendReceiptEmail,
 } from "./send";
 
 describe("transactional email safety", () => {
   beforeEach(() => {
     process.env.RESEND_API_KEY = "test-key";
     sendMock.mockClear();
+    notificationMocks.claim.mockReset().mockResolvedValue("claim-token");
+    notificationMocks.settle.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -45,6 +58,7 @@ describe("transactional email safety", () => {
 
   it("uses a stable pause-version idempotency key and escapes the title body", async () => {
     await sendOutlineApprovalEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: `<The "Road">`,
       projectId: "project-1",
@@ -61,10 +75,16 @@ describe("transactional email safety", () => {
     expect(message.html).toContain("&lt;The &quot;Road&quot;&gt;");
     expect(message.html).not.toContain(`<em><The`);
     expect(options).toEqual({ idempotencyKey: "run:run-1:outline-ready:3" });
+    expect(notificationMocks.claim).toHaveBeenCalledWith({
+      userId: "user-1",
+      category: "authoringActionRequired",
+      eventKey: "run:run-1:outline-ready:3",
+    });
   });
 
   it("routes an included-story pause to recovery without a purchase prompt", async () => {
     await sendIncludedStoryPausedEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: "The First Crossing",
       projectId: "project-1",
@@ -81,10 +101,16 @@ describe("transactional email safety", () => {
     expect(message.html).toContain("SPH-TEST-PAUSE");
     expect(message.html).not.toMatch(/add credits|checkout/i);
     expect(options).toEqual({ idempotencyKey: "run:run-1:included-story-paused:2" });
+    expect(notificationMocks.claim).toHaveBeenCalledWith({
+      userId: "user-1",
+      category: "authoringActionRequired",
+      eventKey: "run:run-1:included-story-paused:2",
+    });
   });
 
   it("deep-links a paid credit pause to its exact durable run", async () => {
     await sendCreditsPausedEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: "The Long Crossing",
       projectId: "11111111-1111-4111-8111-111111111111",
@@ -102,10 +128,16 @@ describe("transactional email safety", () => {
     expect(options).toEqual({
       idempotencyKey: "run:22222222-2222-4222-8222-222222222222:credits-paused:4",
     });
+    expect(notificationMocks.claim).toHaveBeenCalledWith({
+      userId: "user-1",
+      category: "authoringActionRequired",
+      eventKey: "run:22222222-2222-4222-8222-222222222222:credits-paused:4",
+    });
   });
 
   it("uses the authoritative full-book partial recovery action", async () => {
     await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: "The Crossing",
       runId: "run-partial",
@@ -121,10 +153,16 @@ describe("transactional email safety", () => {
     expect(message.html).toContain("https://sopher.ai/projects/project-1/write");
     expect(message.html).toContain("Resume from saved work");
     expect(message.html).not.toContain("https://sopher.ai/projects/project-1/editor");
+    expect(notificationMocks.claim).toHaveBeenCalledWith({
+      userId: "user-1",
+      category: "authoringActionRequired",
+      eventKey: "run:run-partial:needs-attention",
+    });
   });
 
   it("uses the authoritative scoped partial recovery action", async () => {
     await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: "The Crossing",
       runId: "run-scoped-partial",
@@ -143,6 +181,7 @@ describe("transactional email safety", () => {
 
   it("uses the authoritative zero-work start action", async () => {
     await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: "The Crossing",
       runId: "run-zero",
@@ -161,6 +200,7 @@ describe("transactional email safety", () => {
 
   it("uses Contact support for a completion contradiction", async () => {
     await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
       to: "author@example.com",
       bookTitle: "The Crossing",
       runId: "run-contradiction",
@@ -178,5 +218,75 @@ describe("transactional email safety", () => {
     expect(message.html).toContain("Contact support");
     expect(message.html).not.toContain("/write");
     expect(message.html).not.toContain("/editor");
+  });
+
+  it("suppresses an optional notice before Resend and durably keeps its event decision", async () => {
+    notificationMocks.claim.mockResolvedValue(null);
+
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "Quiet Arrival",
+      projectId: "project-1",
+      runId: "run-quiet",
+      chapterCount: 3,
+      wordCount: 3000,
+    });
+
+    expect(notificationMocks.claim).toHaveBeenCalledWith({
+      userId: "user-1",
+      category: "authoringCompleted",
+      eventKey: "run:run-quiet:book-finished",
+    });
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(notificationMocks.settle).not.toHaveBeenCalled();
+  });
+
+  it("maps creative decisions and delayed outline reminders to distinct preferences", async () => {
+    await sendCreativeDecisionEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "A Fork in the Story",
+      projectId: "project-1",
+      runId: "run-guided",
+      pauseVersion: 2,
+    });
+    await sendOutlineApprovalEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "A Fork in the Story",
+      projectId: "project-1",
+      runId: "run-guided",
+      pauseVersion: 3,
+      reminder: true,
+    });
+
+    expect(notificationMocks.claim).toHaveBeenNthCalledWith(1, {
+      userId: "user-1",
+      category: "authoringActionRequired",
+      eventKey: "run:run-guided:creative-decision:2",
+    });
+    expect(notificationMocks.claim).toHaveBeenNthCalledWith(2, {
+      userId: "user-1",
+      category: "authoringReminders",
+      eventKey: "run:run-guided:outline-reminder:3",
+    });
+    expect(sendMock.mock.calls[0]?.[0].html).toContain("Manage email preferences");
+  });
+
+  it("never subjects a purchase receipt to optional authoring preferences", async () => {
+    notificationMocks.claim.mockResolvedValue(null);
+
+    await sendReceiptEmail({
+      to: "author@example.com",
+      packName: "Story",
+      credits: 12,
+      usd: 10,
+      idempotencyKey: "receipt-1",
+    });
+
+    expect(notificationMocks.claim).not.toHaveBeenCalled();
+    expect(sendMock).toHaveBeenCalledOnce();
+    expect(sendMock.mock.calls[0]?.[1]).toEqual({ idempotencyKey: "receipt-1" });
   });
 });

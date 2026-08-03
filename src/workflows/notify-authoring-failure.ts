@@ -59,6 +59,7 @@ export async function notifyAuthoringFailureStep(ref: {
       supportReference: facts.supportReference,
     });
     await sendAuthoringNeedsAttentionEmail({
+      userId: ref.userId,
       to: facts.email,
       bookTitle: facts.title,
       runId: ref.dbRunId,

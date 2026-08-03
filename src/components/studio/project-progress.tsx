@@ -36,7 +36,14 @@ export function ProjectProgressProvider({
   const [progress, setProgress] = React.useState(initialProgress);
   const [pollAnnouncement, setPollAnnouncement] = React.useState("");
   const lastPublishedAtRef = React.useRef(0);
-  const refreshedRunIdRef = React.useRef<string | null>(null);
+  // A terminal initial snapshot and its journey were produced by the same
+  // server render. RunViewer republishes that health on mount, but refreshing
+  // it again can leave a stale RSC request in flight while the author starts a
+  // recovery run. Treat the initial terminal run as already synchronized;
+  // later terminal transitions and distinct recovery runs still refresh.
+  const refreshedRunIdRef = React.useRef<string | null>(
+    isActiveProductionProgress(initialProgress) ? null : initialProgress.runId,
+  );
   const active = isActiveProductionProgress(progress);
 
   const refreshAuthoritativeJourney = React.useCallback(

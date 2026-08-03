@@ -12,6 +12,10 @@ import {
   reconcileMeteredCallAsUncharged,
 } from "@/lib/billing/meter";
 import {
+  isMeteringIntentResolved,
+  resolveReconciledMeteringIncidents,
+} from "@/lib/billing/unresolved-metering";
+import {
   requestAuthoringRunCancellation,
   scheduleRunReservationCleanup,
 } from "@/lib/generation-runs";
@@ -292,9 +296,10 @@ export async function adminReconcileUnchargedMeteringIntent(input: unknown): Pro
     adminId,
     note: data.note,
   });
-  if (!released) {
+  if (!released && !(await isMeteringIntentResolved(data.intentRef))) {
     throw new Error("The intent is already resolved or no longer eligible for release");
   }
+  await resolveReconciledMeteringIncidents(data.intentRef);
   revalidatePath("/admin/runs");
 }
 
@@ -341,5 +346,6 @@ export async function adminReconcileChargedMeteringIntent(input: unknown): Promi
     note: data.note,
     calls: data.calls,
   });
+  await resolveReconciledMeteringIncidents(data.intentRef);
   revalidatePath("/admin/runs");
 }

@@ -1,5 +1,6 @@
 import type { ProjectExperience } from "@/db/schema";
 import {
+  isActiveProductionProgress,
   lifecyclePhaseForProduction,
   type LifecyclePhase,
   type ProductionStage,
@@ -234,9 +235,7 @@ const EVIDENCE_UNSAFE_ERROR_CODES = new Set([
   "completion_contradiction",
   "event_persistence",
   "invalid_pause",
-  "metering_reconciliation_required",
-  "metering_unresolved",
-  "unresolved_metering",
+  "metered_output_missing",
 ]);
 
 const EVIDENCE_UNSAFE_INCIDENT_CATEGORIES = new Set([
@@ -248,14 +247,8 @@ const EVIDENCE_UNSAFE_INCIDENT_CATEGORIES = new Set([
 
 function hasEvidenceUnsafeRecoveryState(run: AuthoringJourneyRun): boolean {
   const errorCode = run.rootErrorCode?.trim().toLowerCase() ?? "";
-  const unresolvedMetering =
-    errorCode.includes("metering") &&
-    (errorCode.includes("reconciliation") ||
-      errorCode.includes("settlement") ||
-      errorCode.includes("unresolved"));
   return (
     EVIDENCE_UNSAFE_ERROR_CODES.has(errorCode) ||
-    unresolvedMetering ||
     (run.blockingIncidentCategories ?? []).some((category) =>
       EVIDENCE_UNSAFE_INCIDENT_CATEGORIES.has(category),
     )
@@ -470,7 +463,7 @@ function actionForSeed(
     }
     return nextAction(
       "recover_saved_work",
-      projectWriteHref,
+      `${projectWriteHref}#authoring-recovery`,
       artifacts.savedChapters > 0 ? "Resume from saved work" : "Try starting again",
       artifacts.savedChapters > 0
         ? `${artifacts.savedChapters} saved ${
@@ -623,6 +616,20 @@ export function authoringJourneyWithProgress(
 ): AuthoringJourneySnapshot {
   if (!progress.runId) return snapshot;
 
+  const existingRun = snapshot.run;
+  const sameRun = existingRun?.id === progress.runId;
+  const existingRunIsActive =
+    existingRun !== null && ACTIVE_RUN_STATUSES.has(existingRun.effectiveStatus);
+  const activeReplacement =
+    !sameRun && isActiveProductionProgress(progress) && !existingRunIsActive;
+
+  // Project progress can briefly move ahead of the server snapshot after a
+  // deliberate recovery start. Only an active, distinct run may replace a
+  // terminal (or absent) snapshot. A second run must never displace another
+  // active run, and stale progress from a terminal run must never revive it.
+  if (!sameRun && !activeReplacement) return snapshot;
+  if (sameRun && existingRun && !existingRunIsActive) return snapshot;
+
   // A streamed `done` event is an immediate presentation signal, not durable
   // proof that finalization committed every chapter and completion digest.
   // Keep the authoritative next action and artifact counts until the server
@@ -643,67 +650,70 @@ export function authoringJourneyWithProgress(
 
   const terminalStatus: AuthoringRunStatus | null =
     progress.stage === "failed" ? "failed" : progress.stage === "cancelled" ? "cancelled" : null;
-  const existingRun = snapshot.run;
+  const inheritedRun = activeReplacement ? null : existingRun;
+  const activeStatus: AuthoringRunStatus =
+    progress.stage === "queued"
+      ? "queued"
+      : progress.stage === "awaiting_guidance" ||
+          progress.stage === "awaiting_approval" ||
+          progress.stage === "awaiting_credits"
+        ? "awaiting_input"
+        : "running";
   const run: AuthoringJourneyRun = {
     id: progress.runId,
-    kind: existingRun?.kind,
-    databaseStatus:
-      terminalStatus ??
-      existingRun?.databaseStatus ??
-      (progress.stage === "queued" ? "queued" : "running"),
-    workflowStatus: existingRun?.workflowStatus ?? null,
-    effectiveStatus:
-      terminalStatus ??
-      (progress.stage === "awaiting_guidance" ||
-      progress.stage === "awaiting_approval" ||
-      progress.stage === "awaiting_credits"
-        ? "awaiting_input"
-        : (existingRun?.effectiveStatus ?? (progress.stage === "queued" ? "queued" : "running"))),
+    kind: activeReplacement ? "full_book" : inheritedRun?.kind,
+    databaseStatus: terminalStatus ?? inheritedRun?.databaseStatus ?? activeStatus,
+    workflowStatus: inheritedRun?.workflowStatus ?? null,
+    effectiveStatus: terminalStatus ?? inheritedRun?.effectiveStatus ?? activeStatus,
     stage: progress.stage,
     progressPct: progress.pct,
     stageDescription: progress.detail ?? null,
-    acceptedAt: existingRun?.acceptedAt ?? snapshot.project.updatedAt,
-    startedAt: existingRun?.startedAt ?? null,
-    completedAt: existingRun?.completedAt ?? null,
-    lastUpdateAt: existingRun?.lastUpdateAt ?? snapshot.project.updatedAt,
-    acceptanceUncertain: existingRun?.acceptanceUncertain ?? false,
-    safeToRetry: existingRun?.safeToRetry ?? false,
-    authoringBegan: existingRun?.authoringBegan ?? progress.stage !== "queued",
+    acceptedAt: inheritedRun?.acceptedAt ?? snapshot.project.updatedAt,
+    startedAt: inheritedRun?.startedAt ?? null,
+    completedAt: inheritedRun?.completedAt ?? null,
+    lastUpdateAt: inheritedRun?.lastUpdateAt ?? snapshot.project.updatedAt,
+    acceptanceUncertain: inheritedRun?.acceptanceUncertain ?? false,
+    safeToRetry: inheritedRun?.safeToRetry ?? false,
+    authoringBegan: inheritedRun?.authoringBegan ?? progress.stage !== "queued",
     noWorkStarted:
-      existingRun?.noWorkStarted ?? (progress.stage === "queued" && progress.draftedCount === 0),
-    completionArtifactsReady: existingRun?.completionArtifactsReady,
-    heartbeatAt: existingRun?.heartbeatAt,
-    lastProgressAt: existingRun?.lastProgressAt,
-    workflowObservedAt: existingRun?.workflowObservedAt,
-    dispatchAttempts: existingRun?.dispatchAttempts,
-    rootErrorCode: existingRun?.rootErrorCode,
-    rootErrorStage: existingRun?.rootErrorStage,
-    blockingIncidentCategories: existingRun?.blockingIncidentCategories,
-    supportReference: existingRun?.supportReference,
+      inheritedRun?.noWorkStarted ?? (progress.stage === "queued" && progress.draftedCount === 0),
+    completionArtifactsReady: inheritedRun?.completionArtifactsReady,
+    heartbeatAt: inheritedRun?.heartbeatAt,
+    lastProgressAt: inheritedRun?.lastProgressAt,
+    workflowObservedAt: inheritedRun?.workflowObservedAt,
+    dispatchAttempts: inheritedRun?.dispatchAttempts,
+    rootErrorCode: inheritedRun?.rootErrorCode,
+    rootErrorStage: inheritedRun?.rootErrorStage,
+    blockingIncidentCategories: inheritedRun?.blockingIncidentCategories,
+    supportReference: inheritedRun?.supportReference,
     cancellationRequestedAt:
-      progress.cancellationRequestedAt ?? existingRun?.cancellationRequestedAt,
+      progress.cancellationRequestedAt ?? inheritedRun?.cancellationRequestedAt,
     pause:
       progress.stage === "awaiting_approval"
         ? {
-            ...(existingRun?.pause?.kind === "outline_approval" ? existingRun.pause : {}),
+            ...(inheritedRun?.pause?.kind === "outline_approval" ? inheritedRun.pause : {}),
             kind: "outline_approval",
           }
         : progress.stage === "awaiting_guidance"
           ? {
-              ...(existingRun?.pause?.kind === "creative_decision" ? existingRun.pause : {}),
+              ...(inheritedRun?.pause?.kind === "creative_decision" ? inheritedRun.pause : {}),
               kind: "creative_decision",
             }
           : progress.stage === "awaiting_credits"
             ? {
-                ...(existingRun?.pause?.kind === "credits" ? existingRun.pause : {}),
+                ...(inheritedRun?.pause?.kind === "credits" ? inheritedRun.pause : {}),
                 kind: "credits",
               }
             : null,
     health:
       terminalStatus === "failed" || terminalStatus === "cancelled"
         ? "needs_attention"
-        : (existingRun?.health ?? "healthy"),
-    spend: existingRun?.spend ?? { meteredUsd: 0, creditsUsed: 0, scope: "run" },
+        : progress.stage === "awaiting_guidance" ||
+            progress.stage === "awaiting_approval" ||
+            progress.stage === "awaiting_credits"
+          ? "waiting"
+          : (inheritedRun?.health ?? "healthy"),
+    spend: inheritedRun?.spend ?? { meteredUsd: 0, creditsUsed: 0, scope: "run" },
   };
 
   return deriveAuthoringJourney({

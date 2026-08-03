@@ -1207,6 +1207,7 @@ async function notifyRunNeedsAttention(run: RunForHealth, health: RunHealth): Pr
       supportReference: health.supportReference,
     });
     await sendAuthoringNeedsAttentionEmail({
+      userId: run.userId,
       to: row.email,
       bookTitle: row.title,
       runId: run.id,

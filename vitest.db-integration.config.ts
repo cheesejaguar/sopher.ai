@@ -18,6 +18,7 @@ export default defineConfig({
       "src/lib/account-deletion.integration.test.ts",
       "src/lib/clerk-deletion-finalizer.integration.test.ts",
       "src/lib/actions/books.integration.test.ts",
+      "src/lib/notification-preferences.integration.test.ts",
     ],
     testTimeout: 60_000,
     hookTimeout: 60_000,

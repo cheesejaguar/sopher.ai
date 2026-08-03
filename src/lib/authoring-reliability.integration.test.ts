@@ -28,6 +28,12 @@ import {
   requestAuthoringRunCancellation,
   transitionAuthoringRunState,
 } from "@/lib/generation-runs";
+import { getAuthoringStartSafetyBlock } from "@/lib/authoring-start-safety";
+import { resolveReconciledMeteringIncidents } from "@/lib/billing/unresolved-metering";
+import {
+  reconcileMeteredCallAsCharged,
+  reconcileMeteredCallAsUncharged,
+} from "@/lib/billing/meter";
 import {
   hydratePreManuscriptRetryStep,
   prepareCreativeQuestionStep,
@@ -645,8 +651,147 @@ describeIsolated("authoring reliability against isolated Neon", () => {
     expect(libraryProject?.nextAction).toEqual(openProject?.nextAction);
     expect(openProject?.nextAction).toMatchObject({
       kind: "recover_saved_work",
-      href: `/projects/${projectId}/write`,
+      href: `/projects/${projectId}/write#authoring-recovery`,
     });
+  });
+
+  it("blocks a replacement run while its billing lineage has unresolved provider evidence", async () => {
+    const projectId = randomUUID();
+    const rootRunId = randomUUID();
+    const retryRunId = randomUUID();
+    const intentRef = `metering-intent:generation:${rootRunId}:creative-question:after-concept:creative.question:attempt:test`;
+    const secondIntentRef = `metering-intent:generation:${rootRunId}:outline:creative.outline:attempt:second`;
+    await observer!`
+      insert into projects (
+        id, user_id, title, brief, genre, experience,
+        target_chapters, target_words_per_chapter, settings
+      )
+      values (
+        ${projectId}, ${userId}, 'Unresolved metering fixture',
+        'A failed provider attempt must be reconciled before retry.', 'mystery',
+        'full_book', 3, 1000, '{"qualityTier":"standard"}'::jsonb
+      )
+    `;
+    await observer!`
+      insert into generation_runs (
+        id, project_id, user_id, request_key, kind, status, config,
+        current_stage, progress_pct, error, root_error_code, root_error_stage, created_at
+      )
+      values
+        (
+          ${rootRunId}, ${projectId}, ${userId}, ${randomUUID()}, 'full_book', 'failed',
+          ${JSON.stringify({ protocolVersion: 2, tier: "standard" })}::jsonb,
+          'failed', 2, 'A prior provider attempt has unresolved local metering. The call was not repeated; reconciliation is required.',
+          'metering_reconciliation_required', 'concept', now() - interval '2 minutes'
+        ),
+        (
+          ${retryRunId}, ${projectId}, ${userId}, ${randomUUID()}, 'full_book', 'failed',
+          ${JSON.stringify({
+            protocolVersion: 2,
+            tier: "standard",
+            resumeFromRunId: rootRunId,
+            billingLineageRunId: rootRunId,
+          })}::jsonb,
+          'failed', 2, 'A prior provider attempt has unresolved local metering. The call was not repeated; reconciliation is required.',
+          'metering_reconciliation_required', 'concept', now() - interval '1 minute'
+        )
+    `;
+    await observer!`
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, run_id, external_ref, created_at
+      )
+      values
+        (${userId}, 100, 'purchase', 'Entitled test wallet', ${projectId}, null,
+          ${`test-purchase:${projectId}`}, now() - interval '3 hours'),
+        (${userId}, 0, 'adjustment', 'Metering intent for creative.question',
+          ${projectId}, ${rootRunId}, ${intentRef}, now() - interval '2 hours'),
+        (${userId}, -0.275, 'adjustment', 'Provider claim',
+          ${projectId}, ${rootRunId}, ${`metering-claim:${intentRef}`}, now() - interval '2 hours'),
+        (${userId}, 0, 'adjustment', 'Second metering intent',
+          ${projectId}, ${rootRunId}, ${secondIntentRef}, now() - interval '2 hours'),
+        (${userId}, -0.275, 'adjustment', 'Second provider claim',
+          ${projectId}, ${rootRunId}, ${`metering-claim:${secondIntentRef}`}, now() - interval '2 hours')
+    `;
+    await observer!`
+      insert into authoring_incidents (
+        run_id, project_id, category, severity, dedupe_key, evidence
+      )
+      values (
+        ${retryRunId}, ${projectId}, 'unresolved_metering', 'critical',
+        'unresolved-metering', '{"errorCode":"metering_reconciliation_required"}'::jsonb
+      )
+    `;
+
+    const access = { fullBookUnlocked: true, balanceCredits: 100 };
+    const library = await listAuthoringJourneySnapshots(userId, access);
+    const openProject = await getAuthoringJourneySnapshot({ userId, projectId, access });
+    const libraryProject = library.find((snapshot) => snapshot.project.id === projectId);
+
+    expect(libraryProject?.run?.id).toBe(retryRunId);
+    expect(libraryProject?.nextAction.kind).toBe("contact_support");
+    expect(libraryProject?.purchaseAction).toBeNull();
+    expect(openProject?.nextAction.kind).toBe("contact_support");
+    await expect(getAuthoringStartSafetyBlock({ userId, projectId })).resolves.toMatchObject({
+      code: "support_required",
+      action: { kind: "contact_support", requiresMeteredAccess: false },
+    });
+
+    await expect(
+      reconcileMeteredCallAsCharged({
+        intentRef,
+        adminId: "integration-test",
+        note: "Exact Gateway attempt verified; output was not delivered.",
+        calls: [
+          {
+            model: "anthropic/claude-sonnet-5",
+            inputTokens: 2,
+            outputTokens: 537,
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({ debitedCredits: expect.any(Number) });
+    await expect(resolveReconciledMeteringIncidents(intentRef)).resolves.toBe(0);
+
+    const afterFirst = await getAuthoringJourneySnapshot({ userId, projectId, access });
+    expect(afterFirst?.nextAction.kind).toBe("contact_support");
+    const chargedLedger = (await observer!`
+      select external_ref as "externalRef", amount::text, kind
+      from credit_ledger
+      where external_ref in (
+        ${`metering-claim:${intentRef}`},
+        ${`release:metering-claim:${intentRef}`},
+        ${`intent-settled:${intentRef}`},
+        ${`delivery-refund:llm:generation:${rootRunId}:creative-question:after-concept:creative.question:attempt:test`},
+        ${`llm:generation:${rootRunId}:creative-question:after-concept:creative.question:attempt:test:step:0`}
+      )
+    `) as unknown as Array<{ externalRef: string; amount: string; kind: string }>;
+    expect(chargedLedger.map((row) => row.externalRef)).toEqual(
+      expect.arrayContaining([
+        `release:metering-claim:${intentRef}`,
+        `intent-settled:${intentRef}`,
+        `delivery-refund:llm:generation:${rootRunId}:creative-question:after-concept:creative.question:attempt:test`,
+      ]),
+    );
+    expect(chargedLedger.reduce((sum, row) => sum + Number(row.amount), 0)).toBeCloseTo(0, 6);
+    const [verifiedCall] = (await observer!`
+      select input_tokens::int as "inputTokens", output_tokens::int as "outputTokens"
+      from llm_calls
+      where run_id = ${rootRunId} and operation = 'creative.question'
+    `) as unknown as Array<{ inputTokens: number; outputTokens: number }>;
+    expect(verifiedCall).toEqual({ inputTokens: 2, outputTokens: 537 });
+
+    await expect(
+      reconcileMeteredCallAsUncharged({
+        intentRef: secondIntentRef,
+        adminId: "integration-test",
+        note: "Gateway verified that the second provider attempt was uncharged.",
+      }),
+    ).resolves.toBe(true);
+    await expect(resolveReconciledMeteringIncidents(secondIntentRef)).resolves.toBeGreaterThan(0);
+
+    const reconciled = await getAuthoringJourneySnapshot({ userId, projectId, access });
+    expect(reconciled?.nextAction.kind).toBe("recover_saved_work");
+    await expect(getAuthoringStartSafetyBlock({ userId, projectId })).resolves.toBeNull();
   });
 
   it("derives the same next action for a successful scoped retry in the library and open project", async () => {

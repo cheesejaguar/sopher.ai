@@ -78,6 +78,11 @@ for (const viewport of PRODUCT_VIEWPORTS) {
         ready: () => page.getByRole("heading", { level: 1, name: "Your books" }),
       },
       {
+        name: "account settings",
+        route: "/studio/settings",
+        ready: () => page.getByRole("heading", { name: "Book email notifications" }),
+      },
+      {
         name: "Admin",
         route: "/admin",
         ready: () => page.getByRole("heading", { level: 1, name: "Overview" }),

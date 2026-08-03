@@ -2,6 +2,12 @@ import "server-only";
 
 import { Resend } from "resend";
 
+import {
+  claimAuthoringNotificationDelivery,
+  settleAuthoringNotificationDelivery,
+} from "@/lib/notification-preferences";
+import type { AuthoringNotificationCategory } from "@/lib/notification-preferences-shared";
+
 /**
  * Transactional email. Every message is triggered by an author action or a
  * state that now needs the author's attention. No marketing and no progress
@@ -49,7 +55,7 @@ export function sanitizeEmailSubject(value: string): string {
     .slice(0, 200);
 }
 
-function shell(title: string, bodyHtml: string): string {
+function shell(title: string, bodyHtml: string, managePreferences = false): string {
   return `<!doctype html>
 <html>
   <body style="margin:0;padding:24px;background:#f7f6f3;font-family:Georgia,'Times New Roman',serif;color:#14161c;">
@@ -61,6 +67,11 @@ function shell(title: string, bodyHtml: string): string {
     <p style="max-width:520px;margin:16px auto 0;font-family:ui-sans-serif,system-ui,sans-serif;font-size:12px;color:#7c8296;">
       Sent because of activity on your sopher.ai account. Questions:
       <a href="mailto:support@sopher.ai" style="color:#4a5fd0;">support@sopher.ai</a>
+      ${
+        managePreferences
+          ? ' · <a href="https://sopher.ai/studio/settings#email-notifications" style="color:#4a5fd0;">Manage email preferences</a>'
+          : ""
+      }
     </p>
   </body>
 </html>`;
@@ -76,27 +87,68 @@ async function deliver(
   subject: string,
   html: string,
   idempotencyKey?: string,
+  optional?: {
+    userId: string;
+    category: AuthoringNotificationCategory;
+    eventKey: string;
+  },
 ): Promise<void> {
+  if (!to) return;
   const resend = getResend();
-  if (!resend || !to) return;
+  if (!resend) return;
+
+  let claimToken: string | null = null;
+  if (optional) {
+    try {
+      claimToken = await claimAuthoringNotificationDelivery(optional);
+      if (!claimToken) return;
+    } catch (error) {
+      // Optional email fails closed. The authoritative next action remains in Studio.
+      console.warn("[email] optional delivery could not be claimed", {
+        category: optional.category,
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+      return;
+    }
+  }
+
+  let delivered = false;
   try {
-    await resend.emails.send(
+    const result = await resend.emails.send(
       { from: FROM, to, subject, html },
       idempotencyKey ? { idempotencyKey } : undefined,
     );
+    if (result.error) throw new Error(result.error.message);
+    delivered = true;
   } catch (error) {
     // Email is best-effort by design; the product state is already correct.
     console.warn("[email] send failed:", error instanceof Error ? error.message : error);
   }
+  if (optional && claimToken) {
+    try {
+      await settleAuthoringNotificationDelivery({
+        eventKey: optional.eventKey,
+        claimToken,
+        delivered,
+      });
+    } catch (error) {
+      // Resend's idempotency key still protects a replay if settlement is unavailable.
+      console.warn("[email] optional delivery settlement failed", {
+        category: optional.category,
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+    }
+  }
 }
 
 export async function sendBookFinishedEmail(input: {
+  userId: string;
   to: string;
   bookTitle: string;
   projectId: string;
   chapterCount: number;
   wordCount: number;
-  runId?: string;
+  runId: string;
 }): Promise<void> {
   const url = `https://sopher.ai/projects/${input.projectId}/manuscript`;
   const title = escapeEmailHtml(input.bookTitle);
@@ -110,23 +162,30 @@ export async function sendBookFinishedEmail(input: {
           "en-US",
         )} words — is written, edited, and waiting for you.`,
       ) + cta(url, "Open your manuscript"),
+      true,
     ),
-    input.runId ? `run:${input.runId}:book-finished` : undefined,
+    `run:${input.runId}:book-finished`,
+    {
+      userId: input.userId,
+      category: "authoringCompleted",
+      eventKey: `run:${input.runId}:book-finished`,
+    },
   );
 }
 
 export async function sendCreditsPausedEmail(input: {
+  userId: string;
   to: string;
   bookTitle: string;
   projectId: string;
   balance: number;
   required: number;
-  runId?: string;
+  runId: string;
   pauseVersion?: number;
 }): Promise<void> {
   const url = `https://sopher.ai/studio/credits?return=${encodeURIComponent(
     `/projects/${input.projectId}/write`,
-  )}${input.runId ? `&resumeRun=${encodeURIComponent(input.runId)}` : ""}`;
+  )}&resumeRun=${encodeURIComponent(input.runId)}`;
   const title = escapeEmailHtml(input.bookTitle);
   await deliver(
     input.to,
@@ -136,12 +195,19 @@ export async function sendCreditsPausedEmail(input: {
       p(
         `<em>${title}</em> needs about ${Math.ceil(input.required)} credits to continue and your balance is ${input.balance.toFixed(1)}. Every chapter drafted so far is safe; the book picks up exactly where it stopped once you top up.`,
       ) + cta(url, "Add credits and resume"),
+      true,
     ),
-    input.runId ? `run:${input.runId}:credits-paused:${input.pauseVersion ?? 0}` : undefined,
+    `run:${input.runId}:credits-paused:${input.pauseVersion ?? 0}`,
+    {
+      userId: input.userId,
+      category: "authoringActionRequired",
+      eventKey: `run:${input.runId}:credits-paused:${input.pauseVersion ?? 0}`,
+    },
   );
 }
 
 export async function sendIncludedStoryPausedEmail(input: {
+  userId: string;
   to: string;
   bookTitle: string;
   projectId: string;
@@ -161,12 +227,19 @@ export async function sendIncludedStoryPausedEmail(input: {
       ) +
         p(`Support reference: <strong>${escapeEmailHtml(input.supportReference)}</strong>`) +
         cta(url, "Review recovery options"),
+      true,
     ),
     `run:${input.runId}:included-story-paused:${input.pauseVersion ?? 0}`,
+    {
+      userId: input.userId,
+      category: "authoringActionRequired",
+      eventKey: `run:${input.runId}:included-story-paused:${input.pauseVersion ?? 0}`,
+    },
   );
 }
 
 export async function sendOutlineApprovalEmail(input: {
+  userId: string;
   to: string;
   bookTitle: string;
   projectId: string;
@@ -188,12 +261,45 @@ export async function sendOutlineApprovalEmail(input: {
       p(
         `We have paused before drafting <em>${title}</em>. Review the plan, then approve it or send it back with notes. No chapters will be written until you decide.`,
       ) + cta(url, "Review the outline"),
+      true,
     ),
     `run:${input.runId}:outline-${input.reminder ? "reminder" : "ready"}:${input.pauseVersion}`,
+    {
+      userId: input.userId,
+      category: input.reminder ? "authoringReminders" : "authoringActionRequired",
+      eventKey: `run:${input.runId}:outline-${input.reminder ? "reminder" : "ready"}:${input.pauseVersion}`,
+    },
+  );
+}
+
+export async function sendCreativeDecisionEmail(input: {
+  userId: string;
+  to: string;
+  bookTitle: string;
+  projectId: string;
+  runId: string;
+  pauseVersion: number;
+}): Promise<void> {
+  const url = `https://sopher.ai/projects/${input.projectId}/write`;
+  const title = escapeEmailHtml(input.bookTitle);
+  const eventKey = `run:${input.runId}:creative-decision:${input.pauseVersion}`;
+  await deliver(
+    input.to,
+    sanitizeEmailSubject(`Choose the direction for “${input.bookTitle}”`),
+    shell(
+      "Your story is ready for your direction.",
+      p(
+        `We have developed the central journey for <em>${title}</em> and paused before outlining. Choose a suggested direction, write your own, or ask Sopher to decide.`,
+      ) + cta(url, "Choose the story direction"),
+      true,
+    ),
+    eventKey,
+    { userId: input.userId, category: "authoringActionRequired", eventKey },
   );
 }
 
 export async function sendAuthoringNeedsAttentionEmail(input: {
+  userId: string;
   to: string;
   bookTitle: string;
   runId: string;
@@ -223,8 +329,14 @@ export async function sendAuthoringNeedsAttentionEmail(input: {
       p(`<em>${title}</em> stopped before production completed. ${savedWork}`) +
         p(`Support reference: <strong>${escapeEmailHtml(input.supportReference)}</strong>`) +
         cta(escapeEmailHtml(url), escapeEmailHtml(input.nextActionLabel)),
+      true,
     ),
     `run:${input.runId}:needs-attention`,
+    {
+      userId: input.userId,
+      category: "authoringActionRequired",
+      eventKey: `run:${input.runId}:needs-attention`,
+    },
   );
 }
 

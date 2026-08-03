@@ -23,6 +23,10 @@ describe("StageTimeline", () => {
     const active = screen.getByText("Chapters").closest('[aria-current="step"]');
     expect(active).toHaveAttribute("data-state", "active");
     expect(active?.querySelector(".forced-colors\\:underline")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Generation stage timeline" })).toHaveClass(
+      "contain-paint",
+      "overflow-x-auto",
+    );
     expect(screen.getByRole("progressbar", { name: "Production progress" })).toHaveAttribute(
       "aria-valuenow",
       "42",

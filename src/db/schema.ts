@@ -48,8 +48,60 @@ export const users = pgTable("users", {
     .$type<AuthoringOnboarding>()
     .default({ version: 1, seenCoachmarks: [] })
     .notNull(),
+  /** Optional authoring notices. Billing and account-security mail bypasses these controls. */
+  emailAuthoringActionRequired: boolean("email_authoring_action_required").default(true).notNull(),
+  emailAuthoringReminders: boolean("email_authoring_reminders").default(true).notNull(),
+  emailAuthoringCompleted: boolean("email_authoring_completed").default(true).notNull(),
   ...timestamps,
 });
+
+/**
+ * Content-free delivery ledger. Stable event keys make Workflow replays safe,
+ * and a durable suppressed decision cannot become a stale email after opt-in.
+ */
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    category: text("category", {
+      enum: ["authoringActionRequired", "authoringReminders", "authoringCompleted"],
+    }).notNull(),
+    eventKey: text("event_key").notNull(),
+    status: text("status", {
+      enum: ["pending", "sent", "suppressed", "failed"],
+    })
+      .default("pending")
+      .notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    claimToken: uuid("claim_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex("uq_notification_deliveries_event_key").on(t.eventKey),
+    index("idx_notification_deliveries_user").on(t.userId, t.createdAt),
+    check(
+      "notification_deliveries_category_check",
+      sql`${t.category} in ('authoringActionRequired', 'authoringReminders', 'authoringCompleted')`,
+    ),
+    check(
+      "notification_deliveries_status_check",
+      sql`${t.status} in ('pending', 'sent', 'suppressed', 'failed')`,
+    ),
+    check(
+      "notification_deliveries_claim_check",
+      sql`(
+        (${t.status} = 'pending' and ${t.claimToken} is not null and ${t.leaseExpiresAt} is not null)
+        or
+        (${t.status} <> 'pending' and ${t.claimToken} is null and ${t.leaseExpiresAt} is null)
+      )`,
+    ),
+  ],
+);
 
 export type Acquisition = {
   source?: string;
@@ -652,6 +704,7 @@ export const authoringIncidents = pgTable(
         "cancellation_unconfirmed",
         "stale_reservation",
         "event_persistence",
+        "unresolved_metering",
         "operator_action",
       ],
     }).notNull(),
@@ -681,7 +734,7 @@ export const authoringIncidents = pgTable(
       sql`${t.category} in (
         'dispatch', 'workflow_missing', 'stalled_heartbeat', 'invalid_pause',
         'completion_contradiction', 'cancellation_unconfirmed',
-        'stale_reservation', 'event_persistence', 'operator_action'
+        'stale_reservation', 'event_persistence', 'unresolved_metering', 'operator_action'
       )`,
     ),
   ],

@@ -35,6 +35,7 @@ import { getOrCreateBook } from "@/db/queries/projects";
 import { listEntities, seedEntities } from "@/db/queries/entities";
 import {
   sendBookFinishedEmail,
+  sendCreativeDecisionEmail,
   sendCreditsPausedEmail,
   sendIncludedStoryPausedEmail,
   sendOutlineApprovalEmail,
@@ -86,6 +87,7 @@ import { buildFrozenAuthoringContract } from "@/ai/authoring-guidelines";
 import { linkAuthoringRunWorkflow, transitionAuthoringRunState } from "@/lib/generation-runs";
 import { nextRunEventSequence, persistRunEvent } from "@/lib/run-event-store";
 import { recordAuthoringIncident, resolveAuthoringIncident } from "@/lib/authoring-incidents";
+import type { AuthoringFailureDetails } from "@/lib/authoring-failures";
 import {
   AUTHORING_CANCELLATION_MESSAGE,
   AUTHORING_RUN_INACTIVE_MESSAGE,
@@ -659,6 +661,7 @@ export async function markRunStatus(
   ref: RunRef,
   status: RequestedRunStatus,
   error?: string,
+  failure?: AuthoringFailureDetails,
 ): Promise<MarkRunStatusOutcome> {
   "use step";
   const result = await transitionAuthoringRunState({
@@ -667,6 +670,8 @@ export async function markRunStatus(
     userId: ref.userId,
     status,
     error,
+    ...(failure?.errorCode ? { errorCode: failure.errorCode } : {}),
+    ...(failure?.errorStage ? { errorStage: failure.errorStage } : {}),
     ...(status === "completed" ? { resolveCancellationOnComplete: true } : {}),
   });
   if (status !== "cancelled" && result.status === "cancelled") {
@@ -680,6 +685,22 @@ export async function markRunStatus(
       return { outcome: "terminal_preserved", status: result.status };
     }
     throw new FatalError("Generation run is no longer active");
+  }
+  if (status === "failed" && failure?.incidentCategory) {
+    const unresolvedMetering = failure.incidentCategory === "unresolved_metering";
+    await recordAuthoringIncident({
+      runId: ref.dbRunId,
+      projectId: ref.projectId,
+      category: failure.incidentCategory,
+      severity: "critical",
+      dedupeKey: unresolvedMetering ? "unresolved-metering" : "settled-output-missing",
+      evidence: {
+        errorCode:
+          failure.errorCode ??
+          (unresolvedMetering ? "metering_reconciliation_required" : "metered_output_missing"),
+        ...(failure.errorStage ? { stage: failure.errorStage } : {}),
+      },
+    });
   }
   return { outcome: "matched", status };
 }
@@ -2744,6 +2765,7 @@ export async function finalizeStep(ref: RunRef, detail?: string): Promise<void> 
       .limit(1);
     if (row?.email) {
       await sendBookFinishedEmail({
+        userId: ref.userId,
         to: row.email,
         bookTitle: row.title,
         projectId: ref.projectId,
@@ -2788,6 +2810,7 @@ export async function notifyCreditsPausedStep(
     if (row?.email) {
       if (row.experience === "trial_short_story") {
         await sendIncludedStoryPausedEmail({
+          userId: ref.userId,
           to: row.email,
           bookTitle: row.title,
           projectId: ref.projectId,
@@ -2797,6 +2820,7 @@ export async function notifyCreditsPausedStep(
         });
       } else {
         await sendCreditsPausedEmail({
+          userId: ref.userId,
           to: row.email,
           bookTitle: row.title,
           projectId: ref.projectId,
@@ -2825,6 +2849,7 @@ export async function notifyOutlineApprovalStep(ref: RunRef, pauseVersion: numbe
       .limit(1);
     if (row?.email) {
       await sendOutlineApprovalEmail({
+        userId: ref.userId,
         to: row.email,
         bookTitle: row.title,
         projectId: ref.projectId,
@@ -2843,5 +2868,29 @@ export async function notifyOutlineApprovalStep(ref: RunRef, pauseVersion: numbe
     }
   } catch (error) {
     console.warn("[email] outline-approval notification failed:", error);
+  }
+}
+
+/** Emails one idempotent notice only after the creative-direction hook is actionable. */
+export async function notifyCreativeDecisionStep(ref: RunRef, pauseVersion: number): Promise<void> {
+  "use step";
+  try {
+    const [row] = await getDb()
+      .select({ email: schema.users.email, title: schema.projects.title })
+      .from(schema.projects)
+      .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+      .where(and(eq(schema.projects.id, ref.projectId), eq(schema.projects.userId, ref.userId)))
+      .limit(1);
+    if (!row?.email) return;
+    await sendCreativeDecisionEmail({
+      userId: ref.userId,
+      to: row.email,
+      bookTitle: row.title,
+      projectId: ref.projectId,
+      runId: ref.dbRunId,
+      pauseVersion,
+    });
+  } catch (error) {
+    console.warn("[email] creative-decision notification failed:", error);
   }
 }

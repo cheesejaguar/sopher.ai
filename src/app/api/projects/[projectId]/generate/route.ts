@@ -41,6 +41,25 @@ const cancellationBodySchema = z.object({
   runId: z.uuid(),
 });
 
+const ACTIVE_AUTHORING_STATUSES = new Set(["queued", "running", "awaiting_input"]);
+
+function terminalRequestReplayResponse(run: { id: string; kind: string; status: string }) {
+  const retryable = run.status === "failed" || run.status === "cancelled";
+  return Response.json(
+    {
+      error: retryable
+        ? "This saved start request belongs to a run that is no longer active. Retrying with a new request is safe."
+        : "This saved start request already completed. The latest project state is being refreshed.",
+      code: "terminal_request_replay",
+      runId: run.id,
+      kind: run.kind,
+      status: run.status,
+      retryable,
+    },
+    { status: 409 },
+  );
+}
+
 function buildBaseGenerationConfig(input: {
   project: typeof schema.projects.$inferSelect;
   tier: GenerationConfig["tier"];
@@ -157,6 +176,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         },
         { status: 409 },
       );
+    }
+    if (!ACTIVE_AUTHORING_STATUSES.has(requestedRun.status)) {
+      return terminalRequestReplayResponse(requestedRun);
     }
     return Response.json(
       {
@@ -318,6 +340,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       ...(minimumBalanceCredits !== undefined ? { minimumBalanceCredits } : {}),
     });
     if (!run.inserted) {
+      if (!ACTIVE_AUTHORING_STATUSES.has(run.status)) {
+        return terminalRequestReplayResponse(run);
+      }
       return Response.json(
         {
           runId: run.id,
@@ -405,7 +430,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
 
     if (isE2EWorkflowStubEnabled()) {
       await settleStubbedAuthoringRunHandoff({ runId: run.id, projectId, userId });
-      return Response.json({ runId: run.id, requestKey, config, stubbed: true }, { status: 202 });
+      return Response.json(
+        {
+          runId: run.id,
+          kind: "full_book",
+          status: run.status,
+          requestKey,
+          config,
+          stubbed: true,
+        },
+        { status: 202 },
+      );
     }
   } catch (error) {
     // No Workflow invocation has happened yet, so this failure is proven
@@ -451,6 +486,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     return Response.json(
       {
         runId: run.id,
+        kind: "full_book",
+        status: run.status,
         requestKey,
         config,
         confirmationPending: uncertain,
@@ -459,7 +496,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     );
   }
 
-  return Response.json({ runId: run.id, requestKey, config }, { status: 202 });
+  return Response.json(
+    { runId: run.id, kind: "full_book", status: run.status, requestKey, config },
+    { status: 202 },
+  );
 }
 
 export async function DELETE(req: Request, ctx: { params: Promise<{ projectId: string }> }) {

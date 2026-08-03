@@ -180,7 +180,8 @@ describe("workflow sandbox boundaries", () => {
       conflictChecked,
     );
     const exposed = source.indexOf('stage: "awaiting_guidance"', registered);
-    const consumed = source.indexOf("await consumeCreativeDecisionStep", exposed);
+    const notified = source.indexOf("await notifyCreativeDecisionStep", exposed);
+    const consumed = source.indexOf("await consumeCreativeDecisionStep", notified);
     const cleared = source.indexOf('clearAuthoringPauseStep(ref, "creative_decision"', consumed);
 
     expect(pauseStart).toBeGreaterThanOrEqual(0);
@@ -188,7 +189,8 @@ describe("workflow sandbox boundaries", () => {
     expect(conflictChecked).toBeGreaterThan(hookCreated);
     expect(registered).toBeGreaterThan(conflictChecked);
     expect(exposed).toBeGreaterThan(registered);
-    expect(consumed).toBeGreaterThan(exposed);
+    expect(notified).toBeGreaterThan(exposed);
+    expect(consumed).toBeGreaterThan(notified);
     expect(cleared).toBeGreaterThan(consumed);
   });
 

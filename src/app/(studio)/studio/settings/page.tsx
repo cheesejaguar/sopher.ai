@@ -7,10 +7,11 @@ import { getBalance } from "@/lib/billing/credits";
 import { requireUser } from "@/lib/auth";
 import Link from "next/link";
 
-import { AppearanceCard, DefaultsCard } from "./settings-cards";
+import { AppearanceCard, DefaultsCard, NotificationPreferencesCard } from "./settings-cards";
 import { CostDisplay, PageHeader } from "@/components/studio/product-primitives";
 import { getStudioAccess } from "@/lib/studio-access";
 import { FULL_BOOK_UNLOCK_HREF } from "@/lib/marketing/trial-offer";
+import { getNotificationSettings } from "@/lib/notification-preferences";
 
 export const metadata: Metadata = {
   title: "Settings",
@@ -66,17 +67,44 @@ function CreditsSkeleton() {
   );
 }
 
+async function NotificationPreferencesSection() {
+  const { userId } = await requireUser();
+  const settings = await getNotificationSettings(userId);
+  return (
+    <NotificationPreferencesCard email={settings.email} initialPreferences={settings.preferences} />
+  );
+}
+
+function NotificationPreferencesSkeleton() {
+  return (
+    <Card className="instrument-surface rounded-sm">
+      <CardHeader>
+        <Skeleton className="h-5 w-52" />
+        <Skeleton className="h-4 w-full max-w-xl" />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-16 w-full" />
+        <Skeleton className="h-16 w-full" />
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-8">
       <PageHeader
         title="Settings"
-        description="Choose how the studio looks and what each new book assumes."
+        description="Choose how the studio looks, what each new book assumes, and when Sopher emails you."
       />
 
       <div className="space-y-6">
         <AppearanceCard />
         <DefaultsCard />
+        <Suspense fallback={<NotificationPreferencesSkeleton />}>
+          <NotificationPreferencesSection />
+        </Suspense>
         <Suspense fallback={<CreditsSkeleton />}>
           <CreditsSection />
         </Suspense>
