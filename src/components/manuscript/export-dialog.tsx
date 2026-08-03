@@ -46,8 +46,19 @@ const MAX_POLLS = 30; // 60s ceiling
 
 type Phase =
   | { name: "idle" }
-  | { name: "working"; format: ExportFormat }
-  | { name: "done"; format: ExportFormat; asset: { id: string; filename: string } }
+  | {
+      name: "working";
+      format: ExportFormat;
+      incomplete?: boolean;
+      capturedAt?: string;
+    }
+  | {
+      name: "done";
+      format: ExportFormat;
+      asset: { id: string; filename: string };
+      incomplete?: boolean;
+      capturedAt?: string;
+    }
   | { name: "failed"; format: ExportFormat; message: string };
 
 export function ExportDialog({ projectId }: { projectId: string }) {
@@ -74,7 +85,18 @@ export function ExportDialog({ projectId }: { projectId: string }) {
         throw new Error("Another export is still running — give it a moment.");
       }
       if (!res.ok) throw new Error("The export could not be started.");
-      const { runId } = (await res.json()) as { runId: string };
+      const started = (await res.json()) as {
+        runId: string;
+        incomplete?: boolean;
+        capturedAt?: string;
+      };
+      const { runId } = started;
+      setPhase({
+        name: "working",
+        format,
+        incomplete: started.incomplete,
+        capturedAt: started.capturedAt,
+      });
 
       for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
         await new Promise((resolve) => setTimeout(resolve, POLL_MS));
@@ -84,11 +106,22 @@ export function ExportDialog({ projectId }: { projectId: string }) {
         const body = (await poll.json()) as {
           status: string;
           error: string | null;
-          asset: { id: string; filename: string } | null;
+          asset: {
+            id: string;
+            filename: string;
+            incomplete?: boolean;
+            capturedAt?: string;
+          } | null;
         };
         if (generation.current !== ticket) return;
         if (body.status === "completed" && body.asset) {
-          setPhase({ name: "done", format, asset: body.asset });
+          setPhase({
+            name: "done",
+            format,
+            asset: body.asset,
+            incomplete: body.asset.incomplete ?? started.incomplete,
+            capturedAt: body.asset.capturedAt ?? started.capturedAt,
+          });
           toast.success(`${body.asset.filename} is ready to download`);
           return;
         }
@@ -126,7 +159,7 @@ export function ExportDialog({ projectId }: { projectId: string }) {
         <DialogHeader>
           <DialogTitle>Export the manuscript</DialogTitle>
           <DialogDescription>
-            Assembles every finished chapter into a single file. Takes a few seconds.
+            Assembles every saved chapter into one consistent edition. Takes a few seconds.
           </DialogDescription>
         </DialogHeader>
 
@@ -176,6 +209,13 @@ export function ExportDialog({ projectId }: { projectId: string }) {
         </p>
 
         <div>
+          {"incomplete" in phase && phase.incomplete ? (
+            <p className="mb-3 border-y border-ember/35 py-2 text-xs text-foreground">
+              This manuscript is incomplete. The export is a captured snapshot; later chapter
+              changes will not alter the downloaded file.
+            </p>
+          ) : null}
+
           {phase.name === "working" ? (
             <p className="text-xs text-muted-foreground">
               Binding the {formatName(phase.format)} edition…

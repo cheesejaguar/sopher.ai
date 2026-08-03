@@ -209,6 +209,10 @@ export function StepShape({
 
       <div className="instrument-surface space-y-4 rounded-sm p-5">
         <p className="text-sm font-medium">Voice and perspective</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          Voice controls how the prose sounds. Point of view controls whose thoughts the reader can
+          enter; tense controls whether events feel remembered or immediate.
+        </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <SettingSelect
@@ -243,6 +247,9 @@ export function StepShape({
         <Separator />
 
         <p className="text-sm font-medium">Content limits</p>
+        <p className="text-xs leading-relaxed text-muted-foreground">
+          These are ceilings, not requests to add mature content.
+        </p>
         <div className="grid gap-4 sm:grid-cols-3">
           <SettingSelect
             id="wizard-heat"

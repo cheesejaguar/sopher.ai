@@ -28,7 +28,6 @@ export default async function AdminPurchases() {
   return (
     <div className="space-y-4">
       <PageHeader
-        label="Admin / Ledger"
         title="Purchases"
         description="Credit purchases, refunds, grants, and manual adjustments."
       />

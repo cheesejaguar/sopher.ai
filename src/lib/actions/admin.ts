@@ -11,7 +11,14 @@ import {
   reconcileMeteredCallAsCharged,
   reconcileMeteredCallAsUncharged,
 } from "@/lib/billing/meter";
-import { scheduleRunReservationCleanup, terminalizeAuthoringRun } from "@/lib/generation-runs";
+import {
+  requestAuthoringRunCancellation,
+  scheduleRunReservationCleanup,
+} from "@/lib/generation-runs";
+import { redispatchUncertainAuthoringRun } from "@/lib/authoring-dispatch";
+import { redeliverAcceptedAuthoringRunInput } from "@/lib/authoring-inputs";
+import { recordAuthoringIncident, resolveAuthoringIncident } from "@/lib/authoring-incidents";
+import { reconcileAuthoringRun } from "@/lib/run-health";
 
 /**
  * Admin actions. Every mutation is (a) behind requireAdmin, (b) auditable —
@@ -72,9 +79,9 @@ export async function adminSetFlagStatus(
   revalidatePath("/admin/flags");
 }
 
-/** Cancels a stuck run: workflow first (best effort), then the DB state. */
+/** Requests cancellation; reconciliation confirms the terminal state. */
 export async function adminCancelRun(runId: string): Promise<void> {
-  await requireAdmin();
+  const { userId: adminId } = await requireAdmin();
   if (!z.uuid().safeParse(runId).success) throw new Error("Run not found");
   const db = getDb();
   const [run] = await db
@@ -89,27 +96,181 @@ export async function adminCancelRun(runId: string): Promise<void> {
     .where(eq(schema.generationRuns.id, runId))
     .limit(1);
   if (!run) throw new Error("Run not found");
-  if (!["queued", "running", "awaiting_input"].includes(run.status)) return;
-
-  if (run.workflowRunId) {
-    try {
-      const { getRun } = await import("workflow/api");
-      await getRun(run.workflowRunId).cancel();
-    } catch (error) {
-      // The workflow may already be dead — the DB state is what users see.
-      console.warn("[admin] workflow cancel failed:", error);
-    }
+  if (!["queued", "running", "awaiting_input"].includes(run.status)) {
+    await recordAdminRunAction({
+      runId: run.id,
+      projectId: run.projectId,
+      adminId,
+      action: "request_cancellation",
+      outcome: "already_terminal",
+    });
+    return;
   }
 
-  await terminalizeAuthoringRun({
+  const cancellation = await requestAuthoringRunCancellation({
     runId,
     projectId: run.projectId,
     userId: run.userId,
-    status: "cancelled",
-    error: "Cancelled by administrator",
+    reason: "Cancelled by administrator",
   });
+  if (!cancellation) throw new Error("Run not found");
+
+  let workflowCancelOutcome = cancellation.requested ? "requested" : "already_requested";
+  if (cancellation.workflowRunId) {
+    try {
+      const { getRun } = await import("workflow/api");
+      await getRun(cancellation.workflowRunId).cancel();
+      workflowCancelOutcome = `${workflowCancelOutcome}_workflow_notified`;
+    } catch (error) {
+      // The workflow may already be dead — the DB state is what users see.
+      console.warn("[admin] workflow cancel failed:", error);
+      workflowCancelOutcome = `${workflowCancelOutcome}_workflow_unconfirmed`;
+    }
+  }
+
   await scheduleRunReservationCleanup({ userId: run.userId, runId });
+  await recordAdminRunAction({
+    runId: run.id,
+    projectId: run.projectId,
+    adminId,
+    action: "request_cancellation",
+    outcome: workflowCancelOutcome,
+  });
+  revalidatePath(`/admin/runs/${runId}`);
   revalidatePath("/admin/runs");
+}
+
+/** Probes Workflow and applies only the evidence-gated reconciliation rules. */
+export async function adminRecheckRun(runId: string): Promise<void> {
+  const { userId: adminId } = await requireAdmin();
+  if (!z.uuid().safeParse(runId).success) throw new Error("Run not found");
+  const [run] = await getDb()
+    .select()
+    .from(schema.generationRuns)
+    .where(eq(schema.generationRuns.id, runId))
+    .limit(1);
+  if (!run) throw new Error("Run not found");
+
+  try {
+    const result = await reconcileAuthoringRun(run);
+    await recordAdminRunAction({
+      runId: run.id,
+      projectId: run.projectId,
+      adminId,
+      action: "recheck",
+      outcome: `${result.outcome}:${result.workflowStatus}`,
+    });
+  } catch (error) {
+    await recordAdminRunAction({
+      runId: run.id,
+      projectId: run.projectId,
+      adminId,
+      action: "recheck",
+      outcome: "probe_error",
+    });
+    throw error;
+  }
+  revalidatePath(`/admin/runs/${runId}`);
+  revalidatePath("/admin/runs");
+}
+
+async function recordAdminRunAction(input: {
+  runId: string;
+  projectId: string;
+  adminId: string;
+  action: "redispatch" | "redeliver_input" | "recheck" | "request_cancellation";
+  outcome: string;
+}): Promise<void> {
+  const dedupeKey = `operator:${input.action}:${crypto.randomUUID()}`;
+  await recordAuthoringIncident({
+    runId: input.runId,
+    projectId: input.projectId,
+    category: "operator_action",
+    severity: "warning",
+    dedupeKey,
+    evidence: {
+      action: input.action,
+      actorId: input.adminId,
+      outcome: input.outcome,
+    },
+  });
+  await resolveAuthoringIncident({ runId: input.runId, dedupeKey });
+}
+
+/**
+ * Reuses the existing durable run after the dispatch lease expires. The
+ * underlying claim enforces the attempt ceiling and refuses linked, cancelled,
+ * non-queued, or otherwise ambiguous work.
+ */
+export async function adminRedispatchRun(runId: string): Promise<void> {
+  const { userId: adminId } = await requireAdmin();
+  if (!z.uuid().safeParse(runId).success) throw new Error("Run not found");
+  const [run] = await getDb()
+    .select({
+      id: schema.generationRuns.id,
+      projectId: schema.generationRuns.projectId,
+      userId: schema.generationRuns.userId,
+    })
+    .from(schema.generationRuns)
+    .where(eq(schema.generationRuns.id, runId))
+    .limit(1);
+  if (!run) throw new Error("Run not found");
+
+  const result = await redispatchUncertainAuthoringRun({
+    runId: run.id,
+    projectId: run.projectId,
+    userId: run.userId,
+  });
+  await recordAdminRunAction({
+    runId: run.id,
+    projectId: run.projectId,
+    adminId,
+    action: "redispatch",
+    outcome: result.outcome,
+  });
+  if (result.outcome === "not_eligible" || result.outcome === "unsupported") {
+    throw new Error("This run is not eligible for safe redispatch");
+  }
+
+  revalidatePath(`/admin/runs/${runId}`);
+  revalidatePath("/admin/runs");
+}
+
+/**
+ * Redelivers only a persisted, accepted response for the run's currently
+ * registered pause. No author payload is copied into the audit record.
+ */
+export async function adminRedeliverRunInput(inputId: string): Promise<void> {
+  const { userId: adminId } = await requireAdmin();
+  if (!z.uuid().safeParse(inputId).success) throw new Error("Input not found");
+  const [input] = await getDb()
+    .select({
+      id: schema.authoringRunInputs.id,
+      runId: schema.authoringRunInputs.runId,
+      projectId: schema.generationRuns.projectId,
+    })
+    .from(schema.authoringRunInputs)
+    .innerJoin(schema.generationRuns, eq(schema.generationRuns.id, schema.authoringRunInputs.runId))
+    .where(eq(schema.authoringRunInputs.id, inputId))
+    .limit(1);
+  if (!input) throw new Error("Input not found");
+
+  const outcome = await redeliverAcceptedAuthoringRunInput({
+    inputId: input.id,
+    minimumAgeMs: 0,
+  });
+  await recordAdminRunAction({
+    runId: input.runId,
+    projectId: input.projectId,
+    adminId,
+    action: "redeliver_input",
+    outcome,
+  });
+  if (outcome === "not_eligible") {
+    throw new Error("This input is no longer eligible for safe redelivery");
+  }
+
+  revalidatePath(`/admin/runs/${input.runId}`);
 }
 
 const reconcileIntentSchema = z.object({

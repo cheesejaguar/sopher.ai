@@ -1,25 +1,38 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const navigation = vi.hoisted(() => ({ pathname: "/studio" }));
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/studio",
+  usePathname: () => navigation.pathname,
   useRouter: () => ({ push: vi.fn() }),
 }));
 
 import { ProductShell } from "./product-shell";
+import { StudioHelpProjectGenre } from "@/components/studio/studio-help-context";
 
-afterEach(cleanup);
+beforeEach(() => {
+  navigation.pathname = "/studio";
+});
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("ProductShell credit label", () => {
   it("shows the product entitlement instead of the private trial allowance", () => {
     render(
       <ProductShell creditLabel="Included story">
+        <StudioHelpProjectGenre genre="mystery" />
         <p>Library content</p>
       </ProductShell>,
     );
 
+    expect(
+      screen.getByRole("complementary", { name: "Studio navigation and account" }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Included story").length).toBeGreaterThan(0);
     expect(screen.queryByText(/10\.0 cr/i)).not.toBeInTheDocument();
   });
@@ -32,5 +45,45 @@ describe("ProductShell credit label", () => {
     );
 
     expect(screen.getAllByText("14.3 cr").length).toBeGreaterThan(0);
+  });
+
+  it("keeps accessible Help available from the Studio shell", async () => {
+    navigation.pathname = "/projects/project-1/write";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        return {
+          ok: true,
+          json: async () =>
+            url.includes("/journey")
+              ? { journey: { project: { genre: "mystery" } } }
+              : url.includes("preferences=1")
+                ? { version: 1, dismissed: false, seenCoachmarks: [] }
+                : {
+                    version: 1,
+                    dismissed: false,
+                    seenCoachmarks: [],
+                    completedCount: 0,
+                    steps: [],
+                  },
+        };
+      }),
+    );
+
+    render(
+      <ProductShell creditLabel="Included story">
+        <p>Library content</p>
+      </ProductShell>,
+    );
+
+    const helpButton = screen.getAllByRole("button", { name: /help/i })[0];
+    expect(helpButton).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(helpButton!);
+    expect(await screen.findByRole("heading", { name: "Help with this page" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Mystery craft guide" })).toHaveAttribute(
+      "href",
+      "/genres/mystery",
+    );
   });
 });

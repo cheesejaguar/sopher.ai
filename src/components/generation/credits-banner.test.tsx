@@ -27,12 +27,13 @@ describe("CreditsBanner", () => {
     expect(screen.getByText(/does not require a card/i)).toBeVisible();
     expect(screen.getByText(/purchase is optional here/i)).toBeVisible();
     expect(screen.getByText(/permanently unlocks/i)).toBeVisible();
-    expect(screen.getByRole("button", { name: "Explore full-book credits" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Get help" })).toHaveAttribute(
       "href",
-      "/studio/credits?return=%2Fprojects%2Ftrial-project%2Fwrite",
+      expect.stringContaining("mailto:support@sopher.ai"),
     );
+    expect(screen.queryByRole("button", { name: /credits/i })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Resume writing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
     await waitFor(() =>
       expect(screen.getByRole("alert")).toHaveTextContent(
         "Your included story should not need a purchase",
@@ -54,7 +55,8 @@ describe("CreditsBanner", () => {
     expect(screen.getByText(/continues exactly where it stopped once you top up/i)).toBeVisible();
     expect(screen.getByRole("button", { name: "Add credits" })).toHaveAttribute(
       "href",
-      "/studio/credits?return=%2Fprojects%2Fbook-project%2Fwrite",
+      "/studio/credits?return=%2Fprojects%2Fbook-project%2Fwrite&resumeRun=book-run",
     );
+    expect(screen.queryByRole("button", { name: /resume writing/i })).not.toBeInTheDocument();
   });
 });

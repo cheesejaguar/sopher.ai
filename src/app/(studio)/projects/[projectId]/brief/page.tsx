@@ -59,7 +59,8 @@ export default async function BriefPage({ params }: { params: Promise<{ projectI
             paragraphs.map((paragraph, index) => <p key={index}>{paragraph}</p>)
           ) : (
             <p className="text-paper-muted italic">
-              This project has no brief yet — the agents will be working from the title alone.
+              Setup is required before production can start. Add the story idea, direction, and
+              constraints the writing team should follow.
             </p>
           )}
         </div>

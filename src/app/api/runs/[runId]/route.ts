@@ -23,22 +23,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ runId: string 
   }
   const db = getDb();
   const [run] = await db
-    .select({
-      id: schema.generationRuns.id,
-      projectId: schema.generationRuns.projectId,
-      userId: schema.generationRuns.userId,
-      workflowRunId: schema.generationRuns.workflowRunId,
-      kind: schema.generationRuns.kind,
-      status: schema.generationRuns.status,
-      config: schema.generationRuns.config,
-      error: schema.generationRuns.error,
-      startedAt: schema.generationRuns.startedAt,
-      completedAt: schema.generationRuns.completedAt,
-      acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
-      acceptanceDispatchClaimedAt: schema.generationRuns.acceptanceDispatchClaimedAt,
-      healthCheckedAt: schema.generationRuns.healthCheckedAt,
-      createdAt: schema.generationRuns.createdAt,
-    })
+    .select()
     .from(schema.generationRuns)
     .where(and(eq(schema.generationRuns.id, runId), eq(schema.generationRuns.userId, userId)))
     .limit(1);

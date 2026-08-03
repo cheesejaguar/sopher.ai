@@ -3,6 +3,7 @@
 import { Suspense, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import type { Route } from "next";
+import type { AuthoringNextAction } from "@/lib/authoring-journey";
 
 import {
   CommandDialog,
@@ -12,6 +13,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { isCurrentPageCancellationAction } from "@/components/studio/project-next-step";
 
 /**
  * ⌘K navigation. Global destinations always; project stages appear when the
@@ -22,17 +24,29 @@ import {
 type CommandPaletteProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenHelp?: () => void;
+  nextAction?: AuthoringNextAction | null;
 };
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  onOpenHelp,
+  nextAction,
+}: CommandPaletteProps) {
   return (
     <Suspense fallback={null}>
-      <CommandPaletteInner open={open} onOpenChange={onOpenChange} />
+      <CommandPaletteInner
+        open={open}
+        onOpenChange={onOpenChange}
+        onOpenHelp={onOpenHelp}
+        nextAction={nextAction}
+      />
     </Suspense>
   );
 }
 
-function CommandPaletteInner({ open, onOpenChange }: CommandPaletteProps) {
+function CommandPaletteInner({ open, onOpenChange, onOpenHelp, nextAction }: CommandPaletteProps) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -51,9 +65,16 @@ function CommandPaletteInner({ open, onOpenChange }: CommandPaletteProps) {
 
   const projectMatch = pathname?.match(/^\/projects\/([^/]+)/);
   const projectId = projectMatch?.[1];
+  const currentPageCancellation = nextAction
+    ? isCurrentPageCancellationAction(nextAction, pathname)
+    : false;
 
   function go(href: string) {
     onOpenChange(false);
+    if (!href.startsWith("/")) {
+      window.location.assign(href);
+      return;
+    }
     router.push(href as Route);
   }
 
@@ -73,7 +94,28 @@ function CommandPaletteInner({ open, onOpenChange }: CommandPaletteProps) {
           <CommandItem onSelect={() => go("/studio/credits")}>Credits</CommandItem>
           <CommandItem onSelect={() => go("/studio/usage")}>Usage</CommandItem>
           <CommandItem onSelect={() => go("/studio/settings")}>Settings</CommandItem>
+          {onOpenHelp ? (
+            <CommandItem
+              onSelect={() => {
+                onOpenChange(false);
+                onOpenHelp();
+              }}
+            >
+              Help and support
+            </CommandItem>
+          ) : null}
         </CommandGroup>
+        {projectId && nextAction ? (
+          <CommandGroup heading="Next step">
+            {currentPageCancellation ? (
+              <CommandItem disabled>Status: Stopping safely</CommandItem>
+            ) : (
+              <CommandItem onSelect={() => go(nextAction.href)}>
+                Next: {nextAction.label}
+              </CommandItem>
+            )}
+          </CommandGroup>
+        ) : null}
         {projectId ? (
           <CommandGroup heading="Plan">
             <CommandItem onSelect={() => go(`/projects/${projectId}/brief`)}>Brief</CommandItem>

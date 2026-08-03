@@ -15,6 +15,12 @@ import {
   meteredOperationCeilingUsd,
 } from "./metering-limits";
 import { ProjectSpendAccessError } from "@/lib/project-spend-access";
+import { optionalDeliveryLeasePrefix } from "@/lib/billing/optional-delivery";
+import {
+  AuthoringCancellationRequestedError,
+  AuthoringRunInactiveError,
+  throwIfAuthoringCancellationRequested,
+} from "@/lib/authoring-cancellation";
 import { PROSE_FALLBACK_MODELS } from "./models";
 
 /**
@@ -60,6 +66,12 @@ export type MeterCtx = {
   }>;
   /** Project mutation leases held until optional output is delivered/refunded. */
   optionalOperationLeaseRefs?: string[];
+  /**
+   * Exact zero-value ledger receipt committed atomically with optional output.
+   * Omit for authoring calls and legacy optional routes that own another replay
+   * contract.
+   */
+  deliveryReceiptRef?: string;
 };
 
 /**
@@ -118,6 +130,24 @@ export class MeteringReconciliationRequiredError extends Error {
         : "A prior provider attempt has unresolved local metering. The call was not repeated; reconciliation is required.",
     );
     this.name = "MeteringReconciliationRequiredError";
+  }
+}
+
+export class MeteredDeliveryPendingError extends Error {
+  readonly isRetryable = true;
+
+  constructor(readonly receiptRef: string) {
+    super("This request is already finishing. Retry shortly with the same request key.");
+    this.name = "MeteredDeliveryPendingError";
+  }
+}
+
+export class MeteredDeliveryReplayError extends Error {
+  readonly isRetryable = true;
+
+  constructor(readonly receiptRef: string) {
+    super("This request was already delivered. Load its durable result instead of repeating it.");
+    this.name = "MeteredDeliveryReplayError";
   }
 }
 
@@ -266,9 +296,21 @@ export async function healReplayedMeteredDelivery(input: {
   userId: string;
   projectId: string;
   idempotencyKey: string;
+  deliveryReceiptRef?: string;
+  meteringIdempotencyKey?: string;
 }): Promise<void> {
   try {
-    await releaseReplayedOptionalOperationLeases(input);
+    await releaseReplayedOptionalOperationLeases({
+      ...input,
+      ...(input.meteringIdempotencyKey
+        ? {
+            optionalLeasePrefix: optionalDeliveryLeasePrefix({
+              userId: input.userId,
+              meteringIdempotencyKey: input.meteringIdempotencyKey,
+            }),
+          }
+        : {}),
+    });
   } catch (error) {
     // The generation-start reconciliation performs the same proof under the
     // project lock, so a transient replay repair failure must not hide output
@@ -306,6 +348,10 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   const intentRef = `${intentPrefix}${attemptId}`;
   const usagePrefix = `llm:${logicalScope}:${info.operation}:`;
   const maximumCredits = meteredCallAuthorizationCredits(ctx, info);
+  // Preserve a stop request as the primary result even if entitlement or
+  // wallet state also changed. The atomic intent statement repeats this gate
+  // to close the race between this read and claim insertion.
+  await throwIfAuthoringCancellationRequested(ctx.runId);
   const intent = await beginMeteredCallIntent({
     userId: ctx.userId,
     projectId: ctx.projectId,
@@ -313,6 +359,7 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     intentRef,
     intentPrefix,
     usagePrefix,
+    deliveryReceiptRef: ctx.deliveryReceiptRef,
     parentReservationRef: ctx.reservationRef,
     maxCredits: maximumCredits,
     description: `Metering intent for ${info.operation}`,
@@ -322,8 +369,8 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   }
   if (intent.status === "trial_cap") {
     throw new ProjectSpendAccessError(
-      "purchase_required",
-      "Purchase credits to keep using AI tools on this story",
+      "included_allowance_exhausted",
+      "The included-story allowance was exhausted unexpectedly. Your saved work is safe; contact support with the run reference.",
     );
   }
   if (intent.status === "project_busy") {
@@ -338,11 +385,32 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
       "This account is suspended and cannot use authoring tools",
     );
   }
+  if (intent.status === "cancelled") {
+    throw new AuthoringCancellationRequestedError();
+  }
+  if (intent.status === "run_inactive") {
+    throw new AuthoringRunInactiveError();
+  }
+  if (intent.status === "delivered") {
+    throw new MeteredDeliveryReplayError(ctx.deliveryReceiptRef ?? intentRef);
+  }
+  if (intent.status === "delivery_pending") {
+    throw new MeteredDeliveryPendingError(ctx.deliveryReceiptRef ?? intentRef);
+  }
   if (intent.status === "settled") {
+    const optionalLeasePrefix =
+      ctx.projectId && !ctx.runId && ctx.idempotencyKey
+        ? optionalDeliveryLeasePrefix({
+            userId: ctx.userId,
+            meteringIdempotencyKey: ctx.idempotencyKey,
+          })
+        : undefined;
     const compensated = await refundSettledLogicalUsageForRedo({
       userId: ctx.userId,
       usagePrefix,
       projectId: ctx.projectId,
+      deliveryReceiptRef: ctx.deliveryReceiptRef,
+      optionalLeasePrefix,
     });
     if (compensated) return metered(ctx, info, fn);
     throw new MeteringReconciliationRequiredError(intentRef, "settled");
@@ -372,6 +440,10 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
   const startedAt = Date.now();
   let providerPromise: Promise<T>;
   try {
+    // Cancellation may arrive after a phase hold was granted but before this
+    // provider attempt is dispatched. Re-check at the last local boundary and
+    // release the untouched intent when the author has asked us to stop.
+    await throwIfAuthoringCancellationRequested(ctx.runId);
     // A synchronous throw proves dispatch never returned a provider promise.
     // Once a promise exists, every rejection is ambiguous (the Gateway may
     // have accepted or partially streamed it) and must remain held for
@@ -466,6 +538,7 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
       );
     }
 
+    await throwIfAuthoringCancellationRequested(ctx.runId);
     return result;
   } catch (error) {
     if (error instanceof MeteredInputLimitError && error.stepNumber === 0) {

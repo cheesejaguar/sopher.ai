@@ -6,7 +6,13 @@ import type { GenerationConfig } from "@/lib/run-events";
 import { TRIAL_STORY_CONFIG } from "@/lib/trial-story";
 import { freshOpeningRequiredUsd } from "@/workflows/opening-credit-plan";
 
-import { deriveStudioAccess, hasPriorAuthoringEvidence, hasVerifiedEmail } from "./studio-access";
+import {
+  deriveStudioAccess,
+  hasPriorAuthoringEvidence,
+  hasVerifiedEmail,
+  shouldOfferFullBookUnlock,
+  trialProjectHasCompletedProduction,
+} from "./studio-access";
 
 const baseFacts = {
   emailVerified: true,
@@ -14,6 +20,7 @@ const baseFacts = {
   hasSettledPurchase: false,
   hasPriorMeteredUsage: false,
   trialProjectId: null,
+  trialProjectCompleted: false,
 };
 
 describe("included-story entitlement", () => {
@@ -80,6 +87,40 @@ describe("included-story entitlement", () => {
       canCreateTrial: true,
       reason: "trial_available",
     });
+  });
+
+  it("recognizes finalization while the project is in its normal editing state", () => {
+    expect(
+      trialProjectHasCompletedProduction({
+        completionArtifactsReady: true,
+      }),
+    ).toBe(true);
+    expect(trialProjectHasCompletedProduction({ completionArtifactsReady: false })).toBe(false);
+    expect(trialProjectHasCompletedProduction(null)).toBe(false);
+  });
+
+  it("defers the primary full-book offer until the included story has verifiable completion", () => {
+    expect(
+      shouldOfferFullBookUnlock({
+        fullBookUnlocked: false,
+        trialProjectId: "trial-1",
+        trialProjectCompleted: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldOfferFullBookUnlock({
+        fullBookUnlocked: false,
+        trialProjectId: "trial-1",
+        trialProjectCompleted: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldOfferFullBookUnlock({
+        fullBookUnlocked: true,
+        trialProjectId: "trial-1",
+        trialProjectCompleted: true,
+      }),
+    ).toBe(false);
   });
 
   it.each([

@@ -26,10 +26,18 @@ const MAX_SEGMENTS = 24;
 /** Segment width (0.5rem) + gap (0.25rem) — used to slide segments to center. */
 const PITCH_REM = 0.75;
 
+function titleSize(title: string): string {
+  if (title.length > 180) return "text-[0.5rem] leading-[1.25]";
+  if (title.length > 110) return "text-[0.5625rem] leading-[1.3]";
+  if (title.length > 72) return "text-[0.6875rem] leading-[1.35]";
+  if (title.length > 42) return "text-xs leading-[1.4]";
+  return "text-base leading-tight";
+}
+
 /**
- * The completion moment: the chapter rail closes into a single spine bearing
- * the book's title. Pure CSS transforms; the global reduced-motion rules
- * collapse the choreography into an instant crossfade.
+ * The completion moment: the chapter rail closes into a finished, stacked-page
+ * book bearing the complete title. Pure CSS transforms; the global
+ * reduced-motion rules collapse the choreography into an instant crossfade.
  */
 export function CompletionMoment({
   projectId,
@@ -73,13 +81,16 @@ export function CompletionMoment({
   const mid = (segments - 1) / 2;
   const includedStory = experience === "trial_short_story";
   const canWriteAgain = !includedStory && Boolean(onWriteAgain);
+  const displayTitle =
+    projectTitle.trim() || (includedStory ? "Your short story" : "Your manuscript");
+  const artifactLabel = `Finished ${includedStory ? "story" : "book"}: ${displayTitle}. ${chapterCount} ${chapterCount === 1 ? "chapter" : "chapters"}.`;
 
   return (
     <section
       aria-label={includedStory ? "Story complete" : "Book complete"}
       className="instrument-surface-raised flex flex-col items-center gap-8 rounded-sm px-6 py-12"
     >
-      <div className="relative flex h-40 items-center justify-center">
+      <div className="relative flex h-52 w-full items-center justify-center sm:h-56">
         <div
           aria-hidden="true"
           className="flex items-center gap-1 transition-opacity duration-300"
@@ -105,13 +116,43 @@ export function CompletionMoment({
           className="absolute inset-0 flex items-center justify-center transition-opacity duration-500"
           style={{ opacity: closed ? 1 : 0, transitionDelay: closed ? "900ms" : "0ms" }}
         >
-          <div className="flex h-36 w-11 items-center justify-center overflow-hidden rounded-md bg-primary px-1 ring-1 ring-primary/40 ring-offset-4 ring-offset-background">
-            <span
-              className="max-h-32 truncate font-display text-sm font-semibold text-primary-foreground [writing-mode:vertical-rl]"
-              title={projectTitle}
+          <div role="img" aria-label={artifactLabel} className="relative h-48 w-40 sm:h-52 sm:w-44">
+            <div
+              aria-hidden="true"
+              className="absolute inset-y-1 right-0 left-4 translate-x-1 translate-y-2 rounded-[3px] border border-border bg-instrument"
+            />
+            <div
+              aria-hidden="true"
+              className="absolute inset-y-0 right-1 left-3 translate-x-1 translate-y-1 overflow-hidden rounded-[3px] border border-paper-edge bg-paper"
             >
-              {projectTitle}
-            </span>
+              <span className="absolute inset-x-2 top-1/4 h-px bg-paper-edge/80" />
+              <span className="absolute inset-x-2 top-1/2 h-px bg-paper-edge/80" />
+              <span className="absolute inset-x-2 top-3/4 h-px bg-paper-edge/80" />
+            </div>
+            <div
+              aria-hidden="true"
+              className="absolute inset-y-1 right-3 left-0 overflow-hidden rounded-[3px] border border-primary/55 bg-future-stage text-future-stage-foreground shadow-[0_20px_36px_-26px_oklch(0.02_0.02_274/95%)]"
+            >
+              <span className="absolute inset-y-0 left-0 w-3 border-r border-primary/70 bg-primary" />
+              <span className="absolute inset-y-0 left-3 w-px bg-future-stage-accent/35" />
+              <span className="absolute top-4 right-0 h-px w-5 bg-ai/80" />
+              <span className="flex h-full min-w-0 flex-col py-4 pr-4 pl-7 text-left">
+                <span className="font-mono text-[0.5625rem] leading-none tracking-[0.12em] text-future-stage-muted uppercase">
+                  Finished manuscript
+                </span>
+                <span className="flex min-h-0 flex-1 items-center py-3">
+                  <span
+                    data-slot="completion-book-title"
+                    className={`w-full font-display font-semibold break-words text-balance [overflow-wrap:anywhere] ${titleSize(displayTitle)}`}
+                  >
+                    {displayTitle}
+                  </span>
+                </span>
+                <span className="border-t border-future-stage-muted/25 pt-2 font-mono text-[0.5625rem] leading-none tracking-[0.08em] text-future-stage-muted uppercase">
+                  {chapterCount} {chapterCount === 1 ? "chapter" : "chapters"} · complete
+                </span>
+              </span>
+            </div>
           </div>
         </div>
       </div>

@@ -270,3 +270,303 @@ export async function getProductMetrics() {
     runs: runs.rows[0] ?? { total: 0, completed: 0, failed: 0, median_minutes: null },
   };
 }
+
+export type AuthoringOperationsMetrics = {
+  firstAuthoringEvent: {
+    sample: number;
+    medianSeconds: number | null;
+    p95Seconds: number | null;
+  };
+  actionWaits: {
+    count: number;
+    medianHours: number | null;
+    oldestHours: number | null;
+  };
+  anomalies: {
+    count: number;
+    medianHours: number | null;
+    oldestHours: number | null;
+  };
+  redispatch: {
+    attempts: number;
+    recovered: number;
+    rate: number | null;
+  };
+  recovery: {
+    attempts: number;
+    completed: number;
+    rate: number | null;
+  };
+  staleHolds: {
+    count: number;
+    credits: number;
+    oldestHours: number | null;
+  };
+  trialConversion: {
+    completedTrials: number;
+    purchasers: number;
+    rate: number | null;
+  };
+};
+
+type AuthoringOperationsRow = {
+  firstEventSample: number | string;
+  firstEventMedianSeconds: number | string | null;
+  firstEventP95Seconds: number | string | null;
+  actionWaitCount: number | string;
+  actionWaitMedianHours: number | string | null;
+  actionWaitOldestHours: number | string | null;
+  anomalyCount: number | string;
+  anomalyMedianHours: number | string | null;
+  anomalyOldestHours: number | string | null;
+  redispatchAttempts: number | string;
+  redispatchRecovered: number | string;
+  recoveryAttempts: number | string;
+  recoveryCompleted: number | string;
+  staleHoldCount: number | string;
+  staleHoldCredits: number | string;
+  staleHoldOldestHours: number | string | null;
+  completedTrials: number | string;
+  trialPurchasers: number | string;
+};
+
+const numeric = (value: number | string | null | undefined): number => Number(value ?? 0);
+const nullableNumeric = (value: number | string | null | undefined): number | null =>
+  value === null || value === undefined ? null : Number(value);
+const ratio = (value: number, total: number): number | null => (total > 0 ? value / total : null);
+
+export function normalizeAuthoringOperationsMetrics(
+  row: AuthoringOperationsRow | undefined,
+): AuthoringOperationsMetrics {
+  const firstEventSample = numeric(row?.firstEventSample);
+  const actionWaitCount = numeric(row?.actionWaitCount);
+  const anomalyCount = numeric(row?.anomalyCount);
+  const redispatchAttempts = numeric(row?.redispatchAttempts);
+  const redispatchRecovered = numeric(row?.redispatchRecovered);
+  const recoveryAttempts = numeric(row?.recoveryAttempts);
+  const recoveryCompleted = numeric(row?.recoveryCompleted);
+  const staleHoldCount = numeric(row?.staleHoldCount);
+  const completedTrials = numeric(row?.completedTrials);
+  const trialPurchasers = numeric(row?.trialPurchasers);
+
+  return {
+    firstAuthoringEvent: {
+      sample: firstEventSample,
+      medianSeconds: nullableNumeric(row?.firstEventMedianSeconds),
+      p95Seconds: nullableNumeric(row?.firstEventP95Seconds),
+    },
+    actionWaits: {
+      count: actionWaitCount,
+      medianHours: nullableNumeric(row?.actionWaitMedianHours),
+      oldestHours: nullableNumeric(row?.actionWaitOldestHours),
+    },
+    anomalies: {
+      count: anomalyCount,
+      medianHours: nullableNumeric(row?.anomalyMedianHours),
+      oldestHours: nullableNumeric(row?.anomalyOldestHours),
+    },
+    redispatch: {
+      attempts: redispatchAttempts,
+      recovered: redispatchRecovered,
+      rate: ratio(redispatchRecovered, redispatchAttempts),
+    },
+    recovery: {
+      attempts: recoveryAttempts,
+      completed: recoveryCompleted,
+      rate: ratio(recoveryCompleted, recoveryAttempts),
+    },
+    staleHolds: {
+      count: staleHoldCount,
+      credits: numeric(row?.staleHoldCredits),
+      oldestHours: nullableNumeric(row?.staleHoldOldestHours),
+    },
+    trialConversion: {
+      completedTrials,
+      purchasers: trialPurchasers,
+      rate: ratio(trialPurchasers, completedTrials),
+    },
+  };
+}
+
+/**
+ * Server-derived reliability and conversion metrics. All operational measures
+ * use durable database evidence; no client analytics event can make a run look
+ * healthier, recovered, or paid.
+ */
+export async function getAuthoringOperationsMetrics(): Promise<AuthoringOperationsMetrics> {
+  await requireAdmin();
+  const { rows } = await getDb().execute<AuthoringOperationsRow>(sql`
+    with meaningful_first_events as (
+      select
+        run_id,
+        min(created_at) as first_event_at
+      from generation_events
+      where type in ('agent', 'chapter', 'review', 'tool_mutation')
+        or (type = 'stage' and payload->>'stage' <> 'queued')
+      group by run_id
+    ),
+    first_event_latencies as (
+      select extract(epoch from (event.first_event_at - run.created_at)) as seconds
+      from generation_runs run
+      inner join meaningful_first_events event on event.run_id = run.id
+      where run.kind = 'full_book'
+        and run.created_at >= now() - interval '30 days'
+        and event.first_event_at >= run.created_at
+    ),
+    action_wait_ages as (
+      select extract(
+        epoch from (now() - coalesce(pause_registered_at, heartbeat_at, created_at))
+      ) / 3600 as hours
+      from generation_runs
+      where status = 'awaiting_input'
+    ),
+    anomaly_ages as (
+      select extract(epoch from (now() - first_observed_at)) / 3600 as hours
+      from authoring_incidents
+      where resolved_at is null
+        and category <> 'operator_action'
+    ),
+    redispatch_runs as (
+      select
+        run.id,
+        greatest(run.dispatch_attempts - 1, 0)::int as retry_attempts,
+        (
+          run.status in ('running', 'awaiting_input', 'completed')
+          and exists (
+            select 1
+            from meaningful_first_events event
+            where event.run_id = run.id
+          )
+        ) as recovered
+      from generation_runs run
+      where run.kind = 'full_book'
+        and run.dispatch_attempts > 1
+    ),
+    recovery_runs as (
+      select status
+      from generation_runs
+      where kind = 'full_book'
+        and config->>'resumeFromRunId' is not null
+    ),
+    open_generation_holds as (
+      select
+        reservation.external_ref,
+        reservation.created_at,
+        run.status,
+        run.completed_at,
+        greatest(
+          0,
+          -reservation.amount - coalesce((
+            select sum(claimed.amount)
+            from credit_ledger claimed
+            where claimed.user_id = reservation.user_id
+              and claimed.external_ref like
+                ('reservation-claim-release:' || reservation.external_ref || ':%')
+          ), 0)
+        ) as remaining
+      from credit_ledger reservation
+      inner join generation_runs run on run.id = reservation.run_id
+      where reservation.kind = 'adjustment'
+        and reservation.amount < 0
+        and reservation.external_ref like 'generation-reservation:%'
+        and not exists (
+          select 1
+          from credit_ledger released
+          where released.external_ref = 'release:' || reservation.external_ref
+        )
+    ),
+    stale_generation_holds as (
+      select
+        remaining,
+        extract(epoch from (now() - created_at)) / 3600 as hours
+      from open_generation_holds
+      where status in ('completed', 'failed', 'cancelled')
+        and coalesce(completed_at, created_at) <= now() - interval '1 hour'
+        and remaining > 0
+    ),
+    completed_trials as (
+      select
+        trial_project.user_id,
+        min(trial_run.completed_at) as completed_at
+      from projects trial_project
+      inner join generation_runs trial_run
+        on trial_run.project_id = trial_project.id
+      cross join lateral (
+        select case
+          when trial_run.config->>'targetChapters' ~ '^[1-9][0-9]*$'
+            then (trial_run.config->>'targetChapters')::int
+          else trial_project.target_chapters
+        end as expected_chapters
+      ) expectation
+      where trial_project.experience = 'trial_short_story'
+        and trial_project.completed_at is not null
+        and trial_run.kind = 'full_book'
+        and trial_run.status = 'completed'
+        and coalesce(
+          trial_run.config #>> '{completion,finalized,sourceRunId}',
+          ''
+        ) = trial_run.id::text
+        and length(
+          btrim(coalesce(
+            trial_run.config #>> '{completion,finalized,manuscriptDigest}',
+            ''
+          ))
+        ) > 0
+        and (
+          select count(*)::int
+          from chapters trial_chapter
+          inner join books trial_book
+            on trial_book.id = trial_chapter.book_id
+          where trial_book.project_id = trial_project.id
+            and trial_chapter.chapter_number
+              between 1 and expectation.expected_chapters
+            and trial_chapter.status = 'final'
+            and length(btrim(trial_chapter.content)) > 0
+        ) >= expectation.expected_chapters
+      group by trial_project.user_id
+    ),
+    trial_conversions as (
+      select
+        trial.user_id,
+        exists (
+          select 1
+          from credit_ledger purchase
+          where purchase.user_id = trial.user_id
+            and purchase.kind = 'purchase'
+            and purchase.amount > 0
+            and purchase.created_at >= trial.completed_at
+        ) as purchased
+      from completed_trials trial
+    )
+    select
+      (select count(*)::int from first_event_latencies) as "firstEventSample",
+      (select percentile_cont(0.5) within group (order by seconds)
+        from first_event_latencies) as "firstEventMedianSeconds",
+      (select percentile_cont(0.95) within group (order by seconds)
+        from first_event_latencies) as "firstEventP95Seconds",
+      (select count(*)::int from action_wait_ages) as "actionWaitCount",
+      (select percentile_cont(0.5) within group (order by hours)
+        from action_wait_ages) as "actionWaitMedianHours",
+      (select max(hours) from action_wait_ages) as "actionWaitOldestHours",
+      (select count(*)::int from anomaly_ages) as "anomalyCount",
+      (select percentile_cont(0.5) within group (order by hours)
+        from anomaly_ages) as "anomalyMedianHours",
+      (select max(hours) from anomaly_ages) as "anomalyOldestHours",
+      (select coalesce(sum(retry_attempts), 0)::int
+        from redispatch_runs) as "redispatchAttempts",
+      (select count(*) filter (where recovered)::int
+        from redispatch_runs) as "redispatchRecovered",
+      (select count(*)::int from recovery_runs) as "recoveryAttempts",
+      (select count(*) filter (where status = 'completed')::int
+        from recovery_runs) as "recoveryCompleted",
+      (select count(*)::int from stale_generation_holds) as "staleHoldCount",
+      (select coalesce(sum(remaining), 0)::float8
+        from stale_generation_holds) as "staleHoldCredits",
+      (select max(hours) from stale_generation_holds) as "staleHoldOldestHours",
+      (select count(*)::int from trial_conversions) as "completedTrials",
+      (select count(*) filter (where purchased)::int
+        from trial_conversions) as "trialPurchasers"
+  `);
+
+  return normalizeAuthoringOperationsMetrics(rows[0]);
+}

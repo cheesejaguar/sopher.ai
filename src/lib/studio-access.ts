@@ -7,6 +7,7 @@ import { getDb, schema } from "@/db";
 import type { ProjectExperience } from "@/db/schema";
 import { clerkEnabled } from "@/lib/clerk";
 import { isE2ETrialUserId } from "@/lib/e2e-workflow-stub";
+import { validFullBookCompletionExistsSql } from "@/lib/run-completion-proof";
 export {
   assertProjectSpendAccess,
   ProjectSpendAccessError,
@@ -23,6 +24,7 @@ export type StudioAccess = {
   hasPriorMeteredUsage: boolean;
   fullBookUnlocked: boolean;
   trialProjectId: string | null;
+  trialProjectCompleted: boolean;
   canCreateTrial: boolean;
   creationExperience: ProjectExperience | null;
   reason: StudioAccessReason;
@@ -30,7 +32,12 @@ export type StudioAccess = {
 
 export type StudioAccessFacts = Pick<
   StudioAccess,
-  "emailVerified" | "isAdmin" | "hasSettledPurchase" | "hasPriorMeteredUsage" | "trialProjectId"
+  | "emailVerified"
+  | "isAdmin"
+  | "hasSettledPurchase"
+  | "hasPriorMeteredUsage"
+  | "trialProjectId"
+  | "trialProjectCompleted"
 >;
 
 export function deriveStudioAccess(facts: StudioAccessFacts): StudioAccess {
@@ -102,6 +109,18 @@ export function hasPriorAuthoringEvidence(input: {
   );
 }
 
+export function trialProjectHasCompletedProduction(
+  input: { completionArtifactsReady: boolean } | null | undefined,
+): boolean {
+  return input?.completionArtifactsReady === true;
+}
+
+export function shouldOfferFullBookUnlock(
+  access: Pick<StudioAccess, "fullBookUnlocked" | "trialProjectId" | "trialProjectCompleted">,
+): boolean {
+  return !access.fullBookUnlocked && access.trialProjectId !== null && access.trialProjectCompleted;
+}
+
 async function resolveVerifiedEmail(userId: string): Promise<boolean> {
   // The explicitly enabled local identity must exercise the same trial path
   // without needing Clerk network credentials.
@@ -157,7 +176,10 @@ export async function getStudioAccess(
       )
       .limit(1),
     db
-      .select({ id: schema.projects.id })
+      .select({
+        id: schema.projects.id,
+        completionArtifactsReady: validFullBookCompletionExistsSql(sql.raw('"projects"."id"')),
+      })
       .from(schema.projects)
       .where(
         and(
@@ -179,7 +201,7 @@ export async function getStudioAccess(
         and(
           eq(schema.generationRuns.userId, userId),
           sql`(
-            ${schema.generationEvents.type} in ('agent', 'chapter', 'review')
+            ${schema.generationEvents.type} in ('agent', 'chapter', 'review', 'tool_mutation')
             or (
               ${schema.generationEvents.type} = 'stage'
               and ${schema.generationEvents.payload}->>'stage' <> 'queued'
@@ -229,6 +251,9 @@ export async function getStudioAccess(
     generatedAsset: Boolean(generatedAsset),
   });
   const trialProjectId = trial?.id ?? null;
+  // Require the run-owned finalization digest and complete chapter set.
+  // Project status/completedAt remain compatibility data, not completion truth.
+  const trialProjectCompleted = trialProjectHasCompletedProduction(trial);
   const emailVerified = options.emailVerified ?? (await resolveVerifiedEmail(userId));
 
   return deriveStudioAccess({
@@ -237,5 +262,6 @@ export async function getStudioAccess(
     hasSettledPurchase,
     hasPriorMeteredUsage,
     trialProjectId,
+    trialProjectCompleted,
   });
 }

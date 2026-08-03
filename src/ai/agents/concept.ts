@@ -1,6 +1,6 @@
 import { generateText, isStepCount, Output } from "ai";
 import { eq } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { schema, withDbTransaction, type DbTransaction } from "@/db";
 import { seedEntities } from "@/db/queries/entities";
 import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
 import { MODELS, type QualityTier } from "@/ai/models";
@@ -128,51 +128,63 @@ export async function generateConcept(
  * concept's cast. Existing entities win (onConflictDoNothing on
  * uq_entity_name) so re-running never clobbers canon later chapters added.
  */
-export async function persistConcept(bookId: string, concept: BookConcept): Promise<void> {
-  const db = getDb();
-  const [book] = await db
-    .select({ projectId: schema.books.projectId, title: schema.books.title })
-    .from(schema.books)
-    .where(eq(schema.books.id, bookId))
-    .limit(1);
+export async function persistConcept(
+  bookId: string,
+  concept: BookConcept,
+  transaction?: DbTransaction,
+): Promise<void> {
+  const persist = async (db: DbTransaction) => {
+    const [book] = await db
+      .select({ projectId: schema.books.projectId, title: schema.books.title })
+      .from(schema.books)
+      .where(eq(schema.books.id, bookId))
+      .limit(1);
 
-  // Quiet brief-level moderation: the verdict rode the concept call itself.
-  if (concept.moderation?.flagged) {
-    if (book) {
-      await recordModerationFlag({
-        projectId: book.projectId,
-        source: "brief",
-        verdict: concept.moderation,
-      });
+    // Quiet brief-level moderation: the verdict rode the concept call itself.
+    if (concept.moderation?.flagged) {
+      if (book) {
+        await recordModerationFlag(
+          {
+            projectId: book.projectId,
+            source: "brief",
+            verdict: concept.moderation,
+          },
+          db,
+        );
+      }
     }
-  }
 
-  // The verdict is admin-only bookkeeping; the author-owned concept jsonb
-  // (loaded by getProjectWithBook) must never carry it.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring strips the field
-  const { moderation, ...persistableConcept } = concept;
-  const authorTitle = book?.title ?? concept.title;
-  await db
-    .update(schema.books)
-    .set({
-      title: authorTitle,
-      synopsis: concept.synopsis,
-      concept: { ...persistableConcept, title: authorTitle },
-      updatedAt: new Date(),
-    })
-    .where(eq(schema.books.id, bookId));
+    // The verdict is admin-only bookkeeping; the author-owned concept jsonb
+    // (loaded by getProjectWithBook) must never carry it.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- destructuring strips the field
+    const { moderation, ...persistableConcept } = concept;
+    const authorTitle = book?.title ?? concept.title;
+    await db
+      .update(schema.books)
+      .set({
+        title: authorTitle,
+        synopsis: concept.synopsis,
+        concept: { ...persistableConcept, title: authorTitle },
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.books.id, bookId));
 
-  await seedEntities(
-    bookId,
-    concept.characters.map((c) => ({
-      kind: "character" as const,
-      name: c.name,
-      attrs: {
-        role: c.role,
-        background: c.description,
-        arc: c.arc,
-        facts: [c.description, `Arc: ${c.arc}`],
-      },
-    })),
-  );
+    await seedEntities(
+      bookId,
+      concept.characters.map((c) => ({
+        kind: "character" as const,
+        name: c.name,
+        attrs: {
+          role: c.role,
+          background: c.description,
+          arc: c.arc,
+          facts: [c.description, `Arc: ${c.arc}`],
+        },
+      })),
+      db,
+    );
+  };
+
+  if (transaction) return persist(transaction);
+  await withDbTransaction(persist);
 }

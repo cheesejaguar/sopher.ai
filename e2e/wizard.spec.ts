@@ -224,10 +224,11 @@ test.describe("stubbed new-book starts", () => {
     await expect(
       page.getByRole("heading", { name: "Your included story is already in Studio" }),
     ).toBeVisible();
-    const fullBookSetup = `/studio/new?from=${acceptedProjectId}`;
-    await expect(
-      page.getByRole("link", { name: "Take this story to full length" }),
-    ).toHaveAttribute("href", `/studio/credits?return=${encodeURIComponent(fullBookSetup)}`);
+    await expect(page.getByRole("link", { name: "Open my included story" })).toHaveAttribute(
+      "href",
+      `/projects/${acceptedProjectId}/write`,
+    );
+    await expect(page.getByRole("link", { name: "Take this story to full length" })).toHaveCount(0);
     await axeCheck(page);
   });
 
@@ -411,7 +412,7 @@ test.describe("stubbed new-book starts", () => {
       runs: [{ requestKey, status: "failed", workflowRunId: null }],
     });
 
-    await page.getByRole("button", { name: "Try again" }).click();
+    await page.getByRole("button", { name: "Try starting again", exact: true }).click();
     await expect(
       page.getByLabel("Book production status").getByText("Production now", { exact: true }),
     ).toBeVisible();

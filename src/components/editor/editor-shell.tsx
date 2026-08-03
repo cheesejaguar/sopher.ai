@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import type {
   ChapterNavItem,
   ContentToolResponse,
+  EditorProductionStatus,
   ReviewResponse,
   SelectionEditResponse,
   SuggestionActionResponse,
@@ -58,7 +59,12 @@ import { ImageNode } from "./image-node";
 import { mermaidCodeBlockView } from "./mermaid-code-block-view";
 import { ReviewPanel } from "./review-panel";
 import { SelectionToolbar, SelectionToolsSheet, type ContentToolId } from "./selection-toolbar";
-import { MobileEditorHeader, MobileEditorToolbar, StatusBar } from "./status-bar";
+import {
+  CompactProductionStatus,
+  MobileEditorHeader,
+  MobileEditorToolbar,
+  StatusBar,
+} from "./status-bar";
 import { HistoryPanel } from "./history-panel";
 import { FindReplace } from "./find-replace";
 import { SuggestionCard } from "./suggestion-card";
@@ -83,6 +89,7 @@ export type EditorShellProps = {
   targetWords: number;
   chapters: ChapterNavItem[];
   initialSuggestions: SuggestionDTO[];
+  productionStatus: EditorProductionStatus | null;
 };
 
 type MarkdownEditorStorage = {
@@ -118,7 +125,7 @@ function computeCardPosition(
   }
 }
 
-/** Elements that must stay reachable even while zen mode covers the app. */
+/** Elements that themselves must stay reachable while an editor overlay covers the app. */
 const KEEP_REACHABLE = '[aria-live],[role="dialog"],[role="alertdialog"]';
 
 /**
@@ -126,7 +133,9 @@ const KEEP_REACHABLE = '[aria-live],[role="dialog"],[role="alertdialog"]';
  * stays in the tab order underneath it — keyboard focus would land on controls
  * the user cannot see (WCAG 2.4.11). Mark the covered siblings inert while zen
  * is on. Body-level portals (dialogs, menus) sit outside this walk, and live
- * regions such as the toaster are skipped explicitly.
+ * regions such as the toaster are skipped explicitly. A covered sibling is
+ * still inert when it merely contains a live-region descendant; otherwise one
+ * hidden status node can leave the entire project shell keyboard-reachable.
  */
 function hideBehindOverlay(overlay: HTMLElement): () => void {
   const hidden: HTMLElement[] = [];
@@ -134,7 +143,7 @@ function hideBehindOverlay(overlay: HTMLElement): () => void {
   while (node?.parentElement && node.parentElement !== document.body) {
     for (const sibling of Array.from(node.parentElement.children)) {
       if (sibling === node || !(sibling instanceof HTMLElement) || sibling.inert) continue;
-      if (sibling.matches(KEEP_REACHABLE) || sibling.querySelector(KEEP_REACHABLE)) continue;
+      if (sibling.matches(KEEP_REACHABLE)) continue;
       sibling.inert = true;
       hidden.push(sibling);
     }
@@ -194,6 +203,7 @@ export function EditorShell({
   targetWords,
   chapters,
   initialSuggestions,
+  productionStatus,
 }: EditorShellProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1052,6 +1062,7 @@ export function EditorShell({
       saveState={autosave.state}
       chaptersOpen={chaptersOpen}
       onOpenChapters={() => setChaptersOpen(true)}
+      productionStatus={productionStatus}
     />
   );
 
@@ -1060,11 +1071,15 @@ export function EditorShell({
       {zen ? (
         <div ref={zenRef} className="fixed inset-0 z-50 flex flex-col bg-background">
           {isWideWorkbench ? findBar : mobileHeader}
+          {isWideWorkbench && productionStatus ? (
+            <CompactProductionStatus status={productionStatus} />
+          ) : null}
           <div className="min-h-0 flex-1 overflow-hidden">{canvas}</div>
           {isWideWorkbench ? statusBar : mobileToolbar}
         </div>
       ) : isWideWorkbench ? (
         <div className="instrument-surface flex h-[calc(100dvh-13rem)] min-h-[520px] flex-col overflow-hidden">
+          {productionStatus ? <CompactProductionStatus status={productionStatus} /> : null}
           <div className="min-h-0 flex-1">
             <ResizablePanelGroup orientation="horizontal">
               <ResizablePanel defaultSize={230} minSize={180} maxSize={340}>

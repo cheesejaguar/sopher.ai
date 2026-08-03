@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom/vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: navigation.refresh }),
+}));
 
 import {
   PROJECT_PROGRESS_POLL_MS,
@@ -22,8 +28,27 @@ function ProgressProbe() {
   return <div data-testid="progress-probe">{`${progress.stage}:${progress.draftedCount}`}</div>;
 }
 
+function CompletionPublisher() {
+  const { publishProgress } = useProjectProgress();
+  const completed = { ...activeProgress, stage: "done" as const, pct: 100, draftedCount: 12 };
+  return (
+    <>
+      <button type="button" onClick={() => publishProgress(completed)}>
+        Raw done
+      </button>
+      <button
+        type="button"
+        onClick={() => publishProgress(completed, { refreshAuthoritativeJourney: true })}
+      >
+        Health-confirmed done
+      </button>
+    </>
+  );
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
+  navigation.refresh.mockClear();
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     value: "visible",
@@ -76,11 +101,31 @@ describe("ProjectProgressProvider polling", () => {
     expect(screen.getByRole("status")).toBe(liveStatus);
     expect(liveStatus).toHaveTextContent("Manuscript complete");
     expect(liveStatus).not.toHaveTextContent("%");
+    expect(navigation.refresh).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(PROJECT_PROGRESS_POLL_MS * 3);
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the journey only when live completion is health-confirmed", () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+
+    render(
+      <ProjectProgressProvider projectId="project-1" initialProgress={activeProgress}>
+        <CompletionPublisher />
+      </ProjectProgressProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Raw done" }));
+    expect(navigation.refresh).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Health-confirmed done" }));
+    expect(navigation.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("does not fetch while the project page is hidden and refreshes when it becomes visible", async () => {

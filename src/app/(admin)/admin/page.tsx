@@ -100,7 +100,6 @@ export default function AdminOverview() {
   return (
     <div className="space-y-6">
       <PageHeader
-        label="Admin / Control room"
         title="Overview"
         description="Operational, financial, and moderation state across the writing system."
       />

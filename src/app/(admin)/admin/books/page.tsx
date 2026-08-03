@@ -21,7 +21,6 @@ export default async function AdminBooks() {
   return (
     <div className="space-y-4">
       <PageHeader
-        label="Admin / Manuscripts"
         title="Books"
         description="Project state, production volume, and open moderation flags."
       />

@@ -1,5 +1,7 @@
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { netRunCreditsUsedSql } from "@/lib/billing/run-spend";
+import { validFullBookCompletionExistsSql } from "@/lib/run-completion-proof";
 
 export async function listProjects(userId: string) {
   const db = getDb();
@@ -14,12 +16,15 @@ export type ProjectWithStats = Awaited<ReturnType<typeof listProjectsWithStats>>
 
 /**
  * Dashboard listing: every non-archived project with chapter progress, word
- * count, and metered spend — batched into three queries total (no N+1).
+ * count, provider spend, and net author-facing credits — batched (no N+1).
  */
 export async function listProjectsWithStats(userId: string, opts?: { archived?: boolean }) {
   const db = getDb();
   const projects = await db
-    .select()
+    .select({
+      ...getTableColumns(schema.projects),
+      fullBookCompletionReady: validFullBookCompletionExistsSql(sql.raw('"projects"."id"')),
+    })
     .from(schema.projects)
     .where(
       and(
@@ -33,10 +38,16 @@ export async function listProjectsWithStats(userId: string, opts?: { archived?: 
   if (projects.length === 0) return [];
 
   const projectIds = projects.map((p) => p.id);
-  const [chapterRows, spendRows] = await Promise.all([
+  const [chapterRows, spendRows, creditRows] = await Promise.all([
     db
       .select({
         projectId: schema.books.projectId,
+        bookId: schema.books.id,
+        outlineReady: sql<boolean>`exists (
+          select 1
+          from ${schema.outlines}
+          where ${schema.outlines.bookId} = ${schema.books.id}
+        )`,
         chapterCount: sql<number>`count(${schema.chapters.id}) filter (
           where not (
             ${schema.chapters.status} = 'planned'
@@ -46,12 +57,21 @@ export async function listProjectsWithStats(userId: string, opts?: { archived?: 
           )
         )::int`,
         chaptersDone: sql<number>`count(${schema.chapters.id}) filter (where ${schema.chapters.status} in ('drafted', 'edited', 'final'))::int`,
+        savedChapters: sql<number>`count(${schema.chapters.id}) filter (
+          where ${schema.chapters.wordCount} > 0
+        )::int`,
+        editedChapters: sql<number>`count(${schema.chapters.id}) filter (
+          where ${schema.chapters.status} in ('edited', 'final')
+        )::int`,
+        finalChapters: sql<number>`count(${schema.chapters.id}) filter (
+          where ${schema.chapters.status} = 'final'
+        )::int`,
         wordCount: sql<number>`coalesce(sum(${schema.chapters.wordCount}), 0)::int`,
       })
       .from(schema.books)
       .leftJoin(schema.chapters, eq(schema.chapters.bookId, schema.books.id))
       .where(inArray(schema.books.projectId, projectIds))
-      .groupBy(schema.books.projectId),
+      .groupBy(schema.books.projectId, schema.books.id),
     db
       .select({
         projectId: schema.llmCalls.projectId,
@@ -60,19 +80,34 @@ export async function listProjectsWithStats(userId: string, opts?: { archived?: 
       .from(schema.llmCalls)
       .where(inArray(schema.llmCalls.projectId, projectIds))
       .groupBy(schema.llmCalls.projectId),
+    db
+      .select({
+        projectId: schema.creditLedger.projectId,
+        credits: netRunCreditsUsedSql(),
+      })
+      .from(schema.creditLedger)
+      .where(inArray(schema.creditLedger.projectId, projectIds))
+      .groupBy(schema.creditLedger.projectId),
   ]);
 
   const chaptersByProject = new Map(chapterRows.map((row) => [row.projectId, row]));
   const spendByProject = new Map(spendRows.map((row) => [row.projectId, Number(row.usd)]));
+  const creditsByProject = new Map(creditRows.map((row) => [row.projectId, Number(row.credits)]));
 
   return projects.map((project) => {
     const chapterStats = chaptersByProject.get(project.id);
     return {
       ...project,
+      bookId: chapterStats?.bookId ?? null,
+      outlineReady: chapterStats?.outlineReady ?? false,
       chaptersDone: chapterStats?.chaptersDone ?? 0,
+      savedChapters: chapterStats?.savedChapters ?? 0,
+      editedChapters: chapterStats?.editedChapters ?? 0,
+      finalChapters: chapterStats?.finalChapters ?? 0,
       chaptersTotal: Math.max(project.targetChapters, chapterStats?.chapterCount ?? 0),
       wordCount: chapterStats?.wordCount ?? 0,
       spendUsd: spendByProject.get(project.id) ?? 0,
+      creditsUsed: creditsByProject.get(project.id) ?? 0,
     };
   });
 }

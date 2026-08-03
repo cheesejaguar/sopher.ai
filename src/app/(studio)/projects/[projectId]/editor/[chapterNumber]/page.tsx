@@ -1,23 +1,18 @@
 import { Suspense } from "react";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { ArrowRight, Feather } from "lucide-react";
+import { Feather } from "lucide-react";
 
 import { getDb, schema } from "@/db";
+import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 import { requireUser } from "@/lib/auth";
 import { toSuggestionDTO, type SuggestionDTO } from "@/lib/editor/types";
 import { EditorShellLoader } from "@/components/editor/editor-shell-loader";
 import { EditorSkeleton } from "@/components/editor/editor-skeleton";
+import { incompleteProductionStatus } from "@/components/studio/incomplete-production-notice";
 
-function NotDraftedState({
-  projectId,
-  chapterNumber,
-}: {
-  projectId: string;
-  chapterNumber: number;
-}) {
+function NotDraftedState({ chapterNumber }: { chapterNumber: number }) {
   return (
     <div className="instrument-surface relative flex min-h-72 flex-col items-center justify-center overflow-hidden px-6 py-16 text-center">
       <span aria-hidden="true" className="spectral-rule absolute inset-x-0 top-0 h-px" />
@@ -26,15 +21,9 @@ function NotDraftedState({
       <h2 className="mt-3 font-display text-lg font-semibold">This chapter is still blank</h2>
       <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
         The writing stage has not produced a draft yet. Once it does, this chapter becomes a full
-        editing surface with suggestions and revision history.
+        editing surface with suggestions and revision history. The project-wide next step above
+        reflects the current production state.
       </p>
-      <Link
-        href={`/projects/${projectId}/write`}
-        className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-sm border border-border px-4 text-sm font-medium text-primary transition-colors hover:bg-accent"
-      >
-        Go to the Write stage
-        <ArrowRight aria-hidden="true" className="size-4" />
-      </Link>
     </div>
   );
 }
@@ -56,7 +45,7 @@ export default async function EditorChapterPage({
   const chapter = await getChapterWithContent(book.id, number);
   if (!chapter) notFound();
   if (!chapter.content.trim()) {
-    return <NotDraftedState projectId={projectId} chapterNumber={number} />;
+    return <NotDraftedState chapterNumber={number} />;
   }
 
   const db = getDb();
@@ -71,6 +60,13 @@ export default async function EditorChapterPage({
       .orderBy(schema.suggestions.createdAt),
   ]);
   const initialSuggestions: SuggestionDTO[] = pendingRows.map(toSuggestionDTO);
+  const journey = await getAuthoringJourneySnapshot({
+    userId,
+    projectId,
+    data,
+    chapters,
+  });
+  const productionStatus = journey ? incompleteProductionStatus(journey) : null;
 
   return (
     <Suspense fallback={<EditorSkeleton />}>
@@ -92,6 +88,11 @@ export default async function EditorChapterPage({
           status: c.status,
         }))}
         initialSuggestions={initialSuggestions}
+        productionStatus={
+          productionStatus
+            ? { label: productionStatus.label, detail: productionStatus.detail }
+            : null
+        }
       />
     </Suspense>
   );

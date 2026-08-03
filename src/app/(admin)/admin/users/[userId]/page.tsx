@@ -29,7 +29,6 @@ export default async function AdminUserDetail({ params }: { params: Promise<{ us
   return (
     <div className="space-y-8">
       <PageHeader
-        label="Admin / Account detail"
         title={user.email}
         description={`${user.name ?? "No name"} · ${user.role === "admin" ? "admin · " : ""}${
           user.suspended ? "suspended · " : ""

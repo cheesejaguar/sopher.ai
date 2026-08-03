@@ -1,17 +1,22 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { ContentToolError, getContentTool } from "@/ai/content-tools/registry";
 import {
   completeMeteredDelivery,
   healReplayedMeteredDelivery,
+  MeteredDeliveryPendingError,
+  MeteredDeliveryReplayError,
   refundMeteredDeliveries,
   type MeterCtx,
 } from "@/ai/metering";
 import { meteredOperationCeilingUsd } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema, withDbTransaction } from "@/db";
-import { persistContentToolDeliveryTransaction } from "@/db/transaction-operations";
+import {
+  persistContentToolDeliveryTransaction,
+  promoteContentToolDeliveryReceiptTransaction,
+} from "@/db/transaction-operations";
 import { getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
@@ -27,6 +32,7 @@ import {
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
+import { optionalDeliveryReceiptRef } from "@/lib/billing/optional-delivery";
 
 export const maxDuration = 120;
 
@@ -109,26 +115,33 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     .where(eq(schema.projects.id, ownership.projectId))
     .limit(1);
 
-  const [replayed] = await db
-    .select({ output: schema.contentToolRuns.output })
-    .from(schema.contentToolRuns)
-    .where(
-      and(
-        eq(schema.contentToolRuns.userId, userId),
-        eq(schema.contentToolRuns.projectId, ownership.projectId),
-        eq(schema.contentToolRuns.chapterId, chapterId),
-        eq(schema.contentToolRuns.toolId, tool.id),
-        sql`${schema.contentToolRuns.input}->>'operationKey' = ${idempotencyKey}`,
-      ),
-    )
-    .limit(1);
+  const meteringIdempotencyKey = `project:${ownership.projectId}:chapter:${chapterId}:tool:${toolId}:${idempotencyKey}`;
+  const deliveryReceiptRef = optionalDeliveryReceiptRef({
+    projectId: ownership.projectId,
+    resource: `content-tool:${chapterId}:${tool.id}`,
+    operationKey: idempotencyKey,
+  });
+  const loadImmutableDelivery = () =>
+    withDbTransaction((tx) =>
+      promoteContentToolDeliveryReceiptTransaction<unknown>(tx, {
+        userId,
+        projectId: ownership.projectId,
+        chapterId,
+        toolId: tool.id,
+        operationKey: idempotencyKey,
+        deliveryReceiptRef,
+      }),
+    );
+  const replayed = await loadImmutableDelivery();
   if (replayed) {
     await healReplayedMeteredDelivery({
       userId,
       projectId: ownership.projectId,
       idempotencyKey,
+      deliveryReceiptRef,
+      meteringIdempotencyKey,
     });
-    return Response.json({ output: replayed.output, replayed: true });
+    return Response.json({ output: replayed, replayed: true });
   }
 
   const spendDenied = await authorizeProjectSpend({
@@ -158,7 +171,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
     userId,
     projectId: ownership.projectId,
     settlements: [],
-    idempotencyKey: `project:${ownership.projectId}:chapter:${chapterId}:tool:${toolId}:${idempotencyKey}`,
+    optionalOperationLeaseRefs: [],
+    idempotencyKey: meteringIdempotencyKey,
+    deliveryReceiptRef,
   };
   const reservationRef = `interactive-reservation:${crypto.randomUUID()}`;
   let reservationHeld = false;
@@ -226,6 +241,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
           chapterId,
           toolId: tool.id,
           operationKey: idempotencyKey,
+          deliveryReceiptRef,
           text,
           options: options ?? {},
           output,
@@ -242,6 +258,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
                   prompt: rawOutput.asset.prompt,
                 }
               : undefined,
+          optionalLeaseRefs: meter.optionalOperationLeaseRefs,
         }),
       );
       deliveredOutput = delivery.output;
@@ -250,36 +267,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
       // A thrown transaction can still mean COMMIT succeeded and only its
       // acknowledgement was lost. Verify the exact operation and, for an
       // illustration, its exact uploaded asset before deciding to refund.
-      let storedRun: { output: unknown } | undefined;
-      let storedAsset: { id: string } | undefined;
+      let storedOutput: unknown | null = null;
       try {
-        [[storedRun], [storedAsset]] = await Promise.all([
-          db
-            .select({ output: schema.contentToolRuns.output })
-            .from(schema.contentToolRuns)
-            .where(
-              and(
-                eq(schema.contentToolRuns.userId, userId),
-                eq(schema.contentToolRuns.projectId, ownership.projectId),
-                eq(schema.contentToolRuns.chapterId, chapterId),
-                eq(schema.contentToolRuns.toolId, tool.id),
-                sql`${schema.contentToolRuns.input}->>'operationKey' = ${idempotencyKey}`,
-              ),
-            )
-            .limit(1),
-          rawOutput.kind === "image"
-            ? db
-                .select({ id: schema.assets.id })
-                .from(schema.assets)
-                .where(
-                  and(
-                    eq(schema.assets.projectId, ownership.projectId),
-                    eq(schema.assets.blobPathname, rawOutput.asset.blobPathname),
-                  ),
-                )
-                .limit(1)
-            : Promise.resolve([]),
-        ]);
+        storedOutput = await loadImmutableDelivery();
       } catch (verificationError) {
         throw new AmbiguousContentToolDeliveryError(
           [asError(persistenceError), asError(verificationError)],
@@ -287,17 +277,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
         );
       }
 
-      const exactCommit =
-        Boolean(storedRun) && (rawOutput.kind !== "image" || Boolean(storedAsset));
-      if (exactCommit) {
-        deliveredOutput = storedRun!.output as typeof output;
-      } else if (storedRun || storedAsset) {
-        // Partial evidence is not proof of rollback. Keep the debit and the
-        // idempotency key so a retry can resolve the durable outcome.
-        throw new AmbiguousContentToolDeliveryError(
-          [asError(persistenceError)],
-          "Content-tool persistence outcome is ambiguous",
-        );
+      if (storedOutput) {
+        deliveredOutput = storedOutput as typeof output;
       } else {
         throw new ContentToolDeliveryError("Could not save the generated result");
       }
@@ -308,6 +289,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ toolId: string
   } catch (error) {
     const spendResponse = projectSpendAccessErrorResponse(error);
     if (spendResponse) return spendResponse;
+    if (error instanceof MeteredDeliveryPendingError) {
+      return Response.json({ error: error.message, code: "delivery_pending" }, { status: 409 });
+    }
+    if (error instanceof MeteredDeliveryReplayError) {
+      const delivered = await loadImmutableDelivery();
+      if (delivered) {
+        await healReplayedMeteredDelivery({
+          userId,
+          projectId: ownership.projectId,
+          idempotencyKey,
+          deliveryReceiptRef,
+          meteringIdempotencyKey,
+        });
+        return Response.json({ output: delivered, replayed: true });
+      }
+    }
     if (
       !(error instanceof AmbiguousContentToolDeliveryError) &&
       (meter.settlements?.length ?? 0) > 0

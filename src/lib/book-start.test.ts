@@ -4,12 +4,14 @@ import {
   buildBookGenerationConfig,
   buildChapterRegenerationConfig,
   canReattachBookStart,
+  canReattachChapterRegeneration,
   type StartableProject,
 } from "./book-start";
 
 function project(overrides: Partial<StartableProject> = {}): StartableProject {
   return {
     id: "11111111-1111-4111-8111-111111111111",
+    updatedAt: new Date("2026-07-30T12:00:00.000Z"),
     title: "The River Door",
     brief: "A cartographer follows a disappearing road into a forgotten country.",
     genre: "Fantasy",
@@ -79,15 +81,20 @@ describe("book start snapshot", () => {
   });
 
   it("regenerates trial chapters with the same fixed entitlement and title snapshot", () => {
-    expect(
-      buildChapterRegenerationConfig(
-        project({
-          targetChapters: 60,
-          targetWordsPerChapter: 8_000,
-          settings: { qualityTier: "premium", requireOutlineApproval: true },
-        }),
-      ),
-    ).toMatchObject({
+    const target = {
+      chapterId: "22222222-2222-4222-8222-222222222222",
+      chapterNumber: 2,
+    };
+    const config = buildChapterRegenerationConfig(
+      project({
+        targetChapters: 60,
+        targetWordsPerChapter: 8_000,
+        settings: { qualityTier: "premium", requireOutlineApproval: true },
+      }),
+      target,
+    );
+
+    expect(config).toMatchObject({
       productionMode: "trial_short_story",
       tier: "standard",
       requireOutlineApproval: false,
@@ -95,7 +102,24 @@ describe("book start snapshot", () => {
       targetChapters: 3,
       targetWordsPerChapter: 1_000,
       chapterRegeneration: true,
+      chapterRegenerationTarget: target,
       inputSnapshot: { workingTitle: "The River Door" },
     });
+    expect(canReattachChapterRegeneration(config, target)).toBe(true);
+    expect(
+      canReattachChapterRegeneration(config, {
+        ...target,
+        chapterNumber: target.chapterNumber + 1,
+      }),
+    ).toBe(false);
+    expect(
+      canReattachChapterRegeneration(config, {
+        ...target,
+        chapterId: "33333333-3333-4333-8333-333333333333",
+      }),
+    ).toBe(false);
+    expect(
+      canReattachChapterRegeneration({ ...config, chapterRegenerationTarget: undefined }, target),
+    ).toBe(false);
   });
 });

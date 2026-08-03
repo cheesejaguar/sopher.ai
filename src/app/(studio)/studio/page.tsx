@@ -11,41 +11,52 @@ import {
   ProjectCard,
   type ProjectCardData,
 } from "@/components/studio/project-card";
-import { listProjectsWithStats, type ProjectWithStats } from "@/db/queries/projects";
+import { StudioInlineChecklist } from "@/components/studio/first-book-checklist";
+import { listAuthoringJourneySnapshots } from "@/db/queries/authoring-journey";
 import { requireUser } from "@/lib/auth";
-import { getStudioAccess } from "@/lib/studio-access";
+import type { AuthoringJourneySnapshot } from "@/lib/authoring-journey";
+import { getAuthoringOnboardingSnapshot } from "@/lib/authoring-onboarding";
+import { getStudioAccess, shouldOfferFullBookUnlock } from "@/lib/studio-access";
+import { getBalance } from "@/lib/billing/credits";
 import { ProjectGridSkeleton } from "./loading";
 
 export const metadata: Metadata = {
   title: "Your books",
 };
 
-function toCard(project: ProjectWithStats): ProjectCardData {
+function toCard(journey: AuthoringJourneySnapshot): ProjectCardData {
+  const { project, artifacts } = journey;
   return {
     id: project.id,
     title: project.title,
     genre: project.genre,
     status: project.status,
     archived: project.status === "archived",
-    updatedAt: project.updatedAt.toISOString(),
-    wordCount: project.wordCount,
-    chaptersDone: project.chaptersDone,
-    chaptersTotal: project.chaptersTotal,
-    spendUsd: project.spendUsd,
+    updatedAt: project.updatedAt,
+    wordCount: artifacts.wordCount,
+    chaptersDone: artifacts.savedChapters,
+    chaptersTotal: artifacts.totalChapters,
+    creditsUsed: journey.spend.creditsUsed,
     estimateUsd: estimateBookCost(
-      project.settings.qualityTier ?? "standard",
+      project.qualityTier,
       project.targetChapters,
       project.targetWordsPerChapter,
     ).totalUsd,
+    nextAction: journey.nextAction,
   };
 }
 
 async function ProjectGrid() {
   const { userId } = await requireUser();
-  const [projects, archived, access] = await Promise.all([
-    listProjectsWithStats(userId),
-    listProjectsWithStats(userId, { archived: true }),
-    getStudioAccess(userId),
+  const accessPromise = getStudioAccess(userId);
+  const journeyAccessPromise = Promise.all([accessPromise, getBalance(userId)]).then(
+    ([access, balanceCredits]) => ({ ...access, balanceCredits }),
+  );
+  const [projects, archived, access, onboarding] = await Promise.all([
+    listAuthoringJourneySnapshots(userId, journeyAccessPromise),
+    listAuthoringJourneySnapshots(userId, journeyAccessPromise, { archived: true }),
+    accessPromise,
+    getAuthoringOnboardingSnapshot(userId),
   ]);
 
   if (projects.length === 0 && archived.length === 0) {
@@ -57,13 +68,19 @@ async function ProjectGrid() {
           : access.reason === "verify_email"
             ? "verify_email"
             : "purchase_required";
-    return <EmptyLibrary mode={mode} />;
+    return (
+      <div className="space-y-8">
+        <StudioInlineChecklist initialSnapshot={onboarding} />
+        <EmptyLibrary mode={mode} />
+      </div>
+    );
   }
 
-  const offerFullBookUnlock = !access.fullBookUnlocked && access.trialProjectId !== null;
+  const offerFullBookUnlock = shouldOfferFullBookUnlock(access);
 
   return (
     <>
+      <StudioInlineChecklist initialSnapshot={onboarding} />
       <div className="space-y-8">
         {projects[0] ? <FeaturedProjectCard project={toCard(projects[0])} /> : null}
         <section aria-labelledby="library-heading" className="space-y-4">
@@ -77,7 +94,7 @@ async function ProjectGrid() {
           </div>
           <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
             {projects.slice(1).map((project) => (
-              <ProjectCard key={project.id} project={toCard(project)} />
+              <ProjectCard key={project.project.id} project={toCard(project)} />
             ))}
             <NewBookCard
               unlockFullBooks={offerFullBookUnlock}
@@ -94,7 +111,7 @@ async function ProjectGrid() {
           </summary>
           <div className="mt-4 grid gap-4 opacity-80 md:grid-cols-2 2xl:grid-cols-3">
             {archived.map((project) => (
-              <ProjectCard key={project.id} project={toCard(project)} />
+              <ProjectCard key={project.project.id} project={toCard(project)} />
             ))}
           </div>
         </details>
@@ -108,8 +125,7 @@ export default function StudioPage() {
     <div className="space-y-8">
       <header className="grid gap-6 border-b border-border pb-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div>
-          <p className="folio-label text-primary">Studio / Library</p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em] text-balance sm:text-4xl">
+          <h1 className="text-3xl font-semibold tracking-[-0.03em] text-balance sm:text-4xl">
             Your books
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">

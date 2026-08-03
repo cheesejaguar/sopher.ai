@@ -4,13 +4,11 @@ import { AlertTriangle, Inbox, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function PageHeader({
-  label,
   title,
   description,
   actions,
   className,
 }: {
-  label?: string;
   title: string;
   description?: string;
   actions?: ReactNode;
@@ -24,12 +22,7 @@ export function PageHeader({
       )}
     >
       <div className="min-w-0">
-        {label ? <p className="folio-label text-primary">{label}</p> : null}
-        <h1
-          className={cn("text-3xl font-semibold tracking-[-0.03em] text-balance", label && "mt-3")}
-        >
-          {title}
-        </h1>
+        <h1 className="text-3xl font-semibold tracking-[-0.03em] text-balance">{title}</h1>
         {description ? (
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground sm:text-base">
             {description}

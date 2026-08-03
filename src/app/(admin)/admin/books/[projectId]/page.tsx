@@ -26,7 +26,6 @@ export default async function AdminBookView({
   return (
     <div className="space-y-6">
       <PageHeader
-        label="Admin / Read-only manuscript"
         title={book.title}
         description={`By ${book.email} · ${book.genre ?? "no genre"} · ${book.status}`}
         actions={

@@ -9,8 +9,10 @@ afterEach(cleanup);
 
 describe("EmptyLibrary", () => {
   it("leads a new eligible author into the complete included story before the purchase step", () => {
-    render(<EmptyLibrary mode="included_story" />);
+    const { container } = render(<EmptyLibrary mode="included_story" />);
 
+    expect(container.firstElementChild).toHaveClass("instrument-surface");
+    expect(container.firstElementChild).not.toHaveClass("instrument-surface-raised");
     expect(screen.getByRole("heading", { name: /complete short story/i })).toBeVisible();
     expect(screen.getByText(/complete Studio, story bible, editor/i)).toBeVisible();
     expect(screen.getByText(/one settled credit purchase permanently unlocks/i)).toBeVisible();
@@ -18,6 +20,7 @@ describe("EmptyLibrary", () => {
       "href",
       "/studio/new",
     );
+    expect(screen.queryByText("Included story / no card")).not.toBeInTheDocument();
   });
 
   it("sends a returning locked author directly to the permanent full-book unlock", () => {
@@ -31,5 +34,6 @@ describe("EmptyLibrary", () => {
       "href",
       "/studio/credits?return=%2Fstudio%2Fnew",
     );
+    expect(screen.queryByText("Full-length production")).not.toBeInTheDocument();
   });
 });

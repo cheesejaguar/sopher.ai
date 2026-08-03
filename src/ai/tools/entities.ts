@@ -4,6 +4,10 @@ import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import {
+  type AuthoringToolMutationContext,
+  withAuthoringToolMutation,
+} from "@/ai/tools/authoring-mutation";
+import {
   ENTITY_KINDS,
   GUARDED_ATTRS,
   KIND_TO_ISSUE_CATEGORY,
@@ -18,9 +22,13 @@ import {
  * that a chapter written in wave 3 asks rather than invents.
  */
 
-export type EntityToolCtx = {
-  bookId: string;
-  chapterNumber?: number;
+export type EntityToolCtx = AuthoringToolMutationContext;
+type EntityRelationResult = {
+  recorded: boolean;
+  reason?: string;
+  from?: string;
+  to?: string;
+  type?: (typeof RELATIONSHIP_TYPES)[number];
 };
 
 /** Scalar attrs that already have a different value — the drift we care about. */
@@ -164,101 +172,133 @@ export function entityUpsert(ctx: EntityToolCtx) {
         .default({})
         .describe("Kind-appropriate attributes. Include `facts` for new canonical statements."),
     }),
-    execute: async ({ kind, name, aliases, attrs }) => {
-      const db = getDb();
+    execute: async ({ kind, name, aliases, attrs }, { toolCallId }) => {
+      const logicalOrdinal = ctx.nextMutationOrdinal?.();
       const parsed = parseAttrs(kind, attrs) as Record<string, unknown>;
+      return withAuthoringToolMutation({
+        ctx,
+        toolName: "entityUpsert",
+        toolCallId,
+        logicalOrdinal,
+        payload: { kind, name, aliases, attrs: parsed },
+        mutate: async (tx) => {
+          // Case-insensitive resolution, then reuse the stored casing: get/search/
+          // relate all match case-insensitively, so "biscuit" must update Biscuit
+          // rather than minting a duplicate row the unique index cannot catch.
+          const [existing] = await tx
+            .select({
+              id: schema.entities.id,
+              name: schema.entities.name,
+              attrs: schema.entities.attrs,
+            })
+            .from(schema.entities)
+            .where(
+              and(
+                eq(schema.entities.bookId, ctx.bookId),
+                eq(schema.entities.kind, kind),
+                sql`lower(${schema.entities.name}) = lower(${name})`,
+              ),
+            )
+            .limit(1);
+          const canonicalName = existing?.name ?? name;
 
-      // Case-insensitive resolution, then reuse the stored casing: get/search/
-      // relate all match case-insensitively, so "biscuit" must update Biscuit
-      // rather than minting a duplicate row the unique index cannot catch.
-      const [existing] = await db
-        .select({
-          id: schema.entities.id,
-          name: schema.entities.name,
-          attrs: schema.entities.attrs,
-        })
-        .from(schema.entities)
-        .where(
-          and(
-            eq(schema.entities.bookId, ctx.bookId),
-            eq(schema.entities.kind, kind),
-            sql`lower(${schema.entities.name}) = lower(${name})`,
-          ),
-        )
-        .limit(1);
-      const canonicalName = existing?.name ?? name;
+          const conflicts = existing ? findConflicts(kind, existing.attrs, parsed) : [];
+          if (conflicts.length > 0) {
+            await tx.insert(schema.continuityIssues).values(
+              conflicts.map((c) => ({
+                bookId: ctx.bookId,
+                runId: ctx.runId!,
+                chapters: ctx.chapterNumber ? [ctx.chapterNumber] : [],
+                category: KIND_TO_ISSUE_CATEGORY[kind],
+                severity: "major" as const,
+                description: `${kind} "${canonicalName}": ${c.field} was established as "${c.from}" but chapter ${ctx.chapterNumber ?? "?"} says "${c.to}".`,
+                suggestedFix: `Keep the established "${c.from}" unless the change is deliberate and explained in the prose.`,
+              })),
+            );
+          }
 
-      const conflicts = existing ? findConflicts(kind, existing.attrs, parsed) : [];
-      if (conflicts.length > 0) {
-        await db.insert(schema.continuityIssues).values(
-          conflicts.map((c) => ({
-            bookId: ctx.bookId,
-            chapters: ctx.chapterNumber ? [ctx.chapterNumber] : [],
-            category: KIND_TO_ISSUE_CATEGORY[kind],
-            severity: "major" as const,
-            description: `${kind} "${canonicalName}": ${c.field} was established as "${c.from}" but chapter ${ctx.chapterNumber ?? "?"} says "${c.to}".`,
-            suggestedFix: `Keep the established "${c.from}" unless the change is deliberate and explained in the prose.`,
-          })),
-        );
-      }
+          // Guarded scalars stay as first established; everything else may refine.
+          // Also drop empty values: parseAttrs fills omitted list fields with []
+          // defaults, and merging those would wipe stored personality/contents/etc
+          // on any partial update.
+          const conflicted = new Set(conflicts.map((c) => c.field));
+          const safeAttrs = Object.fromEntries(
+            Object.entries(parsed).filter(([key, value]) => {
+              if (conflicted.has(key)) return false;
+              if (value === undefined || value === null) return false;
+              if (Array.isArray(value) && value.length === 0 && key !== "facts") return false;
+              if (typeof value === "string" && !value.trim()) return false;
+              return true;
+            }),
+          );
+          const { facts: incomingFacts = [], ...scalars } = safeAttrs as {
+            facts?: string[];
+            [key: string]: unknown;
+          };
 
-      // Guarded scalars stay as first established; everything else may refine.
-      // Also drop empty values: parseAttrs fills omitted list fields with []
-      // defaults, and merging those would wipe stored personality/contents/etc
-      // on any partial update.
-      const conflicted = new Set(conflicts.map((c) => c.field));
-      const safeAttrs = Object.fromEntries(
-        Object.entries(parsed).filter(([key, value]) => {
-          if (conflicted.has(key)) return false;
-          if (value === undefined || value === null) return false;
-          if (Array.isArray(value) && value.length === 0 && key !== "facts") return false;
-          if (typeof value === "string" && !value.trim()) return false;
-          return true;
-        }),
-      );
-      const { facts: incomingFacts = [], ...scalars } = safeAttrs as {
-        facts?: string[];
-        [key: string]: unknown;
-      };
+          // Atomic: chapters draft four at a time, so merge in one statement rather
+          // than read-modify-write. The parens around (excluded.attrs->'facts') are
+          // load-bearing — `||` and `->` are equal precedence and left-associative,
+          // so without them this parses as (attrs || excluded.attrs)->'facts'.
+          await tx
+            .insert(schema.entities)
+            .values({
+              bookId: ctx.bookId,
+              kind,
+              name: canonicalName,
+              aliases,
+              attrs: { ...scalars, facts: incomingFacts },
+              firstAppearanceChapter: ctx.chapterNumber,
+              lastUpdatedChapter: ctx.chapterNumber,
+            })
+            .onConflictDoUpdate({
+              target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
+              set: {
+                attrs: sql`jsonb_set(
+                  ${schema.entities.attrs} || (${JSON.stringify(scalars)}::jsonb),
+                  '{facts}',
+                  coalesce(${schema.entities.attrs}->'facts', '[]'::jsonb) || (excluded.attrs->'facts')
+                )`,
+                aliases: sql`(
+                  select coalesce(jsonb_agg(distinct value), '[]'::jsonb)
+                  from jsonb_array_elements(${schema.entities.aliases} || excluded.aliases)
+                )`,
+                lastUpdatedChapter: ctx.chapterNumber,
+                updatedAt: new Date(),
+              },
+            });
 
-      // Atomic: chapters draft four at a time, so merge in one statement rather
-      // than read-modify-write. The parens around (excluded.attrs->'facts') are
-      // load-bearing — `||` and `->` are equal precedence and left-associative,
-      // so without them this parses as (attrs || excluded.attrs)->'facts'.
-      await db
-        .insert(schema.entities)
-        .values({
-          bookId: ctx.bookId,
-          kind,
-          name: canonicalName,
-          aliases,
-          attrs: { ...scalars, facts: incomingFacts },
-          firstAppearanceChapter: ctx.chapterNumber,
-          lastUpdatedChapter: ctx.chapterNumber,
-        })
-        .onConflictDoUpdate({
-          target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
-          set: {
-            attrs: sql`jsonb_set(
-              ${schema.entities.attrs} || (${JSON.stringify(scalars)}::jsonb),
-              '{facts}',
-              coalesce(${schema.entities.attrs}->'facts', '[]'::jsonb) || (excluded.attrs->'facts')
-            )`,
-            aliases: sql`(
-              select coalesce(jsonb_agg(distinct value), '[]'::jsonb)
-              from jsonb_array_elements(${schema.entities.aliases} || excluded.aliases)
-            )`,
-            lastUpdatedChapter: ctx.chapterNumber,
-            updatedAt: new Date(),
-          },
-        });
-
-      return {
-        recorded: true,
-        kind,
-        name: canonicalName,
-        conflicts: conflicts.map((c) => `${c.field}: "${c.from}" vs "${c.to}"`),
-      };
+          return {
+            recorded: true,
+            kind,
+            name: canonicalName,
+            conflicts: conflicts.map((c) => `${c.field}: "${c.from}" vs "${c.to}"`),
+          };
+        },
+        replay: async (tx) => {
+          const [existing] = await tx
+            .select({
+              name: schema.entities.name,
+              attrs: schema.entities.attrs,
+            })
+            .from(schema.entities)
+            .where(
+              and(
+                eq(schema.entities.bookId, ctx.bookId),
+                eq(schema.entities.kind, kind),
+                sql`lower(${schema.entities.name}) = lower(${name})`,
+              ),
+            )
+            .limit(1);
+          const conflicts = existing ? findConflicts(kind, existing.attrs, parsed) : [];
+          return {
+            recorded: true,
+            kind,
+            name: existing?.name ?? name,
+            conflicts: conflicts.map((c) => `${c.field}: "${c.from}" vs "${c.to}"`),
+          };
+        },
+      });
     },
   });
 }
@@ -273,37 +313,48 @@ export function entityRelate(ctx: EntityToolCtx) {
       type: z.enum(RELATIONSHIP_TYPES),
       description: z.string().max(400).optional(),
     }),
-    execute: async ({ from, to, type, description }) => {
-      const db = getDb();
-      const rows = await db
-        .select({ id: schema.entities.id, name: schema.entities.name })
-        .from(schema.entities)
-        .where(eq(schema.entities.bookId, ctx.bookId));
+    execute: async ({ from, to, type, description }, { toolCallId }) => {
+      const logicalOrdinal = ctx.nextMutationOrdinal?.();
+      return withAuthoringToolMutation<EntityRelationResult>({
+        ctx,
+        toolName: "entityRelate",
+        toolCallId,
+        logicalOrdinal,
+        payload: { from, to, type, description: description ?? null },
+        mutate: async (tx) => {
+          const rows = await tx
+            .select({ id: schema.entities.id, name: schema.entities.name })
+            .from(schema.entities)
+            .where(eq(schema.entities.bookId, ctx.bookId));
 
-      const lookup = (name: string) =>
-        rows.find((r) => r.name.toLowerCase() === name.toLowerCase());
-      const fromRow = lookup(from);
-      const toRow = lookup(to);
-      if (!fromRow || !toRow) {
-        return {
-          recorded: false,
-          reason: `Unknown entity: ${!fromRow ? from : to}. Create it with entityUpsert first.`,
-        };
-      }
+          const lookup = (name: string) =>
+            rows.find((r) => r.name.toLowerCase() === name.toLowerCase());
+          const fromRow = lookup(from);
+          const toRow = lookup(to);
+          if (!fromRow || !toRow) {
+            return {
+              recorded: false,
+              reason: `Unknown entity: ${!fromRow ? from : to}. Create it with entityUpsert first.`,
+            };
+          }
 
-      await db
-        .insert(schema.entityRelationships)
-        .values({
-          bookId: ctx.bookId,
-          fromEntityId: fromRow.id,
-          toEntityId: toRow.id,
-          type,
-          description,
-          establishedChapter: ctx.chapterNumber,
-        })
-        .onConflictDoNothing();
+          await tx
+            .insert(schema.entityRelationships)
+            .values({
+              bookId: ctx.bookId,
+              fromEntityId: fromRow.id,
+              toEntityId: toRow.id,
+              type,
+              description,
+              establishedChapter: ctx.chapterNumber,
+            })
+            .onConflictDoNothing();
 
-      return { recorded: true, from: fromRow.name, to: toRow.name, type };
+          return { recorded: true, from: fromRow.name, to: toRow.name, type };
+        },
+        replay: () => ({ recorded: true, from, to, type }),
+        shouldRecord: (result) => result.recorded,
+      });
     },
   });
 }

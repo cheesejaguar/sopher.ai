@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 
 import {
+  describeCancellationProgress,
   describeProductionProgress,
   isActiveProductionProgress,
   isProjectProgressSnapshot,
@@ -13,7 +15,10 @@ export const PROJECT_PROGRESS_POLL_MS = 5_000;
 
 type ProjectProgressContextValue = {
   progress: ProjectProgressSnapshot;
-  publishProgress: (next: ProjectProgressSnapshot) => void;
+  publishProgress: (
+    next: ProjectProgressSnapshot,
+    options?: { refreshAuthoritativeJourney?: boolean },
+  ) => void;
 };
 
 const ProjectProgressContext = React.createContext<ProjectProgressContextValue | null>(null);
@@ -27,16 +32,33 @@ export function ProjectProgressProvider({
   initialProgress: ProjectProgressSnapshot;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   const [progress, setProgress] = React.useState(initialProgress);
   const [pollAnnouncement, setPollAnnouncement] = React.useState("");
   const lastPublishedAtRef = React.useRef(0);
+  const refreshedRunIdRef = React.useRef<string | null>(null);
   const active = isActiveProductionProgress(progress);
 
-  const publishProgress = React.useCallback((next: ProjectProgressSnapshot) => {
-    lastPublishedAtRef.current = Date.now();
-    setPollAnnouncement("");
-    setProgress(next);
-  }, []);
+  const refreshAuthoritativeJourney = React.useCallback(
+    (runId: string | null) => {
+      if (!runId || refreshedRunIdRef.current === runId) return;
+      refreshedRunIdRef.current = runId;
+      router.refresh();
+    },
+    [router],
+  );
+
+  const publishProgress = React.useCallback(
+    (next: ProjectProgressSnapshot, options?: { refreshAuthoritativeJourney?: boolean }) => {
+      lastPublishedAtRef.current = Date.now();
+      setPollAnnouncement("");
+      setProgress(next);
+      if (options?.refreshAuthoritativeJourney) {
+        refreshAuthoritativeJourney(next.runId);
+      }
+    },
+    [refreshAuthoritativeJourney],
+  );
 
   React.useEffect(() => {
     if (!active) return;
@@ -89,7 +111,17 @@ export function ProjectProgressProvider({
 
         shouldContinue = isActiveProductionProgress(next);
         setProgress(next);
-        setPollAnnouncement(describeProductionProgress(next));
+        setPollAnnouncement(
+          next.cancellationRequestedAt
+            ? describeCancellationProgress(next)
+            : describeProductionProgress(next),
+        );
+        if (!shouldContinue) {
+          // This result came from the authenticated, Workflow-aware progress
+          // endpoint rather than a raw stream event. Refresh the server journey
+          // so completion/recovery actions converge with the terminal status.
+          refreshAuthoritativeJourney(next.runId);
+        }
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
       } finally {
@@ -113,7 +145,7 @@ export function ProjectProgressProvider({
       controller?.abort();
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [active, projectId]);
+  }, [active, projectId, refreshAuthoritativeJourney]);
 
   const value = React.useMemo(() => ({ progress, publishProgress }), [progress, publishProgress]);
 

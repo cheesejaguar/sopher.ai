@@ -8,11 +8,20 @@ import { ChevronDown } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import {
+  describeCancellationProgress,
   describeProductionProgress,
   lifecyclePhaseForProduction,
   type ProjectProgressSnapshot,
 } from "@/lib/project-progress";
 import { useProjectProgress } from "@/components/studio/project-progress";
+import {
+  isCurrentPageCancellationAction,
+  MobileProjectNextStep,
+} from "@/components/studio/project-next-step";
+import {
+  authoringJourneyWithProgress,
+  type AuthoringJourneySnapshot,
+} from "@/lib/authoring-journey";
 
 const lifecycle = [
   {
@@ -133,14 +142,22 @@ function MobileStageMenu({
   projectId,
   pathname,
   progress,
+  journey,
 }: {
   projectId: string;
   pathname?: string;
   progress: ProjectProgressSnapshot;
+  journey: AuthoringJourneySnapshot;
 }) {
   const [openOnPathname, setOpenOnPathname] = useState<string | null>(null);
   const menuPathname = pathname ?? "";
   const open = openOnPathname === menuPathname;
+  const liveJourney = authoringJourneyWithProgress(journey, progress);
+  const cancellationRequested = liveJourney.nextAction.kind === "finish_cancellation";
+  const currentPageCancellation = isCurrentPageCancellationAction(
+    liveJourney.nextAction,
+    pathname ?? null,
+  );
   const activeStage =
     lifecycle
       .flatMap((group) => group.stages.map((stage) => ({ group: group.label, ...stage })))
@@ -183,16 +200,23 @@ function MobileStageMenu({
       <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 px-4 py-2 marker:content-none">
         <span className="min-w-0">
           <span className="folio-label block text-muted-foreground">Project navigation</span>
-          <span className="mt-1 block truncate text-sm font-semibold">
+          <span className="mt-1 block text-sm leading-snug font-semibold break-words">
             {activeStage
               ? `You are here: ${activeStage.group} / ${activeStage.label}`
               : "Choose a stage"}
           </span>
-          <span className="mt-1 block truncate text-xs text-ai">
+          <span className="mt-1 block text-xs leading-relaxed text-ai break-words">
             Production now:{" "}
             {progress.runId
-              ? `${describeProductionProgress(progress)} · ${Math.round(progress.pct)}%`
+              ? cancellationRequested
+                ? describeCancellationProgress(progress)
+                : `${describeProductionProgress(progress)} · ${Math.round(progress.pct)}%`
               : "Not started"}
+          </span>
+          <span className="mt-1 block text-xs leading-relaxed text-muted-foreground break-words">
+            {currentPageCancellation
+              ? "Status: Stopping safely"
+              : `Next: ${liveJourney.nextAction.label}`}
           </span>
         </span>
         <ChevronDown
@@ -201,6 +225,7 @@ function MobileStageMenu({
         />
       </summary>
       <div className="border-t border-border bg-background p-3">
+        <MobileProjectNextStep snapshot={journey} />
         {lifecycle.map((group, index) => (
           <section key={group.label} aria-label={group.label} className="mt-3 first:mt-0">
             <p className="folio-label px-3 pb-1 text-muted-foreground">
@@ -222,14 +247,21 @@ function MobileStageMenu({
 function StageNavigationWithPathname({
   projectId,
   progress,
+  journey,
 }: {
   projectId: string;
   progress: ProjectProgressSnapshot;
+  journey: AuthoringJourneySnapshot;
 }) {
   const pathname = usePathname();
   return (
     <>
-      <MobileStageMenu projectId={projectId} pathname={pathname} progress={progress} />
+      <MobileStageMenu
+        projectId={projectId}
+        pathname={pathname}
+        progress={progress}
+        journey={journey}
+      />
       <div className="hidden px-2 py-2 lg:block">
         <DesktopStageTabs projectId={projectId} pathname={pathname} progress={progress} />
       </div>
@@ -237,9 +269,17 @@ function StageNavigationWithPathname({
   );
 }
 
-export function StageNav({ projectId }: { projectId: string }) {
+export function StageNav({
+  projectId,
+  journey,
+}: {
+  projectId: string;
+  journey: AuthoringJourneySnapshot;
+}) {
   const { progress } = useProjectProgress();
   const productionPhase = lifecyclePhaseForProduction(progress.stage, progress.pausedStage);
+  const liveJourney = authoringJourneyWithProgress(journey, progress);
+  const cancellationRequested = liveJourney.nextAction.kind === "finish_cancellation";
 
   return (
     <nav aria-label="Project lifecycle" className="min-w-0 border-y border-border bg-card/35">
@@ -255,7 +295,7 @@ export function StageNav({ projectId }: { projectId: string }) {
           </>
         }
       >
-        <StageNavigationWithPathname projectId={projectId} progress={progress} />
+        <StageNavigationWithPathname projectId={projectId} progress={progress} journey={journey} />
       </Suspense>
       <div
         role="region"
@@ -263,20 +303,28 @@ export function StageNav({ projectId }: { projectId: string }) {
         className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-4 py-2 text-xs"
       >
         <span className="folio-label text-muted-foreground">Production now</span>
-        <span className="font-medium text-foreground">
-          {progress.runId ? describeProductionProgress(progress) : "Not started"}
-        </span>
         {progress.runId ? (
           <>
-            <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
-              {productionPhase}
-            </span>
-            <span
-              aria-label={`${Math.round(progress.pct)} percent complete`}
-              className="font-mono text-[0.6875rem] text-muted-foreground tabular-nums"
-            >
-              {Math.round(progress.pct)}%
-            </span>
+            {cancellationRequested ? (
+              <span className="font-medium text-foreground">
+                {describeCancellationProgress(progress)}
+              </span>
+            ) : (
+              <>
+                <span className="font-medium text-foreground">
+                  {describeProductionProgress(progress)}
+                </span>
+                <span className="font-mono text-[0.6875rem] tracking-[0.08em] text-ai uppercase">
+                  {productionPhase}
+                </span>
+                <span
+                  aria-label={`${Math.round(progress.pct)} percent complete`}
+                  className="font-mono text-[0.6875rem] text-muted-foreground tabular-nums"
+                >
+                  {Math.round(progress.pct)}%
+                </span>
+              </>
+            )}
             <span
               aria-hidden="true"
               className="h-0.5 min-w-20 flex-1 overflow-hidden bg-border lg:max-w-52"
@@ -287,7 +335,9 @@ export function StageNav({ projectId }: { projectId: string }) {
               />
             </span>
           </>
-        ) : null}
+        ) : (
+          <span className="font-medium text-foreground">Not started</span>
+        )}
       </div>
     </nav>
   );

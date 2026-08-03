@@ -16,6 +16,8 @@ export function projectSpendAccessErrorResponse(error: unknown): Response | null
       return Response.json({ error: error.message, code: error.code }, { status: 402 });
     case "trial_busy":
       return Response.json({ error: error.message, code: error.code }, { status: 409 });
+    case "included_allowance_exhausted":
+      return Response.json({ error: error.message, code: error.code }, { status: 409 });
     case "suspended":
       return Response.json({ error: error.message, code: error.code }, { status: 403 });
   }

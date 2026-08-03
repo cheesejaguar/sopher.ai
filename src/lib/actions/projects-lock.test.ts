@@ -140,14 +140,14 @@ describe("project structural mutation locks", () => {
 
     await expect(deleteProject("project-1")).resolves.toBeUndefined();
 
-    expect(tx.execute).toHaveBeenCalledTimes(2);
+    expect(tx.execute).toHaveBeenCalledTimes(3);
     expect(tx.execute.mock.invocationCallOrder[0]).toBeLessThan(
       tx.select.mock.invocationCallOrder[0],
     );
     expect(tx.select.mock.invocationCallOrder[0]).toBeLessThan(
       tx.execute.mock.invocationCallOrder[1],
     );
-    expect(tx.execute.mock.invocationCallOrder[1]).toBeLessThan(
+    expect(tx.execute.mock.invocationCallOrder[2]).toBeLessThan(
       tx.select.mock.invocationCallOrder[1],
     );
     expect(tx.select).toHaveBeenCalledTimes(4);

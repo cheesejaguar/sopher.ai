@@ -5,6 +5,7 @@ import { useEditorState, type Editor } from "@tiptap/react";
 import {
   AlertTriangle,
   Check,
+  CircleHelp,
   FilePenLine,
   ListTree,
   Maximize2,
@@ -20,6 +21,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatWordCount } from "@/lib/editor/chapter-status";
+import type { EditorProductionStatus } from "@/lib/editor/types";
+import { useStudioCoachmark, useStudioHelp } from "@/components/studio/studio-help-context";
+import { StudioCoachmark } from "@/components/studio/studio-coachmark";
 
 import type { SaveState } from "./use-autosave";
 
@@ -89,6 +93,32 @@ export function SaveIndicator({ state, compact = false }: { state: SaveState; co
 const mobileToolClass =
   "relative size-11 rounded-sm text-muted-foreground hover:text-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground";
 
+export function CompactProductionStatus({
+  status,
+  compact = false,
+}: {
+  status: EditorProductionStatus;
+  compact?: boolean;
+}) {
+  return (
+    <div
+      data-editor-production-status="true"
+      aria-label="Incomplete production status"
+      className={cn(
+        "flex min-w-0 items-center gap-2 border-ember/30 bg-ember/8 text-ember",
+        compact ? "border-t px-3 py-1.5 text-[11px]" : "shrink-0 border-b px-3 py-2 text-xs",
+      )}
+    >
+      <AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" />
+      <span className="shrink-0 font-semibold">{status.label}</span>
+      <span aria-hidden="true" className="text-ember/60">
+        ·
+      </span>
+      <span className="min-w-0 truncate text-foreground/75">{status.detail}</span>
+    </div>
+  );
+}
+
 /**
  * Phone and tablet editor orientation. Save state stays visible above the
  * software keyboard, while the chapter chooser remains a real dialog trigger.
@@ -99,13 +129,18 @@ export function MobileEditorHeader({
   saveState,
   chaptersOpen,
   onOpenChapters,
+  productionStatus,
 }: {
   chapterNumber: number;
   chapterTitle: string | null;
   saveState: SaveState;
   chaptersOpen: boolean;
   onOpenChapters: () => void;
+  productionStatus: EditorProductionStatus | null;
 }) {
+  const openHelp = useStudioHelp();
+  const autosaveCoachmark = useStudioCoachmark("editor_autosave");
+
   return (
     <header className="safe-area-top shrink-0 border-b border-border bg-card">
       <div className="flex min-h-12 min-w-0 items-center gap-2 px-2">
@@ -131,7 +166,25 @@ export function MobileEditorHeader({
           <SaveIndicator state={saveState} compact />
           <SaveAnnouncer state={saveState} />
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-lg"
+          className={mobileToolClass}
+          aria-label="Help with editing"
+          aria-haspopup="dialog"
+          onClick={openHelp}
+        >
+          <CircleHelp aria-hidden="true" className="size-4" />
+        </Button>
       </div>
+      {productionStatus ? <CompactProductionStatus status={productionStatus} compact /> : null}
+      {autosaveCoachmark.visible ? (
+        <StudioCoachmark title="Autosave and chapter history" onDismiss={autosaveCoachmark.dismiss}>
+          Saved confirms the latest version is secure. History opens earlier saved versions, and a
+          conflict warning protects changes made in another tab.
+        </StudioCoachmark>
+      ) : null}
     </header>
   );
 }
@@ -166,6 +219,8 @@ export function MobileEditorToolbar({
   onToggleZen: () => void;
   history: React.ReactNode;
 }) {
+  const selectionCoachmark = useStudioCoachmark("selection_tools");
+  const autosaveCoachmark = useStudioCoachmark("editor_autosave");
   const state = useEditorState({
     editor,
     selector: (ctx) => ({
@@ -176,102 +231,127 @@ export function MobileEditorToolbar({
   });
 
   return (
-    <div
-      role="toolbar"
-      aria-label="Chapter editing tools"
-      className="safe-area-bottom shrink-0 border-t border-border bg-card px-1"
-    >
-      <div className="flex min-h-12 items-center justify-around">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className={mobileToolClass}
-          aria-label="Undo"
-          disabled={!state?.canUndo}
-          onClick={() => editor?.chain().focus().undo().run()}
+    <>
+      {state?.hasSelection && selectionCoachmark.visible && !autosaveCoachmark.visible ? (
+        <StudioCoachmark
+          title="Work with the selected passage"
+          onDismiss={selectionCoachmark.dismiss}
         >
-          <Undo2 aria-hidden="true" className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className={mobileToolClass}
-          aria-label="Redo"
-          disabled={!state?.canRedo}
-          onClick={() => editor?.chain().focus().redo().run()}
-        >
-          <Redo2 aria-hidden="true" className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className={cn(mobileToolClass, state?.hasSelection && "text-ai")}
-          aria-label={
-            state?.hasSelection
-              ? "Edit the selected passage with AI"
-              : "AI editing unavailable — select a passage first"
-          }
-          aria-haspopup="dialog"
-          aria-expanded={selectionToolsOpen}
-          disabled={!state?.hasSelection}
-          onClick={onOpenSelectionTools}
-        >
-          <FilePenLine aria-hidden="true" className="size-4" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className={cn(mobileToolClass, pendingCount > 0 && "text-ai")}
-          aria-label={`Suggestions${pendingCount > 0 ? `, ${pendingCount} pending` : ""}`}
-          aria-haspopup="dialog"
-          aria-expanded={reviewOpen}
-          onClick={onOpenReview}
-        >
-          <MessageSquareText aria-hidden="true" className="size-4" />
-          {pendingCount > 0 ? (
-            <span
-              aria-hidden="true"
-              className="absolute top-1 right-1 min-w-4 rounded-full bg-ai px-1 font-mono text-[9px] leading-4 text-ai-foreground"
-            >
-              {pendingCount > 99 ? "99+" : pendingCount}
-            </span>
-          ) : null}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className={mobileToolClass}
-          aria-label="Find and replace"
-          aria-haspopup="dialog"
-          aria-expanded={findOpen}
-          onClick={onOpenFind}
-        >
-          <Search aria-hidden="true" className="size-4" />
-        </Button>
-        {history}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-lg"
-          className={cn(mobileToolClass, zen && "text-primary")}
-          aria-label={zen ? "Exit zen mode" : "Enter zen mode"}
-          aria-pressed={zen}
-          onClick={onToggleZen}
-        >
-          {zen ? (
-            <Minimize2 aria-hidden="true" className="size-4" />
-          ) : (
-            <Maximize2 aria-hidden="true" className="size-4" />
-          )}
-        </Button>
+          Edit selected passage opens focused rewriting and content tools for only the words you
+          highlighted. Nothing changes until you approve it.
+        </StudioCoachmark>
+      ) : null}
+      <div
+        role="toolbar"
+        aria-label="Chapter editing tools"
+        className="safe-area-bottom shrink-0 border-t border-border bg-card px-1"
+      >
+        <div className="flex min-h-12 items-center justify-around">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            className={mobileToolClass}
+            aria-label="Undo"
+            disabled={!state?.canUndo}
+            onClick={() => editor?.chain().focus().undo().run()}
+          >
+            <Undo2 aria-hidden="true" className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            className={mobileToolClass}
+            aria-label="Redo"
+            disabled={!state?.canRedo}
+            onClick={() => editor?.chain().focus().redo().run()}
+          >
+            <Redo2 aria-hidden="true" className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            className={cn(mobileToolClass, state?.hasSelection && "text-ai")}
+            aria-label={
+              state?.hasSelection
+                ? "Edit the selected passage with AI"
+                : "AI editing unavailable — select a passage first"
+            }
+            aria-haspopup="dialog"
+            aria-expanded={selectionToolsOpen}
+            disabled={!state?.hasSelection}
+            onClick={onOpenSelectionTools}
+          >
+            <FilePenLine aria-hidden="true" className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            className={cn(mobileToolClass, pendingCount > 0 && "text-ai")}
+            aria-label={`Suggestions${pendingCount > 0 ? `, ${pendingCount} pending` : ""}`}
+            aria-haspopup="dialog"
+            aria-expanded={reviewOpen}
+            onClick={onOpenReview}
+          >
+            <MessageSquareText aria-hidden="true" className="size-4" />
+            {pendingCount > 0 ? (
+              <span
+                aria-hidden="true"
+                className="absolute top-1 right-1 min-w-4 rounded-full bg-ai px-1 font-mono text-[11px] leading-4 text-ai-foreground"
+              >
+                {pendingCount > 99 ? "99+" : pendingCount}
+              </span>
+            ) : null}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            className={mobileToolClass}
+            aria-label="Find and replace"
+            aria-haspopup="dialog"
+            aria-expanded={findOpen}
+            onClick={onOpenFind}
+          >
+            <Search aria-hidden="true" className="size-4" />
+          </Button>
+          {history}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-lg"
+            className={cn(mobileToolClass, zen && "text-primary")}
+            aria-label={zen ? "Exit zen mode" : "Enter zen mode"}
+            aria-pressed={zen}
+            onClick={onToggleZen}
+          >
+            {zen ? (
+              <Minimize2 aria-hidden="true" className="size-4" />
+            ) : (
+              <Maximize2 aria-hidden="true" className="size-4" />
+            )}
+          </Button>
+        </div>
       </div>
-    </div>
+    </>
   );
+}
+
+export function getEditorCoachmarkKind({
+  autosaveVisible,
+  selectionVisible,
+  hasSelection,
+}: {
+  autosaveVisible: boolean;
+  selectionVisible: boolean;
+  hasSelection: boolean;
+}): "autosave" | "selection" | null {
+  if (autosaveVisible) return "autosave";
+  if (selectionVisible && hasSelection) return "selection";
+  return null;
 }
 
 export function StatusBar({
@@ -304,13 +384,36 @@ export function StatusBar({
     selector: (ctx) => ({
       canUndo: ctx.editor?.can().undo() ?? false,
       canRedo: ctx.editor?.can().redo() ?? false,
+      hasSelection: !(ctx.editor?.state.selection.empty ?? true),
     }),
+  });
+  const autosaveCoachmark = useStudioCoachmark("editor_autosave");
+  const selectionCoachmark = useStudioCoachmark("selection_tools");
+  const coachmarkKind = getEditorCoachmarkKind({
+    autosaveVisible: autosaveCoachmark.visible,
+    selectionVisible: selectionCoachmark.visible,
+    hasSelection: historyState?.hasSelection ?? false,
   });
   const wordCount = words ?? 0;
   const readingMinutes = Math.max(1, Math.round(wordCount / READING_WPM));
 
   return (
     <TooltipProvider>
+      {coachmarkKind === "autosave" ? (
+        <StudioCoachmark title="Autosave and chapter history" onDismiss={autosaveCoachmark.dismiss}>
+          Saved confirms the latest version is secure. Use History to review or restore an earlier
+          saved version, and resolve any conflict before continuing in another tab.
+        </StudioCoachmark>
+      ) : null}
+      {coachmarkKind === "selection" ? (
+        <StudioCoachmark
+          title="Work with the selected passage"
+          onDismiss={selectionCoachmark.dismiss}
+        >
+          Select prose to open focused rewriting and content tools for only those words. Nothing
+          changes until you approve it.
+        </StudioCoachmark>
+      ) : null}
       <div className="flex h-9 shrink-0 items-center justify-between gap-4 border-t border-border bg-card px-3 text-xs">
         <div className="flex min-w-0 items-center gap-3">
           <SaveIndicator state={saveState} />
@@ -369,7 +472,7 @@ export function StatusBar({
               <MessageSquareText aria-hidden="true" className="size-3.5 text-ai" />
               Suggestions
               {pendingCount > 0 ? (
-                <span className="rounded-full bg-ai-soft px-1.5 font-mono text-[10px] text-ai tabular-nums">
+                <span className="rounded-full bg-ai-soft px-1.5 font-mono text-[11px] text-ai tabular-nums">
                   {pendingCount}
                   <span className="sr-only"> pending</span>
                 </span>

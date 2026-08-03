@@ -43,18 +43,48 @@ export type RunHealth = {
   databaseStatus: RunStatus;
   workflowStatus?: WorkflowStatus;
   effectiveStatus: RunStatus;
+  stage?: Stage;
+  progressPct?: number;
+  stageDescription?: string | null;
   acceptedAt?: string;
   startedAt?: string;
   completedAt?: string;
   lastEventAt?: string;
+  heartbeatAt?: string;
+  lastUpdateAt?: string;
+  health?: "healthy" | "warning" | "critical" | "degraded";
+  telemetryDegraded?: boolean;
+  consecutiveHealthFailures?: number;
+  invalidStreamRecords?: number;
   noWorkStarted: boolean;
   /** `start()` acceptance is ambiguous and this exact durable run may be retried safely. */
   acceptanceUncertain?: boolean;
   safeToRetry?: boolean;
   /** A Workflow id has been durably linked to this run. */
   handoffConfirmed?: boolean;
+  /** Server-validated completion digest and expected manuscript artifacts exist. */
+  completionArtifactsReady?: boolean;
   elapsedMs?: number;
   estimatedMinutes?: number;
+  dispatchAttempts?: number;
+  workflowMissingCount?: number;
+  workflowMissingSince?: string | null;
+  cancellation?: { requestedAt: string; reason: string | null } | null;
+  pause?: {
+    kind: "outline_approval" | "credits_topup";
+    version: number;
+    registeredAt: string;
+    details?: {
+      balanceCredits?: number;
+      requiredCredits?: number;
+      resumeStage?: string;
+    } | null;
+  } | null;
+  savedChapterCount?: number;
+  savedCheckpointCount?: number;
+  supportReference?: string;
+  rootErrorCode?: string | null;
+  rootErrorStage?: string | null;
   chapters?: {
     total: number;
     planned: number;
@@ -129,6 +159,7 @@ const WORKFLOW_STATUSES: ReadonlySet<string> = new Set([
   "missing",
   "unavailable",
 ]);
+const HEALTH_STATUSES = new Set(["healthy", "warning", "critical", "degraded"]);
 
 /** Stages only move forward within a run; replay merges are upgrade-only. */
 const STAGE_ORDER: Record<Stage, number> = {
@@ -247,9 +278,6 @@ function applyEvent(acc: Acc, event: RunEvent): void {
     }
     case "error": {
       acc.error = { message: event.message, fatal: event.fatal };
-      if (event.fatal && STAGE_ORDER[acc.stage] < STAGE_ORDER.failed) {
-        acc.stage = "failed";
-      }
       break;
     }
   }
@@ -311,6 +339,45 @@ function chapterCounts(value: unknown): RunHealth["chapters"] | undefined {
   >;
 }
 
+function pauseState(value: unknown): RunHealth["pause"] | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== "object") return undefined;
+  const pause = value as Record<string, unknown>;
+  if (
+    (pause.kind !== "outline_approval" && pause.kind !== "credits_topup") ||
+    typeof pause.version !== "number" ||
+    !Number.isInteger(pause.version) ||
+    pause.version < 1
+  ) {
+    return undefined;
+  }
+  const registeredAt = dateString(pause.registeredAt);
+  if (!registeredAt) return undefined;
+  const rawDetails =
+    pause.details && typeof pause.details === "object"
+      ? (pause.details as Record<string, unknown>)
+      : null;
+  const details = rawDetails
+    ? {
+        ...(typeof rawDetails.balanceCredits === "number"
+          ? { balanceCredits: rawDetails.balanceCredits }
+          : {}),
+        ...(typeof rawDetails.requiredCredits === "number"
+          ? { requiredCredits: rawDetails.requiredCredits }
+          : {}),
+        ...(typeof rawDetails.resumeStage === "string"
+          ? { resumeStage: rawDetails.resumeStage }
+          : {}),
+      }
+    : null;
+  return {
+    kind: pause.kind,
+    version: pause.version,
+    registeredAt,
+    details,
+  };
+}
+
 /**
  * Defensive adapter for the enriched run endpoint. During rollout the page
  * snapshot and API may not gain every health field in the same deployment.
@@ -356,6 +423,10 @@ export function parseRunHealthResponse(
     handoffConfirmed:
       (typeof run?.workflowRunId === "string" && run.workflowRunId.length > 0) ||
       Boolean(previous.handoffConfirmed),
+    completionArtifactsReady:
+      typeof rawHealth?.completionArtifactsReady === "boolean"
+        ? rawHealth.completionArtifactsReady
+        : previous.completionArtifactsReady,
     ...((workflowStatus(rawHealth?.workflowStatus) ?? previous.workflowStatus)
       ? { workflowStatus: workflowStatus(rawHealth?.workflowStatus) ?? previous.workflowStatus }
       : {}),
@@ -389,6 +460,26 @@ export function parseRunHealthResponse(
             previous.lastEventAt,
         }
       : {}),
+    ...((dateString(rawHealth?.heartbeatAt) ?? previous.heartbeatAt)
+      ? { heartbeatAt: dateString(rawHealth?.heartbeatAt) ?? previous.heartbeatAt }
+      : {}),
+    ...((dateString(rawHealth?.lastUpdateAt) ?? previous.lastUpdateAt)
+      ? { lastUpdateAt: dateString(rawHealth?.lastUpdateAt) ?? previous.lastUpdateAt }
+      : {}),
+    ...((
+      typeof rawHealth?.health === "string" && HEALTH_STATUSES.has(rawHealth.health)
+        ? rawHealth.health
+        : previous.health
+    )
+      ? {
+          health:
+            typeof rawHealth?.health === "string" && HEALTH_STATUSES.has(rawHealth.health)
+              ? (rawHealth.health as NonNullable<RunHealth["health"]>)
+              : previous.health,
+        }
+      : {}),
+    telemetryDegraded: false,
+    consecutiveHealthFailures: 0,
     ...(typeof rawHealth?.elapsedMs === "number" &&
     Number.isFinite(rawHealth.elapsedMs) &&
     rawHealth.elapsedMs >= 0
@@ -406,6 +497,81 @@ export function parseRunHealthResponse(
     ...((chapterCounts(rawHealth?.chapters) ?? previous.chapters)
       ? { chapters: chapterCounts(rawHealth?.chapters) ?? previous.chapters }
       : {}),
+    ...(typeof rawHealth?.dispatchAttempts === "number"
+      ? { dispatchAttempts: rawHealth.dispatchAttempts }
+      : previous.dispatchAttempts !== undefined
+        ? { dispatchAttempts: previous.dispatchAttempts }
+        : {}),
+    ...(typeof rawHealth?.workflowMissingCount === "number"
+      ? { workflowMissingCount: rawHealth.workflowMissingCount }
+      : previous.workflowMissingCount !== undefined
+        ? { workflowMissingCount: previous.workflowMissingCount }
+        : {}),
+    ...(rawHealth && "workflowMissingSince" in rawHealth
+      ? { workflowMissingSince: dateString(rawHealth.workflowMissingSince) ?? null }
+      : previous.workflowMissingSince !== undefined
+        ? { workflowMissingSince: previous.workflowMissingSince }
+        : {}),
+    ...(typeof rawHealth?.savedChapterCount === "number"
+      ? { savedChapterCount: rawHealth.savedChapterCount }
+      : previous.savedChapterCount !== undefined
+        ? { savedChapterCount: previous.savedChapterCount }
+        : {}),
+    ...(typeof rawHealth?.savedCheckpointCount === "number"
+      ? { savedCheckpointCount: rawHealth.savedCheckpointCount }
+      : previous.savedCheckpointCount !== undefined
+        ? { savedCheckpointCount: previous.savedCheckpointCount }
+        : {}),
+    ...(typeof rawHealth?.supportReference === "string"
+      ? { supportReference: rawHealth.supportReference }
+      : previous.supportReference
+        ? { supportReference: previous.supportReference }
+        : {}),
+    ...(rawHealth && "rootErrorCode" in rawHealth
+      ? {
+          rootErrorCode:
+            typeof rawHealth.rootErrorCode === "string" ? rawHealth.rootErrorCode : null,
+        }
+      : previous.rootErrorCode !== undefined
+        ? { rootErrorCode: previous.rootErrorCode }
+        : {}),
+    ...(rawHealth && "rootErrorStage" in rawHealth
+      ? {
+          rootErrorStage:
+            typeof rawHealth.rootErrorStage === "string" ? rawHealth.rootErrorStage : null,
+        }
+      : previous.rootErrorStage !== undefined
+        ? { rootErrorStage: previous.rootErrorStage }
+        : {}),
+    ...(rawHealth && "cancellation" in rawHealth
+      ? {
+          cancellation:
+            rawHealth.cancellation &&
+            typeof rawHealth.cancellation === "object" &&
+            typeof (rawHealth.cancellation as Record<string, unknown>).requestedAt === "string"
+              ? {
+                  requestedAt: (rawHealth.cancellation as Record<string, unknown>)
+                    .requestedAt as string,
+                  reason:
+                    typeof (rawHealth.cancellation as Record<string, unknown>).reason === "string"
+                      ? ((rawHealth.cancellation as Record<string, unknown>).reason as string)
+                      : null,
+                }
+              : null,
+        }
+      : previous.cancellation !== undefined
+        ? { cancellation: previous.cancellation }
+        : {}),
+    ...(rawHealth && "pause" in rawHealth
+      ? {
+          pause:
+            rawHealth.pause === null
+              ? null
+              : (pauseState(rawHealth.pause) ?? previous.pause ?? null),
+        }
+      : previous.pause !== undefined
+        ? { pause: previous.pause }
+        : {}),
   };
 
   const spend =
@@ -473,11 +639,39 @@ function initFromSnapshot(snapshot: RunSnapshot): Acc {
     totalUsd: snapshot.totalUsd ?? 0,
     totalCredits: snapshot.totalCredits ?? creditsForUsd(snapshot.totalUsd ?? 0),
   };
+  const terminalIsConfirmed = TERMINAL_STATUSES.has(
+    snapshot.health?.effectiveStatus ?? snapshot.run.status,
+  );
   for (const payload of snapshot.events) {
     const parsed = runEventSchema.safeParse(payload);
-    if (parsed.success) applyEvent(acc, parsed.data);
+    if (
+      parsed.success &&
+      !(
+        parsed.data.type === "stage" &&
+        TERMINAL_STAGES.has(parsed.data.stage) &&
+        !terminalIsConfirmed
+      )
+    ) {
+      applyEvent(acc, parsed.data);
+    }
   }
-  applyRunStatus(acc, snapshot.run.status, snapshot.run.error);
+  if (snapshot.health?.stage) {
+    const resumeStage = snapshot.health.pause?.details?.resumeStage;
+    applyEvent(acc, {
+      type: "stage",
+      stage: snapshot.health.stage,
+      pct: snapshot.health.progressPct ?? acc.pct,
+      ...(snapshot.health.stageDescription ? { detail: snapshot.health.stageDescription } : {}),
+      ...(snapshot.health.stage === "awaiting_credits" &&
+      resumeStage &&
+      ["concept", "outline", "bible", "chapters", "editing", "continuity", "revising"].includes(
+        resumeStage,
+      )
+        ? { resumeStage: resumeStage as PausedStage }
+        : {}),
+    });
+  }
+  applyRunStatus(acc, snapshot.health?.effectiveStatus ?? snapshot.run.status, snapshot.run.error);
   return acc;
 }
 
@@ -497,6 +691,7 @@ function initHealthFromSnapshot(snapshot: RunSnapshot): HealthAcc {
   const effectiveStatus = snapshot.health?.effectiveStatus ?? snapshot.run.status;
 
   return {
+    ...snapshot.health,
     databaseStatus,
     effectiveStatus,
     noWorkStarted,
@@ -527,6 +722,7 @@ function initHealthFromSnapshot(snapshot: RunSnapshot): HealthAcc {
 }
 
 function materialize(acc: Acc, connection: RunConnection, health: HealthAcc): RunStreamState {
+  const { connectionAttempt, lastConnectionError, ...healthState } = health;
   return {
     stage: acc.stage,
     pct: acc.pct,
@@ -540,29 +736,11 @@ function materialize(acc: Acc, connection: RunConnection, health: HealthAcc): Ru
     error: acc.error,
     connection,
     health: {
-      databaseStatus: health.databaseStatus,
-      effectiveStatus: health.effectiveStatus,
-      noWorkStarted: health.noWorkStarted,
-      ...(health.acceptanceUncertain !== undefined
-        ? { acceptanceUncertain: health.acceptanceUncertain }
-        : {}),
-      ...(health.safeToRetry !== undefined ? { safeToRetry: health.safeToRetry } : {}),
-      ...(health.handoffConfirmed !== undefined
-        ? { handoffConfirmed: health.handoffConfirmed }
-        : {}),
-      ...(health.workflowStatus ? { workflowStatus: health.workflowStatus } : {}),
-      ...(health.acceptedAt ? { acceptedAt: health.acceptedAt } : {}),
-      ...(health.startedAt ? { startedAt: health.startedAt } : {}),
-      ...(health.completedAt ? { completedAt: health.completedAt } : {}),
-      ...(health.lastEventAt ? { lastEventAt: health.lastEventAt } : {}),
-      ...(health.elapsedMs !== undefined ? { elapsedMs: health.elapsedMs } : {}),
-      ...(health.estimatedMinutes !== undefined
-        ? { estimatedMinutes: health.estimatedMinutes }
-        : {}),
+      ...healthState,
       ...(health.chapters ? { chapters: { ...health.chapters } } : {}),
     },
-    connectionAttempt: health.connectionAttempt,
-    lastConnectionError: health.lastConnectionError,
+    connectionAttempt,
+    lastConnectionError,
   };
 }
 
@@ -586,12 +764,22 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * Reads an NDJSON body, invoking onLine for every complete line. Returns when
  * the stream ends; throws on network failure.
  */
-async function readNdjson(body: ReadableStream<Uint8Array>, onLine: (line: string) => void) {
+async function readNdjson(
+  body: ReadableStream<Uint8Array>,
+  onLine: (line: string) => void,
+  signal: AbortSignal,
+) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let completed = false;
+  const cancelReader = () => {
+    void reader.cancel(signal.reason).catch(() => {});
+  };
+  signal.addEventListener("abort", cancelReader, { once: true });
   try {
     for (;;) {
+      if (signal.aborted) return;
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
@@ -602,7 +790,12 @@ async function readNdjson(body: ReadableStream<Uint8Array>, onLine: (line: strin
       }
     }
     if (buffer.trim().length > 0) onLine(buffer);
+    completed = true;
   } finally {
+    signal.removeEventListener("abort", cancelReader);
+    if (signal.aborted || !completed) {
+      await reader.cancel(signal.reason).catch(() => {});
+    }
     reader.releaseLock();
   }
 }
@@ -615,8 +808,10 @@ export type UseRunStreamResult = {
    * unsubscribe function.
    */
   subscribeChapterProse: (chapterNumber: number, onText: (fullText: string) => void) => () => void;
-  /** Locally reflect a successful cancel (the DELETE endpoint emits no event). */
+  /** Locally reflect a durable cancellation request while confirmation is pending. */
   markCancelled: () => void;
+  /** Immediately recheck authoritative run health after degraded telemetry. */
+  checkHealth: () => Promise<void>;
 };
 
 export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStreamResult {
@@ -645,6 +840,7 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
   const connRef = React.useRef(initial.connection);
   const stoppedRef = React.useRef(false);
   const abortRef = React.useRef<(() => void) | null>(null);
+  const healthRefreshRef = React.useRef<() => Promise<void>>(async () => {});
 
   const [state, setState] = React.useState<RunStreamState>(initial.state);
 
@@ -665,13 +861,15 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
     async function fetchRunHealth(): Promise<boolean> {
       try {
         const res = await fetch(`/api/runs/${runId}`, { cache: "no-store", signal });
-        if (!res.ok) return false;
+        if (!res.ok) throw new Error(`Health check responded ${res.status}`);
         const json: unknown = await res.json();
         const parsed = parseRunHealthResponse(json, healthRef.current);
-        if (!parsed) return false;
+        if (!parsed) throw new Error("Health check returned an invalid response");
         healthRef.current = {
           ...healthRef.current,
           ...parsed.health,
+          telemetryDegraded: false,
+          consecutiveHealthFailures: 0,
         };
         if (parsed.totalUsd !== undefined) {
           accRef.current.totalUsd = Math.max(accRef.current.totalUsd, parsed.totalUsd);
@@ -698,10 +896,23 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
         }
         publish();
         return false;
-      } catch {
+      } catch (error) {
+        if (signal.aborted) return false;
+        const failures = (healthRef.current.consecutiveHealthFailures ?? 0) + 1;
+        healthRef.current.consecutiveHealthFailures = failures;
+        if (failures >= 3) {
+          healthRef.current.telemetryDegraded = true;
+          healthRef.current.health = "degraded";
+          healthRef.current.lastConnectionError =
+            error instanceof Error ? error.message : "Run health is temporarily unavailable";
+          publish("reconnecting");
+        }
         return false;
       }
     }
+    healthRefreshRef.current = async () => {
+      await fetchRunHealth();
+    };
 
     async function pollHealth() {
       while (!signal.aborted && !stoppedRef.current) {
@@ -732,31 +943,51 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
           publish("live");
 
           let dirty = false;
-          await readNdjson(res.body, (line) => {
-            received += 1;
-            try {
-              const parsed: unknown = JSON.parse(line);
-              const event = runEventSchema.safeParse(parsed);
-              if (event.success) {
-                applyEvent(acc, event.data);
-                healthRef.current.lastEventAt = new Date().toISOString();
-                if (eventShowsWork(event.data)) healthRef.current.noWorkStarted = false;
+          let terminalStageHint = false;
+          await readNdjson(
+            res.body,
+            (line) => {
+              received += 1;
+              try {
+                const parsed: unknown = JSON.parse(line);
+                const event = runEventSchema.safeParse(parsed);
+                if (event.success) {
+                  if (event.data.type === "stage" && TERMINAL_STAGES.has(event.data.stage)) {
+                    terminalStageHint = true;
+                  } else {
+                    applyEvent(acc, event.data);
+                  }
+                  healthRef.current.lastEventAt = new Date().toISOString();
+                  if (eventShowsWork(event.data)) healthRef.current.noWorkStarted = false;
+                  dirty = true;
+                } else {
+                  healthRef.current.invalidStreamRecords =
+                    (healthRef.current.invalidStreamRecords ?? 0) + 1;
+                  console.warn("Ignored invalid authoring stream record", {
+                    runId,
+                    issues: event.error.issues.length,
+                  });
+                  dirty = true;
+                }
+              } catch (error) {
+                healthRef.current.invalidStreamRecords =
+                  (healthRef.current.invalidStreamRecords ?? 0) + 1;
+                console.warn("Ignored malformed authoring stream record", { runId, error });
                 dirty = true;
               }
-            } catch {
-              // Drop lines that are not valid JSON.
-            }
-            if (dirty) {
-              publish();
-              dirty = false;
-            }
-          });
+              if (dirty) {
+                publish();
+                dirty = false;
+              }
+            },
+            signal,
+          );
 
-          // Stream ended. If the run reached a terminal stage this is the real
-          // end; otherwise confirm against the run row before reconnecting.
-          if (TERMINAL_STAGES.has(acc.stage)) {
-            publish("ended");
-            return;
+          // A stream event is only a hint. Confirm every apparent terminal
+          // state against authoritative run health before ending.
+          if (terminalStageHint || TERMINAL_STAGES.has(acc.stage)) {
+            if (await fetchRunHealth()) return;
+            throw new Error("Terminal stream event is not yet confirmed");
           }
           if (await fetchRunHealth()) return;
           throw new Error("Stream ended while the run was still active");
@@ -778,6 +1009,7 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
     return () => {
       controller.abort();
       abortRef.current = null;
+      healthRefreshRef.current = async () => {};
     };
   }, [runId, terminalAtMount, publish]);
 
@@ -788,10 +1020,50 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
       let received = 0;
       let text = "";
 
+      async function convergeFromSavedChapter(): Promise<
+        "saved" | "terminal_unsaved" | "active_unsaved" | "unavailable"
+      > {
+        try {
+          const saved = await fetch(`/api/runs/${runId}/chapters/${chapterNumber}`, {
+            cache: "no-store",
+            signal,
+          });
+          if (!saved.ok) return "unavailable";
+          const authoritative: unknown = await saved.json();
+          if (!authoritative || typeof authoritative !== "object") return "unavailable";
+          const record = authoritative as Record<string, unknown>;
+          if (record.saved === true && typeof record.content === "string") {
+            text = record.content;
+            if (!signal.aborted) onText(text);
+            return "saved";
+          }
+          if (
+            typeof record.runStatus === "string" &&
+            TERMINAL_STATUSES.has(record.runStatus as RunStatus)
+          ) {
+            return "terminal_unsaved";
+          }
+          return "active_unsaved";
+        } catch {
+          return "unavailable";
+        }
+      }
+
       async function run() {
         let attempt = 0;
         const namespace = encodeURIComponent(`chapter:${chapterNumber}`);
+
+        // A reload can discover a durably saved chapter from the page snapshot
+        // even when its Workflow stream is unavailable or remains open for the
+        // rest of an active book run. Prefer the manuscript row immediately.
+        const initialStatus = accRef.current.chapters.get(chapterNumber)?.status;
+        if (initialStatus && initialStatus !== "planned" && initialStatus !== "drafting") {
+          const initial = await convergeFromSavedChapter();
+          if (initial === "saved" || initial === "terminal_unsaved") return;
+        }
+
         while (!signal.aborted) {
+          let convergence: Awaited<ReturnType<typeof convergeFromSavedChapter>> | undefined;
           try {
             const res = await fetch(
               `/api/runs/${runId}/stream?ns=${namespace}&startIndex=${received}`,
@@ -801,26 +1073,53 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
             attempt = 0;
 
             let dirty = false;
-            await readNdjson(res.body, (line) => {
-              received += 1;
-              try {
-                const delta: unknown = JSON.parse(line);
-                if (typeof delta === "string" && delta.length > 0) {
-                  text += delta;
-                  dirty = true;
+            await readNdjson(
+              res.body,
+              (line) => {
+                received += 1;
+                try {
+                  const delta: unknown = JSON.parse(line);
+                  if (typeof delta === "string") {
+                    if (delta.length > 0) {
+                      text += delta;
+                      dirty = true;
+                    }
+                  } else {
+                    healthRef.current.invalidStreamRecords =
+                      (healthRef.current.invalidStreamRecords ?? 0) + 1;
+                    console.warn("Ignored invalid chapter stream record", {
+                      runId,
+                      chapterNumber,
+                    });
+                    publish();
+                  }
+                } catch (error) {
+                  healthRef.current.invalidStreamRecords =
+                    (healthRef.current.invalidStreamRecords ?? 0) + 1;
+                  console.warn("Ignored malformed chapter stream record", {
+                    runId,
+                    chapterNumber,
+                    error,
+                  });
+                  publish();
                 }
-              } catch {
-                // Drop lines that are not valid JSON.
-              }
-              if (dirty && !signal.aborted) {
-                onText(text);
-                dirty = false;
-              }
-            });
-            // Clean end: the run finished, so the prose replay is complete.
-            return;
+                if (dirty && !signal.aborted) {
+                  onText(text);
+                  dirty = false;
+                }
+              },
+              signal,
+            );
+            convergence = await convergeFromSavedChapter();
+            if (convergence === "saved" || convergence === "terminal_unsaved") return;
+            throw new Error("Chapter stream ended before the chapter was saved");
           } catch {
             if (signal.aborted) return;
+            // Stream transport is never the manuscript authority. A failed
+            // stream may coincide with a successful chapter commit, so check
+            // the saved row before entering another reconnect delay.
+            const recovered = convergence ?? (await convergeFromSavedChapter());
+            if (recovered === "saved" || recovered === "terminal_unsaved") return;
             attempt += 1;
             await sleep(backoffMs(attempt), signal);
           }
@@ -830,18 +1129,22 @@ export function useRunStream(runId: string, snapshot: RunSnapshot): UseRunStream
       void run();
       return () => controller.abort();
     },
-    [runId],
+    [publish, runId],
   );
 
   const markCancelled = React.useCallback(() => {
-    stoppedRef.current = true;
-    abortRef.current?.();
-    accRef.current.stage = "cancelled";
-    healthRef.current.databaseStatus = "cancelled";
-    healthRef.current.effectiveStatus = "cancelled";
-    healthRef.current.completedAt = new Date().toISOString();
-    publish("ended");
+    healthRef.current.cancellation = {
+      requestedAt: new Date().toISOString(),
+      reason: "Cancelled by author",
+    };
+    healthRef.current.health = "warning";
+    accRef.current.detail = "Stopping safely";
+    publish("live");
   }, [publish]);
 
-  return { state, subscribeChapterProse, markCancelled };
+  const checkHealth = React.useCallback(async () => {
+    await healthRefreshRef.current();
+  }, []);
+
+  return { state, subscribeChapterProse, markCancelled, checkHealth };
 }

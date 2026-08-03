@@ -1,24 +1,29 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { reviewChapter } from "@/ai/agents/editor";
 import {
-  completeMeteredDelivery,
   healReplayedMeteredDelivery,
-  meteredCallAuthorizationUsd,
+  MeteredDeliveryPendingError,
+  MeteredDeliveryReplayError,
   refundMeteredDelivery,
   type MeterCtx,
 } from "@/ai/metering";
-import { MODELS, type QualityTier } from "@/ai/models";
+import type { QualityTier } from "@/ai/models";
 import { getDb, schema } from "@/db";
 import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
-import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
+import { InsufficientCreditsError } from "@/lib/billing/credits";
 import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
 import { resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
+import {
+  chapterReviewDeliveryReceiptRef,
+  findChapterReviewDelivery,
+  persistChapterReviewDelivery,
+} from "@/lib/chapter-review-delivery";
 
 export const maxDuration = 300;
 
@@ -74,26 +79,33 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "Chapter not found" }, { status: 404 });
   }
 
+  const meteringIdempotencyKey = `chapter:${chapterId}:${idempotencyKey}`;
+  const deliveryReceiptRef = chapterReviewDeliveryReceiptRef({
+    projectId: ownership.projectId,
+    chapterId,
+    operationKey: idempotencyKey,
+  });
   const db = getDb();
-  const replayed = await db
-    .select()
-    .from(schema.suggestions)
-    .where(
-      and(
-        eq(schema.suggestions.chapterId, chapterId),
-        eq(schema.suggestions.passType, "review"),
-        sql`${schema.suggestions.anchor}->>'operationKey' = ${idempotencyKey}`,
-      ),
-    );
-  if (replayed.length > 0) {
+  const delivered = await findChapterReviewDelivery({
+    userId,
+    projectId: ownership.projectId,
+    chapterId,
+    operationKey: idempotencyKey,
+  });
+  if (delivered) {
     await healReplayedMeteredDelivery({
       userId,
       projectId: ownership.projectId,
       idempotencyKey,
+      deliveryReceiptRef,
+      meteringIdempotencyKey,
     });
-    return Response.json({ suggestions: replayed.map(toSuggestionDTO), skipped: 0 });
+    delivered.suggestions.sort((a, b) => a.anchor.start - b.anchor.start);
+    return Response.json({
+      suggestions: delivered.suggestions.map(toSuggestionDTO),
+      skipped: delivered.skipped,
+    });
   }
-
   // Replays above are read-only; only a new paid review consumes the limit.
   const limited = await rateLimit(LIMITS.llmEdit, req, userId);
   if (limited.limited) return limited.response;
@@ -128,18 +140,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     userId,
     projectId: ownership.projectId,
     authorizationUsd: 0.1,
-    idempotencyKey: `chapter:${chapterId}:${idempotencyKey}`,
+    idempotencyKey: meteringIdempotencyKey,
+    deliveryReceiptRef,
   };
   let reviewed;
   try {
-    await assertCreditsForUsd(
-      userId,
-      meteredCallAuthorizationUsd(meter, {
-        role: "editor",
-        operation: "editor.review",
-        model: MODELS[tier].editor,
-      }),
-    );
     reviewed = await reviewChapter({
       meter,
       tools: {
@@ -156,6 +161,31 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   } catch (error) {
     const spendResponse = projectSpendAccessErrorResponse(error);
     if (spendResponse) return spendResponse;
+    if (error instanceof MeteredDeliveryPendingError) {
+      return Response.json({ error: error.message, code: "delivery_pending" }, { status: 409 });
+    }
+    if (error instanceof MeteredDeliveryReplayError) {
+      const replay = await findChapterReviewDelivery({
+        userId,
+        projectId: ownership.projectId,
+        chapterId,
+        operationKey: idempotencyKey,
+      });
+      if (replay) {
+        await healReplayedMeteredDelivery({
+          userId,
+          projectId: ownership.projectId,
+          idempotencyKey,
+          deliveryReceiptRef,
+          meteringIdempotencyKey,
+        });
+        replay.suggestions.sort((a, b) => a.anchor.start - b.anchor.start);
+        return Response.json({
+          suggestions: replay.suggestions.map(toSuggestionDTO),
+          skipped: replay.skipped,
+        });
+      }
+    }
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: error.message }, { status: 402 });
     }
@@ -204,19 +234,65 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     );
   }
 
-  let rows: Array<typeof schema.suggestions.$inferSelect>;
+  let delivery: Awaited<ReturnType<typeof persistChapterReviewDelivery>>;
   try {
-    rows = values.length > 0 ? await db.insert(schema.suggestions).values(values).returning() : [];
-  } catch {
-    await refundMeteredDelivery(meter, "Chapter review could not be saved — refunded");
-    return Response.json({ error: "Could not save review suggestions" }, { status: 503 });
+    delivery = await persistChapterReviewDelivery({
+      userId,
+      projectId: ownership.projectId,
+      chapterId,
+      operationKey: idempotencyKey,
+      suggestions: values,
+      skipped,
+      meteredUsd: meter.lastSettlement?.meteredUsd ?? 0,
+      optionalLeaseRefs: meter.optionalOperationLeaseRefs ?? [],
+    });
+  } catch (persistenceError) {
+    try {
+      const verified = await findChapterReviewDelivery({
+        userId,
+        projectId: ownership.projectId,
+        chapterId,
+        operationKey: idempotencyKey,
+      });
+      if (verified) {
+        delivery = verified;
+      } else {
+        const [receipt] = await db
+          .select({ id: schema.creditLedger.id })
+          .from(schema.creditLedger)
+          .where(
+            and(
+              eq(schema.creditLedger.userId, userId),
+              eq(schema.creditLedger.projectId, ownership.projectId),
+              isNull(schema.creditLedger.runId),
+              eq(schema.creditLedger.kind, "adjustment"),
+              eq(schema.creditLedger.amount, "0"),
+              eq(schema.creditLedger.externalRef, deliveryReceiptRef),
+            ),
+          )
+          .limit(1);
+        if (receipt) {
+          throw new Error("Chapter-review delivery receipt exists without its immutable output");
+        }
+        await refundMeteredDelivery(meter, "Chapter review could not be saved — refunded");
+        return Response.json({ error: "Could not save review suggestions" }, { status: 503 });
+      }
+    } catch (verificationError) {
+      throw new AggregateError(
+        [persistenceError, verificationError],
+        "Chapter-review persistence failed and could not be verified",
+      );
+    }
   }
+  meter.optionalOperationLeaseRefs = [];
 
   // Order by anchor position so the panel reads top-to-bottom.
-  rows.sort((a, b) => a.anchor.start - b.anchor.start);
+  delivery.suggestions.sort((a, b) => a.anchor.start - b.anchor.start);
 
-  await completeMeteredDelivery(meter);
-  return Response.json({ suggestions: rows.map(toSuggestionDTO), skipped });
+  return Response.json({
+    suggestions: delivery.suggestions.map(toSuggestionDTO),
+    skipped: delivery.skipped,
+  });
 }
 
 /** Pending suggestions for a chapter — used by the editor to re-sync. */

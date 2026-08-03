@@ -1,5 +1,6 @@
 import type { Route } from "next";
-
+import { and, eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
 import { PackButtons } from "@/components/credits/pack-buttons";
 import { PurchaseReturnStatus } from "@/components/credits/purchase-return-status";
 import { RelativeTime } from "@/components/relative-time";
@@ -12,6 +13,12 @@ import {
 } from "@/lib/marketing/trial-offer";
 import { safeInternalPath } from "@/lib/security/url";
 import { getStudioAccess } from "@/lib/studio-access";
+import {
+  creditReturnRunId,
+  creditReturnWithoutRun,
+  creditReturnWithRun,
+} from "@/lib/credit-return";
+import { checkoutSessionId, hasOwnedSettledCheckout } from "@/lib/payments/checkout-return";
 
 export const metadata = { title: "Credits" };
 
@@ -26,21 +33,83 @@ const KIND_LABELS: Record<string, string> = {
 export default async function CreditsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ purchase?: string; return?: string }>;
+  searchParams: Promise<{
+    purchase?: string;
+    return?: string;
+    resumeRun?: string;
+    needed?: string;
+    session_id?: string;
+  }>;
 }) {
-  const { purchase, return: returnTo } = await searchParams;
+  const {
+    purchase,
+    return: returnTo,
+    resumeRun,
+    needed,
+    session_id: returnedSessionId,
+  } = await searchParams;
   // Only ever navigate back inside the app. The old startsWith pair accepted
   // "/\evil.com", which browsers normalize to "//evil.com" — an off-site link
   // rendered on a signed-in page right after a payment.
   const safeReturn = safeInternalPath(returnTo);
   const { userId } = await requireUser();
-  const [balance, ledger, access] = await Promise.all([
+  const resumeRunId = creditReturnRunId(resumeRun, safeReturn);
+  const purchaseSessionId = purchase === "complete" ? checkoutSessionId(returnedSessionId) : null;
+  const checkoutReturnTo =
+    safeReturn && resumeRunId ? creditReturnWithRun(safeReturn, resumeRunId) : safeReturn;
+  const [balance, ledger, access, resumeRows, purchaseConfirmed] = await Promise.all([
     getBalance(userId),
     listLedger(userId),
     getStudioAccess(userId),
+    resumeRunId
+      ? getDb()
+          .select({
+            id: schema.generationRuns.id,
+            status: schema.generationRuns.status,
+            pauseKind: schema.generationRuns.pauseKind,
+            pauseDetails: schema.generationRuns.pauseDetails,
+            cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+          })
+          .from(schema.generationRuns)
+          .where(
+            and(
+              eq(schema.generationRuns.id, resumeRunId),
+              eq(schema.generationRuns.userId, userId),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
+    hasOwnedSettledCheckout({ userId, sessionId: purchaseSessionId }),
   ]);
+  const resumeRow = resumeRows[0];
+  const resumeRequiredCredits =
+    resumeRow?.status === "awaiting_input" &&
+    resumeRow.pauseKind === "credits_topup" &&
+    resumeRow.cancellationRequestedAt === null &&
+    typeof resumeRow.pauseDetails?.requiredCredits === "number" &&
+    Number.isFinite(resumeRow.pauseDetails.requiredCredits)
+      ? resumeRow.pauseDetails.requiredCredits
+      : null;
+  const resumeNoLongerNeeded =
+    resumeRunId !== null &&
+    !(
+      resumeRow?.status === "awaiting_input" &&
+      resumeRow.pauseKind === "credits_topup" &&
+      resumeRow.cancellationRequestedAt === null
+    );
+  const requestedNeeded = Number(needed);
+  const preflightNeeded =
+    Number.isFinite(requestedNeeded) && requestedNeeded > 0 && requestedNeeded <= 10_000
+      ? requestedNeeded
+      : null;
+  const recommendedCredits =
+    resumeRequiredCredits !== null
+      ? Math.max(0, resumeRequiredCredits - balance)
+      : (preflightNeeded ?? undefined);
   const showFullBookUnlock = !access.fullBookUnlocked;
-  const continueTo = (safeReturn ?? "/studio/new") as Route;
+  const resolvedReturnTo =
+    resumeNoLongerNeeded && safeReturn ? creditReturnWithoutRun(safeReturn) : checkoutReturnTo;
+  const continueTo = (resolvedReturnTo ?? "/studio/new") as Route;
   const visibleLedger = access.fullBookUnlocked
     ? ledger
     : ledger.filter((entry) => entry.kind !== "grant");
@@ -48,13 +117,20 @@ export default async function CreditsPage({
   return (
     <div className="space-y-8">
       <PageHeader
-        label="Account / Credits"
         title="Credits"
         description="Credits are the studio’s working balance. See the quote before generation, then pay only for what actually runs."
       />
 
       {purchase === "complete" ? (
-        <PurchaseReturnStatus unlocked={access.fullBookUnlocked} continueTo={continueTo} />
+        <PurchaseReturnStatus
+          purchaseConfirmed={purchaseConfirmed}
+          continueTo={continueTo}
+          resumeRunId={resumeRunId}
+          resumeReady={resumeRequiredCredits !== null && balance >= resumeRequiredCredits}
+          resumeNoLongerNeeded={resumeNoLongerNeeded}
+          balance={balance}
+          requiredCredits={resumeRequiredCredits}
+        />
       ) : null}
       {purchase === "cancelled" ? (
         <p role="status" className="rounded-md border border-border px-4 py-3 text-sm">
@@ -107,8 +183,9 @@ export default async function CreditsPage({
         </div>
         <PackButtons
           packs={CREDIT_PACKS}
-          returnTo={safeReturn ?? undefined}
+          returnTo={resolvedReturnTo ?? undefined}
           unlockingFullBook={showFullBookUnlock}
+          recommendedCredits={recommendedCredits}
         />
       </section>
 

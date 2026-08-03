@@ -100,6 +100,7 @@ function snapshot(overrides: Record<string, unknown> = {}) {
     workflowRunId: null,
     acceptanceUncertainAt: new Date("2026-07-30T12:00:00.000Z"),
     acceptanceDispatchClaimedAt: null,
+    cancellationRequestedAt: null,
     ...overrides,
   };
 }
@@ -161,6 +162,22 @@ describe("POST /api/runs/[runId]/retry-start", () => {
       reattached: true,
     });
     expect(mocks.rateLimit).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("never redispatches a run after Stop has been requested", async () => {
+    mockSelectRows([snapshot({ cancellationRequestedAt: new Date("2026-07-30T12:09:00.000Z") })]);
+
+    const response = await request();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "cancellation_requested",
+      handoffConfirmed: false,
+      confirmationPending: false,
+    });
+    expect(mocks.authorizeProjectSpend).not.toHaveBeenCalled();
+    expect(mocks.claimUncertainAuthoringRun).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
   });
 

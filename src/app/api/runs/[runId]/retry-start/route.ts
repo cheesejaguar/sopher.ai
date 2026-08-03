@@ -66,6 +66,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
       workflowRunId: schema.generationRuns.workflowRunId,
       acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
       acceptanceDispatchClaimedAt: schema.generationRuns.acceptanceDispatchClaimedAt,
+      cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
     })
     .from(schema.generationRuns)
     .where(and(eq(schema.generationRuns.id, runId), eq(schema.generationRuns.userId, userId)))
@@ -76,6 +77,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
     acceptanceUncertainAt: snapshot.acceptanceUncertainAt,
     acceptanceDispatchClaimedAt: snapshot.acceptanceDispatchClaimedAt,
   });
+  if (snapshot.cancellationRequestedAt) {
+    return Response.json(
+      {
+        error: "This run is stopping and cannot be redispatched",
+        code: "cancellation_requested",
+        runId,
+        status: snapshot.status,
+        handoffConfirmed: false,
+        confirmationPending: false,
+      },
+      { status: 409 },
+    );
+  }
   if (snapshot.workflowRunId) {
     return Response.json(
       {
@@ -217,10 +231,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
         workflowRunId: schema.generationRuns.workflowRunId,
         acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
         acceptanceDispatchClaimedAt: schema.generationRuns.acceptanceDispatchClaimedAt,
+        cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
       })
       .from(schema.generationRuns)
       .where(and(eq(schema.generationRuns.id, runId), eq(schema.generationRuns.userId, userId)))
       .limit(1);
+    if (current?.cancellationRequestedAt) {
+      return Response.json(
+        {
+          error: "This run is stopping and cannot be redispatched",
+          code: "cancellation_requested",
+          runId,
+          status: current.status,
+          handoffConfirmed: false,
+          confirmationPending: false,
+        },
+        { status: 409 },
+      );
+    }
     if (current?.workflowRunId) {
       return Response.json(
         {

@@ -280,6 +280,17 @@ export async function reserveCredits(input: {
       from wallet
       where wallet.balance >= ${String(credits)}
         and not exists (select 1 from existing)
+        and (
+          ${input.runId ?? null}::uuid is null
+          or exists (
+            select 1
+            from generation_runs active_run
+            where active_run.id = ${input.runId ?? null}
+              and active_run.user_id = ${input.userId}
+              and active_run.status in ('queued', 'running', 'awaiting_input')
+              and active_run.cancellation_requested_at is null
+          )
+        )
       on conflict (external_ref) do nothing
       returning id
     )

@@ -32,6 +32,8 @@ export class SuspendedError extends Error {
 
 const DEV_USER_ID = "dev-user";
 const E2E_USER_HEADER = "x-sopher-e2e-user";
+let devFallbackProvisioning: Promise<{ userId: string }> | null = null;
+let devFallbackWarningShown = false;
 
 async function isolatedE2EUser(): Promise<{ userId: string } | null> {
   if (!isE2EWorkflowStubEnabled()) return null;
@@ -93,6 +95,30 @@ async function devFallbackUser(): Promise<{ userId: string }> {
 }
 
 /**
+ * Private pages can resolve auth many times during one streamed render. The
+ * shared development identity only needs provisioning once per server
+ * process; repeating the upsert and ledger grant for every nested layout can
+ * overwhelm a small local/preview database and make alternate browser engines
+ * appear to hang. Isolated E2E identities intentionally bypass this cache.
+ */
+function provisionDevFallbackOnce(): Promise<{ userId: string }> {
+  if (!devFallbackProvisioning) {
+    if (!devFallbackWarningShown) {
+      console.warn(
+        "[auth] Clerk keys absent — serving shared dev fallback identity (dev/ALLOW_DEV_AUTH opt-in)",
+      );
+      devFallbackWarningShown = true;
+    }
+    devFallbackProvisioning = devFallbackUser().catch((error: unknown) => {
+      // A transient database failure must remain retryable on the next request.
+      devFallbackProvisioning = null;
+      throw error;
+    });
+  }
+  return devFallbackProvisioning;
+}
+
+/**
  * Reads the first-touch attribution cookie set by the proxy on the landing
  * request. Never throws: attribution is a nice-to-have, and a user who cannot
  * be attributed must still be able to sign up.
@@ -118,10 +144,7 @@ export async function requireUser(): Promise<{ userId: string }> {
     if (devAuthAllowed) {
       const isolatedIdentity = await isolatedE2EUser();
       if (isolatedIdentity) return isolatedIdentity;
-      console.warn(
-        "[auth] Clerk keys absent — serving shared dev fallback identity (dev/ALLOW_DEV_AUTH opt-in)",
-      );
-      return devFallbackUser();
+      return provisionDevFallbackOnce();
     }
     // Preserve the fail-closed runtime behavior without trying to evaluate
     // private routes during a public production build that intentionally has

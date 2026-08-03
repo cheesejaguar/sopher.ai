@@ -22,13 +22,14 @@ export default async function ProjectSettingsPage({
       <header>
         <h2 className="font-display text-xl font-semibold tracking-tight">Project settings</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Shape, voice, and content boundaries. Saving here never changes existing prose. A future
-          full-book run will ask before replacing the manuscript and keep the earlier chapters in
-          revision history.
+          {project.experience === "trial_short_story"
+            ? "Voice, perspective, and content boundaries remain yours. The included story’s length and Standard quality stay fixed; a full-length setup unlocks those controls."
+            : "Shape, voice, and content boundaries. Saving here never changes existing prose. A future full-book run will ask before replacing the manuscript and keep the earlier chapters in revision history."}
         </p>
       </header>
       <ProjectSettingsForm
         projectId={projectId}
+        experience={project.experience}
         defaults={{
           genre: project.genre ?? "",
           targetChapters: project.targetChapters,

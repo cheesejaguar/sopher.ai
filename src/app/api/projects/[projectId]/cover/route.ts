@@ -6,6 +6,8 @@ import {
   gatewayOptions,
   healReplayedMeteredDelivery,
   metered,
+  MeteredDeliveryPendingError,
+  MeteredDeliveryReplayError,
   meteredCallAuthorizationUsd,
   completeMeteredDelivery,
   refundMeteredDelivery,
@@ -14,7 +16,12 @@ import {
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema, withDbTransaction } from "@/db";
-import { replaceCoverAssetTransaction } from "@/db/transaction-operations";
+import {
+  COVER_DELIVERY_TOOL_ID,
+  persistCoverDeliveryTransaction,
+  promoteContentToolDeliveryReceiptTransaction,
+  promoteLegacyImageDeliveryTransaction,
+} from "@/db/transaction-operations";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
@@ -26,6 +33,7 @@ import {
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
+import { optionalDeliveryReceiptRef } from "@/lib/billing/optional-delivery";
 
 /**
  * Generates a book cover from the book's own identity — title, synopsis,
@@ -91,6 +99,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       synopsis: schema.books.synopsis,
       genre: schema.projects.genre,
       settings: schema.projects.settings,
+      frontMatter: schema.books.frontMatter,
     })
     .from(schema.books)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.books.projectId))
@@ -98,8 +107,56 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     .limit(1);
   if (!row) return Response.json({ error: "Book not found" }, { status: 404 });
 
-  const [replayed] = await db
-    .select({ url: schema.assets.blobUrl })
+  const meteringIdempotencyKey = `project:${projectId}:${idempotencyKey}`;
+  const deliveryReceiptRef = optionalDeliveryReceiptRef({
+    projectId,
+    resource: "cover",
+    operationKey: idempotencyKey,
+  });
+  const loadImmutableDelivery = () =>
+    withDbTransaction((tx) =>
+      promoteContentToolDeliveryReceiptTransaction<{ url: string }>(tx, {
+        userId,
+        projectId,
+        chapterId: null,
+        toolId: COVER_DELIVERY_TOOL_ID,
+        operationKey: idempotencyKey,
+        deliveryReceiptRef,
+      }),
+    );
+  const hasImmutableReceipt = async () => {
+    const [receipt] = await db
+      .select({ id: schema.creditLedger.id })
+      .from(schema.creditLedger)
+      .where(
+        and(
+          eq(schema.creditLedger.userId, userId),
+          eq(schema.creditLedger.projectId, projectId),
+          eq(schema.creditLedger.externalRef, deliveryReceiptRef),
+        ),
+      )
+      .limit(1);
+    return Boolean(receipt);
+  };
+  const currentCoverUrl = () => {
+    const value = (row.frontMatter as Record<string, unknown>).coverUrl;
+    return typeof value === "string" ? value : null;
+  };
+
+  const immutableDelivery = await loadImmutableDelivery();
+  if (immutableDelivery) {
+    await healReplayedMeteredDelivery({
+      userId,
+      projectId,
+      idempotencyKey,
+      deliveryReceiptRef,
+      meteringIdempotencyKey,
+    });
+    return Response.json({ url: currentCoverUrl() ?? immutableDelivery.url, replayed: true });
+  }
+
+  const [legacyReplay] = await db
+    .select({ id: schema.assets.id, url: schema.assets.blobUrl })
     .from(schema.assets)
     .where(
       and(
@@ -109,9 +166,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       ),
     )
     .limit(1);
-  if (replayed) {
-    await healReplayedMeteredDelivery({ userId, projectId, idempotencyKey });
-    return Response.json({ url: replayed.url });
+  if (legacyReplay) {
+    const promoted = await withDbTransaction((tx) =>
+      promoteLegacyImageDeliveryTransaction(tx, {
+        userId,
+        projectId,
+        assetId: legacyReplay.id,
+        kind: "cover",
+        targetId: row.bookId,
+        operationKey: idempotencyKey,
+        deliveryReceiptRef,
+      }),
+    );
+    if (promoted) {
+      await healReplayedMeteredDelivery({
+        userId,
+        projectId,
+        idempotencyKey,
+        deliveryReceiptRef,
+        meteringIdempotencyKey,
+      });
+      return Response.json({ url: currentCoverUrl() ?? promoted.url, replayed: true });
+    }
   }
 
   const spendDenied = await authorizeProjectSpend({
@@ -127,7 +203,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     userId,
     projectId,
     authorizationUsd: COVER_USD,
-    idempotencyKey: `project:${projectId}:${idempotencyKey}`,
+    idempotencyKey: meteringIdempotencyKey,
+    deliveryReceiptRef,
   };
   const callInfo = { role: "content-tool", operation: "cover.generate", model };
   const authorizationUsd = meteredCallAuthorizationUsd(meter, callInfo);
@@ -146,6 +223,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   } catch (error) {
     const spendResponse = projectSpendAccessErrorResponse(error);
     if (spendResponse) return spendResponse;
+    if (error instanceof MeteredDeliveryPendingError) {
+      return Response.json({ error: error.message, code: "delivery_pending" }, { status: 409 });
+    }
+    if (error instanceof MeteredDeliveryReplayError) {
+      const delivered = await loadImmutableDelivery();
+      if (delivered) {
+        await healReplayedMeteredDelivery({
+          userId,
+          projectId,
+          idempotencyKey,
+          deliveryReceiptRef,
+          meteringIdempotencyKey,
+        });
+        return Response.json({ url: currentCoverUrl() ?? delivered.url, replayed: true });
+      }
+    }
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: "Not enough credits" }, { status: 402 });
     }
@@ -208,41 +301,35 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
 
   let displacedCover: { id: string; pathname: string } | undefined;
   let displacedCandidate: { id: string; pathname: string } | undefined;
+  let deliveredUrl = blob.url;
   try {
-    displacedCover = await withDbTransaction((tx) =>
-      replaceCoverAssetTransaction(tx, {
+    const delivery = await withDbTransaction((tx) =>
+      persistCoverDeliveryTransaction(tx, {
+        userId,
         projectId,
         bookId: row.bookId,
         title: row.title,
         operationKey: idempotencyKey,
+        deliveryReceiptRef,
         url: blob.url,
         pathname: blob.pathname,
         contentType,
         sizeBytes: file.uint8Array.byteLength,
+        usd: (meter.lastSettlement?.meteredUsd ?? 0).toFixed(6),
+        optionalLeaseRefs: meter.optionalOperationLeaseRefs,
         onDisplacedCandidate: (candidate) => {
           displacedCandidate = candidate;
         },
       }),
     );
+    deliveredUrl = delivery.output.url;
+    displacedCover = delivery.displaced;
   } catch (error) {
-    // COMMIT acknowledgement is ambiguous. Only refund when the exact asset
-    // is proven absent.
-    let committed = false;
+    // COMMIT acknowledgement is ambiguous. The immutable content-tool row and
+    // its unique ledger receipt are stronger evidence than a replaceable asset.
+    let committed: { url: string } | null = null;
     try {
-      const [storedAsset] = await db
-        .select({ id: schema.assets.id })
-        .from(schema.assets)
-        .where(
-          and(
-            eq(schema.assets.projectId, projectId),
-            eq(schema.assets.blobPathname, blob.pathname),
-          ),
-        )
-        .limit(1);
-      // The asset and pointer are inserted in one transaction. The exact,
-      // freshly generated pathname is sufficient proof that COMMIT happened;
-      // a newer concurrent cover may already have advanced the pointer.
-      committed = Boolean(storedAsset);
+      committed = await loadImmutableDelivery();
     } catch (verificationError) {
       throw new AggregateError(
         [
@@ -254,7 +341,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         "Cover persistence failed and could not be verified",
       );
     }
-    if (!committed) return refundAndFail("Could not store the cover");
+    if (!committed) {
+      if (await hasImmutableReceipt()) {
+        throw new AggregateError(
+          [error instanceof Error ? error : new Error(String(error))],
+          "Cover delivery receipt exists but its immutable output is missing",
+        );
+      }
+      return refundAndFail("Could not store the cover");
+    }
+    deliveredUrl = committed.url;
     displacedCover = displacedCandidate;
   }
 
@@ -264,5 +360,5 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     assetId: displacedCover?.id,
     pathname: displacedCover?.pathname,
   });
-  return Response.json({ url: blob.url });
+  return Response.json({ url: deliveredUrl });
 }

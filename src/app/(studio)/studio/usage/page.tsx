@@ -145,7 +145,6 @@ export default function UsagePage() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <PageHeader
-        label="Account / Usage"
         title="Usage"
         description="Follow credit use by book, agent, and model. Metered USD stays visible as the underlying detail."
       />

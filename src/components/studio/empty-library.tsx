@@ -13,7 +13,6 @@ type EmptyLibraryMode = "included_story" | "full_book" | "verify_email" | "purch
 const EMPTY_LIBRARY_COPY: Record<
   EmptyLibraryMode,
   {
-    label: string;
     title: string;
     description: string;
     action: string;
@@ -21,14 +20,12 @@ const EMPTY_LIBRARY_COPY: Record<
   }
 > = {
   included_story: {
-    label: "Included story / no card",
     title: "Turn one idea into a complete short story.",
     description: `Write three chapters with the complete Studio, story bible, editor, manuscript, and export experience. ${INCLUDED_STORY_NO_CARD_NOTE} When you are ready to go full length, the next step is simple. ${FULL_BOOK_UNLOCK_DESCRIPTION}`,
     action: "Create my included story",
     href: "/studio/new",
   },
   full_book: {
-    label: "New production",
     title: "Your next book starts with a brief.",
     description:
       "Describe the story in your own words, choose its length and quality, and review the credit quote before production begins.",
@@ -36,7 +33,6 @@ const EMPTY_LIBRARY_COPY: Record<
     href: "/studio/new",
   },
   verify_email: {
-    label: "Included story / ready",
     title: "Verify your email to begin.",
     description:
       "A verified account includes one complete short story with every Studio tool and no card required. Continue to see the verification reminder.",
@@ -44,7 +40,6 @@ const EMPTY_LIBRARY_COPY: Record<
     href: "/studio/new",
   },
   purchase_required: {
-    label: "Full-length production",
     title: "Unlock your next full-length book.",
     description: `${FULL_BOOK_UNLOCK_DESCRIPTION} Credits are then used only for work that actually runs.`,
     action: "View credit packs",
@@ -56,10 +51,9 @@ export function EmptyLibrary({ mode }: { mode: EmptyLibraryMode }) {
   const copy = EMPTY_LIBRARY_COPY[mode];
 
   return (
-    <div className="instrument-surface-raised grid min-h-[28rem] overflow-hidden rounded-sm lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)]">
+    <div className="instrument-surface grid min-h-[28rem] overflow-hidden rounded-sm lg:grid-cols-[minmax(0,0.9fr)_minmax(22rem,1.1fr)]">
       <div className="flex flex-col justify-center p-6 sm:p-10">
-        <p className="folio-label text-primary">{copy.label}</p>
-        <div className="mt-5 max-w-lg space-y-3">
+        <div className="max-w-lg space-y-3">
           <h2 className="text-2xl font-semibold tracking-[-0.025em] text-balance sm:text-3xl">
             {copy.title}
           </h2>

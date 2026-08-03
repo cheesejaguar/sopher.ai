@@ -1,6 +1,6 @@
 import { generateText, Output } from "ai";
 import { and, eq } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { schema, withDbTransaction, type DbTransaction } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
@@ -61,40 +61,51 @@ export async function generateChapterSummary(input: ChapterSummaryInput): Promis
 export async function persistChapterSummary(
   input: ChapterSummaryInput,
   summary: ChapterSummary,
+  transaction?: DbTransaction,
 ): Promise<void> {
-  const db = getDb();
-  await db
-    .update(schema.chapters)
-    .set({ summary: summary.summary, updatedAt: new Date() })
-    .where(
-      and(
-        eq(schema.chapters.bookId, input.bookId),
-        eq(schema.chapters.chapterNumber, input.chapterNumber),
-      ),
+  const persist = async (db: DbTransaction) => {
+    await db
+      .update(schema.chapters)
+      .set({ summary: summary.summary, updatedAt: new Date() })
+      .where(
+        and(
+          eq(schema.chapters.bookId, input.bookId),
+          eq(schema.chapters.chapterNumber, input.chapterNumber),
+        ),
+      );
+
+    await applyEntityDeltas(
+      {
+        bookId: input.bookId,
+        chapterNumber: input.chapterNumber,
+        newFacts: summary.newFacts,
+        relationships: summary.relationships,
+      },
+      db,
     );
 
-  await applyEntityDeltas({
-    bookId: input.bookId,
-    chapterNumber: input.chapterNumber,
-    newFacts: summary.newFacts,
-    relationships: summary.relationships,
-  });
-
-  if (summary.moderation?.flagged) {
-    const [book] = await db
-      .select({ projectId: schema.books.projectId })
-      .from(schema.books)
-      .where(eq(schema.books.id, input.bookId))
-      .limit(1);
-    if (book) {
-      await recordModerationFlag({
-        projectId: book.projectId,
-        source: "chapter",
-        chapterNumber: input.chapterNumber,
-        verdict: summary.moderation,
-      });
+    if (summary.moderation?.flagged) {
+      const [book] = await db
+        .select({ projectId: schema.books.projectId })
+        .from(schema.books)
+        .where(eq(schema.books.id, input.bookId))
+        .limit(1);
+      if (book) {
+        await recordModerationFlag(
+          {
+            projectId: book.projectId,
+            source: "chapter",
+            chapterNumber: input.chapterNumber,
+            verdict: summary.moderation,
+          },
+          db,
+        );
+      }
     }
-  }
+  };
+
+  if (transaction) return persist(transaction);
+  await withDbTransaction(persist);
 }
 
 export async function summarizeChapter(input: ChapterSummaryInput): Promise<ChapterSummary> {

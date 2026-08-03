@@ -41,19 +41,20 @@ test.describe("studio dashboard", () => {
 test.describe("studio usage", () => {
   test("renders the credit wallet and spend tables", async ({ page }, testInfo) => {
     await page.goto("/studio/usage");
-    await expect(page.getByRole("heading", { level: 1, name: "Usage" })).toBeVisible();
+    const main = page.locator("#main-content");
+    await expect(main.getByRole("heading", { level: 1, name: "Usage" })).toBeVisible();
 
     // Wallet card streams in from the ledger.
-    await expect(page.getByRole("heading", { name: "Credits" })).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByText("Available balance", { exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Buy credits/ })).toBeVisible();
+    await expect(main.getByRole("heading", { name: "Credits" })).toBeVisible({ timeout: 20_000 });
+    await expect(main.getByText("Available balance", { exact: true })).toBeVisible();
+    await expect(main.getByRole("link", { name: /Buy credits/ })).toBeVisible();
 
     // Spend breakdowns. Queried by role: each card title is a heading, and the
     // tables carry sr-only captions that would also match a bare text query.
-    await expect(page.getByRole("heading", { name: "Spend by book" })).toBeVisible({
+    await expect(main.getByRole("heading", { name: "Spend by book" })).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByRole("heading", { name: "Spend by role" })).toBeVisible({
+    await expect(main.getByRole("heading", { name: "Spend by role" })).toBeVisible({
       timeout: 20_000,
     });
 
@@ -209,8 +210,9 @@ test.describe("admin dashboard", () => {
     await expect(main.getByRole("heading", { name: "Users" })).toBeVisible({ timeout: 20_000 });
     const devUser = main.getByRole("link", { name: "dev-author@example.invalid" });
     await expect(devUser).toBeVisible();
+    await expect(devUser).toHaveAttribute("href", "/admin/users/dev-user");
     await fullPageScreenshot(page, testInfo, "admin-users");
-    await devUser.click();
+    await Promise.all([page.waitForURL(/\/admin\/users\/dev-user$/), devUser.click()]);
     await expect(page.getByRole("button", { name: "Adjust credits" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Suspend|Unsuspend/ })).toBeVisible();
     await fullPageScreenshot(page, testInfo, "admin-user-detail");

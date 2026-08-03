@@ -58,6 +58,7 @@ const fullBookAccess: StudioAccess = {
   hasPriorMeteredUsage: false,
   fullBookUnlocked: true,
   trialProjectId: null,
+  trialProjectCompleted: false,
   canCreateTrial: false,
   creationExperience: "full_book",
   reason: "full_book_unlocked",
@@ -70,6 +71,7 @@ const trialAccess: StudioAccess = {
   hasPriorMeteredUsage: false,
   fullBookUnlocked: false,
   trialProjectId: null,
+  trialProjectCompleted: false,
   canCreateTrial: true,
   creationExperience: "trial_short_story",
   reason: "trial_available",
@@ -82,6 +84,7 @@ const existingTrialAccess: StudioAccess = {
   hasPriorMeteredUsage: false,
   fullBookUnlocked: false,
   trialProjectId: "trial-project-1",
+  trialProjectCompleted: false,
   canCreateTrial: false,
   creationExperience: null,
   reason: "trial_exists",
@@ -105,7 +108,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mockEstimate() {
+function mockEstimate(balance = 10) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ({
@@ -116,7 +119,7 @@ function mockEstimate() {
             tier: "standard",
             totalUsd: 0.6,
             credits: 1.7,
-            balance: 10,
+            balance,
             estimatedMinutes: 12,
             stages: [{ stage: "Concept", usd: 0.1 }],
           },
@@ -158,6 +161,9 @@ describe("NewBookWizard", () => {
 
     expect(
       await screen.findByRole("heading", { name: /pick the shelf it belongs on/i }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("complementary", { name: "Book setup progress and summary" }),
     ).toBeVisible();
     expect(screen.getByText("Step 01 / 04")).toBeVisible();
     expect(screen.getByText("Fantasy").closest("button")).toHaveAttribute("aria-pressed", "true");
@@ -240,7 +246,7 @@ describe("NewBookWizard", () => {
     expect(replace).toHaveBeenCalledWith("/projects/new-full-book-project/write");
   });
 
-  it("shows the existing-story and full-book choices instead of defaulting null access to book controls", () => {
+  it("keeps the full-length upsell out of an unfinished included story", () => {
     render(<NewBookWizard userId="user-gated" access={existingTrialAccess} />);
 
     expect(
@@ -250,13 +256,26 @@ describe("NewBookWizard", () => {
       "href",
       "/projects/trial-project-1/write",
     );
+    expect(
+      screen.queryByRole("link", { name: "Take this story to full length" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText(/does not require a card/i)).toBeVisible();
+    expect(screen.queryByText("Step 01 / 04")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Chapters")).not.toBeInTheDocument();
+  });
+
+  it("offers full-length continuation after the included story is complete", () => {
+    render(
+      <NewBookWizard
+        userId="user-gated-complete"
+        access={{ ...existingTrialAccess, trialProjectCompleted: true }}
+      />,
+    );
+
     expect(screen.getByRole("link", { name: "Take this story to full length" })).toHaveAttribute(
       "href",
       fullBookUnlockHref("trial-project-1"),
     );
-    expect(screen.getByText(/does not require a card/i)).toBeVisible();
-    expect(screen.queryByText("Step 01 / 04")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Chapters")).not.toBeInTheDocument();
   });
 
   it("keeps verification and purchase-required gates explicit", () => {
@@ -348,6 +367,53 @@ describe("NewBookWizard", () => {
     expect(await screen.findByLabelText("Working title")).toHaveValue("The Last Lantern");
   });
 
+  it("returns a valid same-account checkout draft to final confirmation", async () => {
+    mockEstimate();
+    window.localStorage.setItem(
+      wizardDraftKey("user-checkout-return", "full_book"),
+      serializeDraft(
+        {
+          ...initialWizardState,
+          genre: "mystery",
+          title: "The Last Lantern",
+          brief: "A retired keeper finds a coded warning inside the harbor lantern.",
+        },
+        "full_book",
+      ),
+    );
+
+    render(
+      <NewBookWizard userId="user-checkout-return" access={fullBookAccess} resumeAfterCheckout />,
+    );
+
+    expect(await screen.findByText("Step 04 / 04")).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "Continue where you left off?" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText("The Last Lantern").length).toBeGreaterThan(0);
+    expect(await screen.findByRole("button", { name: "Start the book" })).toBeVisible();
+  });
+
+  it("never uses another account's draft for a checkout return", async () => {
+    window.localStorage.setItem(
+      wizardDraftKey("different-user", "full_book"),
+      serializeDraft(
+        {
+          ...initialWizardState,
+          genre: "mystery",
+          title: "A Different Book",
+          brief: "This valid setup belongs to a different signed-in account.",
+        },
+        "full_book",
+      ),
+    );
+
+    render(<NewBookWizard userId="current-user" access={fullBookAccess} resumeAfterCheckout />);
+
+    expect(await screen.findByText("Step 01 / 04")).toBeVisible();
+    expect(screen.queryByText("A Different Book")).not.toBeInTheDocument();
+  });
+
   it("requires the visible working title before advancing", async () => {
     render(
       <NewBookWizard initialGenre="science_fiction" userId="user-3" access={fullBookAccess} />,
@@ -414,6 +480,36 @@ describe("NewBookWizard", () => {
       "The changed shape could not be quoted.",
     );
     fireEvent.click(start);
+    expect(startBook).not.toHaveBeenCalled();
+  });
+
+  it("sends an underfunded full book to credit packs before starting", async () => {
+    mockEstimate(0.5);
+    render(
+      <NewBookWizard initialGenre="mystery" userId="user-needs-credits" access={fullBookAccess} />,
+    );
+    await screen.findByText("Step 01 / 04");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.change(screen.getByLabelText("Working title"), {
+      target: { value: "The Last Receipt" },
+    });
+    fireEvent.change(screen.getByLabelText("Your brief"), {
+      target: { value: "A bookseller finds a receipt dated one day after the shop disappears." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    const addCredits = await screen.findByRole("button", { name: "Add credits to start" });
+    expect(addCredits).toHaveAttribute(
+      "href",
+      "/studio/credits?return=%2Fstudio%2Fnew%3Fresume%3Dcheckout",
+    );
+    addCredits.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    fireEvent.click(addCredits);
+    expect(
+      window.localStorage.getItem(wizardDraftKey("user-needs-credits", "full_book")),
+    ).toContain("The Last Receipt");
+    expect(screen.queryByRole("button", { name: "Start the book" })).not.toBeInTheDocument();
     expect(startBook).not.toHaveBeenCalled();
   });
 

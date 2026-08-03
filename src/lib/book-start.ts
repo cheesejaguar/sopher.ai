@@ -15,7 +15,12 @@ export type BookGenerationSnapshot = Pick<
 >;
 
 export type StartableProject = BookGenerationSnapshot &
-  Pick<typeof schema.projects.$inferSelect, "id">;
+  Pick<typeof schema.projects.$inferSelect, "id" | "updatedAt">;
+
+export type ChapterRegenerationTarget = {
+  chapterId: string;
+  chapterNumber: number;
+};
 
 /**
  * A wizard start may only reattach to the full-book run it is responsible for.
@@ -32,6 +37,7 @@ export function canReattachBookStart(
 export function buildBookGenerationConfig(project: BookGenerationSnapshot): GenerationConfig {
   const trial = project.experience === "trial_short_story";
   return {
+    protocolVersion: 2,
     productionMode: project.experience,
     tier: trial ? TRIAL_STORY_CONFIG.tier : (project.settings.qualityTier ?? "standard"),
     requireOutlineApproval: trial
@@ -61,11 +67,29 @@ export function buildBookGenerationConfig(project: BookGenerationSnapshot): Gene
 }
 
 /** Uses the same frozen identity/entitlement while narrowing work to one chapter. */
-export function buildChapterRegenerationConfig(project: BookGenerationSnapshot): GenerationConfig {
+export function buildChapterRegenerationConfig(
+  project: BookGenerationSnapshot,
+  target?: ChapterRegenerationTarget,
+): GenerationConfig {
   return {
     ...buildBookGenerationConfig(project),
     requireOutlineApproval: false,
     waveSize: 1,
     chapterRegeneration: true,
+    ...(target ? { chapterRegenerationTarget: target } : {}),
   };
+}
+
+/** A caller-stable key may reattach only to the exact chapter it originally targeted. */
+export function canReattachChapterRegeneration(
+  config: unknown,
+  target: ChapterRegenerationTarget,
+): boolean {
+  if (!config || typeof config !== "object") return false;
+  const candidate = config as Partial<GenerationConfig>;
+  return (
+    candidate.chapterRegeneration === true &&
+    candidate.chapterRegenerationTarget?.chapterId === target.chapterId &&
+    candidate.chapterRegenerationTarget.chapterNumber === target.chapterNumber
+  );
 }

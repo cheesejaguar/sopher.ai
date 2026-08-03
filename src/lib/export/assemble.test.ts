@@ -9,6 +9,7 @@ import {
   parseInline,
   stripInline,
   MANUSCRIPT_AUTHOR,
+  selectManuscriptOwnerRun,
 } from "./assemble";
 import { diagramSourceHash, fitWidth, pngDimensions } from "./figures";
 import { filenameStem } from "./types";
@@ -48,6 +49,88 @@ describe("buildManuscript", () => {
   });
 });
 
+describe("export manuscript ownership", () => {
+  it("ignores a newer zero-work failed rerun with a shorter shape", () => {
+    const completedRunId = "11111111-1111-4111-8111-111111111111";
+    expect(
+      selectManuscriptOwnerRun([
+        {
+          id: "22222222-2222-4222-8222-222222222222",
+          status: "failed",
+          config: { targetChapters: 3 },
+        },
+        {
+          id: completedRunId,
+          status: "completed",
+          config: {
+            targetChapters: 10,
+            manuscriptPrepared: true,
+            completion: {
+              finalized: {
+                sourceRunId: completedRunId,
+                manuscriptDigest: "complete-ten-chapter-digest",
+              },
+            },
+          },
+        },
+      ]),
+    ).toMatchObject({
+      id: completedRunId,
+      status: "completed",
+      config: { targetChapters: 10 },
+    });
+  });
+
+  it("uses a newer run once its manuscript preparation checkpoint committed", () => {
+    expect(
+      selectManuscriptOwnerRun([
+        {
+          id: "new-prepared-run",
+          status: "failed",
+          config: { targetChapters: 3, manuscriptPrepared: true },
+        },
+        {
+          id: "old-completed-run",
+          status: "completed",
+          config: {
+            targetChapters: 10,
+            completion: {
+              finalized: {
+                sourceRunId: "old-completed-run",
+                manuscriptDigest: "old-digest",
+              },
+            },
+          },
+        },
+      ]),
+    ).toMatchObject({ id: "new-prepared-run" });
+  });
+
+  it("keeps a completed pinned-v1 manuscript exportable without a v2 digest", () => {
+    expect(
+      selectManuscriptOwnerRun([
+        {
+          id: "legacy-completed-run",
+          status: "completed",
+          config: { protocolVersion: 1, targetChapters: 8 },
+        },
+      ]),
+    ).toMatchObject({
+      id: "legacy-completed-run",
+      config: { targetChapters: 8 },
+    });
+    expect(
+      selectManuscriptOwnerRun([
+        {
+          id: "v2-contradiction",
+          status: "completed",
+          config: { protocolVersion: 2, targetChapters: 8 },
+        },
+      ]),
+    ).toBeUndefined();
+  });
+});
+
 describe("chapterHeading", () => {
   it("collapses default titles", () => {
     expect(chapterHeading({ number: 1, title: "Chapter 1" })).toBe("Chapter 1");
@@ -67,6 +150,8 @@ describe("manuscriptToMarkdown", () => {
         "*A ferryman's daughter smuggles hope across a drowned coast.*",
         "",
         "Written with sopher.ai",
+        "",
+        "_an early reading copy_",
         "",
         "## Contents",
         "",

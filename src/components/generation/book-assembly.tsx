@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenText, Check, Layers3, PenLine, ScanSearch } from "lucide-react";
+import { BookOpenText, Check, CircleStop, Layers3, PenLine, ScanSearch } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { ChapterProgress } from "@/hooks/use-run-stream";
@@ -8,13 +8,12 @@ import type { Stage } from "@/lib/run-events";
 
 type AssemblyStatus = "planned" | "drafting" | "assembled" | "reviewed" | "final";
 
-const STATUS_LABEL: Record<AssemblyStatus, string> = {
-  planned: "planned",
-  drafting: "being written",
-  assembled: "assembled",
-  reviewed: "reviewed",
-  final: "final",
-};
+function statusLabel(status: AssemblyStatus, cancellationRequested: boolean): string {
+  if (status === "drafting") {
+    return cancellationRequested ? "finishing at the safe boundary" : "being written";
+  }
+  return status;
+}
 
 function assemblyStatus(chapter: ChapterProgress | undefined): AssemblyStatus {
   switch (chapter?.status) {
@@ -31,7 +30,19 @@ function assemblyStatus(chapter: ChapterProgress | undefined): AssemblyStatus {
   }
 }
 
-function phaseCopy(stage: Stage, drafted: number, total: number): string {
+function phaseCopy(
+  stage: Stage,
+  drafted: number,
+  total: number,
+  cancellationRequested: boolean,
+  settling: number,
+): string {
+  if (cancellationRequested) {
+    return settling > 0
+      ? `${drafted} of ${total} chapters are safely assembled. In-flight chapter work is finishing at the current safe boundary.`
+      : `${drafted} of ${total} chapters are safely assembled while the Studio confirms the stop.`;
+  }
+
   switch (stage) {
     case "queued":
       return "The production desk is ready for the brief.";
@@ -82,12 +93,14 @@ export function BookAssembly({
   plannedTotal,
   targetWordsPerChapter,
   stage,
+  cancellationRequested = false,
 }: {
   chapters: Map<number, ChapterProgress>;
   titles: Record<number, string | null>;
   plannedTotal: number;
   targetWordsPerChapter: number;
   stage: Stage;
+  cancellationRequested?: boolean;
 }) {
   const folios = Array.from({ length: plannedTotal }, (_, index) => {
     const number = index + 1;
@@ -101,9 +114,10 @@ export function BookAssembly({
     { planned: 0, drafting: 0, assembled: 0, reviewed: 0, final: 0 },
   );
   const drafted = counts.assembled + counts.reviewed + counts.final;
-  const reviewActive = isReviewStage(stage);
+  const reviewActive = isReviewStage(stage) && !cancellationRequested;
   const draftingActive = counts.drafting > 0;
   const productionActive =
+    !cancellationRequested &&
     stage !== "awaiting_approval" &&
     stage !== "awaiting_credits" &&
     stage !== "done" &&
@@ -146,16 +160,19 @@ export function BookAssembly({
         <div className="min-w-0">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="folio-label text-ai">Live book assembly</p>
-              <h3 id="book-assembly-title" className="mt-2 text-lg font-semibold tracking-tight">
-                Watch the manuscript take shape
+              <h3 id="book-assembly-title" className="text-lg font-semibold tracking-tight">
+                {cancellationRequested
+                  ? "Manuscript saved so far"
+                  : "Watch the manuscript take shape"}
               </h3>
               <p className="mt-1 font-mono text-[0.6875rem] tracking-[0.04em] text-muted-foreground">
                 Run plan: {plannedTotal} chapters × ~
                 {new Intl.NumberFormat("en-US").format(targetWordsPerChapter)} words
               </p>
             </div>
-            {reviewActive ? (
+            {cancellationRequested ? (
+              <CircleStop aria-hidden="true" className="mt-1 size-5 shrink-0 text-ai" />
+            ) : reviewActive ? (
               <ScanSearch aria-hidden="true" className="mt-1 size-5 shrink-0 text-ai" />
             ) : draftingActive ? (
               <PenLine aria-hidden="true" className="mt-1 size-5 shrink-0 text-ai" />
@@ -164,12 +181,14 @@ export function BookAssembly({
             ) : null}
           </div>
           <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            {phaseCopy(stage, drafted, plannedTotal)}
+            {phaseCopy(stage, drafted, plannedTotal, cancellationRequested, counts.drafting)}
           </p>
 
           <dl className="mt-5 grid grid-cols-2 gap-x-5 gap-y-3 border-y border-border py-4 sm:grid-cols-4">
             <div>
-              <dt className="folio-label text-muted-foreground">Writing now</dt>
+              <dt className="folio-label text-muted-foreground">
+                {cancellationRequested ? "Settling now" : "Writing now"}
+              </dt>
               <dd className="mt-1 font-mono text-sm tabular-nums">{counts.drafting}</dd>
             </div>
             <div>
@@ -195,10 +214,10 @@ export function BookAssembly({
             {folios.map(({ number, status }) => (
               <li
                 key={number}
-                aria-label={`Chapter ${number}${titles[number] ? `, ${titles[number]}` : ""}: ${STATUS_LABEL[status]}`}
-                title={`Chapter ${number}: ${STATUS_LABEL[status]}`}
+                aria-label={`Chapter ${number}${titles[number] ? `, ${titles[number]}` : ""}: ${statusLabel(status, cancellationRequested)}`}
+                title={`Chapter ${number}: ${statusLabel(status, cancellationRequested)}`}
                 className={cn(
-                  "relative flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-[2px] border font-mono text-[9px] tabular-nums",
+                  "relative flex h-7 min-w-0 items-center justify-center overflow-hidden rounded-[2px] border font-mono text-[11px] tabular-nums",
                   status === "planned" && "border-border text-muted-foreground",
                   status === "drafting" && "border-ai/70 bg-ai/10 text-ai",
                   status === "assembled" && "border-primary/60 bg-primary/15 text-primary",
@@ -213,12 +232,14 @@ export function BookAssembly({
                     <span aria-hidden="true">{number.toString().padStart(2, "0")}</span>
                     <span
                       aria-hidden="true"
-                      className="absolute top-0.5 right-0.5 text-[10px] leading-none font-bold uppercase"
+                      className="absolute top-0.5 right-0.5 text-[11px] leading-none font-bold uppercase"
                     >
                       {status === "planned"
                         ? "P"
                         : status === "drafting"
-                          ? "W"
+                          ? cancellationRequested
+                            ? "S"
+                            : "W"
                           : status === "assembled"
                             ? "A"
                             : "R"}
@@ -230,9 +251,11 @@ export function BookAssembly({
           </ol>
           <p
             aria-hidden="true"
-            className="mt-2 font-mono text-[0.625rem] tracking-[0.03em] text-muted-foreground"
+            className="mt-2 font-mono text-[11px] tracking-[0.03em] text-muted-foreground"
           >
-            P planned · W writing · A assembled · R reviewed · ✓ final
+            {cancellationRequested
+              ? "P planned · S settling · A assembled · R reviewed · ✓ final"
+              : "P planned · W writing · A assembled · R reviewed · ✓ final"}
           </p>
         </div>
       </div>

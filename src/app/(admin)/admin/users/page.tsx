@@ -1,5 +1,3 @@
-import Link from "next/link";
-
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -21,11 +19,7 @@ export default async function AdminUsers() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        label="Admin / Accounts"
-        title="Users"
-        description="Balances, book activity, and account state."
-      />
+      <PageHeader title="Users" description="Balances, book activity, and account state." />
       <Table aria-label="All users" scrollLabel="All users">
         <TableHeader>
           <TableRow>
@@ -48,12 +42,18 @@ export default async function AdminUsers() {
           {users.map((user) => (
             <TableRow key={user.id}>
               <TableCell>
-                <Link
+                {/*
+                  Keep account-detail navigation document-based. This is an
+                  operational control surface, and a hard navigation avoids a
+                  streamed App Router transition leaving the table visible
+                  after the detail response has already arrived.
+                */}
+                <a
                   href={`/admin/users/${user.id}`}
                   className="font-medium text-primary hover:underline"
                 >
                   {user.email}
-                </Link>
+                </a>
                 {user.name ? (
                   <span className="ml-2 text-xs text-muted-foreground">{user.name}</span>
                 ) : null}

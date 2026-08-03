@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { BookOpenText, PenLine } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,10 @@ export function clearRecoveredWizardStorage(
   return true;
 }
 
+export function shouldRefreshAuthoritativeJourney(progress: RunProgressSnapshot): boolean {
+  return progress.authoritativeTerminal === true;
+}
+
 /**
  * Client island for the write stage: pre-flight when the project has never
  * run, the live run viewer otherwise. Starting a run swaps straight into the
@@ -75,6 +80,8 @@ export function WriteExperience({
   targetChapters,
   targetWordsPerChapter,
   estimateUsd,
+  balanceCredits,
+  requiredCredits,
   estimatedMinutes,
   initialRunShape,
   initialSnapshot,
@@ -91,6 +98,8 @@ export function WriteExperience({
   targetChapters: number;
   targetWordsPerChapter: number;
   estimateUsd: number;
+  balanceCredits: number;
+  requiredCredits: number;
   estimatedMinutes?: number;
   initialRunShape?: {
     tier: QualityTier;
@@ -121,15 +130,21 @@ export function WriteExperience({
   const handleProgress = React.useCallback(
     (progress: RunProgressSnapshot) => {
       if (!activeRunId) return;
-      publishProgress({
-        runId: activeRunId,
-        stage: progress.stage,
-        pct: progress.pct,
-        detail: progress.detail,
-        pausedStage: progress.pausedStage,
-        draftedCount: progress.draftedCount,
-        totalChapters: progress.totalChapters,
-      });
+      publishProgress(
+        {
+          runId: activeRunId,
+          stage: progress.stage,
+          pct: progress.pct,
+          detail: progress.detail,
+          pausedStage: progress.pausedStage,
+          cancellationRequestedAt: progress.cancellationRequestedAt,
+          draftedCount: progress.draftedCount,
+          totalChapters: progress.totalChapters,
+        },
+        {
+          refreshAuthoritativeJourney: shouldRefreshAuthoritativeJourney(progress),
+        },
+      );
     },
     [activeRunId, publishProgress],
   );
@@ -217,11 +232,14 @@ export function WriteExperience({
   if (!snapshot) {
     return (
       <PreFlight
+        projectId={projectId}
         tier={tier}
         requireOutlineApproval={requireOutlineApproval}
         targetChapters={targetChapters}
         targetWordsPerChapter={targetWordsPerChapter}
         estimateUsd={estimateUsd}
+        balanceCredits={balanceCredits}
+        requiredCredits={requiredCredits}
         experience={experience}
         onStart={startRun}
         pending={pending}
@@ -264,27 +282,34 @@ export function WriteExperience({
 }
 
 function PreFlight({
+  projectId,
   tier,
   requireOutlineApproval,
   targetChapters,
   targetWordsPerChapter,
   estimateUsd,
+  balanceCredits,
+  requiredCredits,
   experience,
   onStart,
   pending,
   error,
 }: {
+  projectId: string;
   tier: QualityTier;
   requireOutlineApproval: boolean;
   targetChapters: number;
   targetWordsPerChapter: number;
   estimateUsd: number;
+  balanceCredits: number;
+  requiredCredits: number;
   experience: ProjectExperience;
   onStart: () => void;
   pending: boolean;
   error: string | null;
 }) {
   const includedStory = experience === "trial_short_story";
+  const underfunded = !includedStory && balanceCredits < requiredCredits;
   const tierLabel = TIER_LABELS[tier];
   const facts = [
     { label: "Chapters", value: String(targetChapters) },
@@ -324,20 +349,43 @@ function PreFlight({
         </dl>
 
         <div className="mt-8 flex flex-wrap items-center gap-3">
-          <Button
-            size="lg"
-            onClick={onStart}
-            aria-busy={pending || undefined}
-            aria-disabled={pending}
-            className={pending ? "opacity-50" : undefined}
-          >
-            {pending ? (
-              <Spinner aria-hidden="true" />
-            ) : (
-              <PenLine aria-hidden="true" data-icon="inline-start" />
-            )}
-            {includedStory ? "Start my included story" : "Start writing this book"}
-          </Button>
+          {underfunded ? (
+            <Button
+              size="lg"
+              render={
+                <Link
+                  href={`/studio/credits?return=${encodeURIComponent(`/projects/${projectId}/write`)}&needed=${encodeURIComponent(String(requiredCredits - balanceCredits))}`}
+                />
+              }
+              nativeButton={false}
+            >
+              Add credits to start
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              onClick={onStart}
+              aria-busy={pending || undefined}
+              aria-disabled={pending}
+              className={pending ? "opacity-50" : undefined}
+            >
+              {pending ? (
+                <Spinner aria-hidden="true" />
+              ) : (
+                <PenLine aria-hidden="true" data-icon="inline-start" />
+              )}
+              {includedStory ? "Start my included story" : "Start writing this book"}
+            </Button>
+          )}
+          {underfunded ? (
+            <p className="text-sm text-muted-foreground">
+              Your saved setup needs{" "}
+              <span className="font-mono tabular-nums">
+                {(requiredCredits - balanceCredits).toFixed(2)}
+              </span>{" "}
+              more credits. Checkout returns here without changing it.
+            </p>
+          ) : null}
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}

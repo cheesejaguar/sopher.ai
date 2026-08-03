@@ -201,6 +201,16 @@ Fields look like precision brief-entry bays: visible labels, etched rules, graph
 
 Navigation is positional. A current item receives a field or index bar plus semantic `aria-current`, not color alone. Mobile navigation is disclosed through labeled drawers and never hidden without replacement.
 
+### Authoring Journey
+
+Every nonarchived project presents one server-derived next action beneath the lifecycle rail and on its library card. The action follows durable run state, Workflow evidence, saved artifacts, access, and billing—not the project status label—and remains consistent across Brief, Story Bible, Write, Editor, Manuscript, mobile navigation, and command access. Navigation location and production state are shown as separate facts.
+
+Ambiguous or interrupted work is described in concrete terms: what happened, what is saved, whether credits were used, and what the author can safely do next. A stop request remains “Stopping safely” until Workflow confirms a terminal state. A purchase is never presented as the remedy for a product failure, and included-story failures route to recovery or Help rather than checkout.
+
+### Guidance and Help
+
+First-book guidance is a nonmodal, artifact-derived checklist rather than a forced tour: shape the idea, start production, review the outline, watch chapters, edit, read or export, then continue to full length. Contextual callouts may explain unfamiliar tools once, but essential instructions never live only in a tooltip. Persistent Help is available in desktop and mobile shells and through command access, covering stages, approvals, pauses, billing, recovery, autosave conflicts, exports, and support diagnostics.
+
 ### Transforming Notebook
 
 The signature component is one dark college-ruled notebook page that visibly changes from an author's plain-language direction into concept, outline, chapter draft, editorial proof, and a continuity-checked manuscript spread. The artifact remains spatially dominant while stage labels act as supporting evidence. A restrained scan line and luminous page edge show active work. The sequence is keyboard-operable, pausable, fully visible under reduced motion, and remains one coherent artifact on small screens.

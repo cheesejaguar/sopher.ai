@@ -65,4 +65,53 @@ describe("LiveDraftPane focus retention", () => {
     expect(first).toHaveFocus();
     expect(screen.getAllByRole("tab")).toHaveLength(6);
   });
+
+  it("re-subscribes when a drafting chapter crosses the durable saved boundary", () => {
+    const unsubscribe = vi.fn();
+    const subscribe = vi.fn(() => unsubscribe);
+    const { rerender } = render(
+      <LiveDraftPane
+        chapters={new Map([[1, { status: "drafting" }]])}
+        titles={{}}
+        stage="chapters"
+        subscribeChapterProse={subscribe}
+      />,
+    );
+
+    rerender(
+      <LiveDraftPane
+        chapters={new Map([[1, { status: "drafted", wordCount: 142 }]])}
+        titles={{}}
+        stage="chapters"
+        subscribeChapterProse={subscribe}
+      />,
+    );
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(subscribe).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses safe-stop semantics instead of live drafting semantics during cancellation", () => {
+    render(
+      <LiveDraftPane
+        chapters={new Map([[1, { status: "drafting", wordCount: 123 }]])}
+        titles={{ 1: "Night Water" }}
+        stage="chapters"
+        cancellationRequested
+        subscribeChapterProse={vi.fn(() => () => undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("tablist", { name: "Chapters at the safe stop" })).toBeVisible();
+    expect(
+      screen.getByRole("tab", { name: "Chapter 1 (finishing at the safe boundary)" }),
+    ).toBeVisible();
+    expect(screen.getByRole("region", { name: "Chapter 1 saved work" })).toBeVisible();
+    expect(screen.getByText("Finishing at the safe boundary.")).toBeVisible();
+    expect(screen.getByText("123 words · settling at safe boundary")).toBeVisible();
+    expect(screen.queryByRole("tablist", { name: "Drafting chapters" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/drafting now/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/123 words · drafting/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Jump to live")).not.toBeInTheDocument();
+  });
 });

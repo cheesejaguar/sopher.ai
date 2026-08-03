@@ -68,4 +68,34 @@ describe("resolveRunProgress", () => {
       pausedStage: "continuity",
     });
   });
+
+  it("uses durable progress before the first event replay is available", () => {
+    expect(
+      resolveRunProgress("running", null, {
+        stage: "chapters",
+        pct: 41,
+        detail: "Drafting chapter two",
+      }),
+    ).toEqual({
+      stage: "chapters",
+      pct: 41,
+      detail: "Drafting chapter two",
+    });
+  });
+
+  it("uses the durable credit-pause phase without mislabeling it as outline approval", () => {
+    expect(
+      resolveRunProgress("awaiting_input", null, {
+        stage: "awaiting_credits",
+        pct: 46,
+        detail: "One chapter is saved",
+        resumeStage: "chapters",
+      }),
+    ).toEqual({
+      stage: "awaiting_credits",
+      pct: 46,
+      detail: "One chapter is saved",
+      pausedStage: "chapters",
+    });
+  });
 });

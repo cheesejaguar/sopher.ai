@@ -6,6 +6,8 @@ import {
   gatewayOptions,
   healReplayedMeteredDelivery,
   metered,
+  MeteredDeliveryPendingError,
+  MeteredDeliveryReplayError,
   meteredCallAuthorizationUsd,
   completeMeteredDelivery,
   refundMeteredDelivery,
@@ -14,7 +16,12 @@ import {
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { getDb, schema, withDbTransaction } from "@/db";
-import { replacePortraitAssetTransaction } from "@/db/transaction-operations";
+import {
+  persistPortraitDeliveryTransaction,
+  PORTRAIT_DELIVERY_TOOL_ID,
+  promoteContentToolDeliveryReceiptTransaction,
+  promoteLegacyImageDeliveryTransaction,
+} from "@/db/transaction-operations";
 import { getEntityForPortrait } from "@/db/queries/entities";
 import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
@@ -28,6 +35,7 @@ import {
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
+import { optionalDeliveryReceiptRef } from "@/lib/billing/optional-delivery";
 
 /**
  * Generates one entity portrait on demand. Never called automatically — the
@@ -90,8 +98,64 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     .where(eq(schema.projects.id, entity.projectId))
     .limit(1);
 
-  const [replayed] = await db
-    .select({ url: schema.assets.blobUrl })
+  const meteringIdempotencyKey = `project:${entity.projectId}:entity:${entityId}:${idempotencyKey}`;
+  const deliveryReceiptRef = optionalDeliveryReceiptRef({
+    projectId: entity.projectId,
+    resource: `portrait:${entityId}`,
+    operationKey: idempotencyKey,
+  });
+  const loadImmutableDelivery = () =>
+    withDbTransaction((tx) =>
+      promoteContentToolDeliveryReceiptTransaction<{ url: string }>(tx, {
+        userId,
+        projectId: entity.projectId,
+        chapterId: null,
+        toolId: PORTRAIT_DELIVERY_TOOL_ID,
+        operationKey: idempotencyKey,
+        deliveryReceiptRef,
+      }),
+    );
+  const hasImmutableReceipt = async () => {
+    const [receipt] = await db
+      .select({ id: schema.creditLedger.id })
+      .from(schema.creditLedger)
+      .where(
+        and(
+          eq(schema.creditLedger.userId, userId),
+          eq(schema.creditLedger.projectId, entity.projectId),
+          eq(schema.creditLedger.externalRef, deliveryReceiptRef),
+        ),
+      )
+      .limit(1);
+    return Boolean(receipt);
+  };
+  const currentPortraitUrl = async () => {
+    const [current] = await db
+      .select({ url: schema.assets.blobUrl })
+      .from(schema.entities)
+      .innerJoin(schema.assets, eq(schema.assets.id, schema.entities.portraitAssetId))
+      .where(eq(schema.entities.id, entityId))
+      .limit(1);
+    return current?.url ?? null;
+  };
+
+  const immutableDelivery = await loadImmutableDelivery();
+  if (immutableDelivery) {
+    await healReplayedMeteredDelivery({
+      userId,
+      projectId: entity.projectId,
+      idempotencyKey,
+      deliveryReceiptRef,
+      meteringIdempotencyKey,
+    });
+    return Response.json({
+      url: (await currentPortraitUrl()) ?? immutableDelivery.url,
+      replayed: true,
+    });
+  }
+
+  const [legacyReplay] = await db
+    .select({ id: schema.assets.id, url: schema.assets.blobUrl })
     .from(schema.assets)
     .where(
       and(
@@ -102,13 +166,31 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
       ),
     )
     .limit(1);
-  if (replayed) {
-    await healReplayedMeteredDelivery({
-      userId,
-      projectId: entity.projectId,
-      idempotencyKey,
-    });
-    return Response.json({ url: replayed.url });
+  if (legacyReplay) {
+    const promoted = await withDbTransaction((tx) =>
+      promoteLegacyImageDeliveryTransaction(tx, {
+        userId,
+        projectId: entity.projectId,
+        assetId: legacyReplay.id,
+        kind: "portrait",
+        targetId: entityId,
+        operationKey: idempotencyKey,
+        deliveryReceiptRef,
+      }),
+    );
+    if (promoted) {
+      await healReplayedMeteredDelivery({
+        userId,
+        projectId: entity.projectId,
+        idempotencyKey,
+        deliveryReceiptRef,
+        meteringIdempotencyKey,
+      });
+      return Response.json({
+        url: (await currentPortraitUrl()) ?? promoted.url,
+        replayed: true,
+      });
+    }
   }
   const spendDenied = await authorizeProjectSpend({
     userId,
@@ -122,7 +204,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
     userId,
     projectId: entity.projectId,
     authorizationUsd: PORTRAIT_USD,
-    idempotencyKey: `project:${entity.projectId}:entity:${entityId}:${idempotencyKey}`,
+    idempotencyKey: meteringIdempotencyKey,
+    deliveryReceiptRef,
   };
   const callInfo = { role: "content-tool", operation: "entity.portrait", model };
   const authorizationUsd = meteredCallAuthorizationUsd(meter, callInfo);
@@ -206,40 +289,33 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
 
     let displacedPortrait: { id: string; pathname: string } | undefined;
     let displacedCandidate: { id: string; pathname: string } | undefined;
+    let deliveredUrl = blob.url;
     try {
-      displacedPortrait = await withDbTransaction((tx) =>
-        replacePortraitAssetTransaction(tx, {
+      const delivery = await withDbTransaction((tx) =>
+        persistPortraitDeliveryTransaction(tx, {
+          userId,
           projectId: entity.projectId,
           entityId,
+          operationKey: idempotencyKey,
+          deliveryReceiptRef,
           url: blob.url,
           pathname: blob.pathname,
           contentType,
           sizeBytes: file.uint8Array.byteLength,
-          meta: { entityId, prompt, operationKey: idempotencyKey },
+          prompt,
+          usd: (meter.lastSettlement?.meteredUsd ?? 0).toFixed(6),
+          optionalLeaseRefs: meter.optionalOperationLeaseRefs,
           onDisplacedCandidate: (candidate) => {
             displacedCandidate = candidate;
           },
         }),
       );
+      deliveredUrl = delivery.output.url;
+      displacedPortrait = delivery.displaced;
     } catch (error) {
-      let committedAsset: { id: string } | undefined;
+      let committed: { url: string } | null = null;
       try {
-        const [storedAsset] = await db
-          .select({ id: schema.assets.id })
-          .from(schema.assets)
-          .where(
-            and(
-              eq(schema.assets.projectId, entity.projectId),
-              eq(schema.assets.blobPathname, blob.pathname),
-            ),
-          )
-          .limit(1);
-        // The exact uploaded asset can only exist if the transaction committed.
-        // A newer concurrent portrait may already have advanced the entity
-        // pointer by the time this ambiguous acknowledgement is verified.
-        if (storedAsset) {
-          committedAsset = storedAsset;
-        }
+        committed = await loadImmutableDelivery();
       } catch (verificationError) {
         throw new AggregateError(
           [
@@ -251,7 +327,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
           "Portrait persistence failed and could not be verified",
         );
       }
-      if (!committedAsset) return refundAndFail("Could not store the portrait");
+      if (!committed) {
+        if (await hasImmutableReceipt()) {
+          throw new AggregateError(
+            [error instanceof Error ? error : new Error(String(error))],
+            "Portrait delivery receipt exists but its immutable output is missing",
+          );
+        }
+        return refundAndFail("Could not store the portrait");
+      }
+      deliveredUrl = committed.url;
       displacedPortrait = displacedCandidate;
     }
 
@@ -261,10 +346,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
       assetId: displacedPortrait?.id,
       pathname: displacedPortrait?.pathname,
     });
-    return Response.json({ url: blob.url });
+    return Response.json({ url: deliveredUrl });
   } catch (error) {
     const spendResponse = projectSpendAccessErrorResponse(error);
     if (spendResponse) return spendResponse;
+    if (error instanceof MeteredDeliveryPendingError) {
+      return Response.json({ error: error.message, code: "delivery_pending" }, { status: 409 });
+    }
+    if (error instanceof MeteredDeliveryReplayError) {
+      const delivered = await loadImmutableDelivery();
+      if (delivered) {
+        await healReplayedMeteredDelivery({
+          userId,
+          projectId: entity.projectId,
+          idempotencyKey,
+          deliveryReceiptRef,
+          meteringIdempotencyKey,
+        });
+        return Response.json({
+          url: (await currentPortraitUrl()) ?? delivered.url,
+          replayed: true,
+        });
+      }
+    }
     if (error instanceof InsufficientCreditsError) {
       return Response.json({ error: "Not enough credits" }, { status: 402 });
     }

@@ -2,14 +2,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   transition: vi.fn(),
+  withDbTransaction: vi.fn(),
 }));
+
+vi.mock("@/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db")>();
+  return { ...actual, withDbTransaction: mocks.withDbTransaction };
+});
 
 vi.mock("@/lib/generation-runs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/generation-runs")>();
   return { ...actual, transitionAuthoringRunState: mocks.transition };
 });
 
-import { markRunStatus } from "./steps";
+import { markRunStatus, withActiveAuthoringMutation } from "./steps";
 
 const ref = { dbRunId: "run-1", projectId: "project-1", userId: "user-1" };
 
@@ -33,27 +39,100 @@ describe("markRunStatus transition boundary", () => {
         userId: "user-1",
         status,
         error: status === "failed" ? "generation failed" : undefined,
+        ...(status === "completed" ? { resolveCancellationOnComplete: true } : {}),
       });
     },
   );
 
-  it("stops a stale workflow step instead of resurrecting a cancelled run", async () => {
+  it("classifies a cancellation that wins before work starts as cancellation", async () => {
     mocks.transition.mockResolvedValue({ status: "cancelled", transitioned: false });
 
-    await expect(markRunStatus(ref, "running")).rejects.toThrow(
-      "Generation run is no longer active",
-    );
+    await expect(markRunStatus(ref, "running")).rejects.toThrow("Authoring cancellation requested");
   });
 
   it("treats replay of the same committed terminal transition as success", async () => {
     mocks.transition.mockResolvedValue({ status: "completed", transitioned: false });
 
-    await expect(markRunStatus(ref, "completed")).resolves.toBeUndefined();
+    await expect(markRunStatus(ref, "completed")).resolves.toEqual({
+      outcome: "matched",
+      status: "completed",
+    });
   });
 
   it("cannot downgrade a completed run when a later progress emit fails", async () => {
     mocks.transition.mockResolvedValue({ status: "completed", transitioned: false });
 
-    await expect(markRunStatus(ref, "failed", "late event failure")).resolves.toBeUndefined();
+    await expect(markRunStatus(ref, "failed", "late event failure")).resolves.toEqual({
+      outcome: "terminal_preserved",
+      status: "completed",
+    });
+  });
+
+  it("resolves a cancellation that wins after scoped output commits as the terminal outcome", async () => {
+    mocks.transition.mockResolvedValue({ status: "cancelled", transitioned: true });
+
+    await expect(markRunStatus(ref, "completed")).resolves.toEqual({
+      outcome: "cancellation_won",
+      status: "cancelled",
+    });
+    expect(mocks.transition).toHaveBeenCalledWith({
+      runId: "run-1",
+      projectId: "project-1",
+      userId: "user-1",
+      status: "completed",
+      error: undefined,
+      resolveCancellationOnComplete: true,
+    });
+  });
+});
+
+describe("active authoring mutation boundary", () => {
+  function transactionFor(run: { status: string; cancellationRequestedAt: Date | null }) {
+    const tx = {
+      execute: vi.fn().mockResolvedValue([]),
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue([run]),
+          }),
+        }),
+      }),
+    };
+    mocks.withDbTransaction.mockImplementation(
+      async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
+    );
+    return tx;
+  }
+
+  it("holds the project cancellation lock through a manuscript mutation", async () => {
+    const tx = transactionFor({ status: "running", cancellationRequestedAt: null });
+    const mutate = vi.fn().mockResolvedValue("committed");
+
+    await expect(withActiveAuthoringMutation(ref, mutate)).resolves.toBe("committed");
+    expect(tx.execute).toHaveBeenCalledOnce();
+    expect(mutate).toHaveBeenCalledWith(tx);
+  });
+
+  it("rejects the mutation after cancellation wins the shared lock", async () => {
+    transactionFor({
+      status: "running",
+      cancellationRequestedAt: new Date("2026-07-30T12:00:00.000Z"),
+    });
+    const mutate = vi.fn();
+
+    await expect(withActiveAuthoringMutation(ref, mutate)).rejects.toThrow(
+      "Authoring cancellation requested",
+    );
+    expect(mutate).not.toHaveBeenCalled();
+  });
+
+  it("preserves an unrelated terminal state as inactive rather than cancellation", async () => {
+    transactionFor({ status: "failed", cancellationRequestedAt: null });
+    const mutate = vi.fn();
+
+    await expect(withActiveAuthoringMutation(ref, mutate)).rejects.toThrow(
+      "Generation run is no longer active",
+    );
+    expect(mutate).not.toHaveBeenCalled();
   });
 });

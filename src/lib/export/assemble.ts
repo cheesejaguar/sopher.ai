@@ -1,8 +1,16 @@
 import { Marked } from "marked";
-import { and, eq, gt, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { and, eq, gt, inArray, sql } from "drizzle-orm";
+import { getDb, schema, type DbTransaction } from "@/db";
+import { requiresRunOwnedFullBookCompletionProof } from "@/lib/run-completion-proof";
+import type { GenerationConfig } from "@/lib/run-events";
 import { isSafeHref } from "@/lib/security/url";
-import { diagramSourceHash, loadFigures, type FigureAsset, type FigureMap } from "./figures";
+import {
+  buildFigureMap,
+  diagramSourceHash,
+  loadFigures,
+  type FigureAsset,
+  type FigureMap,
+} from "./figures";
 
 /**
  * Manuscript assembly: turns a project's book + ordered chapters into a
@@ -31,6 +39,8 @@ export type AssembledManuscript = {
   figures: FigureMap;
   /** Generated cover image, when the author made one. */
   coverUrl: string | null;
+  /** Truthful title-page label for a complete proof or an in-progress snapshot. */
+  editionNote: string;
 };
 
 export type ManuscriptSourceChapter = {
@@ -47,6 +57,7 @@ export function buildManuscript(input: {
   /** Author byline; falls back to the house line when unset. */
   author?: string | null;
   coverUrl?: string | null;
+  editionNote?: string;
   chapters: ManuscriptSourceChapter[];
   figures?: FigureMap;
 }): AssembledManuscript {
@@ -71,6 +82,188 @@ export function buildManuscript(input: {
     totalWords: chapters.reduce((sum, c) => sum + c.wordCount, 0),
     figures: input.figures ?? {},
     coverUrl: input.coverUrl ?? null,
+    editionNote: input.editionNote?.trim() || READING_LINE,
+  };
+}
+
+export type ExportSnapshot = {
+  manuscript: AssembledManuscript;
+  capturedAt: string;
+  incomplete: boolean;
+  chapterVersions: Array<{ number: number; version: number }>;
+};
+
+type FullBookRunSnapshot = {
+  id: string;
+  status: string;
+  config: unknown;
+};
+
+/**
+ * A newly inserted run does not own the live manuscript until preparation
+ * commits. Prefer the newest prepared/finalized run so a zero-work retry with
+ * a different shape cannot truncate an otherwise complete export.
+ */
+export function selectManuscriptOwnerRun(
+  runsNewestFirst: FullBookRunSnapshot[],
+): FullBookRunSnapshot | undefined {
+  return runsNewestFirst.find((run) => {
+    const config = run.config as Partial<GenerationConfig> | null;
+    const finalization = config?.completion?.finalized;
+    const requiresRunOwnedFinalization = requiresRunOwnedFullBookCompletionProof(config);
+    return (
+      config?.manuscriptPrepared === true ||
+      (run.status === "completed" &&
+        (!requiresRunOwnedFinalization ||
+          (finalization?.sourceRunId === run.id &&
+            typeof finalization.manuscriptDigest === "string" &&
+            finalization.manuscriptDigest.length > 0)))
+    );
+  });
+}
+
+/**
+ * Captures one repeatable, retry-stable export edition inside the transaction
+ * that creates its run. The Workflow renders this snapshot instead of reading
+ * chapters again after production may have advanced.
+ */
+export async function captureExportSnapshot(
+  tx: DbTransaction,
+  userId: string,
+  projectId: string,
+): Promise<ExportSnapshot | null> {
+  const [row] = await tx
+    .select({
+      projectId: schema.projects.id,
+      projectCompletedAt: schema.projects.completedAt,
+      targetChapters: schema.projects.targetChapters,
+      genre: schema.projects.genre,
+      bookId: schema.books.id,
+      bookTitle: schema.books.title,
+      synopsis: schema.books.synopsis,
+      frontMatter: schema.books.frontMatter,
+    })
+    .from(schema.projects)
+    .innerJoin(schema.books, eq(schema.books.projectId, schema.projects.id))
+    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
+    .limit(1);
+  if (!row) return null;
+
+  const chapters = await tx
+    .select({
+      number: schema.chapters.chapterNumber,
+      title: schema.chapters.title,
+      content: schema.chapters.content,
+      version: schema.chapters.version,
+      status: schema.chapters.status,
+    })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.bookId, row.bookId))
+    .orderBy(schema.chapters.chapterNumber);
+  const figureRows = await tx
+    .select({
+      blobUrl: schema.assets.blobUrl,
+      contentType: schema.assets.contentType,
+      meta: schema.assets.meta,
+    })
+    .from(schema.assets)
+    .where(and(eq(schema.assets.projectId, projectId), eq(schema.assets.kind, "diagram")));
+  const activeRuns = await tx
+    .select({ id: schema.generationRuns.id })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        inArray(schema.generationRuns.kind, ["full_book", "chapter", "edit_pass", "continuity"]),
+        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+      ),
+    )
+    .limit(1);
+  const fullBookRuns = await tx
+    .select({
+      id: schema.generationRuns.id,
+      status: schema.generationRuns.status,
+      config: schema.generationRuns.config,
+    })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        eq(schema.generationRuns.kind, "full_book"),
+        sql`(
+          ${schema.generationRuns.config}->>'manuscriptPrepared' = 'true'
+          or (
+            ${schema.generationRuns.status} = 'completed'
+            and (
+              ${schema.generationRuns.config}->>'protocolVersion' is null
+              or ${schema.generationRuns.config}->>'protocolVersion' = '1'
+              or (
+                coalesce(
+                  ${schema.generationRuns.config} #>> '{completion,finalized,sourceRunId}',
+                  ''
+                ) = ${schema.generationRuns.id}::text
+                and length(btrim(coalesce(
+                  ${schema.generationRuns.config} #>> '{completion,finalized,manuscriptDigest}',
+                  ''
+                ))) > 0
+              )
+            )
+          )
+        )`,
+      ),
+    )
+    .orderBy(sql`${schema.generationRuns.createdAt} desc`)
+    .limit(1);
+
+  const manuscriptOwnerRun = selectManuscriptOwnerRun(fullBookRuns);
+  const latestConfig = manuscriptOwnerRun?.config as Partial<GenerationConfig> | undefined;
+  const expectedChapters =
+    typeof latestConfig?.targetChapters === "number" &&
+    Number.isInteger(latestConfig.targetChapters) &&
+    latestConfig.targetChapters > 0
+      ? latestConfig.targetChapters
+      : row.targetChapters;
+  // Shorter reruns retain surplus rows as blank planned placeholders so their
+  // revision history remains recoverable. Those rows are outside this edition.
+  const editionChapters = chapters.filter(
+    (chapter) => chapter.number >= 1 && chapter.number <= expectedChapters,
+  );
+  const written = editionChapters.filter((chapter) => chapter.content.trim().length > 0);
+  const completion = latestConfig?.completion?.finalized;
+  const requiresRunOwnedFinalization = requiresRunOwnedFullBookCompletionProof(latestConfig);
+  const hasValidFinalization =
+    row.projectCompletedAt !== null &&
+    manuscriptOwnerRun?.status === "completed" &&
+    (!requiresRunOwnedFinalization ||
+      (completion?.sourceRunId === manuscriptOwnerRun.id &&
+        typeof completion.manuscriptDigest === "string" &&
+        completion.manuscriptDigest.length > 0));
+  const incomplete =
+    activeRuns.length > 0 ||
+    !hasValidFinalization ||
+    written.length < expectedChapters ||
+    editionChapters.some(
+      (chapter) => chapter.status === "planned" || chapter.status === "drafting",
+    );
+  const front = row.frontMatter as { author?: string; coverUrl?: string } | null;
+  const capturedAt = new Date().toISOString();
+  return {
+    capturedAt,
+    incomplete,
+    chapterVersions: written.map((chapter) => ({
+      number: chapter.number,
+      version: chapter.version,
+    })),
+    manuscript: buildManuscript({
+      title: row.bookTitle,
+      synopsis: row.synopsis,
+      genre: row.genre,
+      author: front?.author,
+      coverUrl: front?.coverUrl,
+      editionNote: incomplete ? "an incomplete production snapshot" : READING_LINE,
+      chapters: written,
+      figures: buildFigureMap(figureRows),
+    }),
   };
 }
 
@@ -84,7 +277,7 @@ export function chapterHeading(chapter: Pick<ManuscriptChapter, "number" | "titl
 export function manuscriptToMarkdown(m: AssembledManuscript): string {
   const lines: string[] = [`# ${m.title}`, ""];
   if (m.synopsis) lines.push(`*${m.synopsis}*`, "");
-  lines.push(m.author, "", "## Contents", "");
+  lines.push(m.author, "", `_${m.editionNote}_`, "", "## Contents", "");
   for (const chapter of m.chapters) {
     lines.push(`${chapter.number}. ${chapter.title}`);
   }

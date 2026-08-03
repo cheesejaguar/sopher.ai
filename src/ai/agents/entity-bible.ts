@@ -1,6 +1,7 @@
 import { generateText, Output } from "ai";
 import { z } from "zod";
 
+import { withDbTransaction, type DbTransaction } from "@/db";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
@@ -38,6 +39,11 @@ const bibleSchema = z.object({
     .default([]),
 });
 
+export type GeneratedEntityBible = {
+  entities: EntitySeed[];
+  relationships: z.infer<typeof bibleSchema>["relationships"];
+};
+
 function bibleInstructions(): string {
   return [
     `You are a story bible editor. Before a word of prose is written you establish the canon that every chapter must honor.`,
@@ -63,7 +69,7 @@ function bibleInstructions(): string {
  * Derives the initial cast and world. Runs once, after the outline, before any
  * chapter is drafted.
  */
-export async function buildEntityBible(input: {
+export async function generateEntityBible(input: {
   meter: MeterCtx;
   bookId: string;
   tier: QualityTier;
@@ -72,7 +78,7 @@ export async function buildEntityBible(input: {
   genre?: string;
   authoringContract?: string;
   existingNames?: string[];
-}): Promise<{ entityCount: number; relationshipCount: number }> {
+}): Promise<GeneratedEntityBible> {
   const model = MODELS[input.tier].summarizer;
 
   const chapterDigest = input.outline.chapters
@@ -138,19 +144,42 @@ export async function buildEntityBible(input: {
     aliases: e.aliases,
     attrs: e.attrs,
   }));
-  await enrichEntities(input.bookId, seeds);
+  return { entities: seeds, relationships: bible.relationships };
+}
 
-  // Relationships are applied after the entities exist so both endpoints resolve.
-  await applyEntityDeltas({
-    bookId: input.bookId,
-    newFacts: [],
-    relationships: bible.relationships.map((r) => ({
-      from: r.from,
-      to: r.to,
-      type: r.type,
-      description: r.description,
-    })),
-  });
+export async function persistEntityBible(
+  bookId: string,
+  bible: GeneratedEntityBible,
+  transaction?: DbTransaction,
+): Promise<{ entityCount: number; relationshipCount: number }> {
+  const persist = async (db: DbTransaction) => {
+    await enrichEntities(bookId, bible.entities, db);
+    // Relationships are applied after the entities exist so both endpoints resolve.
+    await applyEntityDeltas(
+      {
+        bookId,
+        newFacts: [],
+        relationships: bible.relationships.map((r) => ({
+          from: r.from,
+          to: r.to,
+          type: r.type,
+          description: r.description,
+        })),
+      },
+      db,
+    );
 
-  return { entityCount: seeds.length, relationshipCount: bible.relationships.length };
+    return {
+      entityCount: bible.entities.length,
+      relationshipCount: bible.relationships.length,
+    };
+  };
+  return transaction ? persist(transaction) : withDbTransaction(persist);
+}
+
+export async function buildEntityBible(
+  input: Parameters<typeof generateEntityBible>[0],
+): Promise<{ entityCount: number; relationshipCount: number }> {
+  const bible = await generateEntityBible(input);
+  return persistEntityBible(input.bookId, bible);
 }

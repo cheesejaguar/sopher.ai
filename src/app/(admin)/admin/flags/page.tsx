@@ -30,7 +30,6 @@ export default async function AdminFlags({
   return (
     <div className="space-y-4">
       <PageHeader
-        label="Admin / Moderation"
         title="Moderation flags"
         description="Quiet review signals. Authors are not interrupted and generation is not stopped automatically."
         actions={

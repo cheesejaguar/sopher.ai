@@ -34,26 +34,28 @@ function stageFromRunStatus(status: string): ProductionStage {
 export function resolveRunProgress(
   status: string,
   stageEvent: StageProgressEvent | null,
+  durableProgress: StageProgressEvent | null = null,
 ): Pick<ProjectProgressSnapshot, "stage" | "pct" | "detail"> {
   const statusStage = stageFromRunStatus(status);
   const isTerminal = status === "completed" || status === "failed" || status === "cancelled";
+  const canonicalProgress = stageEvent ?? durableProgress;
 
   if (isTerminal) {
     return {
       stage: statusStage,
-      pct: status === "completed" ? 100 : (stageEvent?.pct ?? 0),
+      pct: status === "completed" ? 100 : (canonicalProgress?.pct ?? 0),
       // A non-terminal stage event may be the last event persisted before the
       // run stopped. Its detail would misdescribe the terminal state.
-      detail: stageEvent?.stage === statusStage ? stageEvent.detail : undefined,
+      detail: canonicalProgress?.stage === statusStage ? canonicalProgress.detail : undefined,
     };
   }
 
   return {
-    stage: stageEvent?.stage ?? statusStage,
-    pct: stageEvent?.pct ?? 0,
-    detail: stageEvent?.detail,
-    ...(stageEvent?.stage === "awaiting_credits" && stageEvent.resumeStage
-      ? { pausedStage: stageEvent.resumeStage }
+    stage: canonicalProgress?.stage ?? statusStage,
+    pct: canonicalProgress?.pct ?? 0,
+    detail: canonicalProgress?.detail,
+    ...(canonicalProgress?.stage === "awaiting_credits" && canonicalProgress.resumeStage
+      ? { pausedStage: canonicalProgress.resumeStage }
       : {}),
   };
 }
@@ -68,6 +70,11 @@ export async function getProjectProductionProgress(
     id: schema.generationRuns.id,
     status: schema.generationRuns.status,
     config: schema.generationRuns.config,
+    currentStage: schema.generationRuns.currentStage,
+    progressPct: schema.generationRuns.progressPct,
+    stageDescription: schema.generationRuns.stageDescription,
+    pauseDetails: schema.generationRuns.pauseDetails,
+    cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
   };
   const [activeRun] = await db
     .select(runColumns)
@@ -127,11 +134,39 @@ export async function getProjectProductionProgress(
       chapter.status !== "planned" &&
       chapter.status !== "drafting",
   ).length;
-  const resolvedProgress = resolveRunProgress(run.status, stageEvent);
+  const resumeStage = run.pauseDetails?.resumeStage;
+  const durableProgress: StageProgressEvent = {
+    stage: run.currentStage,
+    pct: run.progressPct,
+    ...(run.stageDescription ? { detail: run.stageDescription } : {}),
+    ...(run.currentStage === "awaiting_credits" &&
+    resumeStage &&
+    [
+      "queued",
+      "concept",
+      "outline",
+      "awaiting_approval",
+      "bible",
+      "chapters",
+      "editing",
+      "continuity",
+      "revising",
+      "finalizing",
+      "done",
+      "failed",
+      "cancelled",
+    ].includes(resumeStage)
+      ? { resumeStage: resumeStage as Exclude<ProductionStage, "awaiting_credits"> }
+      : {}),
+  };
+  const resolvedProgress = resolveRunProgress(run.status, stageEvent, durableProgress);
 
   return {
     runId: run.id,
     ...resolvedProgress,
+    ...(run.cancellationRequestedAt
+      ? { cancellationRequestedAt: run.cancellationRequestedAt.toISOString() }
+      : {}),
     draftedCount,
     totalChapters,
   };

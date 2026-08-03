@@ -13,13 +13,25 @@ export function PackButtons({
   packs,
   returnTo,
   unlockingFullBook = false,
+  recommendedCredits,
 }: {
   packs: CreditPack[];
   returnTo?: string;
   unlockingFullBook?: boolean;
+  /** Additional balance the current saved action needs, used only to highlight a pack. */
+  recommendedCredits?: number;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const recommendedPackId =
+    recommendedCredits !== undefined && recommendedCredits > 0
+      ? ([...packs]
+          .sort((left, right) => left.credits - right.credits)
+          .find((pack) => pack.credits >= recommendedCredits)?.id ??
+        [...packs].sort((left, right) => right.credits - left.credits)[0]?.id)
+      : unlockingFullBook
+        ? "author"
+        : null;
 
   async function buy(packId: string) {
     setBusy(packId);
@@ -59,7 +71,7 @@ export function PackButtons({
             <div className="instrument-surface relative flex h-full flex-col rounded-sm p-5">
               <div className="flex min-h-5 items-start justify-between gap-3">
                 <p className="folio-label text-muted-foreground">{pack.name}</p>
-                {unlockingFullBook && pack.id === "author" ? (
+                {pack.id === recommendedPackId ? (
                   <span className="rounded-full border border-ai/35 bg-ai-soft px-2 py-0.5 text-[0.6875rem] font-semibold text-ai">
                     Recommended
                   </span>
@@ -90,7 +102,7 @@ export function PackButtons({
               <Button
                 type="button"
                 className="mt-4 w-full"
-                variant={pack.id === "author" ? "default" : "outline"}
+                variant={pack.id === recommendedPackId ? "default" : "outline"}
                 onClick={() => buy(pack.id)}
                 disabled={busy !== null}
                 aria-label={

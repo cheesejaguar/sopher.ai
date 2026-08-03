@@ -25,12 +25,12 @@ export function CancelRunButton({ runId }: { runId: string }) {
               await adminCancelRun(runId);
               router.refresh();
             } catch {
-              setError("Cancel failed");
+              setError("The stop request failed.");
             }
           });
         }}
       >
-        {pending ? "Cancelling…" : "Cancel run"}
+        {pending ? "Requesting…" : "Request stop"}
       </Button>
       {error ? (
         <span role="alert" className="text-xs text-destructive">

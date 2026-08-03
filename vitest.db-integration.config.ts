@@ -5,7 +5,17 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/db/index.integration.test.ts", "src/lib/run-health.integration.test.ts"],
+    include: [
+      "src/db/index.integration.test.ts",
+      "src/lib/run-health.integration.test.ts",
+      "src/lib/authoring-reliability.integration.test.ts",
+      "src/lib/authoring-fault-matrix.integration.test.ts",
+      "src/lib/authoring-tool-mutation.integration.test.ts",
+      "src/lib/authoring-stream-leases.integration.test.ts",
+      "src/lib/chapter-review-delivery.integration.test.ts",
+      "src/lib/account-deletion.integration.test.ts",
+      "src/lib/clerk-deletion-finalizer.integration.test.ts",
+    ],
     testTimeout: 60_000,
     hookTimeout: 60_000,
   },

@@ -44,6 +44,8 @@ type QuoteError = { shapeKey: string; message: string };
 
 export type WizardQuoteSummary = {
   credits: number;
+  balance: number | null;
+  covered: boolean | null;
   label?: string;
   chapters: number;
   wordsPerChapter: number;
@@ -137,6 +139,8 @@ export function StepEstimate({
       selected && !quotePending
         ? {
             credits: selected.credits,
+            balance,
+            covered: balance === null ? null : balance >= selected.credits,
             chapters,
             wordsPerChapter,
             tier: state.tier,
@@ -144,7 +148,7 @@ export function StepEstimate({
           }
         : null,
     );
-  }, [chapters, experience, onQuote, quotePending, selected, state.tier, wordsPerChapter]);
+  }, [balance, chapters, experience, onQuote, quotePending, selected, state.tier, wordsPerChapter]);
 
   return (
     <div className="space-y-5">
@@ -296,11 +300,9 @@ export function StepEstimate({
           {short ? (
             <>
               Your balance is {formatCredits(balance)} — this book needs about{" "}
-              {formatCredits(selected.credits)}. Writing will pause until you{" "}
-              <a href="/studio/credits" className="font-medium underline">
-                add credits
-              </a>
-              .
+              {formatCredits(selected.credits)}. Add credits before starting; your setup will be
+              saved when you use{" "}
+              <span className="font-medium text-foreground">Add credits to start</span> below.
             </>
           ) : (
             `Covered by your balance: ${formatCredits(balance)} available.`

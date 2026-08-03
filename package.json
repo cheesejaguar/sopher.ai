@@ -108,11 +108,6 @@
       "minimatch@3.1.5>brace-expansion": "1.1.17",
       "next>postcss": "8.5.18",
       "next>sharp": "0.35.0"
-    },
-    "auditConfig": {
-      "ignoreCves": [
-        "CVE-2026-14257"
-      ]
     }
   }
 }

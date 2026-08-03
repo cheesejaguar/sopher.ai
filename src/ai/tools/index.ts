@@ -3,16 +3,20 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { entityGet, entityRelate, entitySearch, entityUpsert } from "@/ai/tools/entities";
+import { withAuthoringToolMutation } from "@/ai/tools/authoring-mutation";
 import { analyzeQuality, getQualityRecommendations } from "@/ai/analysis/quality-metrics";
 import { analyzePacing } from "@/ai/analysis/pacing";
 import { getGenreTemplate, chapterPromptForGenre, genreAvoidList } from "@/ai/knowledge/genres";
 import { getTemplateSummary, chapterGuidance } from "@/ai/knowledge/plot-structures";
 
 export type ToolCtx = {
+  runId?: string;
   userId: string;
   projectId: string;
   bookId: string;
   chapterNumber?: number;
+  mutationScope?: string;
+  nextMutationOrdinal?: () => number;
 };
 
 export type AgentRole = "writer" | "outliner" | "editor" | "continuity" | "concept";
@@ -169,17 +173,28 @@ function continuityRecordIssue(ctx: ToolCtx) {
       description: z.string(),
       suggestedFix: z.string(),
     }),
-    execute: async (issue) => {
-      const db = getDb();
-      await db.insert(schema.continuityIssues).values({
-        bookId: ctx.bookId,
-        chapters: issue.chapters,
-        category: issue.category,
-        severity: issue.severity,
-        description: issue.description,
-        suggestedFix: issue.suggestedFix,
+    execute: async (issue, { toolCallId }) => {
+      const logicalOrdinal = ctx.nextMutationOrdinal?.();
+      return withAuthoringToolMutation({
+        ctx,
+        toolName: "continuityRecordIssue",
+        toolCallId,
+        logicalOrdinal,
+        payload: issue,
+        mutate: async (tx) => {
+          await tx.insert(schema.continuityIssues).values({
+            bookId: ctx.bookId,
+            runId: ctx.runId!,
+            chapters: issue.chapters,
+            category: issue.category,
+            severity: issue.severity,
+            description: issue.description,
+            suggestedFix: issue.suggestedFix,
+          });
+          return { recorded: true };
+        },
+        replay: () => ({ recorded: true }),
       });
-      return { recorded: true };
     },
   });
 }
@@ -245,13 +260,21 @@ const knowledgeGenre = tool({
 });
 
 export function buildToolset(role: AgentRole, ctx: ToolCtx): ToolSet {
+  let mutationOrdinal = 0;
+  const mutationCtx: ToolCtx = {
+    ...ctx,
+    nextMutationOrdinal: () => {
+      mutationOrdinal += 1;
+      return mutationOrdinal;
+    },
+  };
   switch (role) {
     case "writer":
       return {
-        entityGet: entityGet(ctx),
-        entitySearch: entitySearch(ctx),
-        entityUpsert: entityUpsert(ctx),
-        entityRelate: entityRelate(ctx),
+        entityGet: entityGet(mutationCtx),
+        entitySearch: entitySearch(mutationCtx),
+        entityUpsert: entityUpsert(mutationCtx),
+        entityRelate: entityRelate(mutationCtx),
         storySoFarSearch: storySoFarSearch(ctx),
         storySoFarRecent: storySoFarRecent(ctx),
         outlineGetChapter: outlineGetChapter(ctx),
@@ -274,10 +297,10 @@ export function buildToolset(role: AgentRole, ctx: ToolCtx): ToolSet {
       return {
         chaptersGetText: chaptersGetText(ctx),
         storySoFarSearch: storySoFarSearch(ctx),
-        entityGet: entityGet(ctx),
-        entitySearch: entitySearch(ctx),
+        entityGet: entityGet(mutationCtx),
+        entitySearch: entitySearch(mutationCtx),
         outlineGetStructure: outlineGetStructure(ctx),
-        continuityRecordIssue: continuityRecordIssue(ctx),
+        continuityRecordIssue: continuityRecordIssue(mutationCtx),
       };
     case "concept":
       return { knowledgeGenre };

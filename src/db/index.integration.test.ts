@@ -1,14 +1,16 @@
 import { randomUUID } from "node:crypto";
 
 import { neon } from "@neondatabase/serverless";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { schema, withDbTransaction } from "./index";
 import {
   persistContentToolDeliveryTransaction,
+  persistCoverDeliveryTransaction,
   persistDiagramAssetsTransaction,
   persistExportAssetTransaction,
+  persistPortraitDeliveryTransaction,
   projectExistsUnderAuthoringLock,
   referencedAssetPathnamesUnderAuthoringLock,
   replaceCoverAssetTransaction,
@@ -18,10 +20,21 @@ import { claimUncertainAuthoringRun, transitionAuthoringRunState } from "@/lib/g
 import {
   deleteProjectTransaction,
   refreshProjectBeforeFirstRunTransaction,
+  setProjectArchivedTransaction,
   updateProjectTransaction,
 } from "@/lib/project-transaction-operations";
 import { deleteClerkUserTransaction } from "@/lib/account-deletion-transaction";
-import { beginMeteredCallIntent, recordLlmCallsAndDebit } from "@/lib/billing/meter";
+import {
+  beginMeteredCallIntent,
+  recordLlmCallsAndDebit,
+  refundSettledLogicalUsageForRedo,
+} from "@/lib/billing/meter";
+import {
+  optionalDeliveryLeasePrefix,
+  optionalDeliveryReceiptRef,
+} from "@/lib/billing/optional-delivery";
+import { captureExportSnapshot } from "@/lib/export/assemble";
+import { validFullBookCompletionExistsSql } from "@/lib/run-completion-proof";
 
 function isolatedDatabaseUrl(): string | null {
   const isolated = process.env.E2E_DATABASE_ISOLATED;
@@ -282,12 +295,28 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
         (
           ${ids.deleteAsset}, ${ids.deleteProject}, 'cover',
           'https://blob.test/delete-cover.png', 'fixtures/delete-cover.png',
-          'image/png', 30, '{}'::jsonb
+          'image/png', 30, '{"operationKey":"delete-cover-op"}'::jsonb
         ),
         (
           ${ids.accountAsset}, ${ids.accountProject}, 'cover',
           'https://blob.test/account-cover.png', 'fixtures/account-cover.png',
-          'image/png', 40, '{}'::jsonb
+          'image/png', 40, '{"operationKey":"account-cover-op"}'::jsonb
+        )
+    `;
+    await observer`
+      insert into credit_ledger (
+        user_id, amount, kind, description, project_id, external_ref
+      )
+      values
+        (
+          ${ids.pathUser}, 0, 'adjustment', 'Delivered optional operation lease',
+          ${ids.deleteProject},
+          'optional-operation-lease:fixture:delete-cover-op:attempt:1'
+        ),
+        (
+          ${ids.accountUser}, 0, 'adjustment', 'Delivered optional operation lease',
+          ${ids.accountProject},
+          'optional-operation-lease:fixture:account-cover-op:attempt:1'
         )
     `;
     await observer`
@@ -370,6 +399,408 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
     await expect(userExists(ids.outer)).resolves.toBe(true);
     await expect(userExists(ids.nested)).resolves.toBe(false);
     await expect(userExists(ids.recovered)).resolves.toBe(true);
+  });
+
+  it("captures an immutable incomplete export edition with exact chapter versions", async () => {
+    const snapshot = await withDbTransaction(async (tx) => {
+      await tx.execute(sql`set transaction isolation level repeatable read`);
+      return captureExportSnapshot(tx, ids.pathUser, ids.baseProject);
+    });
+
+    expect(snapshot).toMatchObject({
+      incomplete: true,
+      chapterVersions: [{ number: 1, version: 1 }],
+      manuscript: {
+        title: "Path fixture",
+        editionNote: "an incomplete production snapshot",
+        chapters: [
+          {
+            number: 1,
+            title: "Fixture chapter",
+            markdown: "Fixture prose.",
+          },
+        ],
+      },
+    });
+
+    await observer`
+      update chapters
+      set content = 'A later edit.', version = version + 1
+      where id = ${ids.baseChapter}
+    `;
+
+    expect(snapshot?.manuscript.chapters[0]?.markdown).toBe("Fixture prose.");
+    expect(snapshot?.chapterVersions).toEqual([{ number: 1, version: 1 }]);
+
+    await observer`
+      update chapters
+      set content = 'Fixture prose.', version = 1
+      where id = ${ids.baseChapter}
+    `;
+  });
+
+  it("exports the completed manuscript after a shorter zero-work rerun fails", async () => {
+    const projectId = randomUUID();
+    const bookId = randomUUID();
+    const completedRunId = randomUUID();
+    const failedRunId = randomUUID();
+    await observer`
+      insert into projects (
+        id, user_id, title, brief, genre, experience, target_chapters,
+        target_words_per_chapter, settings, completed_at
+      )
+      values (
+        ${projectId}, ${ids.pathUser}, 'Ten chapter proof', 'Completed export fixture',
+        'fantasy', 'full_book', 3, 1000, '{}'::jsonb, now()
+      )
+    `;
+    await observer`
+      insert into books (id, project_id, title, front_matter)
+      values (${bookId}, ${projectId}, 'Ten chapter proof', '{}'::jsonb)
+    `;
+    for (let chapterNumber = 1; chapterNumber <= 10; chapterNumber += 1) {
+      await observer`
+        insert into chapters (
+          id, book_id, chapter_number, title, content, word_count, status
+        )
+        values (
+          ${randomUUID()}, ${bookId}, ${chapterNumber}, ${`Chapter ${chapterNumber}`},
+          ${`Completed prose ${chapterNumber}.`}, 3, 'final'
+        )
+      `;
+    }
+    await observer`
+      insert into generation_runs (
+        id, project_id, user_id, kind, status, config, created_at, completed_at
+      )
+      values (
+        ${completedRunId}, ${projectId}, ${ids.pathUser}, 'full_book', 'completed',
+        ${JSON.stringify({
+          protocolVersion: 2,
+          targetChapters: 10,
+          manuscriptPrepared: true,
+          completion: {
+            finalized: {
+              sourceRunId: completedRunId,
+              manuscriptDigest: "ten-chapter-proof",
+            },
+          },
+        })}::jsonb,
+        now() - interval '1 minute', now() - interval '1 minute'
+      )
+    `;
+    await observer`
+      insert into generation_runs (
+        id, project_id, user_id, kind, status, config, created_at, completed_at
+      )
+      values (
+        ${failedRunId}, ${projectId}, ${ids.pathUser}, 'full_book', 'failed',
+        '{"targetChapters":3}'::jsonb, now(), now()
+      )
+    `;
+
+    const snapshot = await withDbTransaction((tx) =>
+      captureExportSnapshot(tx, ids.pathUser, projectId),
+    );
+
+    expect(snapshot).toMatchObject({
+      incomplete: false,
+      manuscript: {
+        editionNote: "an early reading copy",
+      },
+    });
+    expect(snapshot?.manuscript.chapters).toHaveLength(10);
+    expect(snapshot?.chapterVersions).toHaveLength(10);
+  });
+
+  it("exports a completed pinned-v1 manuscript without v2 finalization metadata", async () => {
+    const projectId = randomUUID();
+    const bookId = randomUUID();
+    const runId = randomUUID();
+    await observer`
+      insert into projects (
+        id, user_id, title, brief, genre, experience, target_chapters,
+        target_words_per_chapter, settings, completed_at
+      )
+      values (
+        ${projectId}, ${ids.pathUser}, 'Pinned v1 export',
+        'Historical completed books retain export access.',
+        'mystery', 'full_book', 1, 1000, '{}'::jsonb, now()
+      )
+    `;
+    await observer`
+      insert into books (id, project_id, title, front_matter)
+      values (${bookId}, ${projectId}, 'Pinned v1 export', '{}'::jsonb)
+    `;
+    await observer`
+      insert into chapters (
+        id, book_id, chapter_number, title, content, word_count, status
+      )
+      values (
+        ${randomUUID()}, ${bookId}, 1, 'Final',
+        'Historical final prose.', 3, 'final'
+      )
+    `;
+    await observer`
+      insert into generation_runs (
+        id, project_id, user_id, kind, status, config, created_at, completed_at
+      )
+      values (
+        ${runId}, ${projectId}, ${ids.pathUser}, 'full_book', 'completed',
+        '{"protocolVersion":1,"targetChapters":1}'::jsonb, now(), now()
+      )
+    `;
+
+    const snapshot = await withDbTransaction((tx) =>
+      captureExportSnapshot(tx, ids.pathUser, projectId),
+    );
+
+    expect(snapshot).toMatchObject({
+      incomplete: false,
+      manuscript: {
+        editionNote: "an early reading copy",
+      },
+    });
+    expect(snapshot?.manuscript.chapters).toHaveLength(1);
+    expect(snapshot?.chapterVersions).toHaveLength(1);
+  });
+
+  it("requires source-bound v2 proof while retaining completed pinned-v1 books", async () => {
+    const projectId = randomUUID();
+    const bookId = randomUUID();
+    const chapterId = randomUUID();
+    const runId = randomUUID();
+    await observer`
+      insert into projects (
+        id, user_id, title, brief, genre, experience, target_chapters,
+        target_words_per_chapter, settings, completed_at
+      )
+      values (
+        ${projectId}, ${ids.pathUser}, 'Completion proof', 'Completion proof fixture',
+        'mystery', 'trial_short_story', 1, 1000, '{}'::jsonb, now()
+      )
+    `;
+    await observer`
+      insert into books (id, project_id, title, front_matter)
+      values (${bookId}, ${projectId}, 'Completion proof', '{}'::jsonb)
+    `;
+    await observer`
+      insert into chapters (
+        id, book_id, chapter_number, title, content, word_count, status
+      )
+      values (${chapterId}, ${bookId}, 1, 'Proof', 'Final prose.', 2, 'final')
+    `;
+    await observer`
+      insert into generation_runs (id, project_id, user_id, kind, status, config)
+      values (
+        ${runId}, ${projectId}, ${ids.pathUser}, 'full_book', 'completed',
+        ${JSON.stringify({
+          protocolVersion: 2,
+          targetChapters: 1,
+          completion: {
+            finalized: {
+              sourceRunId: randomUUID(),
+              manuscriptDigest: "wrong-owner",
+            },
+          },
+        })}::jsonb
+      )
+    `;
+
+    const completionReady = async () => {
+      const [row] = await withDbTransaction((tx) =>
+        tx
+          .select({ ready: validFullBookCompletionExistsSql(sql.raw('"projects"."id"')) })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .limit(1),
+      );
+      return row?.ready ?? false;
+    };
+    await expect(completionReady()).resolves.toBe(false);
+
+    await observer`
+      update generation_runs
+      set config = ${JSON.stringify({
+        protocolVersion: 2,
+        targetChapters: 1,
+        completion: {
+          finalized: {
+            sourceRunId: runId,
+            manuscriptDigest: "source-bound-proof",
+          },
+        },
+      })}::jsonb
+      where id = ${runId}
+    `;
+    await expect(completionReady()).resolves.toBe(true);
+
+    await observer`
+      update chapters
+      set content = '', word_count = 0, status = 'planned'
+      where id = ${chapterId}
+    `;
+    await expect(completionReady()).resolves.toBe(true);
+
+    await observer`
+      update generation_runs
+      set config = '{"protocolVersion":1,"targetChapters":1}'::jsonb
+      where id = ${runId}
+    `;
+    await expect(completionReady()).resolves.toBe(true);
+  });
+
+  it("serializes archive with authoring and restores only source-bound completion", async () => {
+    const projectId = randomUUID();
+    const bookId = randomUUID();
+    const chapterId = randomUUID();
+    const completedRunId = randomUUID();
+    const exportRunId = randomUUID();
+    const activeRunId = randomUUID();
+    await observer`
+      insert into projects (
+        id, user_id, title, brief, genre, experience, target_chapters,
+        target_words_per_chapter, settings, status, completed_at
+      )
+      values (
+        ${projectId}, ${ids.pathUser}, 'Archive proof', 'Archive state fixture',
+        'mystery', 'full_book', 1, 1000, '{}'::jsonb, 'archived', now()
+      )
+    `;
+    await observer`
+      insert into books (id, project_id, title, front_matter)
+      values (${bookId}, ${projectId}, 'Archive proof', '{}'::jsonb)
+    `;
+    await observer`
+      insert into chapters (
+        id, book_id, chapter_number, title, content, word_count, status
+      )
+      values (${chapterId}, ${bookId}, 1, 'Proof', 'Final-looking prose.', 2, 'final')
+    `;
+    await observer`
+      insert into generation_runs (id, project_id, user_id, kind, status, config)
+      values (
+        ${completedRunId}, ${projectId}, ${ids.pathUser}, 'full_book', 'completed',
+        ${JSON.stringify({
+          protocolVersion: 2,
+          targetChapters: 1,
+          completion: {
+            finalized: {
+              sourceRunId: randomUUID(),
+              manuscriptDigest: "wrong-owner",
+            },
+          },
+        })}::jsonb
+      )
+    `;
+
+    await expect(
+      withDbTransaction((tx) =>
+        setProjectArchivedTransaction(tx, {
+          projectId,
+          userId: ids.pathUser,
+          archived: false,
+        }),
+      ),
+    ).resolves.toBe("updated");
+    let [project] = (await observer`
+      select status from projects where id = ${projectId}
+    `) as unknown as Array<{ status: string }>;
+    expect(project?.status).toBe("editing");
+
+    await observer`
+      insert into generation_runs (id, project_id, user_id, kind, status, config)
+      values (
+        ${exportRunId}, ${projectId}, ${ids.pathUser},
+        'export', 'running', '{}'::jsonb
+      )
+    `;
+    await expect(
+      withDbTransaction((tx) =>
+        setProjectArchivedTransaction(tx, {
+          projectId,
+          userId: ids.pathUser,
+          archived: true,
+        }),
+      ),
+    ).resolves.toBe("updated");
+    await expect(
+      withDbTransaction((tx) =>
+        setProjectArchivedTransaction(tx, {
+          projectId,
+          userId: ids.pathUser,
+          archived: false,
+        }),
+      ),
+    ).resolves.toBe("updated");
+    await observer`
+      update generation_runs
+      set status = 'completed'
+      where id = ${exportRunId}
+    `;
+
+    await observer`
+      insert into generation_runs (id, project_id, user_id, kind, status, config)
+      values (
+        ${activeRunId}, ${projectId}, ${ids.pathUser},
+        'edit_pass', 'running', '{}'::jsonb
+      )
+    `;
+    await expect(
+      withDbTransaction((tx) =>
+        setProjectArchivedTransaction(tx, {
+          projectId,
+          userId: ids.pathUser,
+          archived: true,
+        }),
+      ),
+    ).resolves.toBe("active_run");
+    [project] = (await observer`
+      select status from projects where id = ${projectId}
+    `) as unknown as Array<{ status: string }>;
+    expect(project?.status).toBe("editing");
+
+    await observer`
+      update generation_runs
+      set status = 'completed'
+      where id = ${activeRunId}
+    `;
+    await observer`
+      update generation_runs
+      set config = ${JSON.stringify({
+        protocolVersion: 2,
+        targetChapters: 1,
+        completion: {
+          finalized: {
+            sourceRunId: completedRunId,
+            manuscriptDigest: "source-bound-proof",
+          },
+        },
+      })}::jsonb
+      where id = ${completedRunId}
+    `;
+    await expect(
+      withDbTransaction((tx) =>
+        setProjectArchivedTransaction(tx, {
+          projectId,
+          userId: ids.pathUser,
+          archived: true,
+        }),
+      ),
+    ).resolves.toBe("updated");
+    await expect(
+      withDbTransaction((tx) =>
+        setProjectArchivedTransaction(tx, {
+          projectId,
+          userId: ids.pathUser,
+          archived: false,
+        }),
+      ),
+    ).resolves.toBe("updated");
+    [project] = (await observer`
+      select status from projects where id = ${projectId}
+    `) as unknown as Array<{ status: string }>;
+    expect(project?.status).toBe("complete");
   });
 
   it("allows the exact included-story cap boundary and blocks the next fraction", async () => {
@@ -523,16 +954,183 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
       });
       expect(Number(facts?.balance)).toBe(10);
 
-      const restoredCap = await beginMeteredCallIntent({
+      const grossCap = await beginMeteredCallIntent({
         userId,
         projectId,
         intentRef: `metering-intent:interactive:${userId}:after-refund:attempt:one`,
         intentPrefix: `metering-intent:interactive:${userId}:after-refund:attempt:`,
         usagePrefix: `llm:interactive:${userId}:after-refund:`,
         maxCredits: 10,
-        description: "Refund restored included-story capacity",
+        description: "Delivery refund does not restore provider-spend capacity",
       });
-      expect(restoredCap.status).toBe("started");
+      expect(grossCap.status).toBe("trial_cap");
+    } finally {
+      await observer`delete from users where id = ${userId}`;
+    }
+  });
+
+  it("blocks compensated redo while optional delivery is pending and after its receipt commits", async () => {
+    const userId = `e2e-optional-delivery-${suffix}`;
+    const projectId = randomUUID();
+    const bookId = randomUUID();
+    const chapterId = randomUUID();
+    const operationKey = randomUUID();
+    const meteringKey = `project:${projectId}:chapter:${chapterId}:tool:mermaid:${operationKey}`;
+    const intentPrefix = `metering-intent:interactive:${userId}:${meteringKey}:tool.mermaid:attempt:`;
+    const usagePrefix = `llm:interactive:${userId}:${meteringKey}:tool.mermaid:`;
+    const receiptRef = optionalDeliveryReceiptRef({
+      projectId,
+      resource: `content-tool:${chapterId}:mermaid`,
+      operationKey,
+    });
+    const leasePrefix = optionalDeliveryLeasePrefix({
+      userId,
+      meteringIdempotencyKey: meteringKey,
+    });
+    try {
+      await observer`
+        insert into users (id, email, role)
+        values (${userId}, ${`${userId}@example.test`}, 'admin')
+      `;
+      await observer`
+        insert into projects (
+          id, user_id, title, brief, genre, experience,
+          target_chapters, target_words_per_chapter, settings
+        ) values (
+          ${projectId}, ${userId}, 'Optional delivery fixture', 'Receipt race fixture',
+          'fantasy', 'full_book', 3, 1000, '{}'::jsonb
+        )
+      `;
+      await observer`
+        insert into books (id, project_id, title, front_matter)
+        values (${bookId}, ${projectId}, 'Optional delivery fixture', '{}'::jsonb)
+      `;
+      await observer`
+        insert into chapters (
+          id, book_id, chapter_number, title, content, word_count, status
+        ) values (
+          ${chapterId}, ${bookId}, 1, 'Fixture', 'Fixture prose.', 2, 'drafted'
+        )
+      `;
+      await observer`
+        insert into credit_ledger (
+          user_id, amount, kind, description, project_id, external_ref
+        ) values (
+          ${userId}, 10, 'grant', 'Optional delivery fixture',
+          ${projectId}, ${`optional-delivery-grant:${suffix}`}
+        )
+      `;
+
+      const intentRef = `${intentPrefix}one`;
+      const started = await beginMeteredCallIntent({
+        userId,
+        projectId,
+        intentRef,
+        intentPrefix,
+        usagePrefix,
+        deliveryReceiptRef: receiptRef,
+        maxCredits: 1,
+        description: "Optional delivery fixture",
+      });
+      expect(started.status).toBe("started");
+      const settled = await recordLlmCallsAndDebit(
+        [
+          {
+            userId,
+            projectId,
+            runId: null,
+            agentRole: "content-tool",
+            operation: "tool.mermaid",
+            model: "anthropic/claude-haiku-4.5",
+            usage: {
+              inputTokens: 100,
+              outputTokens: 50,
+              cachedInputTokens: 0,
+              cacheWriteTokens: 0,
+            },
+          },
+        ],
+        {
+          description: "tool.mermaid",
+          externalRefPrefix: `${usagePrefix}attempt:one`,
+          intentRef,
+          reservationRef: started.reservationRef,
+        },
+      );
+      expect(settled.debitedCredits).toBeGreaterThan(0);
+
+      const pending = await beginMeteredCallIntent({
+        userId,
+        projectId,
+        intentRef: `${intentPrefix}two`,
+        intentPrefix,
+        usagePrefix,
+        deliveryReceiptRef: receiptRef,
+        maxCredits: 1,
+        description: "Duplicate optional delivery",
+      });
+      expect(pending.status).toBe("delivery_pending");
+      await expect(
+        refundSettledLogicalUsageForRedo({
+          userId,
+          projectId,
+          usagePrefix,
+          deliveryReceiptRef: receiptRef,
+          optionalLeasePrefix: leasePrefix,
+        }),
+      ).resolves.toBe(false);
+
+      await withDbTransaction((tx) =>
+        persistContentToolDeliveryTransaction(tx, {
+          userId,
+          projectId,
+          chapterId,
+          toolId: "mermaid",
+          operationKey,
+          deliveryReceiptRef: receiptRef,
+          text: "Fixture prose.",
+          options: {},
+          output: { kind: "mermaid", source: "flowchart LR; A-->B" },
+          usd: settled.meteredUsd.toFixed(6),
+          optionalLeaseRefs: started.optionalLeaseRef ? [started.optionalLeaseRef] : [],
+        }),
+      );
+
+      const delivered = await beginMeteredCallIntent({
+        userId,
+        projectId,
+        intentRef: `${intentPrefix}three`,
+        intentPrefix,
+        usagePrefix,
+        deliveryReceiptRef: receiptRef,
+        maxCredits: 1,
+        description: "Delivered optional replay",
+      });
+      expect(delivered.status).toBe("delivered");
+      await expect(
+        refundSettledLogicalUsageForRedo({
+          userId,
+          projectId,
+          usagePrefix,
+          deliveryReceiptRef: receiptRef,
+          optionalLeasePrefix: leasePrefix,
+        }),
+      ).resolves.toBe(false);
+
+      const facts = firstRow<{ receipts: number; refunds: number; releases: number }>(
+        await observer`
+          select
+            count(*) filter (where external_ref = ${receiptRef})::int as receipts,
+            count(*) filter (where external_ref like ${`delivery-refund:${usagePrefix}%`})::int
+              as refunds,
+            count(*) filter (
+              where external_ref = ${`release:${started.optionalLeaseRef}`}
+            )::int as releases
+          from credit_ledger
+          where user_id = ${userId}
+        `,
+      );
+      expect(facts).toEqual({ receipts: 1, refunds: 0, releases: 1 });
     } finally {
       await observer`delete from users where id = ${userId}`;
     }
@@ -1000,6 +1598,140 @@ describeIsolated("withDbTransaction against isolated Neon", () => {
       `,
     );
     expect(toolFacts).toMatchObject({ run_count: 1, asset_count: 1 });
+  });
+
+  it("keeps cover and portrait delivery receipts after their assets are replaced", async () => {
+    const firstCoverKey = randomUUID();
+    const secondCoverKey = randomUUID();
+    const firstPortraitKey = randomUUID();
+    const secondPortraitKey = randomUUID();
+    const firstCoverReceipt = optionalDeliveryReceiptRef({
+      projectId: ids.baseProject,
+      resource: "cover",
+      operationKey: firstCoverKey,
+    });
+    const secondCoverReceipt = optionalDeliveryReceiptRef({
+      projectId: ids.baseProject,
+      resource: "cover",
+      operationKey: secondCoverKey,
+    });
+    const firstPortraitReceipt = optionalDeliveryReceiptRef({
+      projectId: ids.baseProject,
+      resource: `portrait:${ids.baseEntity}`,
+      operationKey: firstPortraitKey,
+    });
+    const secondPortraitReceipt = optionalDeliveryReceiptRef({
+      projectId: ids.baseProject,
+      resource: `portrait:${ids.baseEntity}`,
+      operationKey: secondPortraitKey,
+    });
+    const cover = (operationKey: string, receipt: string, label: string) =>
+      withDbTransaction((tx) =>
+        persistCoverDeliveryTransaction(tx, {
+          userId: ids.pathUser,
+          projectId: ids.baseProject,
+          bookId: ids.baseBook,
+          title: "Path fixture",
+          operationKey,
+          deliveryReceiptRef: receipt,
+          url: `https://blob.test/${label}.png`,
+          pathname: `fixtures/${suffix}/${label}.png`,
+          contentType: "image/png",
+          sizeBytes: 100,
+          usd: "0.067000",
+        }),
+      );
+    const portrait = (operationKey: string, receipt: string, label: string) =>
+      withDbTransaction((tx) =>
+        persistPortraitDeliveryTransaction(tx, {
+          userId: ids.pathUser,
+          projectId: ids.baseProject,
+          entityId: ids.baseEntity,
+          operationKey,
+          deliveryReceiptRef: receipt,
+          url: `https://blob.test/${label}.png`,
+          pathname: `fixtures/${suffix}/${label}.png`,
+          contentType: "image/png",
+          sizeBytes: 100,
+          prompt: label,
+          usd: "0.067000",
+        }),
+      );
+
+    const firstCover = await cover(firstCoverKey, firstCoverReceipt, "receipt-cover-one");
+    const firstPortrait = await portrait(
+      firstPortraitKey,
+      firstPortraitReceipt,
+      "receipt-portrait-one",
+    );
+    await cover(secondCoverKey, secondCoverReceipt, "receipt-cover-two");
+    await portrait(secondPortraitKey, secondPortraitReceipt, "receipt-portrait-two");
+
+    await observer`
+      delete from assets
+      where project_id = ${ids.baseProject}
+        and blob_pathname in (
+          ${`fixtures/${suffix}/receipt-cover-one.png`},
+          ${`fixtures/${suffix}/receipt-portrait-one.png`}
+        )
+    `;
+
+    const replayedCover = await cover(firstCoverKey, firstCoverReceipt, "must-not-insert-cover");
+    const replayedPortrait = await portrait(
+      firstPortraitKey,
+      firstPortraitReceipt,
+      "must-not-insert-portrait",
+    );
+    expect(replayedCover).toMatchObject({ output: firstCover.output, replayed: true });
+    expect(replayedPortrait).toMatchObject({ output: firstPortrait.output, replayed: true });
+
+    const facts = firstRow<{
+      receipts: number;
+      deliveries: number;
+      forbidden_assets: number;
+      cover_url: string;
+      portrait_url: string;
+    }>(
+      await observer`
+        select
+          (
+            select count(*)::int from credit_ledger
+            where external_ref in (
+              ${firstCoverReceipt}, ${secondCoverReceipt},
+              ${firstPortraitReceipt}, ${secondPortraitReceipt}
+            )
+          ) as receipts,
+          (
+            select count(*)::int from content_tool_runs
+            where project_id = ${ids.baseProject}
+              and input->>'deliveryReceiptRef' in (
+                ${firstCoverReceipt}, ${secondCoverReceipt},
+                ${firstPortraitReceipt}, ${secondPortraitReceipt}
+              )
+          ) as deliveries,
+          (
+            select count(*)::int from assets
+            where blob_pathname in (
+              ${`fixtures/${suffix}/must-not-insert-cover.png`},
+              ${`fixtures/${suffix}/must-not-insert-portrait.png`}
+            )
+          ) as forbidden_assets,
+          (select front_matter->>'coverUrl' from books where id = ${ids.baseBook}) as cover_url,
+          (
+            select asset.blob_url
+            from entities entity
+            join assets asset on asset.id = entity.portrait_asset_id
+            where entity.id = ${ids.baseEntity}
+          ) as portrait_url
+      `,
+    );
+    expect(facts).toEqual({
+      receipts: 4,
+      deliveries: 4,
+      forbidden_assets: 0,
+      cover_url: "https://blob.test/receipt-cover-two.png",
+      portrait_url: "https://blob.test/receipt-portrait-two.png",
+    });
   });
 
   it("rolls back an extracted asset operation without leaking a partial row", async () => {

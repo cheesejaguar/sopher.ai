@@ -82,3 +82,9 @@ export type ChapterNavItem = {
   wordCount: number;
   status: "planned" | "drafting" | "drafted" | "edited" | "final";
 };
+
+/** Compact, status-only production context shown inside the chapter editor. */
+export type EditorProductionStatus = {
+  label: string;
+  detail: string;
+};

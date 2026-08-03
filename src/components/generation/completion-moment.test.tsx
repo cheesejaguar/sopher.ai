@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CompletionMoment } from "./completion-moment";
@@ -19,6 +19,40 @@ afterEach(() => {
 });
 
 describe("CompletionMoment", () => {
+  it("presents the completed manuscript as a labeled book with a readable horizontal title", () => {
+    render(
+      <CompletionMoment
+        projectId="project-1"
+        projectTitle="The Clockmaker's Map"
+        chapterCount={8}
+      />,
+    );
+
+    const book = screen.getByRole("img", {
+      name: "Finished book: The Clockmaker's Map. 8 chapters.",
+    });
+    const title = within(book).getByText("The Clockmaker's Map");
+
+    expect(book).toBeVisible();
+    expect(title).toHaveClass("break-words");
+    expect(title).not.toHaveClass("truncate");
+    expect(title).not.toHaveStyle({ writingMode: "vertical-rl" });
+  });
+
+  it("keeps a long title complete inside the finished-book artifact", () => {
+    const longTitle = "A".repeat(300);
+    render(<CompletionMoment projectId="project-1" projectTitle={longTitle} chapterCount={12} />);
+
+    const book = screen.getByRole("img", {
+      name: `Finished book: ${longTitle}. 12 chapters.`,
+    });
+    const title = within(book).getByText(longTitle);
+
+    expect(title).toHaveTextContent(longTitle);
+    expect(title).toHaveClass("text-[0.5rem]", "[overflow-wrap:anywhere]");
+    expect(title).not.toHaveClass("line-clamp-1", "line-clamp-2", "truncate");
+  });
+
   it("requires explicit confirmation before replacing a completed manuscript", async () => {
     const onWriteAgain = vi.fn();
     render(

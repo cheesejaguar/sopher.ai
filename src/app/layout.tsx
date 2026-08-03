@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Suspense } from "react";
 import { Archivo, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { BaseUiFocusGuardLabels } from "@/components/ui/base-ui-focus-guard-labels";
 import { SkipLink } from "@/components/ui/skip-link";
 import { SITE_URL, SiteJsonLd } from "@/components/seo/json-ld";
 import "./globals.css";
@@ -111,6 +112,7 @@ export default function RootLayout({
         <SiteJsonLd />
         <SkipLink />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
+          <BaseUiFocusGuardLabels />
           {route}
         </ThemeProvider>
       </body>
