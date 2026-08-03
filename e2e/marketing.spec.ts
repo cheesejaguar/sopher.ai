@@ -141,6 +141,7 @@ test.describe("landing page", () => {
 
   test("a skip link is the first tab stop and targets the main region", async ({ page }) => {
     await page.goto("/");
+    await expect(page.locator("#main-content")).toBeVisible();
     await page.keyboard.press("Tab");
 
     const skip = page.getByRole("link", { name: "Skip to main content" });

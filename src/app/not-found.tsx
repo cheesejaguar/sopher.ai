@@ -7,7 +7,8 @@ export default function NotFound() {
   return (
     <main
       id="main-content"
-      className="instrument-canvas grid min-h-dvh place-items-center px-5 py-12"
+      tabIndex={-1}
+      className="instrument-canvas grid min-h-dvh place-items-center px-5 py-12 outline-none"
     >
       <div className="w-full max-w-3xl border border-border bg-background/95">
         <header className="flex items-center justify-between border-b border-border px-5 py-4 sm:px-8">

@@ -100,6 +100,7 @@ export default function RootLayout({
         </div>
       }
     >
+      <SkipLink />
       {children}
     </Suspense>
   );
@@ -112,7 +113,6 @@ export default function RootLayout({
     >
       <body className="min-h-dvh antialiased [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff]">
         <SiteJsonLd />
-        <SkipLink />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <BaseUiFocusGuardLabels />
           {route}
