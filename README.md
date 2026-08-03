@@ -175,13 +175,13 @@ Accessibility = 1.00, Best Practices ≥ 0.95, and SEO = 1.00.
 
 ## Deployment
 
-[sopher.ai](https://sopher.ai) runs on Vercel in `iad1` with Node.js 24. Git integration creates a
-protected preview deployment for pull requests and deploys `main` to production. The production
-build applies the forward-only Drizzle migration journal before compiling Next.js.
+[sopher.ai](https://sopher.ai) runs on Vercel with Node.js 24. Git integration creates preview
+deployments for pull requests and deploys `main` to production. The production build applies the
+forward-only Drizzle migration journal before compiling Next.js.
 
 A signed five-minute reconciler checks active authoring runs, and the progress stream opts into
-Vercel request cancellation. Workflow and runtime operations are documented in
-[`CLAUDE.md`](CLAUDE.md) and [`doc/CUTOVER.md`](doc/CUTOVER.md).
+Vercel request cancellation. Current Workflow and runtime commands are documented in
+[`CLAUDE.md`](CLAUDE.md).
 
 ## Repository documentation
 
