@@ -8,6 +8,7 @@ describe("project spend HTTP errors", () => {
   it.each([
     ["purchase_required", 402],
     ["trial_busy", 409],
+    ["included_allowance_exhausted", 409],
     ["suspended", 403],
     ["project_not_found", 404],
   ] as const)("maps %s to an actionable response", async (code, status) => {

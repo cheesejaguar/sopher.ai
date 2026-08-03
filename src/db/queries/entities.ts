@@ -1,6 +1,6 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction, type DbTransaction } from "@/db";
 import { ENTITY_KINDS, parseAttrs, type EntityKind } from "@/ai/schemas/entities";
 
 /**
@@ -59,6 +59,13 @@ export function mergeEntityAttrs(
   return merged;
 }
 
+function withEntityMutation<T>(
+  transaction: DbTransaction | undefined,
+  mutate: (tx: DbTransaction) => Promise<T>,
+): Promise<T> {
+  return transaction ? mutate(transaction) : withDbTransaction(mutate);
+}
+
 function isEntityKind(value: string): value is EntityKind {
   return (ENTITY_KINDS as readonly string[]).includes(value);
 }
@@ -71,120 +78,129 @@ function isEntityKind(value: string): value is EntityKind {
  * as `(attrs || excluded.attrs)->'facts'` and the column resolves to NULL,
  * violating the NOT NULL constraint. That exact bug shipped once already.
  */
-export async function applyEntityDeltas(input: {
-  bookId: string;
-  chapterNumber?: number;
-  newFacts: { kind?: string; name: string; facts: string[] }[];
-  relationships?: { from: string; to: string; type: string; description?: string }[];
-}): Promise<void> {
-  const db = getDb();
+export async function applyEntityDeltas(
+  input: {
+    bookId: string;
+    chapterNumber?: number;
+    newFacts: { kind?: string; name: string; facts: string[] }[];
+    relationships?: { from: string; to: string; type: string; description?: string }[];
+  },
+  transaction?: DbTransaction,
+): Promise<void> {
+  return withEntityMutation(transaction, async (db) => {
+    for (const entry of input.newFacts) {
+      if (!entry.name?.trim() || entry.facts.length === 0) continue;
+      const kind = entry.kind && isEntityKind(entry.kind) ? entry.kind : "character";
 
-  for (const entry of input.newFacts) {
-    if (!entry.name?.trim() || entry.facts.length === 0) continue;
-    const kind = entry.kind && isEntityKind(entry.kind) ? entry.kind : "character";
-
-    await db
-      .insert(schema.entities)
-      .values({
-        bookId: input.bookId,
-        kind,
-        name: entry.name.trim(),
-        aliases: [],
-        attrs: { facts: entry.facts },
-        firstAppearanceChapter: input.chapterNumber,
-        lastUpdatedChapter: input.chapterNumber,
-      })
-      .onConflictDoUpdate({
-        target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
-        set: {
-          attrs: sql`jsonb_set(
-            ${schema.entities.attrs},
-            '{facts}',
-            (
-              select coalesce(jsonb_agg(deduped.value order by deduped.first_position), '[]'::jsonb)
-              from (
-                select fact.value, min(fact.position) as first_position
-                from jsonb_array_elements(
-                  coalesce(${schema.entities.attrs}->'facts', '[]'::jsonb)
-                  || coalesce(excluded.attrs->'facts', '[]'::jsonb)
-                ) with ordinality as fact(value, position)
-                group by fact.value
-              ) deduped
-            )
-          )`,
+      await db
+        .insert(schema.entities)
+        .values({
+          bookId: input.bookId,
+          kind,
+          name: entry.name.trim(),
+          aliases: [],
+          attrs: { facts: entry.facts },
+          firstAppearanceChapter: input.chapterNumber,
           lastUpdatedChapter: input.chapterNumber,
-          updatedAt: new Date(),
-        },
-      });
-  }
+        })
+        .onConflictDoUpdate({
+          target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
+          set: {
+            attrs: sql`jsonb_set(
+              ${schema.entities.attrs},
+              '{facts}',
+              (
+                select coalesce(jsonb_agg(deduped.value order by deduped.first_position), '[]'::jsonb)
+                from (
+                  select fact.value, min(fact.position) as first_position
+                  from jsonb_array_elements(
+                    coalesce(${schema.entities.attrs}->'facts', '[]'::jsonb)
+                    || coalesce(excluded.attrs->'facts', '[]'::jsonb)
+                  ) with ordinality as fact(value, position)
+                  group by fact.value
+                ) deduped
+              )
+            )`,
+            lastUpdatedChapter: input.chapterNumber,
+            updatedAt: new Date(),
+          },
+        });
+    }
 
-  for (const rel of input.relationships ?? []) {
-    if (!rel.from?.trim() || !rel.to?.trim()) continue;
-    const rows = await db
-      .select({ id: schema.entities.id, name: schema.entities.name, kind: schema.entities.kind })
-      .from(schema.entities)
-      .where(eq(schema.entities.bookId, input.bookId));
-    // Prefer an exact-case match; among case-insensitive matches prefer a
-    // character (family ties are the common case). Ambiguity across kinds with
-    // no better signal drops the relationship rather than guessing wrong.
-    const find = (name: string) => {
-      const matches = rows.filter((r) => r.name.toLowerCase() === name.toLowerCase());
-      if (matches.length <= 1) return matches[0];
-      return (
-        matches.find((r) => r.name === name) ??
-        matches.find((r) => r.kind === "character") ??
-        undefined
-      );
-    };
-    const from = find(rel.from);
-    const to = find(rel.to);
-    // Relationships between entities we do not know about are dropped rather
-    // than guessed at — the next chapter's upsert will create them.
-    if (!from || !to || from.id === to.id) continue;
+    for (const rel of input.relationships ?? []) {
+      if (!rel.from?.trim() || !rel.to?.trim()) continue;
+      const rows = await db
+        .select({ id: schema.entities.id, name: schema.entities.name, kind: schema.entities.kind })
+        .from(schema.entities)
+        .where(eq(schema.entities.bookId, input.bookId));
+      // Prefer an exact-case match; among case-insensitive matches prefer a
+      // character (family ties are the common case). Ambiguity across kinds with
+      // no better signal drops the relationship rather than guessing wrong.
+      const find = (name: string) => {
+        const matches = rows.filter((r) => r.name.toLowerCase() === name.toLowerCase());
+        if (matches.length <= 1) return matches[0];
+        return (
+          matches.find((r) => r.name === name) ??
+          matches.find((r) => r.kind === "character") ??
+          undefined
+        );
+      };
+      const from = find(rel.from);
+      const to = find(rel.to);
+      // Relationships between entities we do not know about are dropped rather
+      // than guessed at — the next chapter's upsert will create them.
+      if (!from || !to || from.id === to.id) continue;
 
-    await db
-      .insert(schema.entityRelationships)
-      .values({
-        bookId: input.bookId,
-        fromEntityId: from.id,
-        toEntityId: to.id,
-        type: rel.type || "other",
-        description: rel.description?.trim() || null,
-        establishedChapter: input.chapterNumber,
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.entityRelationships.fromEntityId,
-          schema.entityRelationships.toEntityId,
-          schema.entityRelationships.type,
-        ],
-        set: {
-          description: sql`coalesce(${schema.entityRelationships.description}, excluded.description)`,
-        },
-      });
-  }
+      await db
+        .insert(schema.entityRelationships)
+        .values({
+          bookId: input.bookId,
+          fromEntityId: from.id,
+          toEntityId: to.id,
+          type: rel.type || "other",
+          description: rel.description?.trim() || null,
+          establishedChapter: input.chapterNumber,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.entityRelationships.fromEntityId,
+            schema.entityRelationships.toEntityId,
+            schema.entityRelationships.type,
+          ],
+          set: {
+            description: sql`coalesce(${schema.entityRelationships.description}, excluded.description)`,
+          },
+        });
+    }
+  });
 }
 
 /**
  * Seeds entities from the concept/outline pass. Existing rows win: a re-run
  * must never clobber canon that later chapters have already built on.
  */
-export async function seedEntities(bookId: string, seeds: EntitySeed[]): Promise<void> {
+export async function seedEntities(
+  bookId: string,
+  seeds: EntitySeed[],
+  transaction?: DbTransaction,
+): Promise<void> {
   if (seeds.length === 0) return;
-  await getDb()
-    .insert(schema.entities)
-    .values(
-      seeds.map((seed) => ({
-        bookId,
-        kind: seed.kind,
-        name: seed.name.trim(),
-        aliases: seed.aliases ?? [],
-        attrs: parseAttrs(seed.kind, seed.attrs ?? {}) as Record<string, unknown>,
-      })),
-    )
-    .onConflictDoNothing({
-      target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
-    });
+  await withEntityMutation(transaction, (db) =>
+    db
+      .insert(schema.entities)
+      .values(
+        seeds.map((seed) => ({
+          bookId,
+          kind: seed.kind,
+          name: seed.name.trim(),
+          aliases: seed.aliases ?? [],
+          attrs: parseAttrs(seed.kind, seed.attrs ?? {}) as Record<string, unknown>,
+        })),
+      )
+      .onConflictDoNothing({
+        target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
+      }),
+  );
 }
 
 /**
@@ -194,54 +210,58 @@ export async function seedEntities(bookId: string, seeds: EntitySeed[]): Promise
  * later retry may encounter chapter-established facts; mergeEntityAttrs keeps
  * those values authoritative and only fills gaps.
  */
-export async function enrichEntities(bookId: string, seeds: EntitySeed[]): Promise<void> {
-  const db = getDb();
-
-  for (const seed of seeds) {
-    const name = seed.name.trim();
-    if (!name) continue;
-    const incoming = parseAttrs(seed.kind, seed.attrs ?? {}) as Record<string, unknown>;
-    const [existing] = await db
-      .select({
-        id: schema.entities.id,
-        aliases: schema.entities.aliases,
-        attrs: schema.entities.attrs,
-      })
-      .from(schema.entities)
-      .where(
-        and(
-          eq(schema.entities.bookId, bookId),
-          eq(schema.entities.kind, seed.kind),
-          sql`lower(${schema.entities.name}) = lower(${name})`,
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      await db
-        .update(schema.entities)
-        .set({
-          aliases: [...new Set([...existing.aliases, ...(seed.aliases ?? [])])],
-          attrs: mergeEntityAttrs(existing.attrs, incoming),
-          updatedAt: new Date(),
+export async function enrichEntities(
+  bookId: string,
+  seeds: EntitySeed[],
+  transaction?: DbTransaction,
+): Promise<void> {
+  return withEntityMutation(transaction, async (db) => {
+    for (const seed of seeds) {
+      const name = seed.name.trim();
+      if (!name) continue;
+      const incoming = parseAttrs(seed.kind, seed.attrs ?? {}) as Record<string, unknown>;
+      const [existing] = await db
+        .select({
+          id: schema.entities.id,
+          aliases: schema.entities.aliases,
+          attrs: schema.entities.attrs,
         })
-        .where(eq(schema.entities.id, existing.id));
-      continue;
-    }
+        .from(schema.entities)
+        .where(
+          and(
+            eq(schema.entities.bookId, bookId),
+            eq(schema.entities.kind, seed.kind),
+            sql`lower(${schema.entities.name}) = lower(${name})`,
+          ),
+        )
+        .limit(1);
 
-    await db
-      .insert(schema.entities)
-      .values({
-        bookId,
-        kind: seed.kind,
-        name,
-        aliases: seed.aliases ?? [],
-        attrs: incoming,
-      })
-      .onConflictDoNothing({
-        target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
-      });
-  }
+      if (existing) {
+        await db
+          .update(schema.entities)
+          .set({
+            aliases: [...new Set([...existing.aliases, ...(seed.aliases ?? [])])],
+            attrs: mergeEntityAttrs(existing.attrs, incoming),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.entities.id, existing.id));
+        continue;
+      }
+
+      await db
+        .insert(schema.entities)
+        .values({
+          bookId,
+          kind: seed.kind,
+          name,
+          aliases: seed.aliases ?? [],
+          attrs: incoming,
+        })
+        .onConflictDoNothing({
+          target: [schema.entities.bookId, schema.entities.kind, schema.entities.name],
+        });
+    }
+  });
 }
 
 export type BibleEntity = {

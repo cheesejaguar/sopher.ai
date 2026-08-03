@@ -22,14 +22,16 @@ const buttonVariants = cva(
       },
       size: {
         default:
-          "h-11 gap-2 px-4 sm:h-9 sm:px-3 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",
-        xs: "h-11 min-w-11 gap-1 px-2 text-xs sm:h-7 sm:min-w-0 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-11 min-w-11 gap-1.5 px-3 text-[0.8rem] sm:h-8 sm:min-w-0 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-12 gap-2 px-5 sm:h-11 sm:px-4 has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4",
-        icon: "size-11 sm:size-9",
-        "icon-xs": "size-11 sm:size-7 [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-11 sm:size-8 [&_svg:not([class*='size-'])]:size-3.5",
-        "icon-lg": "size-12 sm:size-10",
+          "h-11 gap-2 px-4 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:h-9 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:px-3 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",
+        xs: "h-11 min-w-11 gap-1 px-2 text-xs sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:h-7 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-w-0 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-11 min-w-11 gap-1.5 px-3 text-[0.8rem] sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:h-8 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-w-0 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-12 gap-2 px-5 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:h-11 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:px-4 has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4",
+        icon: "size-11 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:size-9",
+        "icon-xs":
+          "size-11 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:size-7 [&_svg:not([class*='size-'])]:size-3",
+        "icon-sm":
+          "size-11 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:size-8 [&_svg:not([class*='size-'])]:size-3.5",
+        "icon-lg": "size-12 sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:size-10",
       },
     },
     defaultVariants: {

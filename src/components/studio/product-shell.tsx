@@ -10,6 +10,7 @@ import {
   BookOpen,
   BookPlus,
   Coins,
+  CircleHelp,
   CreditCard,
   Flag,
   Gauge,
@@ -39,7 +40,15 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { CommandPalette } from "@/components/studio/command-palette";
+import {
+  AuthoringJourneyCommandProvider,
+  useAuthoringJourneyCommand,
+} from "@/components/studio/authoring-journey-command";
+import { StudioHelp } from "@/components/studio/studio-help";
+import { StudioHelpProvider } from "@/components/studio/studio-help-context";
+import { StudioCoachmark } from "@/components/studio/studio-coachmark";
 import { ThemeToggle } from "@/components/studio/theme-toggle";
+import type { AuthoringOnboardingPreferences } from "@/lib/authoring-onboarding-shared";
 
 type ShellVariant = "studio" | "admin";
 
@@ -85,14 +94,20 @@ function isCurrent(pathname: string, link: ShellLink, variant: ShellVariant) {
   return undefined;
 }
 
-function ProductMark({ variant }: { variant: ShellVariant }) {
+function ProductMark({
+  variant,
+  showContext = true,
+}: {
+  variant: ShellVariant;
+  showContext?: boolean;
+}) {
   return (
     <Link
       href={variant === "admin" ? "/admin" : "/studio"}
       className="group flex min-h-11 min-w-0 items-center gap-3 rounded-sm"
     >
       <BrandMark className="text-sidebar-foreground" />
-      <span className="hidden min-w-0 min-[360px]:block">
+      <span className={cn("min-w-0", showContext ? "block" : "hidden")}>
         <span className="block font-mono text-[0.6875rem] tracking-[0.12em] text-sidebar-foreground/75 uppercase">
           {variant === "admin" ? "Control room" : "Writing studio"}
         </span>
@@ -213,7 +228,15 @@ function CommandButton({ compact = false, onOpen }: { compact?: boolean; onOpen:
   );
 }
 
-function ShellUtilities({ variant, mobile = false }: { variant: ShellVariant; mobile?: boolean }) {
+function ShellUtilities({
+  variant,
+  mobile = false,
+  onOpenHelp,
+}: {
+  variant: ShellVariant;
+  mobile?: boolean;
+  onOpenHelp?: () => void;
+}) {
   const studioLink = (
     <Link
       href="/studio"
@@ -232,6 +255,23 @@ function ShellUtilities({ variant, mobile = false }: { variant: ShellVariant; mo
         ) : (
           studioLink
         )
+      ) : null}
+      {variant === "studio" && onOpenHelp ? (
+        <Button
+          type="button"
+          variant="ghost"
+          onClick={onOpenHelp}
+          aria-haspopup="dialog"
+          className="min-h-11 w-full justify-start gap-3 rounded-sm px-3 text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground"
+        >
+          <CircleHelp aria-hidden="true" className="size-4" />
+          <span>
+            <span className="block text-left text-sm font-medium">Help</span>
+            <span className="block text-left text-[0.6875rem] font-normal text-sidebar-foreground/75">
+              Guidance &amp; support
+            </span>
+          </span>
+        </Button>
       ) : null}
       <div className="flex min-h-11 items-center justify-between gap-3 rounded-sm border border-sidebar-border px-3">
         <span className="flex items-center gap-3 text-sm text-sidebar-foreground/75">
@@ -314,11 +354,13 @@ export function ProductShell({
   creditLabel,
 }: ProductShellProps) {
   return (
-    <React.Suspense fallback={<ProductShellFallback variant={variant} />}>
-      <ProductShellWithPathname variant={variant} credits={credits} creditLabel={creditLabel}>
-        {children}
-      </ProductShellWithPathname>
-    </React.Suspense>
+    <AuthoringJourneyCommandProvider>
+      <React.Suspense fallback={<ProductShellFallback variant={variant} />}>
+        <ProductShellWithPathname variant={variant} credits={credits} creditLabel={creditLabel}>
+          {children}
+        </ProductShellWithPathname>
+      </React.Suspense>
+    </AuthoringJourneyCommandProvider>
   );
 }
 
@@ -331,111 +373,182 @@ function ProductShellWithPathname({
   const pathname = usePathname() ?? (variant === "admin" ? "/admin" : "/studio");
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false);
+  const [helpOpen, setHelpOpen] = React.useState(false);
+  const { nextAction } = useAuthoringJourneyCommand();
+  const [seenCoachmarks, setSeenCoachmarks] = React.useState<string[] | null>(null);
   const editorOwnsMobileChrome =
     variant === "studio" && /^\/projects\/[^/]+\/editor\/\d+\/?$/.test(pathname);
 
+  const openHelp = React.useCallback(() => {
+    setMobileNavOpen(false);
+    setCommandPaletteOpen(false);
+    setHelpOpen(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (variant !== "studio") return;
+    const controller = new AbortController();
+    void fetch("/api/onboarding?preferences=1", {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const preferences = (await response.json()) as AuthoringOnboardingPreferences;
+        setSeenCoachmarks(preferences.seenCoachmarks);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [variant]);
+
+  const markCoachmarkSeen = React.useCallback((coachmark: string) => {
+    setSeenCoachmarks((current) =>
+      current && !current.includes(coachmark) ? [...current, coachmark] : current,
+    );
+    void fetch("/api/onboarding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_coachmark_seen", coachmark }),
+    }).catch(() => {});
+  }, []);
+
+  const showMobileNavigationCoachmark =
+    seenCoachmarks !== null && !seenCoachmarks.includes("mobile_navigation");
+
   return (
-    <div className="min-h-dvh min-w-0 bg-background text-foreground [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
-      <aside className="sticky top-0 hidden h-dvh flex-col border-r border-sidebar-border bg-sidebar px-4 py-5 text-sidebar-foreground lg:flex">
-        <ProductMark variant={variant} />
-        {variant === "studio" ? (
-          <div className="mt-6">
-            <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
-          </div>
-        ) : (
-          <div className="mt-6 flex items-center gap-2 border-y border-sidebar-border py-3 font-mono text-[0.6875rem] tracking-[0.12em] text-sidebar-foreground/75 uppercase">
-            <ShieldCheck aria-hidden="true" className="size-3.5 text-ember" />
-            Restricted access
-          </div>
-        )}
-        <div className="mt-7 min-h-0 flex-1 overflow-y-auto">
-          <Navigation
-            variant={variant}
-            pathname={pathname}
-            credits={credits}
-            creditLabel={creditLabel}
-          />
-        </div>
-        <div className="border-t border-sidebar-border pt-4">
-          <ShellUtilities variant={variant} />
-        </div>
-      </aside>
-
-      <div className="min-w-0">
-        {editorOwnsMobileChrome ? null : (
-          <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/95 px-4 supports-[backdrop-filter]:backdrop-blur-md lg:hidden">
-            <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-              <SheetTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-lg"
-                    onClick={() => setMobileNavOpen(true)}
-                    aria-label={
-                      variant === "admin" ? "Open admin navigation" : "Open studio navigation"
-                    }
-                    className="rounded-sm"
-                  />
-                }
-              >
-                <Menu aria-hidden="true" />
-              </SheetTrigger>
-              <SheetContent
-                side="left"
-                className="w-[min(22rem,88vw)] gap-0 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground"
-              >
-                <SheetHeader className="border-b border-sidebar-border p-5 text-left">
-                  <SheetTitle className="sr-only">
-                    {variant === "admin" ? "Admin navigation" : "Studio navigation"}
-                  </SheetTitle>
-                  <SheetDescription className="sr-only">
-                    Choose a destination in sopher.ai.
-                  </SheetDescription>
-                  <ProductMark variant={variant} />
-                </SheetHeader>
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                  {variant === "studio" ? (
-                    <div className="mb-6">
-                      <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
-                    </div>
-                  ) : null}
-                  <Navigation
-                    variant={variant}
-                    pathname={pathname}
-                    mobile
-                    credits={credits}
-                    creditLabel={creditLabel}
-                  />
-                </div>
-                <div className="p-4">
-                  <ShellUtilities variant={variant} mobile />
-                </div>
-              </SheetContent>
-            </Sheet>
-
-            <ProductMark variant={variant} />
-            <div className="flex items-center gap-1">
-              {variant === "studio" ? (
-                <CommandButton compact onOpen={() => setCommandPaletteOpen(true)} />
-              ) : (
-                <ThemeToggle />
-              )}
-            </div>
-          </header>
-        )}
-
-        <main
-          id="main-content"
-          tabIndex={-1}
-          className="min-h-[calc(100dvh-3.5rem)] min-w-0 px-4 py-6 sm:px-6 sm:py-8 lg:min-h-dvh lg:px-8 xl:px-10"
+    <StudioHelpProvider
+      onOpen={openHelp}
+      seenCoachmarks={seenCoachmarks}
+      onCoachmarkSeen={markCoachmarkSeen}
+    >
+      <div className="min-h-dvh min-w-0 bg-background text-foreground [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+        <aside
+          aria-label={
+            variant === "admin" ? "Admin navigation and account" : "Studio navigation and account"
+          }
+          className="sticky top-0 hidden h-dvh flex-col border-r border-sidebar-border bg-sidebar px-4 py-5 text-sidebar-foreground lg:flex"
         >
-          <div className="mx-auto w-full max-w-[92rem] min-w-0">{children}</div>
-        </main>
-      </div>
+          <ProductMark variant={variant} />
+          {variant === "studio" ? (
+            <div className="mt-6">
+              <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
+            </div>
+          ) : (
+            <div className="mt-6 flex items-center gap-2 border-y border-sidebar-border py-3 font-mono text-[0.6875rem] tracking-[0.12em] text-sidebar-foreground/75 uppercase">
+              <ShieldCheck aria-hidden="true" className="size-3.5 text-ember" />
+              Restricted access
+            </div>
+          )}
+          <div className="mt-7 min-h-0 flex-1 overflow-y-auto">
+            <Navigation
+              variant={variant}
+              pathname={pathname}
+              credits={credits}
+              creditLabel={creditLabel}
+            />
+          </div>
+          <div className="border-t border-sidebar-border pt-4">
+            <ShellUtilities variant={variant} onOpenHelp={openHelp} />
+          </div>
+        </aside>
 
-      {variant === "studio" ? (
-        <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
-      ) : null}
-    </div>
+        <div className="min-w-0">
+          {editorOwnsMobileChrome ? null : (
+            <header className="sticky top-0 z-40 grid min-h-14 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2 border-b border-border bg-background/95 pt-[env(safe-area-inset-top)] pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] supports-[backdrop-filter]:backdrop-blur-md lg:hidden">
+              <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+                <SheetTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-lg"
+                      onClick={() => setMobileNavOpen(true)}
+                      aria-label={
+                        variant === "admin" ? "Open admin navigation" : "Open studio navigation"
+                      }
+                      className="rounded-sm"
+                    />
+                  }
+                >
+                  <Menu aria-hidden="true" />
+                </SheetTrigger>
+                <SheetContent
+                  side="left"
+                  className="w-[min(22rem,88vw)] gap-0 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground"
+                >
+                  <SheetHeader className="border-b border-sidebar-border p-5 text-left">
+                    <SheetTitle className="sr-only">
+                      {variant === "admin" ? "Admin navigation" : "Studio navigation"}
+                    </SheetTitle>
+                    <SheetDescription className="sr-only">
+                      Choose a destination in sopher.ai.
+                    </SheetDescription>
+                    <ProductMark variant={variant} />
+                  </SheetHeader>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-4">
+                    {variant === "studio" && showMobileNavigationCoachmark ? (
+                      <div className="mb-5">
+                        <StudioCoachmark
+                          title="Everything is still within reach"
+                          onDismiss={() => markCoachmarkSeen("mobile_navigation")}
+                        >
+                          Your books, credits, settings, and Help live in this menu while you write
+                          on a smaller screen.
+                        </StudioCoachmark>
+                      </div>
+                    ) : null}
+                    {variant === "studio" ? (
+                      <div className="mb-6">
+                        <CommandButton onOpen={() => setCommandPaletteOpen(true)} />
+                      </div>
+                    ) : null}
+                    <Navigation
+                      variant={variant}
+                      pathname={pathname}
+                      mobile
+                      credits={credits}
+                      creditLabel={creditLabel}
+                    />
+                  </div>
+                  <div className="p-4">
+                    <ShellUtilities variant={variant} mobile onOpenHelp={openHelp} />
+                  </div>
+                </SheetContent>
+              </Sheet>
+
+              <span className="min-w-0 justify-self-center overflow-hidden">
+                <ProductMark variant={variant} showContext={false} />
+              </span>
+              <div className="flex items-center justify-self-end gap-1">
+                {variant === "studio" ? (
+                  <CommandButton compact onOpen={() => setCommandPaletteOpen(true)} />
+                ) : (
+                  <ThemeToggle />
+                )}
+              </div>
+            </header>
+          )}
+
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className="safe-area-page min-h-[calc(100dvh-3.5rem)] min-w-0 pt-6 sm:pt-8 lg:min-h-dvh"
+          >
+            <div className="mx-auto w-full max-w-[92rem] min-w-0">{children}</div>
+          </main>
+        </div>
+
+        {variant === "studio" ? (
+          <>
+            <CommandPalette
+              open={commandPaletteOpen}
+              onOpenChange={setCommandPaletteOpen}
+              onOpenHelp={openHelp}
+              nextAction={nextAction}
+            />
+            <StudioHelp open={helpOpen} onOpenChange={setHelpOpen} pathname={pathname} />
+          </>
+        ) : null}
+      </div>
+    </StudioHelpProvider>
   );
 }

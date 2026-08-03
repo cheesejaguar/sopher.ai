@@ -100,6 +100,7 @@ function snapshot(overrides: Record<string, unknown> = {}) {
     workflowRunId: null,
     acceptanceUncertainAt: new Date("2026-07-30T12:00:00.000Z"),
     acceptanceDispatchClaimedAt: null,
+    cancellationRequestedAt: null,
     ...overrides,
   };
 }
@@ -161,6 +162,22 @@ describe("POST /api/runs/[runId]/retry-start", () => {
       reattached: true,
     });
     expect(mocks.rateLimit).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("never redispatches a run after Stop has been requested", async () => {
+    mockSelectRows([snapshot({ cancellationRequestedAt: new Date("2026-07-30T12:09:00.000Z") })]);
+
+    const response = await request();
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "cancellation_requested",
+      handoffConfirmed: false,
+      confirmationPending: false,
+    });
+    expect(mocks.authorizeProjectSpend).not.toHaveBeenCalled();
+    expect(mocks.claimUncertainAuthoringRun).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
   });
 
@@ -285,6 +302,34 @@ describe("POST /api/runs/[runId]/retry-start", () => {
       userId: "user-1",
       workflowRunId: "workflow-1",
     });
+  });
+
+  it("reattaches when a competing retry links Workflow before this claim lands", async () => {
+    mockSelectRows(
+      [snapshot()],
+      [
+        {
+          status: "queued",
+          workflowRunId: "workflow-from-competing-retry",
+          acceptanceUncertainAt: null,
+          acceptanceDispatchClaimedAt: null,
+          cancellationRequestedAt: null,
+        },
+      ],
+    );
+    mocks.claimUncertainAuthoringRun.mockResolvedValue(null);
+
+    const response = await request();
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toMatchObject({
+      runId,
+      status: "queued",
+      reattached: true,
+      handoffConfirmed: true,
+      confirmationPending: false,
+    });
+    expect(mocks.start).not.toHaveBeenCalled();
   });
 
   it("rebuilds an unfinished full-book snapshot before claiming or dispatching it", async () => {

@@ -30,11 +30,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Audit the full dependency graph
-        # CVE-2026-14257's registry range currently marks every historical
-        # major vulnerable even though brace-expansion backported the fix to
-        # v1.1.17. The lockfile override pins that official v1 maintenance
-        # release; no other advisory is ignored.
-        run: pnpm audit --ignore CVE-2026-14257
+        run: pnpm audit
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm format:check
@@ -63,16 +59,21 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Build the public acceptance application
+        run: pnpm build
+        env:
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ""
+          CLERK_SECRET_KEY: ""
       - run: pnpm exec playwright install chromium firefox webkit --with-deps
       - name: Public cross-browser acceptance
         run: pnpm test:e2e
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: playwright-public-report
           path: playwright-report
           retention-days: 14
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: e2e-public-screenshots
@@ -133,17 +134,23 @@ jobs:
         run: pnpm test:db-integration
         env:
           E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+      - name: Build the authenticated acceptance application
+        run: pnpm build
+        env:
+          DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ""
+          CLERK_SECRET_KEY: ""
       - name: Authenticated database acceptance
         run: pnpm test:e2e
         env:
           E2E_DATABASE_URL: ${{ secrets.E2E_DATABASE_URL }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: playwright-db-report
           path: playwright-report
           retention-days: 14
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: e2e-db-screenshots
@@ -192,7 +199,7 @@ jobs:
           CLERK_SECRET_KEY: ""
       - name: Lighthouse production routes
         run: pnpm lighthouse
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: lighthouse-reports

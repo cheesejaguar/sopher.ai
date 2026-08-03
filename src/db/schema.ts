@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -36,6 +38,15 @@ export const users = pgTable("users", {
    * cannot tell you a specific user's lifetime revenue.
    */
   acquisition: jsonb("acquisition").$type<Acquisition | null>(),
+  /**
+   * Small, cross-device authoring guidance state. Journey completion is
+   * derived from durable project artifacts; this stores only presentation
+   * preferences so it can never become another lifecycle source of truth.
+   */
+  authoringOnboarding: jsonb("authoring_onboarding")
+    .$type<AuthoringOnboarding>()
+    .default({ version: 1, seenCoachmarks: [] })
+    .notNull(),
   ...timestamps,
 });
 
@@ -50,6 +61,12 @@ export type Acquisition = {
   /** First page of the first visit. */
   landingPath?: string;
   capturedAt: string;
+};
+
+export type AuthoringOnboarding = {
+  version: number;
+  dismissedAt?: string;
+  seenCoachmarks?: string[];
 };
 
 export type ProjectSettings = {
@@ -286,6 +303,61 @@ export const generationRuns = pgTable(
       .default("queued")
       .notNull(),
     config: jsonb("config").default({}).notNull(),
+    /** Canonical progress is persisted with each durable event before streaming. */
+    currentStage: text("current_stage", {
+      enum: [
+        "queued",
+        "concept",
+        "outline",
+        "awaiting_approval",
+        "awaiting_credits",
+        "bible",
+        "chapters",
+        "editing",
+        "continuity",
+        "revising",
+        "finalizing",
+        "done",
+        "failed",
+        "cancelled",
+      ],
+    })
+      .default("queued")
+      .notNull(),
+    progressPct: integer("progress_pct").default(0).notNull(),
+    stageDescription: text("stage_description"),
+    lastProgressAt: timestamp("last_progress_at", { withTimezone: true }),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    /**
+     * Last authoritative Workflow observation. Missing and unavailable are
+     * observations, never terminal database states.
+     */
+    workflowObservedStatus: text("workflow_observed_status", {
+      enum: ["pending", "running", "completed", "failed", "cancelled", "missing", "unavailable"],
+    }),
+    workflowObservedAt: timestamp("workflow_observed_at", { withTimezone: true }),
+    workflowMissingSince: timestamp("workflow_missing_since", { withTimezone: true }),
+    workflowMissingCount: integer("workflow_missing_count").default(0).notNull(),
+    /** Initial dispatch plus at most two same-run recovery dispatches. */
+    dispatchAttempts: integer("dispatch_attempts").default(0).notNull(),
+    /**
+     * Cancellation is requested first. Terminal cancellation is recorded only
+     * after Workflow confirms it or no remote work could have started.
+     */
+    cancellationRequestedAt: timestamp("cancellation_requested_at", { withTimezone: true }),
+    cancellationReason: text("cancellation_reason"),
+    pauseKind: text("pause_kind", { enum: ["outline_approval", "credits_topup"] }),
+    pauseVersion: integer("pause_version").default(0).notNull(),
+    /** Stable Workflow step id that makes pause allocation replay-safe. */
+    pauseKey: text("pause_key"),
+    pauseDetails: jsonb("pause_details").$type<AuthoringPauseDetails | null>(),
+    pauseRegisteredAt: timestamp("pause_registered_at", { withTimezone: true }),
+    rootErrorCode: text("root_error_code"),
+    rootErrorStage: text("root_error_stage"),
+    /** Allocated under the run row lock; legacy events remain valid. */
+    nextEventSeq: integer("next_event_seq").default(1).notNull(),
+    /** Opaque, copyable support handle that carries no manuscript content. */
+    supportReference: uuid("support_reference").defaultRandom().notNull(),
     /**
      * What the author wrote when sending the outline back for revision. Lived
      * only inside Workflow DevKit's durable state, reachable by `workflow
@@ -314,6 +386,28 @@ export const generationRuns = pgTable(
     index("idx_runs_project").on(t.projectId, t.createdAt),
     index("idx_runs_status").on(t.status),
     index("idx_runs_health_check").on(t.status, t.healthCheckedAt, t.createdAt),
+    uniqueIndex("uq_runs_support_reference").on(t.supportReference),
+    uniqueIndex("uq_runs_id_project").on(t.id, t.projectId),
+    uniqueIndex("uq_runs_id_user").on(t.id, t.userId),
+    check(
+      "generation_runs_current_stage_check",
+      sql`${t.currentStage} in (
+        'queued', 'concept', 'outline', 'awaiting_approval', 'awaiting_credits',
+        'bible', 'chapters', 'editing', 'continuity', 'revising',
+        'finalizing', 'done', 'failed', 'cancelled'
+      )`,
+    ),
+    check("generation_runs_progress_pct_check", sql`${t.progressPct} between 0 and 100`),
+    check(
+      "generation_runs_workflow_observed_status_check",
+      sql`${t.workflowObservedStatus} is null or ${t.workflowObservedStatus} in (
+        'pending', 'running', 'completed', 'failed', 'cancelled', 'missing', 'unavailable'
+      )`,
+    ),
+    check("generation_runs_workflow_missing_count_check", sql`${t.workflowMissingCount} >= 0`),
+    check("generation_runs_dispatch_attempts_check", sql`${t.dispatchAttempts} between 0 and 3`),
+    check("generation_runs_pause_version_check", sql`${t.pauseVersion} >= 0`),
+    check("generation_runs_next_event_seq_check", sql`${t.nextEventSeq} >= 1`),
     // Race-proof backstop for the "one active generation per project" rule.
     // Export runs are excluded so exports stay independent of generation.
     uniqueIndex("uq_runs_active_per_project")
@@ -331,11 +425,157 @@ export const generationEvents = pgTable(
       .notNull()
       .references(() => generationRuns.id, { onDelete: "cascade" }),
     seq: integer("seq").notNull(),
+    /** Stable Workflow step identifier; null only on historical events. */
+    eventKey: text("event_key"),
     type: text("type").notNull(),
     payload: jsonb("payload").default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [uniqueIndex("uq_event_seq").on(t.runId, t.seq)],
+  (t) => [
+    uniqueIndex("uq_event_seq").on(t.runId, t.seq),
+    uniqueIndex("uq_event_key")
+      .on(t.runId, t.eventKey)
+      .where(sql`${t.eventKey} is not null`),
+    check("generation_events_seq_check", sql`${t.seq} >= 1`),
+  ],
+);
+
+/**
+ * Short-lived database-backed caps for long-running Workflow stream readers.
+ * A process crash needs no cleanup job: the next acquisition removes expired
+ * leases before counting. The run/user composite FK prevents attribution drift.
+ */
+export const authoringStreamLeases = pgTable(
+  "authoring_stream_leases",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").notNull(),
+    userId: text("user_id").notNull(),
+    namespace: text("namespace").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    foreignKey({
+      name: "authoring_stream_leases_run_user_generation_runs_fk",
+      columns: [t.runId, t.userId],
+      foreignColumns: [generationRuns.id, generationRuns.userId],
+    }).onDelete("cascade"),
+    index("idx_authoring_stream_leases_active").on(t.runId, t.userId, t.expiresAt),
+    index("idx_authoring_stream_leases_user").on(t.userId, t.expiresAt),
+    check(
+      "authoring_stream_leases_namespace_check",
+      sql`${t.namespace} = 'progress' or ${t.namespace} ~ '^chapter:[1-9][0-9]{0,3}$'`,
+    ),
+    check("authoring_stream_leases_expiry_check", sql`${t.expiresAt} > ${t.createdAt}`),
+  ],
+);
+
+export type AuthoringRunInputKind = "outline_approval" | "credits_topup";
+export type AuthoringPauseDetails = {
+  balanceCredits?: number;
+  requiredCredits?: number;
+  resumeStage?: string;
+};
+
+/**
+ * Durable, versioned human input. The route commits here before signaling the
+ * Workflow hook, so response loss and hook delivery retries never duplicate an
+ * approval or top-up.
+ */
+export const authoringRunInputs = pgTable(
+  "authoring_run_inputs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => generationRuns.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["outline_approval", "credits_topup"] }).notNull(),
+    pauseVersion: integer("pause_version").notNull(),
+    requestKey: uuid("request_key").defaultRandom().notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().default({}).notNull(),
+    status: text("status", { enum: ["accepted", "delivered", "consumed"] })
+      .default("accepted")
+      .notNull(),
+    deliveryAttempts: integer("delivery_attempts").default(0).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    lastDeliveryError: text("last_delivery_error"),
+  },
+  (t) => [
+    uniqueIndex("uq_authoring_run_input_pause").on(t.runId, t.kind, t.pauseVersion),
+    uniqueIndex("uq_authoring_run_input_request").on(t.runId, t.requestKey),
+    index("idx_authoring_run_inputs_delivery").on(t.status, t.acceptedAt),
+    check("authoring_run_inputs_pause_version_check", sql`${t.pauseVersion} >= 1`),
+    check("authoring_run_inputs_delivery_attempts_check", sql`${t.deliveryAttempts} >= 0`),
+    check(
+      "authoring_run_inputs_status_check",
+      sql`${t.status} in ('accepted', 'delivered', 'consumed')`,
+    ),
+    check(
+      "authoring_run_inputs_kind_check",
+      sql`${t.kind} in ('outline_approval', 'credits_topup')`,
+    ),
+  ],
+);
+
+export type AuthoringIncidentEvidence = Record<string, string | number | boolean | null>;
+
+/**
+ * Idempotent, content-free operational evidence. One unresolved incident
+ * exists per run/dedupe key; repeated watchdog observations update it rather
+ * than creating alert noise.
+ */
+export const authoringIncidents = pgTable(
+  "authoring_incidents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id").notNull(),
+    projectId: uuid("project_id").notNull(),
+    category: text("category", {
+      enum: [
+        "dispatch",
+        "workflow_missing",
+        "stalled_heartbeat",
+        "invalid_pause",
+        "completion_contradiction",
+        "cancellation_unconfirmed",
+        "stale_reservation",
+        "event_persistence",
+        "operator_action",
+      ],
+    }).notNull(),
+    severity: text("severity", { enum: ["warning", "critical"] }).notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    evidence: jsonb("evidence").$type<AuthoringIncidentEvidence>().default({}).notNull(),
+    occurrenceCount: integer("occurrence_count").default(1).notNull(),
+    firstObservedAt: timestamp("first_observed_at", { withTimezone: true }).defaultNow().notNull(),
+    lastObservedAt: timestamp("last_observed_at", { withTimezone: true }).defaultNow().notNull(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("uq_authoring_incident_active")
+      .on(t.runId, t.dedupeKey)
+      .where(sql`${t.resolvedAt} is null`),
+    index("idx_authoring_incidents_project").on(t.projectId, t.resolvedAt, t.severity),
+    index("idx_authoring_incidents_active").on(t.resolvedAt, t.severity, t.lastObservedAt),
+    foreignKey({
+      name: "authoring_incidents_run_project_generation_runs_fk",
+      columns: [t.runId, t.projectId],
+      foreignColumns: [generationRuns.id, generationRuns.projectId],
+    }).onDelete("cascade"),
+    check("authoring_incidents_occurrence_count_check", sql`${t.occurrenceCount} >= 1`),
+    check("authoring_incidents_severity_check", sql`${t.severity} in ('warning', 'critical')`),
+    check(
+      "authoring_incidents_category_check",
+      sql`${t.category} in (
+        'dispatch', 'workflow_missing', 'stalled_heartbeat', 'invalid_pause',
+        'completion_contradiction', 'cancellation_unconfirmed',
+        'stale_reservation', 'event_persistence', 'operator_action'
+      )`,
+    ),
+  ],
 );
 
 // Ground truth for cost metering and margin analysis.

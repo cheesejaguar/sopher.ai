@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
@@ -16,13 +16,16 @@ import { WriteExperience } from "@/components/generation/write-experience";
 import type { RunSnapshot, RunStatus } from "@/hooks/use-run-stream";
 import { getStudioAccess } from "@/lib/studio-access";
 import { getRunHealth } from "@/lib/run-health";
+import { getBalance } from "@/lib/billing/credits";
+import { fullBookRequiredCredits } from "@/lib/full-book-credit-requirement";
 
 export default async function WritePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
   const { userId } = await requireUser();
-  const [data, access] = await Promise.all([
+  const [data, access, balance] = await Promise.all([
     getProjectWithBook(userId, projectId),
     getStudioAccess(userId),
+    getBalance(userId),
   ]);
   if (!data) notFound();
   const { project, book } = data;
@@ -39,6 +42,11 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
     project.targetChapters,
     project.targetWordsPerChapter,
   );
+  const launchRequiredCredits = fullBookRequiredCredits({
+    tier: launchTier,
+    targetChapters: project.targetChapters,
+    targetWordsPerChapter: project.targetWordsPerChapter,
+  });
   const runTier: QualityTier = runConfig.tier ?? launchTier;
   const runTargetChapters = runConfig.targetChapters ?? project.targetChapters;
   const runTargetWordsPerChapter = runConfig.targetWordsPerChapter ?? project.targetWordsPerChapter;
@@ -60,7 +68,14 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
           createdAt: schema.generationEvents.createdAt,
         })
         .from(schema.generationEvents)
-        .where(eq(schema.generationEvents.runId, run.id))
+        // Internal replay markers share the run sequence but are deliberately
+        // not part of the author-facing RunEvent stream contract.
+        .where(
+          and(
+            eq(schema.generationEvents.runId, run.id),
+            ne(schema.generationEvents.type, "tool_mutation"),
+          ),
+        )
         .orderBy(schema.generationEvents.seq),
       getRunHealth(run),
     ]);
@@ -79,16 +94,35 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
         databaseStatus: health.databaseStatus,
         workflowStatus: health.workflowStatus,
         effectiveStatus: health.effectiveStatus,
+        stage: health.stage,
+        progressPct: health.progressPct,
+        stageDescription: health.stageDescription,
         acceptedAt: health.acceptedAt,
         ...(health.startedAt ? { startedAt: health.startedAt } : {}),
         ...(health.completedAt ? { completedAt: health.completedAt } : {}),
         ...(health.lastEventAt ? { lastEventAt: health.lastEventAt } : {}),
+        ...(health.heartbeatAt ? { heartbeatAt: health.heartbeatAt } : {}),
+        lastUpdateAt: health.lastUpdateAt,
+        health: health.health,
+        telemetryDegraded: health.health === "degraded",
         noWorkStarted: health.noWorkStarted,
         acceptanceUncertain: health.acceptanceUncertain,
         safeToRetry: health.safeToRetry,
         handoffConfirmed: Boolean(run.workflowRunId),
         elapsedMs: health.elapsedMs,
         ...(health.estimatedMinutes !== null ? { estimatedMinutes: health.estimatedMinutes } : {}),
+        dispatchAttempts: health.dispatchAttempts,
+        workflowMissingCount: health.workflowMissingCount,
+        ...(health.workflowMissingSince
+          ? { workflowMissingSince: health.workflowMissingSince }
+          : {}),
+        cancellation: health.cancellation,
+        pause: health.pause,
+        savedChapterCount: health.savedChapterCount,
+        savedCheckpointCount: health.savedCheckpointCount,
+        supportReference: health.supportReference,
+        rootErrorCode: health.rootErrorCode,
+        rootErrorStage: health.rootErrorStage,
         chapters: health.chapters,
       },
       events: events.map((event) => event.payload),
@@ -129,6 +163,8 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
         targetChapters={project.targetChapters}
         targetWordsPerChapter={project.targetWordsPerChapter}
         estimateUsd={launchEstimate.totalUsd}
+        balanceCredits={balance}
+        requiredCredits={launchRequiredCredits}
         estimatedMinutes={launchEstimate.estimatedMinutes}
         initialRunShape={
           run

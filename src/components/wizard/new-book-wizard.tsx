@@ -215,6 +215,12 @@ type NewBookWizardProps = {
   /** True only when this route is mounted beneath an active ClerkProvider. */
   accountManagementEnabled?: boolean;
   /**
+   * A validated checkout return may restore this account's saved full-book
+   * draft directly to final confirmation. Ordinary visits always begin at
+   * Step 1, including the explicit Resume flow.
+   */
+  resumeAfterCheckout?: boolean;
+  /**
    * Isolated browser-test failure injection. The server page passes this only
    * when the non-production, disposable-DB Workflow stub gate is active.
    */
@@ -259,10 +265,9 @@ function NewBookAccessGate({
       aria-labelledby="new-book-access-title"
       className="instrument-surface-raised rounded-sm px-5 py-8 sm:px-8"
     >
-      <p className="folio-label text-primary">New production</p>
       <h2
         id="new-book-access-title"
-        className="mt-3 text-xl font-semibold tracking-[-0.02em] sm:text-2xl"
+        className="text-xl font-semibold tracking-[-0.02em] sm:text-2xl"
       >
         {verificationRequired
           ? "Verify your email to begin"
@@ -302,12 +307,14 @@ function NewBookAccessGate({
             <Link href={existingTrialHref} className={buttonVariants({ className: "rounded-sm" })}>
               Open my included story
             </Link>
-            <Link
-              href={fullBookUnlockHref(access.trialProjectId!)}
-              className={buttonVariants({ variant: "outline", className: "rounded-sm" })}
-            >
-              Take this story to full length
-            </Link>
+            {access.trialProjectCompleted ? (
+              <Link
+                href={fullBookUnlockHref(access.trialProjectId!)}
+                className={buttonVariants({ variant: "outline", className: "rounded-sm" })}
+              >
+                Take this story to full length
+              </Link>
+            ) : null}
           </>
         ) : (
           <Link
@@ -412,6 +419,7 @@ function NewBookSetupWizard({
   userId,
   experience,
   e2eStartMode,
+  resumeAfterCheckout = false,
 }: Omit<NewBookWizardProps, "access"> & { experience: ProjectExperience }) {
   const router = useRouter();
   const freshState = React.useMemo(
@@ -504,8 +512,21 @@ function NewBookSetupWizard({
       const key = userId ? wizardDraftKey(userId, experience) : null;
       const draft = key ? restoreDraft(window.localStorage.getItem(key), experience) : null;
       if (draft && draftHasContent(draft)) {
-        setAvailableDraft(experience === "trial_short_story" ? applyTrialStoryShape(draft) : draft);
-        persistenceEnabled.current = false;
+        const normalized = experience === "trial_short_story" ? applyTrialStoryShape(draft) : draft;
+        if (
+          resumeAfterCheckout &&
+          experience === "full_book" &&
+          maxReachableStep(normalized) === WIZARD_STEPS.length - 1
+        ) {
+          persistenceEnabled.current = Boolean(key);
+          dispatch({
+            type: "resume",
+            state: { ...normalized, step: WIZARD_STEPS.length - 1 },
+          });
+        } else {
+          setAvailableDraft(normalized);
+          persistenceEnabled.current = false;
+        }
       } else {
         const tier = window.localStorage.getItem(DEFAULT_TIER_KEY);
         if (
@@ -520,7 +541,7 @@ function NewBookSetupWizard({
       setDraftChecked(true);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [experience, userId]);
+  }, [experience, resumeAfterCheckout, userId]);
 
   // Persist the draft, debounced, so a closed tab costs nothing.
   React.useEffect(() => {
@@ -672,6 +693,17 @@ function NewBookSetupWizard({
     quoteSummary?.chapters === state.chapters &&
     quoteSummary.wordsPerChapter === state.wordsPerChapter &&
     quoteSummary.tier === state.tier;
+  const needsCredits = experience === "full_book" && quoteReady && quoteSummary?.covered === false;
+  const checkoutResumeHref = "/studio/credits?return=%2Fstudio%2Fnew%3Fresume%3Dcheckout" as const;
+
+  function preserveSetupForCheckout() {
+    if (!userId) return;
+    persistenceEnabled.current = true;
+    window.localStorage.setItem(
+      wizardDraftKey(userId, experience),
+      serializeDraft(state, experience),
+    );
+  }
   // Why "Next" is unavailable — the button alone does not make this obvious.
   const blockedReason =
     stepId === "genre"
@@ -736,7 +768,10 @@ function NewBookSetupWizard({
 
   return (
     <div className="instrument-surface-raised overflow-hidden rounded-sm lg:grid lg:grid-cols-[14rem_minmax(0,1fr)]">
-      <aside className="border-b border-border bg-background/35 p-4 lg:border-r lg:border-b-0 lg:p-5">
+      <aside
+        aria-label="Book setup progress and summary"
+        className="border-b border-border bg-background/35 p-4 lg:border-r lg:border-b-0 lg:p-5"
+      >
         <p className="folio-label mb-3 text-muted-foreground">Brief sequence</p>
         <FolioProgress state={state} onGoto={(step) => goToStep({ type: "goto", step })} />
         {ui.resumed ? (
@@ -833,26 +868,43 @@ function NewBookSetupWizard({
           {lastStep ? (
             <>
               <p id="wizard-quote-hint" className="sr-only" aria-live="polite">
-                {quoteReady ? "" : "Wait for the current production estimate before starting."}
+                {!quoteReady
+                  ? "Wait for the current production estimate before starting."
+                  : needsCredits
+                    ? "Add enough credits before production can start."
+                    : ""}
               </p>
-              <Button
-                onClick={handleSubmit}
-                disabled={pending || !quoteReady}
-                focusableWhenDisabled
-                aria-describedby={quoteReady ? undefined : "wizard-quote-hint"}
-                className="rounded-sm aria-disabled:opacity-50"
-              >
-                {pending ? (
-                  <Spinner data-icon="inline-start" />
-                ) : (
-                  <Feather aria-hidden="true" data-icon="inline-start" />
-                )}
-                {pending
-                  ? "Starting the story…"
-                  : experience === "trial_short_story"
-                    ? "Create my short story"
-                    : "Start the book"}
-              </Button>
+              {needsCredits ? (
+                <Button
+                  nativeButton={false}
+                  render={<Link href={checkoutResumeHref} />}
+                  onClick={preserveSetupForCheckout}
+                  aria-describedby="wizard-quote-hint"
+                  className="rounded-sm"
+                >
+                  Add credits to start
+                  <ArrowRight aria-hidden="true" data-icon="inline-end" />
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleSubmit}
+                  disabled={pending || !quoteReady}
+                  focusableWhenDisabled
+                  aria-describedby={quoteReady ? undefined : "wizard-quote-hint"}
+                  className="rounded-sm aria-disabled:opacity-50"
+                >
+                  {pending ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : (
+                    <Feather aria-hidden="true" data-icon="inline-start" />
+                  )}
+                  {pending
+                    ? "Starting the story…"
+                    : experience === "trial_short_story"
+                      ? "Create my short story"
+                      : "Start the book"}
+                </Button>
+              )}
             </>
           ) : (
             <>

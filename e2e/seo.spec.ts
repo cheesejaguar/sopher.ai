@@ -247,7 +247,11 @@ test.describe("structured data", () => {
 
   test("the FAQ is on the homepage, not only on /pricing", async ({ page }) => {
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: "Common questions" })).toBeVisible();
-    await expect(page.getByText("What happens after I start?")).toBeVisible();
+    const faq = page
+      .locator("#main-content")
+      .getByRole("region", { name: "Common questions", exact: true });
+    await expect(faq).toHaveCount(1);
+    await expect(faq.getByRole("heading", { name: "Common questions" })).toBeVisible();
+    await expect(faq.getByText("What happens after I start?", { exact: true })).toBeVisible();
   });
 });

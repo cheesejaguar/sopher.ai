@@ -15,7 +15,12 @@ import {
 import { generateChapter } from "@/workflows/generate-chapter";
 import { singleChapterRequiredUsd } from "@/workflows/opening-credit-plan";
 import { isActiveRunConflict } from "@/lib/run-conflict";
-import { buildChapterRegenerationConfig, type BookGenerationSnapshot } from "@/lib/book-start";
+import {
+  buildChapterRegenerationConfig,
+  canReattachChapterRegeneration,
+  type BookGenerationSnapshot,
+  type ChapterRegenerationTarget,
+} from "@/lib/book-start";
 import {
   insertQueuedAuthoringRun,
   linkAuthoringRunWorkflow,
@@ -28,6 +33,7 @@ import {
 import { authorizeProjectSpend } from "@/lib/project-spend-http";
 import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
 import { markAuthoringRunDispatchReady } from "@/lib/authoring-dispatch";
+import { getAuthoringStartSafetyBlock } from "@/lib/authoring-start-safety";
 
 export const maxDuration = 60;
 
@@ -84,6 +90,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       id: schema.generationRuns.id,
       kind: schema.generationRuns.kind,
       status: schema.generationRuns.status,
+      config: schema.generationRuns.config,
     })
     .from(schema.generationRuns)
     .where(
@@ -95,9 +102,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     )
     .limit(1);
   if (requestedRun) {
-    if (requestedRun.kind !== "chapter") {
+    const requestedTarget: ChapterRegenerationTarget = {
+      chapterId,
+      chapterNumber: ownership.chapterNumber,
+    };
+    if (
+      requestedRun.kind !== "chapter" ||
+      !canReattachChapterRegeneration(requestedRun.config, requestedTarget)
+    ) {
       return Response.json(
-        { error: "This request key already belongs to a different generation operation" },
+        { error: "This request key already belongs to a different chapter regeneration" },
         { status: 409 },
       );
     }
@@ -109,6 +123,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
         reattached: true,
       },
       { status: 202 },
+    );
+  }
+
+  await reconcileBeforeAuthoringRunConflict({
+    projectId: ownership.projectId,
+    userId,
+  });
+  const safetyBlock = await getAuthoringStartSafetyBlock({
+    projectId: ownership.projectId,
+    userId,
+  });
+  if (safetyBlock) {
+    return Response.json(
+      {
+        error: "This project needs a safety recheck before another authoring run can be created.",
+        ...safetyBlock,
+      },
+      { status: 409 },
     );
   }
 
@@ -144,10 +176,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
 
   // One run per project at a time — same rule as full-book generation, backed
   // by the same partial unique index.
-  await reconcileBeforeAuthoringRunConflict({
-    projectId: ownership.projectId,
-    userId,
-  });
   const [active] = await db
     .select({ id: schema.generationRuns.id })
     .from(schema.generationRuns)
@@ -163,7 +191,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     return Response.json({ error: "A run is already in progress" }, { status: 409 });
   }
 
-  let config = buildChapterRegenerationConfig(row);
+  let config = buildChapterRegenerationConfig(row, {
+    chapterId,
+    chapterNumber: row.chapterNumber,
+  });
 
   const optimisticRequiredUsd = singleChapterRequiredUsd(config);
   try {
@@ -186,6 +217,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       requestKey,
     });
     if (!run.inserted) {
+      if (
+        !canReattachChapterRegeneration(run.config, {
+          chapterId,
+          chapterNumber: row.chapterNumber,
+        })
+      ) {
+        return Response.json(
+          { error: "This request key already belongs to a different chapter regeneration" },
+          { status: 409 },
+        );
+      }
       return Response.json(
         {
           runId: run.id,
@@ -265,7 +307,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     );
   }
   const lockedChapterNumber = lockedChapter.chapterNumber;
-  config = buildChapterRegenerationConfig(lockedChapter);
+  config = buildChapterRegenerationConfig(lockedChapter, {
+    chapterId,
+    chapterNumber: lockedChapterNumber,
+  });
   try {
     const [updatedRun] = await db
       .update(schema.generationRuns)

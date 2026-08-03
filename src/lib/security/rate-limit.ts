@@ -28,6 +28,8 @@ export const LIMITS = {
   checkout: "checkout",
   /** Starting or restarting a full book run. */
   bookStart: "book-start",
+  /** Long-lived authoring stream handshakes and reconnect churn. */
+  authoringStream: "authoring-stream",
   /** The one unauthenticated route — keyed by IP, not user. */
   estimates: "estimates",
 } as const;

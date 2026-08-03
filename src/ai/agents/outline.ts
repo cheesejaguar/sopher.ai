@@ -1,7 +1,7 @@
 import { generateText, Output } from "ai";
 import { desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getDb, schema } from "@/db";
+import { schema, withDbTransaction, type DbTransaction } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
@@ -453,50 +453,52 @@ export async function generateOutline(
 export async function persistOutline(
   bookId: string,
   outline: BookOutline,
+  transaction?: DbTransaction,
 ): Promise<{ outlineId: string; version: number }> {
-  const db = getDb();
-  const [[book], [prior]] = await Promise.all([
-    db
+  const persist = async (db: DbTransaction) => {
+    const [book] = await db
       .select({ title: schema.books.title })
       .from(schema.books)
       .where(eq(schema.books.id, bookId))
-      .limit(1),
-    db
+      .limit(1);
+    const [prior] = await db
       .select({ version: schema.outlines.version })
       .from(schema.outlines)
       .where(eq(schema.outlines.bookId, bookId))
       .orderBy(desc(schema.outlines.version))
-      .limit(1),
-  ]);
-  const version = (prior?.version ?? 0) + 1;
-  const authorOutline = book ? { ...outline, title: book.title } : outline;
+      .limit(1);
+    const version = (prior?.version ?? 0) + 1;
+    const authorOutline = book ? { ...outline, title: book.title } : outline;
 
-  const [row] = await db
-    .insert(schema.outlines)
-    .values({ bookId, version, content: authorOutline, source: "ai" })
-    .returning({ id: schema.outlines.id });
+    const [row] = await db
+      .insert(schema.outlines)
+      .values({ bookId, version, content: authorOutline, source: "ai" })
+      .returning({ id: schema.outlines.id });
 
-  if (outline.chapters.length > 0) {
-    await db
-      .insert(schema.chapters)
-      .values(
-        outline.chapters.map((c) => ({
-          bookId,
-          chapterNumber: c.number,
-          title: c.title,
-          summary: c.summary,
-          status: "planned" as const,
-        })),
-      )
-      .onConflictDoUpdate({
-        target: [schema.chapters.bookId, schema.chapters.chapterNumber],
-        set: {
-          title: sql`excluded.title`,
-          summary: sql`excluded.summary`,
-          updatedAt: new Date(),
-        },
-      });
-  }
+    if (outline.chapters.length > 0) {
+      await db
+        .insert(schema.chapters)
+        .values(
+          outline.chapters.map((c) => ({
+            bookId,
+            chapterNumber: c.number,
+            title: c.title,
+            summary: c.summary,
+            status: "planned" as const,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [schema.chapters.bookId, schema.chapters.chapterNumber],
+          set: {
+            title: sql`excluded.title`,
+            summary: sql`excluded.summary`,
+            updatedAt: new Date(),
+          },
+        });
+    }
 
-  return { outlineId: row.id, version };
+    return { outlineId: row.id, version };
+  };
+
+  return transaction ? persist(transaction) : withDbTransaction(persist);
 }

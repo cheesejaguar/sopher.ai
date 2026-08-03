@@ -24,7 +24,7 @@ Authors move through a library of book projects, a four-step setup flow, a proje
 
 ## Capabilities and Constraints
 
-- Preserve the existing public routes, authenticated routes, APIs, server actions, workflow events, database schema, billing behavior, permissions, exports, and TipTap document model.
+- Preserve the existing public routes, authenticated routes, API and Workflow-event compatibility, billing behavior, permissions, exports, and TipTap document model. Reliability data evolves only through forward migrations.
 - Preserve the five public pipeline stages: Concept, Outline, Chapters, Editor, and Continuity.
 - Preserve current pricing, credit-pack values, ownership language, functional claims, private-route behavior, and legal meaning.
 - Marketing hierarchy and copy may be rewritten around verified facts.
@@ -49,6 +49,8 @@ The repository contains real pipeline behavior, current pricing constants, three
 3. Prove capabilities through the working product and honest samples, not unsupported claims.
 4. Keep costs, progress, ownership, and system state explicit.
 5. Treat reading, writing, and revision as distinct modes with interfaces suited to each.
+6. Derive one truthful next action from durable authoring evidence; never ask an author to purchase their way out of a product failure.
+7. Preserve ambiguous or interrupted work until Workflow evidence makes recovery, cancellation, or failure conclusive.
 
 ## Accessibility & Inclusion
 

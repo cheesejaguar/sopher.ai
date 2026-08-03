@@ -25,6 +25,12 @@ export type FigureAsset = {
 /** Keyed by diagram source hash, or by URL for plain markdown images. */
 export type FigureMap = Record<string, FigureAsset>;
 
+export type FigureRow = {
+  blobUrl: string;
+  contentType: string;
+  meta: unknown;
+};
+
 /**
  * Hash of a diagram's source. The client computes the same digest over the same
  * normalized string via SubtleCrypto — keep the two in step or every lookup
@@ -63,17 +69,8 @@ export function fitWidth(
   return { width: Math.round(dims.width * scale), height: Math.round(dims.height * scale) };
 }
 
-/** Every diagram render stored for a project, keyed by source hash. */
-export async function loadFigures(projectId: string): Promise<FigureMap> {
-  const rows = await getDb()
-    .select({
-      blobUrl: schema.assets.blobUrl,
-      contentType: schema.assets.contentType,
-      meta: schema.assets.meta,
-    })
-    .from(schema.assets)
-    .where(and(eq(schema.assets.projectId, projectId), eq(schema.assets.kind, "diagram")));
-
+/** Turns one consistent asset query into the map shared by reading and export. */
+export function buildFigureMap(rows: FigureRow[]): FigureMap {
   const figures: FigureMap = {};
   for (const row of rows) {
     const meta = (row.meta ?? {}) as { sourceHash?: string; alt?: string };
@@ -89,6 +86,19 @@ export async function loadFigures(projectId: string): Promise<FigureMap> {
     figures[meta.sourceHash] = existing;
   }
   return figures;
+}
+
+/** Every diagram render stored for a project, keyed by source hash. */
+export async function loadFigures(projectId: string): Promise<FigureMap> {
+  const rows = await getDb()
+    .select({
+      blobUrl: schema.assets.blobUrl,
+      contentType: schema.assets.contentType,
+      meta: schema.assets.meta,
+    })
+    .from(schema.assets)
+    .where(and(eq(schema.assets.projectId, projectId), eq(schema.assets.kind, "diagram")));
+  return buildFigureMap(rows);
 }
 
 /**

@@ -108,19 +108,9 @@ export async function reconcileBeforeAuthoringRunConflict(_input: {
   userId: string;
 }): Promise<void> {
   try {
-    const [active] = await getDb()
-      .select({ id: schema.generationRuns.id })
-      .from(schema.generationRuns)
-      .where(
-        and(
-          eq(schema.generationRuns.projectId, _input.projectId),
-          inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
-          ne(schema.generationRuns.kind, "export"),
-        ),
-      )
-      .limit(1);
-    if (!active) return;
-
+    // Reconciliation also validates completed full-book evidence. Restricting
+    // this call to active rows let a contradictory terminal run bypass the
+    // safety gate and be replaced with new paid work.
     const { reconcileActiveAuthoringRuns } = await import("@/lib/run-health");
     await reconcileActiveAuthoringRuns({ projectId: _input.projectId });
   } catch (error) {
@@ -166,12 +156,38 @@ export class TrialOptionalWorkInProgressError extends Error {
   }
 }
 
+export class FullBookStartInsufficientCreditsError extends Error {
+  constructor(
+    readonly balance: number,
+    readonly required: number,
+  ) {
+    super(
+      `Insufficient credits to start: ${balance.toFixed(2)} available, ${required.toFixed(2)} required`,
+    );
+    this.name = "FullBookStartInsufficientCreditsError";
+  }
+}
+
+export class ProjectStartSnapshotChangedError extends Error {
+  constructor() {
+    super("The saved book setup changed before production could start");
+    this.name = "ProjectStartSnapshotChangedError";
+  }
+}
+
+export type ProjectStartSnapshot = Pick<
+  typeof schema.projects.$inferSelect,
+  "updatedAt" | "targetChapters" | "targetWordsPerChapter" | "experience"
+>;
+
 export async function insertQueuedAuthoringRun(input: {
   projectId: string;
   userId: string;
   kind: "full_book" | "chapter" | "edit_pass" | "continuity";
   config: unknown;
   requestKey?: string;
+  minimumBalanceCredits?: number;
+  expectedProjectSnapshot?: ProjectStartSnapshot;
 }): Promise<{
   id: string;
   inserted: boolean;
@@ -186,10 +202,35 @@ export async function insertQueuedAuthoringRun(input: {
   // The table is intentionally non-partitioned and has no BEFORE UPDATE trigger;
   // a migration changing either property must replace this detection and its
   // concurrent insertion regression coverage at the same time.
-  const [, , inserted] = await client.transaction((tx) => [
+  const transactionResults = await client.transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
     )`,
+    ...(input.minimumBalanceCredits !== undefined
+      ? [
+          tx`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`,
+          tx`
+            select coalesce(sum(amount), 0)::text as balance
+            from credit_ledger
+            where user_id = ${input.userId}
+          `,
+        ]
+      : []),
+    ...(input.expectedProjectSnapshot
+      ? [
+          tx`
+            select
+              updated_at as "updatedAt",
+              target_chapters as "targetChapters",
+              target_words_per_chapter as "targetWordsPerChapter",
+              experience
+            from projects
+            where id = ${input.projectId}
+              and user_id = ${input.userId}
+            limit 1
+          `,
+        ]
+      : []),
     tx`
       insert into credit_ledger (
         user_id, amount, kind, description, project_id, run_id, external_ref
@@ -242,7 +283,9 @@ export async function insertQueuedAuthoringRun(input: {
         status,
         config,
         acceptance_uncertain_at,
-        acceptance_dispatch_claimed_at
+        acceptance_dispatch_claimed_at,
+        dispatch_attempts,
+        heartbeat_at
       )
       select
         ${input.projectId},
@@ -252,6 +295,8 @@ export async function insertQueuedAuthoringRun(input: {
         'queued',
         ${configJson}::jsonb,
         null,
+        now(),
+        1,
         now()
       where not exists (
         select 1
@@ -288,6 +333,46 @@ export async function insertQueuedAuthoringRun(input: {
               )
           )
       )
+      and (
+        ${input.expectedProjectSnapshot?.updatedAt ?? null}::timestamptz is null
+        or exists (
+          select 1
+          from generation_runs replay
+          where replay.project_id = ${input.projectId}
+            and replay.request_key = ${input.requestKey ?? null}
+        )
+        or exists (
+          select 1
+          from projects project_snapshot
+          where project_snapshot.id = ${input.projectId}
+            and project_snapshot.user_id = ${input.userId}
+            and date_trunc('milliseconds', project_snapshot.updated_at) =
+              date_trunc(
+                'milliseconds',
+                ${input.expectedProjectSnapshot?.updatedAt ?? null}::timestamptz
+              )
+            and project_snapshot.target_chapters =
+              ${input.expectedProjectSnapshot?.targetChapters ?? null}::integer
+            and project_snapshot.target_words_per_chapter =
+              ${input.expectedProjectSnapshot?.targetWordsPerChapter ?? null}::integer
+            and project_snapshot.experience =
+              ${input.expectedProjectSnapshot?.experience ?? null}::text
+        )
+      )
+      and (
+        ${input.minimumBalanceCredits ?? null}::numeric is null
+        or exists (
+          select 1
+          from generation_runs replay
+          where replay.project_id = ${input.projectId}
+            and replay.request_key = ${input.requestKey ?? null}
+        )
+        or (
+          select coalesce(sum(wallet.amount), 0)
+          from credit_ledger wallet
+          where wallet.user_id = ${input.userId}
+        ) >= ${input.minimumBalanceCredits ?? null}::numeric
+      )
       on conflict (project_id, request_key) do update
         set request_key = excluded.request_key
       returning
@@ -299,6 +384,7 @@ export async function insertQueuedAuthoringRun(input: {
         (xmax = 0) as inserted
     `,
   ]);
+  const inserted = transactionResults.at(-1);
   const run = (
     inserted as Array<{
       id: string;
@@ -309,7 +395,38 @@ export async function insertQueuedAuthoringRun(input: {
       workflow_run_id: string | null;
     }>
   )[0];
-  if (!run) throw new TrialOptionalWorkInProgressError();
+  if (!run) {
+    if (input.expectedProjectSnapshot) {
+      const snapshotResultIndex = 1 + (input.minimumBalanceCredits !== undefined ? 2 : 0);
+      const snapshotRows = transactionResults[snapshotResultIndex] as
+        | Array<{
+            updatedAt: string | Date;
+            targetChapters: number;
+            targetWordsPerChapter: number;
+            experience: string;
+          }>
+        | undefined;
+      const current = snapshotRows?.[0];
+      const expected = input.expectedProjectSnapshot;
+      if (
+        !current ||
+        new Date(current.updatedAt).getTime() !== expected.updatedAt.getTime() ||
+        Number(current.targetChapters) !== expected.targetChapters ||
+        Number(current.targetWordsPerChapter) !== expected.targetWordsPerChapter ||
+        current.experience !== expected.experience
+      ) {
+        throw new ProjectStartSnapshotChangedError();
+      }
+    }
+    if (input.minimumBalanceCredits !== undefined) {
+      const balanceRows = transactionResults[2] as Array<{ balance: string }> | undefined;
+      const balance = Number(balanceRows?.[0]?.balance ?? 0);
+      if (balance < input.minimumBalanceCredits) {
+        throw new FullBookStartInsufficientCreditsError(balance, input.minimumBalanceCredits);
+      }
+    }
+    throw new TrialOptionalWorkInProgressError();
+  }
   if (run.kind !== input.kind) {
     throw new RunRequestKeyMismatchError(input.kind, run.kind);
   }
@@ -337,8 +454,16 @@ export async function transitionAuthoringRunState(input: {
   userId: string;
   status: Exclude<AuthoringRunStatus, "queued">;
   error?: string;
+  errorCode?: string;
+  errorStage?: string;
+  /**
+   * Scoped workflows commit their bounded output before recording terminal
+   * completion. Resolve a cancellation that won the shared project lock during
+   * that narrow interval as the terminal result instead of leaving the run
+   * active with a cancellation marker.
+   */
+  resolveCancellationOnComplete?: boolean;
 }): Promise<{ status: AuthoringRunStatus | null; transitioned: boolean }> {
-  const terminal = ["completed", "failed", "cancelled"].includes(input.status);
   return withDbTransaction(async (tx) => {
     // Keep one global order anywhere both locks are needed: project, then
     // wallet. Metering takes only the wallet lock and asset writes only the
@@ -348,6 +473,39 @@ export async function transitionAuthoringRunState(input: {
         hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
       )`,
     );
+
+    let targetStatus = input.status;
+    const resolveCancellationBeforeWork =
+      input.status === "running" || input.status === "awaiting_input";
+    if (
+      resolveCancellationBeforeWork ||
+      (input.status === "completed" && input.resolveCancellationOnComplete)
+    ) {
+      const [lockedRun] = await tx
+        .select({
+          status: schema.generationRuns.status,
+          cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+        })
+        .from(schema.generationRuns)
+        .where(
+          and(
+            eq(schema.generationRuns.id, input.runId),
+            eq(schema.generationRuns.userId, input.userId),
+            eq(schema.generationRuns.projectId, input.projectId),
+          ),
+        )
+        .limit(1);
+      if (
+        lockedRun?.cancellationRequestedAt &&
+        ACTIVE_AUTHORING_RUN_STATUSES.includes(
+          lockedRun.status as (typeof ACTIVE_AUTHORING_RUN_STATUSES)[number],
+        )
+      ) {
+        targetStatus = "cancelled";
+      }
+    }
+
+    const terminal = ["completed", "failed", "cancelled"].includes(targetStatus);
     if (terminal) {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`);
       try {
@@ -375,12 +533,43 @@ export async function transitionAuthoringRunState(input: {
       }
     }
 
+    const stateProjection =
+      targetStatus === "completed"
+        ? { currentStage: "done" as const, progressPct: 100 }
+        : targetStatus === "failed"
+          ? {
+              currentStage: "failed" as const,
+              stageDescription: input.error ?? "Authoring stopped",
+            }
+          : targetStatus === "cancelled"
+            ? {
+                currentStage: "cancelled" as const,
+                stageDescription:
+                  input.error ??
+                  (input.resolveCancellationOnComplete
+                    ? "Stopped safely after saving completed work"
+                    : "Authoring cancelled"),
+              }
+            : {};
     const [updated] = await tx
       .update(schema.generationRuns)
       .set({
-        status: input.status,
-        error: input.error ?? null,
-        ...(input.status === "running" ? { startedAt: new Date() } : {}),
+        status: targetStatus,
+        error:
+          targetStatus === "failed"
+            ? sql`coalesce(${schema.generationRuns.error}, ${input.error ?? null})`
+            : (input.error ?? null),
+        ...(targetStatus === "failed"
+          ? {
+              rootErrorCode: sql`coalesce(${schema.generationRuns.rootErrorCode}, ${input.errorCode ?? "authoring_failed"})`,
+              rootErrorStage: sql`coalesce(${schema.generationRuns.rootErrorStage}, ${input.errorStage ?? null}, ${schema.generationRuns.currentStage})`,
+            }
+          : {}),
+        ...(targetStatus === "running"
+          ? { startedAt: sql`coalesce(${schema.generationRuns.startedAt}, now())` }
+          : {}),
+        heartbeatAt: new Date(),
+        ...stateProjection,
         ...(terminal
           ? {
               completedAt: new Date(),
@@ -394,7 +583,14 @@ export async function transitionAuthoringRunState(input: {
           eq(schema.generationRuns.id, input.runId),
           eq(schema.generationRuns.userId, input.userId),
           eq(schema.generationRuns.projectId, input.projectId),
-          inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
+          targetStatus === "failed" && input.errorCode === "completion_contradiction"
+            ? inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES, "completed"])
+            : inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
+          ...(targetStatus === "running" ||
+          targetStatus === "awaiting_input" ||
+          targetStatus === "completed"
+            ? [isNull(schema.generationRuns.cancellationRequestedAt)]
+            : []),
         ),
       )
       .returning({ status: schema.generationRuns.status });
@@ -466,6 +662,7 @@ export async function linkAuthoringRunWorkflow(input: {
       workflowRunId: input.workflowRunId,
       acceptanceUncertainAt: null,
       acceptanceDispatchClaimedAt: null,
+      heartbeatAt: new Date(),
     })
     .where(
       and(
@@ -483,6 +680,88 @@ export async function linkAuthoringRunWorkflow(input: {
   return Boolean(linked);
 }
 
+export type CancellationRequestResult = {
+  runId: string;
+  projectId: string;
+  userId: string;
+  workflowRunId: string | null;
+  status: AuthoringRunStatus;
+  requested: boolean;
+};
+
+/**
+ * Stop is a durable request, not an optimistic terminal state. Metered
+ * authorization observes this marker immediately, while reconciliation waits
+ * for authoritative Workflow cancellation (or proves no Workflow exists).
+ */
+export async function requestAuthoringRunCancellation(input: {
+  runId: string;
+  projectId: string;
+  userId: string;
+  reason: string;
+}): Promise<CancellationRequestResult | null> {
+  return withDbTransaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
+      )`,
+    );
+    const [run] = await tx
+      .select({
+        runId: schema.generationRuns.id,
+        projectId: schema.generationRuns.projectId,
+        userId: schema.generationRuns.userId,
+        workflowRunId: schema.generationRuns.workflowRunId,
+        status: schema.generationRuns.status,
+        cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+      })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.id, input.runId),
+          eq(schema.generationRuns.projectId, input.projectId),
+          eq(schema.generationRuns.userId, input.userId),
+        ),
+      )
+      .limit(1);
+    if (!run) return null;
+    const status = run.status as AuthoringRunStatus;
+    if (
+      !ACTIVE_AUTHORING_RUN_STATUSES.includes(
+        status as (typeof ACTIVE_AUTHORING_RUN_STATUSES)[number],
+      )
+    ) {
+      return {
+        runId: run.runId,
+        projectId: run.projectId,
+        userId: run.userId,
+        workflowRunId: run.workflowRunId,
+        status,
+        requested: false,
+      };
+    }
+    if (!run.cancellationRequestedAt) {
+      await tx
+        .update(schema.generationRuns)
+        .set({
+          cancellationRequestedAt: new Date(),
+          cancellationReason: input.reason.slice(0, 300),
+          heartbeatAt: new Date(),
+          stageDescription: "Stopping safely",
+        })
+        .where(eq(schema.generationRuns.id, input.runId));
+    }
+    return {
+      runId: run.runId,
+      projectId: run.projectId,
+      userId: run.userId,
+      workflowRunId: run.workflowRunId,
+      status,
+      requested: true,
+    };
+  });
+}
+
 /**
  * Records the one response-loss state that may be retried safely. The CAS
  * deliberately refuses running/terminal or already-linked rows.
@@ -496,7 +775,6 @@ export async function markAuthoringRunAcceptanceUncertain(input: {
     .update(schema.generationRuns)
     .set({
       acceptanceUncertainAt: new Date(),
-      acceptanceDispatchClaimedAt: null,
     })
     .where(
       and(
@@ -578,6 +856,7 @@ export async function claimUncertainAuthoringRun(input: {
         // another lost response remains recoverable after this claim expires.
         acceptanceUncertainAt: claimedAt,
         acceptanceDispatchClaimedAt: claimedAt,
+        dispatchAttempts: sql`${schema.generationRuns.dispatchAttempts} + 1`,
       })
       .where(
         and(
@@ -586,6 +865,7 @@ export async function claimUncertainAuthoringRun(input: {
           eq(schema.generationRuns.userId, input.userId),
           eq(schema.generationRuns.status, "queued"),
           isNull(schema.generationRuns.workflowRunId),
+          isNull(schema.generationRuns.cancellationRequestedAt),
           or(
             isNotNull(schema.generationRuns.acceptanceUncertainAt),
             lte(schema.generationRuns.acceptanceDispatchClaimedAt, staleBefore),
@@ -595,6 +875,7 @@ export async function claimUncertainAuthoringRun(input: {
             isNull(schema.generationRuns.acceptanceDispatchClaimedAt),
             lte(schema.generationRuns.acceptanceDispatchClaimedAt, staleBefore),
           ),
+          sql`${schema.generationRuns.dispatchAttempts} < 3`,
         ),
       )
       .returning({
@@ -629,6 +910,8 @@ export async function terminalizeAuthoringRun(input: {
   userId: string;
   status: "failed" | "cancelled";
   error?: string;
+  errorCode?: string;
+  errorStage?: string;
   /** Safe only when no provider call can still be executing. */
   releaseImmediately?: boolean;
 }): Promise<void> {

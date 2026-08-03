@@ -11,6 +11,8 @@ describe("isE2EWorkflowStubEnabled", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("E2E_DATABASE_ISOLATED", "1");
     vi.stubEnv("E2E_STUB_WORKFLOW", "1");
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@isolated.example.test/test");
 
     expect(isE2EWorkflowStubEnabled()).toBe(true);
     expect(isE2ETrialUserId("e2e-trial-123e4567-e89b-42d3-a456-426614174000")).toBe(true);
@@ -25,6 +27,32 @@ describe("isE2EWorkflowStubEnabled", () => {
     vi.stubEnv("NODE_ENV", nodeEnv);
     vi.stubEnv("E2E_DATABASE_ISOLATED", isolated);
     vi.stubEnv("E2E_STUB_WORKFLOW", workflow);
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@isolated.example.test/test");
+
+    expect(isE2EWorkflowStubEnabled()).toBe(false);
+  });
+
+  it("allows an optimized local acceptance server only with every explicit safety gate", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("E2E_PRODUCTION_SERVER", "1");
+    vi.stubEnv("ALLOW_DEV_AUTH", "1");
+    vi.stubEnv("E2E_DATABASE_ISOLATED", "1");
+    vi.stubEnv("E2E_STUB_WORKFLOW", "1");
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@isolated.example.test/test");
+
+    expect(isE2EWorkflowStubEnabled()).toBe(true);
+  });
+
+  it("rejects a production acceptance seam when the database host does not match", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("E2E_PRODUCTION_SERVER", "1");
+    vi.stubEnv("ALLOW_DEV_AUTH", "1");
+    vi.stubEnv("E2E_DATABASE_ISOLATED", "1");
+    vi.stubEnv("E2E_STUB_WORKFLOW", "1");
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@production.example.test/test");
 
     expect(isE2EWorkflowStubEnabled()).toBe(false);
   });
@@ -33,6 +61,8 @@ describe("isE2EWorkflowStubEnabled", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("E2E_DATABASE_ISOLATED", "1");
     vi.stubEnv("E2E_STUB_WORKFLOW", "1");
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@isolated.example.test/test");
     vi.stubEnv("VERCEL_ENV", "preview");
 
     expect(isE2EWorkflowStubEnabled()).toBe(false);

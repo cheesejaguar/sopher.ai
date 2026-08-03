@@ -1,4 +1,4 @@
-import { FatalError, getWritable } from "workflow";
+import { FatalError, getStepMetadata, getWorkflowMetadata, getWritable } from "workflow";
 import { put } from "@vercel/blob";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getDb, schema, withDbTransaction } from "@/db";
@@ -8,10 +8,16 @@ import {
   compensateUnreferencedBlobUpload,
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
-import { loadManuscript } from "@/lib/export/assemble";
+import {
+  loadManuscript,
+  type AssembledManuscript,
+  type ExportSnapshot,
+} from "@/lib/export/assemble";
 import { renderExport } from "@/lib/export";
 import { FORMAT_META, type ExportFormat } from "@/lib/export/types";
 import { PROGRESS_NS, type RunEvent } from "@/lib/run-events";
+import { persistRunEvent } from "@/lib/run-event-store";
+import { linkAuthoringRunWorkflow } from "@/lib/generation-runs";
 
 /**
  * Export runs are quick (<30s), so the UI polls GET /api/projects/[id]/export
@@ -26,20 +32,22 @@ type RunRef = {
   userId: string;
 };
 
-async function writeProgress(ref: RunRef, event: RunEvent) {
+async function writeProgress(ref: RunRef, eventKey: string, event: RunEvent) {
+  await persistRunEvent({ runId: ref.dbRunId, eventKey, event });
   const writer = getWritable<RunEvent>({ namespace: PROGRESS_NS }).getWriter();
   try {
     await writer.write(event);
+  } catch (error) {
+    // The database projection is canonical. Polling and replay recover from a
+    // transient stream publication failure without duplicating the export.
+    console.warn("Could not publish persisted export progress", {
+      runId: ref.dbRunId,
+      eventType: event.type,
+      error,
+    });
   } finally {
     writer.releaseLock();
   }
-  const db = getDb();
-  await db.insert(schema.generationEvents).values({
-    runId: ref.dbRunId,
-    seq: sql`coalesce((select max(seq) from ${schema.generationEvents} where ${schema.generationEvents.runId} = ${ref.dbRunId}), 0) + 1` as unknown as number,
-    type: event.type,
-    payload: event,
-  });
 }
 
 export async function markExportStatus(
@@ -88,7 +96,18 @@ export async function markExportStatus(
 
 async function emitExportProgress(ref: RunRef, event: RunEvent) {
   "use step";
-  await writeProgress(ref, event);
+  const { stepId } = getStepMetadata();
+  await writeProgress(ref, stepId, event);
+}
+
+async function linkExportWorkflowStep(ref: RunRef, workflowRunId: string): Promise<boolean> {
+  "use step";
+  return linkAuthoringRunWorkflow({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    workflowRunId,
+  });
 }
 
 /**
@@ -111,7 +130,26 @@ async function assembleAndUploadStep(
   token: string,
 ): Promise<{ assetId: string; filename: string }> {
   "use step";
-  const manuscript = await loadManuscript(ref.userId, ref.projectId);
+  const db = getDb();
+  const [run] = await db
+    .select({ config: schema.generationRuns.config })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.id, ref.dbRunId),
+        eq(schema.generationRuns.userId, ref.userId),
+        eq(schema.generationRuns.projectId, ref.projectId),
+      ),
+    )
+    .limit(1);
+  const config = (run?.config ?? {}) as { snapshot?: ExportSnapshot };
+  const storedSnapshot = config.snapshot;
+  const manuscript: AssembledManuscript | null =
+    storedSnapshot?.manuscript &&
+    Array.isArray(storedSnapshot.manuscript.chapters) &&
+    typeof storedSnapshot.capturedAt === "string"
+      ? storedSnapshot.manuscript
+      : await loadManuscript(ref.userId, ref.projectId);
   if (!manuscript) throw new FatalError("Project has no book to export");
   if (manuscript.chapters.length === 0) {
     throw new FatalError("No chapters have been written yet — nothing to export");
@@ -119,7 +157,6 @@ async function assembleAndUploadStep(
 
   const result = await renderExport(format, manuscript);
   const meta = FORMAT_META[format];
-  const db = getDb();
   const findExistingAsset = async () => {
     const [existing] = await db
       .select({ id: schema.assets.id, meta: schema.assets.meta })
@@ -192,6 +229,15 @@ async function assembleAndUploadStep(
         sizeBytes: result.buffer.byteLength,
         format,
         filename: result.filename,
+        ...(storedSnapshot
+          ? {
+              snapshot: {
+                capturedAt: storedSnapshot.capturedAt,
+                incomplete: storedSnapshot.incomplete,
+                chapterVersions: storedSnapshot.chapterVersions,
+              },
+            }
+          : {}),
       }),
     );
     if (!asset) throw new Error("Could not record the export asset");
@@ -238,7 +284,14 @@ export async function exportBook(
 ) {
   "use workflow";
   const ref: RunRef = { dbRunId, projectId, userId };
+  const { workflowRunId } = getWorkflowMetadata();
 
+  // Every accepted Workflow records its own id before rendering or uploading.
+  // A retry that loses the linkage race exits here and cannot mark the shared
+  // database run failed or create a duplicate asset.
+  if (!(await linkExportWorkflowStep(ref, workflowRunId))) {
+    throw new FatalError("Export Workflow is not the active dispatch");
+  }
   try {
     if (!(await markExportStatus(ref, "running"))) {
       throw new FatalError("Export is no longer active");
@@ -260,8 +313,22 @@ export async function exportBook(
     return { assetId, filename };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Export failed";
-    await markExportStatus(ref, "failed", message);
-    await emitExportProgress(ref, { type: "error", message, fatal: true });
+    try {
+      await markExportStatus(ref, "failed", message);
+    } catch (statusError) {
+      console.error("Could not persist the initiating export failure", {
+        runId: ref.dbRunId,
+        statusError,
+      });
+    }
+    try {
+      await emitExportProgress(ref, { type: "error", message, fatal: true });
+    } catch (eventError) {
+      console.warn("Could not publish the initiating export failure", {
+        runId: ref.dbRunId,
+        eventError,
+      });
+    }
     throw error instanceof FatalError ? error : new FatalError(message);
   }
 }

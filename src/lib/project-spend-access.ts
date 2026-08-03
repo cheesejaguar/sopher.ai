@@ -1,13 +1,19 @@
 import "server-only";
 
-import { and, eq, gt, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray, ne, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 import type { ProjectExperience } from "@/db/schema";
+import { validFullBookCompletionExistsSql } from "@/lib/run-completion-proof";
 
 export class ProjectSpendAccessError extends Error {
   constructor(
-    readonly code: "project_not_found" | "purchase_required" | "trial_busy" | "suspended",
+    readonly code:
+      | "project_not_found"
+      | "purchase_required"
+      | "trial_busy"
+      | "included_allowance_exhausted"
+      | "suspended",
     message: string,
   ) {
     super(message);
@@ -82,7 +88,7 @@ export async function assertProjectSpendAccess(input: {
     db
       .select({
         experience: schema.projects.experience,
-        completedAt: schema.projects.completedAt,
+        completionArtifactsReady: validFullBookCompletionExistsSql(sql.raw('"projects"."id"')),
       })
       .from(schema.projects)
       .where(and(eq(schema.projects.id, input.projectId), eq(schema.projects.userId, input.userId)))
@@ -109,8 +115,8 @@ export async function assertProjectSpendAccess(input: {
     throw new ProjectSpendAccessError("project_not_found", "Project not found");
   }
   let optionalWorkDuringActiveRun = false;
-  let wholeStoryStartAfterCompletion =
-    input.operationKind === "whole_story_start" && Boolean(project.completedAt);
+  const wholeStoryStartAfterCompletion =
+    input.operationKind === "whole_story_start" && project.completionArtifactsReady;
   if ((input.operationKind ?? "optional") === "optional") {
     const [activeRun] = await db
       .select({ id: schema.generationRuns.id })
@@ -119,31 +125,12 @@ export async function assertProjectSpendAccess(input: {
         and(
           eq(schema.generationRuns.projectId, input.projectId),
           inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+          ne(schema.generationRuns.kind, "export"),
         ),
       )
       .limit(1);
     optionalWorkDuringActiveRun = Boolean(activeRun);
   }
-  if (
-    project.experience === "trial_short_story" &&
-    input.operationKind === "whole_story_start" &&
-    !wholeStoryStartAfterCompletion
-  ) {
-    const [completedRun] = await db
-      .select({ id: schema.generationRuns.id })
-      .from(schema.generationRuns)
-      .where(
-        and(
-          eq(schema.generationRuns.projectId, input.projectId),
-          eq(schema.generationRuns.userId, input.userId),
-          eq(schema.generationRuns.kind, "full_book"),
-          eq(schema.generationRuns.status, "completed"),
-        ),
-      )
-      .limit(1);
-    wholeStoryStartAfterCompletion = Boolean(completedRun);
-  }
-
   return deriveProjectSpendAccess({
     experience: project.experience,
     isAdmin: user?.role === "admin",

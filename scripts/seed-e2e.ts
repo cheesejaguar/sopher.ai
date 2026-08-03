@@ -77,10 +77,74 @@ const IDS = {
   analytics: ["ffffffff-ffff-4fff-8fff-fffffffffff1", "ffffffff-ffff-4fff-8fff-fffffffffff2"],
 } as const;
 
+/**
+ * Authoring-journey acceptance fixtures. The titles are intentionally explicit
+ * so browser tests can select a state without relying on card order.
+ */
+const JOURNEY_IDS = {
+  projects: {
+    briefNoRun: "10101010-0000-4000-8000-000000000001",
+    dispatchUncertain: "10101010-0000-4000-8000-000000000002",
+    outlineApproval: "10101010-0000-4000-8000-000000000003",
+    creditsPause: "10101010-0000-4000-8000-000000000004",
+    partialFailure: "10101010-0000-4000-8000-000000000005",
+    degradedTelemetry: "10101010-0000-4000-8000-000000000006",
+    cancellationRequested: "10101010-0000-4000-8000-000000000007",
+    invalidCompletion: "10101010-0000-4000-8000-000000000008",
+  },
+  books: {
+    outlineApproval: "20202020-0000-4000-8000-000000000003",
+    creditsPause: "20202020-0000-4000-8000-000000000004",
+    partialFailure: "20202020-0000-4000-8000-000000000005",
+    degradedTelemetry: "20202020-0000-4000-8000-000000000006",
+    cancellationRequested: "20202020-0000-4000-8000-000000000007",
+    invalidCompletion: "20202020-0000-4000-8000-000000000008",
+  },
+  outlines: {
+    outlineApproval: "30303030-0000-4000-8000-000000000003",
+    creditsPause: "30303030-0000-4000-8000-000000000004",
+  },
+  chapters: {
+    creditsPause: "60606060-0000-4000-8000-000000000004",
+    partialFailureOne: "60606060-0000-4000-8000-000000000051",
+    partialFailureTwo: "60606060-0000-4000-8000-000000000052",
+    cancellationRequested: "60606060-0000-4000-8000-000000000007",
+    invalidCompletion: "60606060-0000-4000-8000-000000000008",
+  },
+  runs: {
+    dispatchUncertain: "40404040-0000-4000-8000-000000000002",
+    outlineApproval: "40404040-0000-4000-8000-000000000003",
+    creditsPause: "40404040-0000-4000-8000-000000000004",
+    partialFailure: "40404040-0000-4000-8000-000000000005",
+    degradedTelemetry: "40404040-0000-4000-8000-000000000006",
+    cancellationRequested: "40404040-0000-4000-8000-000000000007",
+    invalidCompletion: "40404040-0000-4000-8000-000000000008",
+  },
+  support: {
+    dispatchUncertain: "50505050-0000-4000-8000-000000000002",
+    outlineApproval: "50505050-0000-4000-8000-000000000003",
+    creditsPause: "50505050-0000-4000-8000-000000000004",
+    partialFailure: "50505050-0000-4000-8000-000000000005",
+    degradedTelemetry: "50505050-0000-4000-8000-000000000006",
+    cancellationRequested: "50505050-0000-4000-8000-000000000007",
+    invalidCompletion: "50505050-0000-4000-8000-000000000008",
+  },
+} as const;
+
 const CREATED_AT = new Date("2026-07-27T16:00:00.000Z");
 const RUN_STARTED_AT = new Date("2026-07-28T15:00:00.000Z");
 const RUN_COMPLETED_AT = new Date("2026-07-28T15:18:00.000Z");
 const UPDATED_AT = new Date("2026-07-29T16:00:00.000Z");
+const JOURNEY_UPDATED_AT = new Date("2026-07-29T12:00:00.000Z");
+const ACTIVE_RUN_AT = new Date(Date.now() - 5 * 60_000);
+const STALE_DISPATCH_AT = new Date(Date.now() - 20 * 60_000);
+
+function indentedManuscriptFixture(markdown: string): string {
+  return markdown
+    .split("\n")
+    .map((line) => (line.length > 0 ? `    ${line}` : line))
+    .join("\n");
+}
 
 const chapterContents = [
   `# The Brass Compass
@@ -94,7 +158,10 @@ At dusk, every public clock in Bellweather stopped. The clock beneath the floor 
 Mara knelt beside the loose board and listened. A second rhythm answered the clock: three patient knocks from somewhere below. She lifted the plank and found a stairway descending into blue light, its first step dustless, as if someone had used it moments before.
 
 She pocketed the compass, left the shop sign turned to CLOSED, and followed the light underground.`,
-  `# The Room Beneath the Hour
+  // Deliberately mirrors a historical model response that indented every
+  // nonblank line. Reader/export acceptance must recover it as prose, not a
+  // horizontally clipped Markdown code block.
+  indentedManuscriptFixture(`# The Room Beneath the Hour
 
 The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.
 
@@ -102,7 +169,7 @@ Mara placed the compass at the center of the room. The tiles rose in sequence an
 
 A quiet mechanism clicked behind her. Elias Venn, the municipal clock keeper, stepped from the shadows with both hands raised. He claimed the stopped clocks were a warning, not a failure. Someone had begun removing hours from the city, and the missing quarter was only the first place to slip out of time.
 
-The map pulsed once. Across its glass surface, a new route appeared in violet light and led straight toward the sealed observatory.`,
+The map pulsed once. Across its glass surface, a new route appeared in violet light and led straight toward the sealed observatory.`),
   `# The Observatory Door
 
 Rain silvered the observatory dome while Mara and Elias crossed the abandoned square. No bell marked the hour. Without the city's clocks, every footstep seemed too loud.
@@ -291,8 +358,7 @@ const chapterRows = chapterContents.map((content, index) => ({
   wordCount: countWords(content),
   version: index === 0 ? 4 : 2,
   qualityScore: index === 0 ? "0.914" : index === 1 ? "0.932" : "0.887",
-  status:
-    index === 0 ? ("edited" as const) : index === 1 ? ("final" as const) : ("drafted" as const),
+  status: "final" as const,
   createdAt: CREATED_AT,
   updatedAt: UPDATED_AT,
 }));
@@ -349,6 +415,397 @@ const suggestionRows = [
   },
 ];
 
+const journeyProjects: (typeof schema.projects.$inferInsert)[] = [
+  {
+    id: JOURNEY_IDS.projects.briefNoRun,
+    userId: IDS.user,
+    title: "The Lantern Index",
+    brief:
+      "A junior archivist learns that every lantern in the city keeps one forgotten memory and must return the right one before sunrise.",
+    genre: "Fantasy",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: true },
+    status: "draft",
+    createdAt: CREATED_AT,
+    updatedAt: JOURNEY_UPDATED_AT,
+  },
+  {
+    id: JOURNEY_IDS.projects.dispatchUncertain,
+    userId: IDS.user,
+    title: "Signal at Low Tide",
+    brief:
+      "A volunteer lighthouse keeper receives a radio call from a ship that vanished thirty years ago.",
+    genre: "Mystery",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: true },
+    status: "generating",
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 60_000),
+  },
+  {
+    id: JOURNEY_IDS.projects.outlineApproval,
+    userId: IDS.user,
+    title: "The Map of Borrowed Roads",
+    brief:
+      "A bicycle courier discovers a map that lends travelers roads from lives they almost lived.",
+    genre: "Fantasy",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: true },
+    status: "generating",
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 2 * 60_000),
+  },
+  {
+    id: JOURNEY_IDS.projects.creditsPause,
+    userId: IDS.user,
+    title: "A Choir for Europa",
+    brief:
+      "A maintenance engineer beneath Europa's ice hears a human harmony where no expedition has ever gone.",
+    genre: "Science Fiction",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: true },
+    status: "generating",
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 3 * 60_000),
+  },
+  {
+    id: JOURNEY_IDS.projects.partialFailure,
+    userId: IDS.user,
+    title: "The Orchard Below",
+    brief:
+      "Two sisters find an underground orchard whose fruit grows a different version of their family history.",
+    genre: "Literary Fiction",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: false },
+    status: "editing",
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 4 * 60_000),
+  },
+  {
+    id: JOURNEY_IDS.projects.degradedTelemetry,
+    userId: IDS.user,
+    title: "The Last Weather Station",
+    brief:
+      "A mountain meteorologist keeps writing forecasts after every town below has disappeared from the radio.",
+    genre: "Science Fiction",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: false },
+    status: "generating",
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 5 * 60_000),
+  },
+  {
+    id: JOURNEY_IDS.projects.cancellationRequested,
+    userId: IDS.user,
+    title: "Glasswing County",
+    brief:
+      "A county surveyor follows a migration of glass-winged moths toward a town omitted from every official map.",
+    genre: "Mystery",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: false },
+    status: "generating",
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 6 * 60_000),
+  },
+  {
+    id: JOURNEY_IDS.projects.invalidCompletion,
+    userId: IDS.user,
+    title: "The House That Counted",
+    brief:
+      "A child notices that her house counts every visitor except the person living in the attic.",
+    genre: "Horror",
+    targetChapters: 3,
+    targetWordsPerChapter: 1000,
+    settings: { qualityTier: "standard", requireOutlineApproval: false },
+    status: "complete",
+    completedAt: RUN_COMPLETED_AT,
+    createdAt: CREATED_AT,
+    updatedAt: new Date(JOURNEY_UPDATED_AT.getTime() - 7 * 60_000),
+  },
+];
+
+const journeyBooks: (typeof schema.books.$inferInsert)[] = [
+  [
+    JOURNEY_IDS.books.outlineApproval,
+    JOURNEY_IDS.projects.outlineApproval,
+    "The Map of Borrowed Roads",
+  ],
+  [JOURNEY_IDS.books.creditsPause, JOURNEY_IDS.projects.creditsPause, "A Choir for Europa"],
+  [JOURNEY_IDS.books.partialFailure, JOURNEY_IDS.projects.partialFailure, "The Orchard Below"],
+  [
+    JOURNEY_IDS.books.degradedTelemetry,
+    JOURNEY_IDS.projects.degradedTelemetry,
+    "The Last Weather Station",
+  ],
+  [
+    JOURNEY_IDS.books.cancellationRequested,
+    JOURNEY_IDS.projects.cancellationRequested,
+    "Glasswing County",
+  ],
+  [
+    JOURNEY_IDS.books.invalidCompletion,
+    JOURNEY_IDS.projects.invalidCompletion,
+    "The House That Counted",
+  ],
+].map(([id, projectId, title]) => ({
+  id,
+  projectId,
+  title,
+  synopsis: `A deterministic browser fixture for ${title}.`,
+  concept: { ...concept, title },
+  frontMatter: { author: "E2E Sample Author" },
+  createdAt: CREATED_AT,
+  updatedAt: JOURNEY_UPDATED_AT,
+}));
+
+const journeyOutlines: (typeof schema.outlines.$inferInsert)[] = [
+  {
+    id: JOURNEY_IDS.outlines.outlineApproval,
+    bookId: JOURNEY_IDS.books.outlineApproval,
+    version: 1,
+    content: { ...outline, title: "The Map of Borrowed Roads" },
+    source: "ai",
+    createdAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.outlines.creditsPause,
+    bookId: JOURNEY_IDS.books.creditsPause,
+    version: 1,
+    content: { ...outline, title: "A Choir for Europa" },
+    source: "ai",
+    createdAt: ACTIVE_RUN_AT,
+  },
+];
+
+const journeyChapters: (typeof schema.chapters.$inferInsert)[] = [
+  {
+    id: JOURNEY_IDS.chapters.creditsPause,
+    bookId: JOURNEY_IDS.books.creditsPause,
+    chapterNumber: 1,
+    title: "The Sound Beneath the Ice",
+    summary: "The first signal reaches the station.",
+    content: chapterContents[0],
+    wordCount: countWords(chapterContents[0]),
+    status: "drafted",
+    createdAt: RUN_STARTED_AT,
+    updatedAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.chapters.partialFailureOne,
+    bookId: JOURNEY_IDS.books.partialFailure,
+    chapterNumber: 1,
+    title: "Root Cellar",
+    summary: "The sisters find the first impossible tree.",
+    content: chapterContents[0],
+    wordCount: countWords(chapterContents[0]),
+    status: "edited",
+    createdAt: RUN_STARTED_AT,
+    updatedAt: RUN_COMPLETED_AT,
+  },
+  {
+    id: JOURNEY_IDS.chapters.partialFailureTwo,
+    bookId: JOURNEY_IDS.books.partialFailure,
+    chapterNumber: 2,
+    title: "Second Harvest",
+    summary: "A different family memory begins to take hold.",
+    content: chapterContents[1],
+    wordCount: countWords(chapterContents[1]),
+    status: "drafted",
+    createdAt: RUN_STARTED_AT,
+    updatedAt: RUN_COMPLETED_AT,
+  },
+  {
+    id: JOURNEY_IDS.chapters.cancellationRequested,
+    bookId: JOURNEY_IDS.books.cancellationRequested,
+    chapterNumber: 1,
+    title: "County Line",
+    summary: "The surveyor follows the moths beyond the marked road.",
+    content: chapterContents[0],
+    wordCount: countWords(chapterContents[0]),
+    status: "drafted",
+    createdAt: RUN_STARTED_AT,
+    updatedAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.chapters.invalidCompletion,
+    bookId: JOURNEY_IDS.books.invalidCompletion,
+    chapterNumber: 1,
+    title: "One Visitor Missing",
+    summary: "The house's count first contradicts the family.",
+    content: chapterContents[0],
+    wordCount: countWords(chapterContents[0]),
+    status: "final",
+    createdAt: RUN_STARTED_AT,
+    updatedAt: RUN_COMPLETED_AT,
+  },
+];
+
+const journeyRunConfig = {
+  protocolVersion: 2,
+  tier: "standard",
+  targetChapters: 3,
+  targetWordsPerChapter: 1000,
+  requireOutlineApproval: true,
+  waveSize: 1,
+} as const;
+
+const journeyRuns: (typeof schema.generationRuns.$inferInsert)[] = [
+  {
+    id: JOURNEY_IDS.runs.dispatchUncertain,
+    projectId: JOURNEY_IDS.projects.dispatchUncertain,
+    userId: IDS.user,
+    kind: "full_book",
+    status: "queued",
+    config: journeyRunConfig,
+    currentStage: "queued",
+    stageDescription: "Waiting for the writing room to confirm",
+    dispatchAttempts: 2,
+    acceptanceUncertainAt: STALE_DISPATCH_AT,
+    acceptanceDispatchClaimedAt: STALE_DISPATCH_AT,
+    supportReference: JOURNEY_IDS.support.dispatchUncertain,
+    createdAt: STALE_DISPATCH_AT,
+  },
+  {
+    id: JOURNEY_IDS.runs.outlineApproval,
+    projectId: JOURNEY_IDS.projects.outlineApproval,
+    userId: IDS.user,
+    kind: "full_book",
+    status: "awaiting_input",
+    config: journeyRunConfig,
+    currentStage: "awaiting_approval",
+    progressPct: 24,
+    stageDescription: "The outline is ready for your decision",
+    startedAt: ACTIVE_RUN_AT,
+    lastProgressAt: ACTIVE_RUN_AT,
+    heartbeatAt: ACTIVE_RUN_AT,
+    workflowObservedStatus: "running",
+    workflowObservedAt: ACTIVE_RUN_AT,
+    dispatchAttempts: 1,
+    pauseKind: "outline_approval",
+    pauseVersion: 1,
+    pauseKey: "e2e-outline-approval-v1",
+    pauseRegisteredAt: ACTIVE_RUN_AT,
+    supportReference: JOURNEY_IDS.support.outlineApproval,
+    createdAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.runs.creditsPause,
+    projectId: JOURNEY_IDS.projects.creditsPause,
+    userId: IDS.user,
+    kind: "full_book",
+    status: "awaiting_input",
+    config: journeyRunConfig,
+    currentStage: "awaiting_credits",
+    progressPct: 46,
+    stageDescription: "One chapter is saved at a safe credit boundary",
+    startedAt: ACTIVE_RUN_AT,
+    lastProgressAt: ACTIVE_RUN_AT,
+    heartbeatAt: ACTIVE_RUN_AT,
+    workflowObservedStatus: "running",
+    workflowObservedAt: ACTIVE_RUN_AT,
+    dispatchAttempts: 1,
+    pauseKind: "credits_topup",
+    pauseVersion: 1,
+    pauseKey: "e2e-credits-topup-v1",
+    pauseDetails: { balanceCredits: 0.25, requiredCredits: 2.5, resumeStage: "chapters" },
+    pauseRegisteredAt: ACTIVE_RUN_AT,
+    supportReference: JOURNEY_IDS.support.creditsPause,
+    createdAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.runs.partialFailure,
+    projectId: JOURNEY_IDS.projects.partialFailure,
+    userId: IDS.user,
+    kind: "full_book",
+    status: "failed",
+    config: { ...journeyRunConfig, requireOutlineApproval: false },
+    currentStage: "failed",
+    progressPct: 58,
+    stageDescription: "Production stopped after two saved chapters",
+    rootErrorCode: "E2E_INTERRUPTED",
+    rootErrorStage: "chapters",
+    error: "The isolated fixture interrupted production after a durable chapter commit.",
+    startedAt: RUN_STARTED_AT,
+    completedAt: RUN_COMPLETED_AT,
+    lastProgressAt: RUN_COMPLETED_AT,
+    heartbeatAt: RUN_COMPLETED_AT,
+    workflowObservedStatus: "failed",
+    workflowObservedAt: RUN_COMPLETED_AT,
+    dispatchAttempts: 1,
+    supportReference: JOURNEY_IDS.support.partialFailure,
+    createdAt: RUN_STARTED_AT,
+  },
+  {
+    id: JOURNEY_IDS.runs.degradedTelemetry,
+    projectId: JOURNEY_IDS.projects.degradedTelemetry,
+    userId: IDS.user,
+    workflowRunId: "e2e-workflow-unavailable",
+    kind: "full_book",
+    status: "running",
+    config: { ...journeyRunConfig, requireOutlineApproval: false },
+    currentStage: "chapters",
+    progressPct: 41,
+    stageDescription: "Drafting chapter two",
+    startedAt: ACTIVE_RUN_AT,
+    lastProgressAt: ACTIVE_RUN_AT,
+    heartbeatAt: ACTIVE_RUN_AT,
+    workflowObservedStatus: "unavailable",
+    workflowObservedAt: ACTIVE_RUN_AT,
+    dispatchAttempts: 1,
+    supportReference: JOURNEY_IDS.support.degradedTelemetry,
+    createdAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.runs.cancellationRequested,
+    projectId: JOURNEY_IDS.projects.cancellationRequested,
+    userId: IDS.user,
+    workflowRunId: "e2e-workflow-cancelling",
+    kind: "full_book",
+    status: "running",
+    config: { ...journeyRunConfig, requireOutlineApproval: false },
+    currentStage: "chapters",
+    progressPct: 37,
+    stageDescription: "Finishing the current safe boundary",
+    startedAt: ACTIVE_RUN_AT,
+    lastProgressAt: ACTIVE_RUN_AT,
+    heartbeatAt: ACTIVE_RUN_AT,
+    workflowObservedStatus: "running",
+    workflowObservedAt: ACTIVE_RUN_AT,
+    dispatchAttempts: 1,
+    cancellationRequestedAt: new Date(ACTIVE_RUN_AT.getTime() + 2 * 60_000),
+    cancellationReason: "Author requested a safe stop from the Write room.",
+    supportReference: JOURNEY_IDS.support.cancellationRequested,
+    createdAt: ACTIVE_RUN_AT,
+  },
+  {
+    id: JOURNEY_IDS.runs.invalidCompletion,
+    projectId: JOURNEY_IDS.projects.invalidCompletion,
+    userId: IDS.user,
+    kind: "full_book",
+    status: "completed",
+    config: { ...journeyRunConfig, requireOutlineApproval: false },
+    currentStage: "done",
+    progressPct: 100,
+    stageDescription: "Completion reported without every expected chapter",
+    startedAt: RUN_STARTED_AT,
+    completedAt: RUN_COMPLETED_AT,
+    lastProgressAt: RUN_COMPLETED_AT,
+    heartbeatAt: RUN_COMPLETED_AT,
+    workflowObservedStatus: "completed",
+    workflowObservedAt: RUN_COMPLETED_AT,
+    dispatchAttempts: 1,
+    supportReference: JOURNEY_IDS.support.invalidCompletion,
+    createdAt: RUN_STARTED_AT,
+  },
+];
+
 function requireIsolatedDatabaseUrl(): string {
   if (process.env.E2E_DATABASE_ISOLATED !== "1") {
     throw new Error(
@@ -388,6 +845,11 @@ function validateFixtureShape() {
     ["outline chapters", outline.chapters.length, chapterRows.length],
     ["event ids", IDS.events.length, runEvents.length],
     ["suggestion ids", IDS.suggestions.length, suggestionRows.length],
+    ["journey projects", Object.keys(JOURNEY_IDS.projects).length, journeyProjects.length],
+    ["journey books", Object.keys(JOURNEY_IDS.books).length, journeyBooks.length],
+    ["journey outlines", Object.keys(JOURNEY_IDS.outlines).length, journeyOutlines.length],
+    ["journey chapters", Object.keys(JOURNEY_IDS.chapters).length, journeyChapters.length],
+    ["journey runs", Object.keys(JOURNEY_IDS.runs).length, journeyRuns.length],
   ];
   for (const [label, actual, expected] of checks) {
     if (actual !== expected) {
@@ -404,7 +866,7 @@ async function main() {
 
   if (process.argv.includes("--dry-run")) {
     console.log(
-      `E2E seed validated for ${targetLabel}: 1 user, 1 project, ${chapterRows.length} chapters, ${suggestionRows.length} pending suggestions. No database connection opened.`,
+      `E2E seed validated for ${targetLabel}: 1 user, ${journeyProjects.length + 1} projects, ${chapterRows.length + journeyChapters.length} chapters, ${suggestionRows.length} pending suggestions. No database connection opened.`,
     );
     return;
   }
@@ -484,6 +946,7 @@ async function main() {
       createdAt: CREATED_AT,
       updatedAt: UPDATED_AT,
     }),
+    db.insert(schema.projects).values(journeyProjects),
     db.insert(schema.books).values({
       id: IDS.book,
       projectId: IDS.project,
@@ -497,6 +960,7 @@ async function main() {
       createdAt: CREATED_AT,
       updatedAt: UPDATED_AT,
     }),
+    db.insert(schema.books).values(journeyBooks),
     db.insert(schema.outlines).values({
       id: IDS.outline,
       bookId: IDS.book,
@@ -505,7 +969,9 @@ async function main() {
       source: "ai",
       createdAt: CREATED_AT,
     }),
+    db.insert(schema.outlines).values(journeyOutlines),
     db.insert(schema.chapters).values(chapterRows),
+    db.insert(schema.chapters).values(journeyChapters),
     db.insert(schema.chapterRevisions).values([
       {
         id: IDS.revisions[0],
@@ -562,12 +1028,25 @@ async function main() {
       workflowRunId: "e2e-workflow-completed",
       kind: "full_book",
       status: "completed",
-      config: { tier: "standard", requireOutlineApproval: true, waveSize: 2 },
+      config: {
+        tier: "standard",
+        requireOutlineApproval: true,
+        waveSize: 2,
+        targetChapters: 3,
+        targetWordsPerChapter: 1200,
+        completion: {
+          finalized: {
+            sourceRunId: IDS.run,
+            manuscriptDigest: "e2e-clockmakers-map-complete",
+          },
+        },
+      },
       approvalNotes: "Keep the mystery hopeful and preserve Mara's authorship.",
       startedAt: RUN_STARTED_AT,
       completedAt: RUN_COMPLETED_AT,
       createdAt: RUN_STARTED_AT,
     }),
+    db.insert(schema.generationRuns).values(journeyRuns),
     db.insert(schema.generationEvents).values(
       runEvents.map((event, index) => ({
         id: IDS.events[index],
@@ -724,7 +1203,7 @@ async function main() {
   ] as const);
 
   console.log(
-    `Seeded isolated E2E database ${targetLabel}: 1 admin author, 1 project, ${chapterRows.length} chapters, ${suggestionRows.length} pending suggestions.`,
+    `Seeded isolated E2E database ${targetLabel}: 1 admin author, ${journeyProjects.length + 1} projects, ${chapterRows.length + journeyChapters.length} chapters, ${suggestionRows.length} pending suggestions.`,
   );
 }
 

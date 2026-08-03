@@ -116,9 +116,28 @@ export async function fullPageScreenshot(
   testInfo: TestInfo,
   name: string,
 ): Promise<void> {
-  await page.screenshot({
-    path: path.join(__dirname, "screenshots", testInfo.project.name, `${name}.png`),
-    fullPage: true,
-    animations: "disabled",
+  // Chromium otherwise preserves content-visibility skipping while capturing
+  // outside the viewport, producing a misleading full-page image with blank
+  // sections. Reveal them only for the visual artifact, then restore runtime
+  // behavior for any assertions that follow.
+  const revealDeferred = await page.addStyleTag({
+    content:
+      ".defer-offscreen { content-visibility: visible !important; contain-intrinsic-size: none !important; }",
   });
+  try {
+    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    await page.screenshot({
+      path: path.join(__dirname, "screenshots", testInfo.project.name, `${name}.png`),
+      fullPage: true,
+      animations: "disabled",
+    });
+  } finally {
+    await revealDeferred.evaluate((style) => style.parentNode?.removeChild(style));
+  }
 }

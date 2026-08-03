@@ -87,6 +87,33 @@ describe("parseRunHealthResponse", () => {
     });
   });
 
+  it("carries server-validated completion artifact proof into live health", () => {
+    expect(
+      parseRunHealthResponse(
+        {
+          run: { status: "completed", error: null },
+          health: {
+            databaseStatus: "completed",
+            workflowStatus: "completed",
+            effectiveStatus: "completed",
+            completionArtifactsReady: true,
+            noWorkStarted: false,
+            stage: "done",
+            progressPct: 100,
+          },
+        },
+        previous,
+      ),
+    ).toMatchObject({
+      health: {
+        effectiveStatus: "completed",
+        completionArtifactsReady: true,
+      },
+      stage: "done",
+      pct: 100,
+    });
+  });
+
   it("surfaces a safe ambiguous-start retry and recognizes the later durable Workflow link", () => {
     const uncertain = parseRunHealthResponse(
       {

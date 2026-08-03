@@ -2,12 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { start } from "workflow/api";
 import { z } from "zod";
 import { getDb, schema, withDbTransaction } from "@/db";
 import { assertNotSuspended, requireUser, SuspendedError } from "@/lib/auth";
-import { canonicalizeCreditRequirement, creditsForUsd, getBalance } from "@/lib/billing/credits";
+import { getBalance } from "@/lib/billing/credits";
 import { isActionRateLimited, LIMITS } from "@/lib/security/rate-limit";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { generateBook } from "@/workflows/generate-book";
@@ -21,8 +21,10 @@ import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 import { prepareFullBookRunDispatch } from "@/lib/authoring-dispatch";
 import {
   insertQueuedAuthoringRun,
+  FullBookStartInsufficientCreditsError,
   linkAuthoringRunWorkflow,
   markAuthoringRunAcceptanceUncertain,
+  ProjectStartSnapshotChangedError,
   reconcileBeforeAuthoringRunConflict,
   RunRequestKeyMismatchError,
   settleStubbedAuthoringRunHandoff,
@@ -32,9 +34,11 @@ import {
 import type { GenerationConfig } from "@/lib/run-events";
 import { getStudioAccess } from "@/lib/studio-access";
 import { TRIAL_STORY_CONFIG, type ProjectExperience } from "@/lib/trial-story";
+import { fullBookRequiredCredits } from "@/lib/full-book-credit-requirement";
 import {
   deleteProjectTransaction,
   refreshProjectBeforeFirstRunTransaction,
+  setProjectArchivedTransaction,
   updateProjectTransaction,
 } from "@/lib/project-transaction-operations";
 import {
@@ -45,7 +49,7 @@ import {
   projectTitleSchema,
   updateProjectSchema,
 } from "@/lib/validation/project";
-import { freshOpeningRequiredUsd } from "@/workflows/opening-credit-plan";
+import { getAuthoringStartSafetyBlock } from "@/lib/authoring-start-safety";
 
 export async function createProject(input: unknown) {
   const { userId } = await requireUser();
@@ -125,7 +129,7 @@ export type StartBookResult =
       status: "validation_error";
       message: string;
       fieldErrors?: StartBookFieldErrors;
-      code?: "email_verification_required" | "purchase_required";
+      code?: "email_verification_required" | "purchase_required" | "setup_changed";
     }
   | {
       status: "insufficient_credits";
@@ -182,7 +186,7 @@ async function existingStartResult(input: {
       db
         .select({
           authoringCount: sql<number>`count(*) filter (
-            where ${schema.generationEvents.type} in ('agent', 'chapter', 'review')
+            where ${schema.generationEvents.type} in ('agent', 'chapter', 'review', 'tool_mutation')
               or (
                 ${schema.generationEvents.type} = 'stage'
                 and ${schema.generationEvents.payload}->>'stage' <> 'queued'
@@ -203,6 +207,12 @@ async function existingStartResult(input: {
           reservationCount: sql<number>`count(*) filter (
             where coalesce(${schema.creditLedger.externalRef}, '')
               ~ '^(generation-reservation:|interactive-reservation:)'
+              and not exists (
+                select 1
+                from credit_ledger released
+                where released.external_ref =
+                  'release:' || ${schema.creditLedger.externalRef}
+              )
           )::int`,
           creditsUsed: sql<string>`coalesce(
             -sum(${schema.creditLedger.amount}) filter (
@@ -301,11 +311,11 @@ async function startGenerationRun(
   userId: string,
   config: GenerationConfig,
   requestKey: string,
+  minimumBalanceCredits?: number,
   e2eStartMode?: "fail_before_work",
 ): Promise<StartBookResult> {
   const db = getDb();
 
-  await reconcileBeforeAuthoringRunConflict({ projectId: project.id, userId });
   const replay = await existingStartResult({
     projectId: project.id,
     userId,
@@ -313,6 +323,20 @@ async function startGenerationRun(
     experience: project.experience,
   });
   if (replay) return replay;
+
+  await reconcileBeforeAuthoringRunConflict({ projectId: project.id, userId });
+  const safetyBlock = await getAuthoringStartSafetyBlock({
+    projectId: project.id,
+    userId,
+  });
+  if (safetyBlock) {
+    return {
+      status: "start_failed",
+      projectId: project.id,
+      message: `${safetyBlock.action.description} Support reference: ${safetyBlock.supportReference}.`,
+      noWorkStarted: false,
+    };
+  }
 
   const [activeRun] = await db
     .select({
@@ -324,6 +348,7 @@ async function startGenerationRun(
       and(
         eq(schema.generationRuns.projectId, project.id),
         inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+        ne(schema.generationRuns.kind, "export"),
       ),
     )
     .limit(1);
@@ -353,6 +378,13 @@ async function startGenerationRun(
       kind: "full_book",
       config,
       requestKey,
+      expectedProjectSnapshot: {
+        updatedAt: project.updatedAt,
+        targetChapters: project.targetChapters,
+        targetWordsPerChapter: project.targetWordsPerChapter,
+        experience: project.experience,
+      },
+      ...(minimumBalanceCredits !== undefined ? { minimumBalanceCredits } : {}),
     });
   } catch (error) {
     if (error instanceof RunRequestKeyMismatchError) {
@@ -363,12 +395,28 @@ async function startGenerationRun(
         noWorkStarted: false,
       };
     }
+    if (error instanceof ProjectStartSnapshotChangedError) {
+      return {
+        status: "validation_error",
+        code: "setup_changed",
+        message:
+          "Your saved setup changed before production started. Review the refreshed estimate and try again.",
+      };
+    }
     if (error instanceof TrialOptionalWorkInProgressError) {
       return {
         status: "start_failed",
         projectId: project.id,
         message: error.message,
         noWorkStarted: false,
+      };
+    }
+    if (error instanceof FullBookStartInsufficientCreditsError) {
+      return {
+        status: "insufficient_credits",
+        message: `${error.balance.toFixed(2)} credits available; ${error.required.toFixed(2)} needed to begin.`,
+        balance: error.balance,
+        required: error.required,
       };
     }
     // The partial unique index is the race-proof backstop behind the pre-check above.
@@ -383,6 +431,7 @@ async function startGenerationRun(
         and(
           eq(schema.generationRuns.projectId, project.id),
           inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+          ne(schema.generationRuns.kind, "export"),
         ),
       )
       .limit(1);
@@ -625,6 +674,25 @@ async function startBookParsed(userId: string, data: StartBookInput): Promise<St
     };
   }
 
+  let minimumBalanceCredits: number | undefined;
+  if (experience === "full_book") {
+    minimumBalanceCredits = fullBookRequiredCredits({
+      tier: data.settings.qualityTier ?? "standard",
+      targetChapters: data.targetChapters,
+      targetWordsPerChapter: data.targetWordsPerChapter,
+    });
+    const balance = await getBalance(userId);
+    if (balance < minimumBalanceCredits) {
+      revalidatePath("/studio");
+      return {
+        status: "insufficient_credits",
+        message: `${balance.toFixed(2)} credits available; ${minimumBalanceCredits.toFixed(2)} needed to begin.`,
+        balance,
+        required: minimumBalanceCredits,
+      };
+    }
+  }
+
   if (!project) {
     const [inserted] = await db
       .insert(schema.projects)
@@ -662,23 +730,12 @@ async function startBookParsed(userId: string, data: StartBookInput): Promise<St
 
   const config = buildBookGenerationConfig(project);
 
-  const required = canonicalizeCreditRequirement(creditsForUsd(freshOpeningRequiredUsd(config)));
-  const balance = await getBalance(userId);
-  if (balance < required) {
-    revalidatePath("/studio");
-    return {
-      status: "insufficient_credits",
-      message: `${balance.toFixed(2)} credits available; ${required.toFixed(2)} needed to begin.`,
-      balance,
-      required,
-    };
-  }
-
   const result = await startGenerationRun(
     project,
     userId,
     config,
     data.requestKey,
+    minimumBalanceCredits,
     data.e2eStartMode,
   );
 
@@ -766,44 +823,20 @@ export async function updateProject(projectId: string, input: unknown) {
 }
 
 /**
- * Archive/unarchive. Restoring derives the status from the book's actual state
- * rather than resetting to draft, so a finished book comes back as finished.
+ * Archive/unarchive under the same project lock as authoring. Restoring derives
+ * completion only from the run-bound finalization proof rather than inferring
+ * it from chapter fullness or a stale denormalized project status.
  */
 export async function setProjectArchived(projectId: string, archived: boolean) {
   const { userId } = await requireUser();
-  const db = getDb();
-
-  let status: "draft" | "editing" | "complete" | "archived" = "archived";
-  if (!archived) {
-    const [stats] = await db
-      .select({
-        total: sql<number>`count(*) filter (
-          where not (
-            ${schema.chapters.status} = 'planned'
-            and ${schema.chapters.wordCount} = 0
-            and ${schema.chapters.title} is null
-            and ${schema.chapters.summary} is null
-          )
-        )::int`,
-        written: sql<number>`count(*) filter (where length(${schema.chapters.content}) > 0)::int`,
-      })
-      .from(schema.chapters)
-      .innerJoin(schema.books, eq(schema.books.id, schema.chapters.bookId))
-      .where(eq(schema.books.projectId, projectId));
-    status =
-      stats && stats.written > 0
-        ? stats.written >= stats.total
-          ? "complete"
-          : "editing"
-        : "draft";
+  await reconcileBeforeAuthoringRunConflict({ projectId, userId });
+  const outcome = await withDbTransaction((tx) =>
+    setProjectArchivedTransaction(tx, { projectId, userId, archived }),
+  );
+  if (outcome === "active_run") {
+    throw new Error("Stop the current generation run before archiving this project");
   }
-
-  const [updated] = await db
-    .update(schema.projects)
-    .set({ status, updatedAt: new Date() })
-    .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
-    .returning({ id: schema.projects.id });
-  if (!updated) throw new Error("Project not found");
+  if (outcome === "not_found") throw new Error("Project not found");
   revalidatePath("/studio");
 }
 

@@ -21,6 +21,9 @@ const requestKey = "11111111-1111-4111-8111-111111111111";
 describe("isolated E2E start-state inspection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@isolated.example.test/test");
+    vi.stubEnv("VERCEL_ENV", "");
     mocks.requireUser.mockResolvedValue({ userId: "user-1" });
   });
 

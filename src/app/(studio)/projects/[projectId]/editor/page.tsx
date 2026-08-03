@@ -15,6 +15,8 @@ import {
   chapterStatusLabels,
   formatWordCount,
 } from "@/lib/editor/chapter-status";
+import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
+import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 
 export default async function EditorIndexPage({
   params,
@@ -29,6 +31,12 @@ export default async function EditorIndexPage({
   const [chapters, archivedChapters] = data.book
     ? await Promise.all([getChapterList(data.book.id), getArchivedChapterRecoveries(data.book.id)])
     : [[], []];
+  const journey = await getAuthoringJourneySnapshot({
+    userId,
+    projectId,
+    data,
+    chapters,
+  });
 
   return (
     <div className="space-y-5">
@@ -43,21 +51,17 @@ export default async function EditorIndexPage({
         </p>
       </header>
 
+      {journey ? <IncompleteProductionNotice journey={journey} /> : null}
+
       {chapters.length === 0 ? (
         <div className="instrument-surface relative flex min-h-56 flex-col items-center justify-center overflow-hidden px-6 py-12 text-center">
           <span aria-hidden="true" className="spectral-rule absolute inset-x-0 top-0 h-px" />
           <PenLine aria-hidden="true" className="size-5 text-primary" />
           <p className="mt-3 font-display text-base font-semibold">Nothing to edit yet</p>
           <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-            Drafted chapters will appear here as a numbered editorial queue.
+            Drafted chapters will appear here as a numbered editorial queue. The project-wide next
+            step above shows what this book needs now.
           </p>
-          <Link
-            href={`/projects/${projectId}/write`}
-            className="mt-4 inline-flex min-h-11 items-center gap-2 rounded-sm border border-border px-4 text-sm font-medium text-primary transition-colors hover:bg-accent"
-          >
-            Go to the Write stage
-            <ArrowRight aria-hidden="true" className="size-4" />
-          </Link>
         </div>
       ) : (
         <section

@@ -1,5 +1,5 @@
 import epub, { type Chapter } from "epub-gen-memory";
-import { chapterHeading, markdownToHtml, READING_LINE, type AssembledManuscript } from "./assemble";
+import { chapterHeading, markdownToHtml, type AssembledManuscript } from "./assemble";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 const CSS = `
@@ -26,7 +26,7 @@ function titlePageHtml(m: AssembledManuscript): string {
     `<div class="title-page">`,
     `<h1>${escapeHtml(m.title)}</h1>`,
     m.synopsis ? `<p class="synopsis">${escapeHtml(m.synopsis)}</p>` : "",
-    `<p class="byline">${escapeHtml(READING_LINE)}<br/>${escapeHtml(m.author)}</p>`,
+    `<p class="byline">${escapeHtml(m.editionNote)}<br/>${escapeHtml(m.author)}</p>`,
     `</div>`,
   ]
     .filter(Boolean)

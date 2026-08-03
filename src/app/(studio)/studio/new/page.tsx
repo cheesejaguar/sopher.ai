@@ -40,12 +40,21 @@ function editableBrief(source: {
 export default async function NewBookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ genre?: string; from?: string; e2eStartMode?: string }>;
+  searchParams: Promise<{
+    genre?: string;
+    from?: string;
+    resume?: string;
+    e2eStartMode?: string;
+  }>;
 }) {
-  const { genre, from, e2eStartMode: requestedE2EStartMode } = await searchParams;
+  const { genre, from, resume, e2eStartMode: requestedE2EStartMode } = await searchParams;
   const initialGenre = (GENRE_IDS as readonly string[]).includes(genre ?? "")
     ? (genre as GenreId)
     : undefined;
+  // This marker changes only the client restore position. The draft itself is
+  // still loaded from the authenticated account's scoped key and revalidated
+  // before the wizard may move past Step 1.
+  const resumeAfterCheckout = z.literal("checkout").safeParse(resume).success;
   // This query parameter is not a product feature. It is passed to the client
   // only inside a local, isolated, explicitly stubbed browser-test process;
   // production cannot enable the gate even if both E2E variables are present.
@@ -108,7 +117,9 @@ export default async function NewBookPage({
     : initialSetup
       ? "Your title, genre, and brief are carried forward. Confirm the genre on Step 1, review the title and brief on Step 2, then choose the full-length shape and quality."
       : existingIncludedStory
-        ? "Continue your included story, or explore full-length production when you are ready."
+        ? access.trialProjectCompleted
+          ? "Your included story is complete. Keep reading or editing it, or carry it into a full-length production."
+          : "Continue your included story with every Studio tool. Full-length continuation becomes available after it is complete."
         : verificationRequired
           ? "Verify your account to begin the complete included story—no purchase required."
           : "Four short steps from idea to estimate. Nothing runs until you approve the cost.";
@@ -116,8 +127,7 @@ export default async function NewBookPage({
   return (
     <div className="mx-auto max-w-6xl space-y-8">
       <header className="max-w-3xl border-b border-border pb-7">
-        <p className="folio-label text-primary">Studio / New production</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">{pageTitle}</h1>
+        <h1 className="text-3xl font-semibold tracking-[-0.03em] sm:text-4xl">{pageTitle}</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
           {pageDescription}
         </p>
@@ -129,6 +139,7 @@ export default async function NewBookPage({
         userId={userId}
         access={access}
         accountManagementEnabled={clerkEnabled}
+        resumeAfterCheckout={resumeAfterCheckout}
         e2eStartMode={e2eStartMode}
       />
     </div>

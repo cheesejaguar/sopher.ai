@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   abort: vi.fn(),
   refundSettled: vi.fn(),
   grant: vi.fn(),
+  cancellationCheck: vi.fn(),
 }));
 
 vi.mock("@/lib/billing/meter", () => ({
@@ -23,10 +24,22 @@ vi.mock("@/lib/billing/credits", async (importOriginal) => {
   return { ...actual, grantCredits: mocks.grant };
 });
 
+vi.mock("@/lib/authoring-cancellation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authoring-cancellation")>();
+  return {
+    ...actual,
+    throwIfAuthoringCancellationRequested: mocks.cancellationCheck,
+  };
+});
+
 import { InsufficientCreditsError } from "@/lib/billing/credits";
+import { AuthoringCancellationRequestedError } from "@/lib/authoring-cancellation";
+import { ProjectSpendAccessError } from "@/lib/project-spend-access";
 import { MeteredInputLimitError } from "./metering-limits";
 import {
   gatewayOptions,
+  MeteredDeliveryPendingError,
+  MeteredDeliveryReplayError,
   MeteredOutputDeliveryError,
   MeteringReconciliationRequiredError,
   metered,
@@ -60,6 +73,7 @@ beforeEach(() => {
   mocks.abort.mockResolvedValue(undefined);
   mocks.refundSettled.mockResolvedValue(true);
   mocks.grant.mockResolvedValue(true);
+  mocks.cancellationCheck.mockResolvedValue(undefined);
 });
 
 describe("metered atomic authorization", () => {
@@ -159,6 +173,51 @@ describe("metered atomic authorization", () => {
     );
   });
 
+  it("treats an author cancellation as the run state, never a credit failure", async () => {
+    mocks.begin.mockResolvedValueOnce({
+      ...startedIntent(),
+      status: "cancelled",
+    });
+    const provider = vi.fn(async () => ({ usage }));
+
+    await expect(
+      metered(
+        {
+          userId: "user-1",
+          projectId: "project-1",
+          runId: "run-1",
+          billingScope: "generation:run-1:chapter:1",
+          reservationRef: "generation-reservation:run-1:wave-1",
+        },
+        { role: "writer", operation: "writer.draft", model: "anthropic/claude-sonnet-5" },
+        provider,
+      ),
+    ).rejects.toBeInstanceOf(AuthoringCancellationRequestedError);
+    expect(provider).not.toHaveBeenCalled();
+    expect(mocks.abort).not.toHaveBeenCalled();
+  });
+
+  it("never presents a purchase as the remedy for an exhausted included allowance", async () => {
+    mocks.begin.mockResolvedValueOnce({
+      ...startedIntent(),
+      status: "trial_cap",
+    });
+    const provider = vi.fn(async () => ({ usage }));
+
+    const call = metered(
+      { userId: "user-1", projectId: "project-1", authorizationUsd: 0.1 },
+      { role: "editor", operation: "editor.selection", model: "anthropic/claude-haiku-4.5" },
+      provider,
+    );
+    await expect(call).rejects.toMatchObject({
+      name: "ProjectSpendAccessError",
+      code: "included_allowance_exhausted",
+      message: expect.not.stringMatching(/purchase|buy|upgrade/i),
+    });
+    await expect(call).rejects.toBeInstanceOf(ProjectSpendAccessError);
+    expect(provider).not.toHaveBeenCalled();
+  });
+
   it("records actual fallback models and per-step usage in one settlement", async () => {
     const firstUsage = { ...usage, inputTokens: 2_000 };
     const fallbackUsage = { ...usage, outputTokens: 900 };
@@ -238,6 +297,63 @@ describe("metered atomic authorization", () => {
         reservationRef: startedIntent().reservationRef,
       }),
     );
+  });
+
+  it("never creates an intent or dispatches after an existing cancellation request", async () => {
+    const cancellation = new Error("Authoring cancellation requested");
+    mocks.cancellationCheck.mockRejectedValueOnce(cancellation);
+    const provider = vi.fn(async () => ({ usage }));
+
+    await expect(
+      metered(
+        {
+          userId: "user-1",
+          runId: "run-1",
+          billingScope: "generation:run-1:chapter:1",
+          reservationRef: "generation-reservation:run-1:wave-1",
+        },
+        { role: "writer", operation: "writer.draft", model: "anthropic/claude-sonnet-5" },
+        provider,
+      ),
+    ).rejects.toBe(cancellation);
+
+    expect(mocks.begin).not.toHaveBeenCalled();
+    expect(provider).not.toHaveBeenCalled();
+    expect(mocks.abort).not.toHaveBeenCalled();
+    expect(mocks.recordMany).not.toHaveBeenCalled();
+  });
+
+  it("settles an in-flight provider call before cancellation prevents its output delivery", async () => {
+    const cancellation = new Error("Authoring cancellation requested");
+    mocks.cancellationCheck
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(cancellation);
+    const provider = vi.fn(async () => ({ usage }));
+    const ctx = {
+      userId: "user-1",
+      runId: "run-1",
+      billingScope: "generation:run-1:chapter:1",
+      reservationRef: "generation-reservation:run-1:wave-1",
+    };
+
+    await expect(
+      metered(
+        ctx,
+        { role: "writer", operation: "writer.draft", model: "anthropic/claude-sonnet-5" },
+        provider,
+      ),
+    ).rejects.toBe(cancellation);
+
+    expect(provider).toHaveBeenCalledOnce();
+    expect(mocks.recordMany).toHaveBeenCalledOnce();
+    expect(mocks.abort).not.toHaveBeenCalled();
+    expect(ctx).toMatchObject({
+      lastSettlement: {
+        meteredUsd: 0.01,
+        credits: 0.0275,
+      },
+    });
   });
 
   it("keeps an async network or stream interruption pending because provider billing is ambiguous", async () => {
@@ -354,6 +470,33 @@ describe("metered atomic authorization", () => {
     expect(mocks.refundSettled).toHaveBeenCalledOnce();
     expect(provider).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    ["delivery_pending", MeteredDeliveryPendingError],
+    ["delivered", MeteredDeliveryReplayError],
+  ] as const)(
+    "never compensates or repeats an optional %s action",
+    async (status, expectedError) => {
+      mocks.begin.mockResolvedValueOnce({ ...startedIntent(), status });
+      const provider = vi.fn(async () => ({ usage }));
+
+      await expect(
+        metered(
+          {
+            userId: "user-1",
+            projectId: "project-1",
+            idempotencyKey: "project:project-1:cover:request-1",
+            deliveryReceiptRef: "optional-delivery:project-1:cover:request-1",
+          },
+          { role: "content-tool", operation: "cover.generate", model: "image-model" },
+          provider,
+        ),
+      ).rejects.toBeInstanceOf(expectedError);
+
+      expect(mocks.refundSettled).not.toHaveBeenCalled();
+      expect(provider).not.toHaveBeenCalled();
+    },
+  );
 
   it("settles and refunds truncated structured output before exposing a non-retryable error", async () => {
     const truncatedUsage = {

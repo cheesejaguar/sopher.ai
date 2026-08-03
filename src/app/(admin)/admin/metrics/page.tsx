@@ -10,10 +10,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatUsd } from "@/components/usage/format";
+import { formatCredits, formatUsd } from "@/components/usage/format";
 import {
   getAcquisitionChannels,
   getAcquisitionFunnel,
+  getAuthoringOperationsMetrics,
   getProductMetrics,
   getWeeklyEconomics,
   getWizardFunnel,
@@ -25,6 +26,17 @@ export const metadata = { title: "Metrics — admin" };
 const pct = (value: number | null) => (value === null ? "—" : `${(value * 100).toFixed(1)}%`);
 const days = (value: number | null) =>
   value === null ? "—" : value < 1 ? `${Math.round(value * 24)}h` : `${value.toFixed(1)}d`;
+const seconds = (value: number | null) => {
+  if (value === null) return "—";
+  if (value < 60) return `${Math.round(value)}s`;
+  return `${(value / 60).toFixed(value < 600 ? 1 : 0)}m`;
+};
+const hours = (value: number | null) => {
+  if (value === null) return "—";
+  if (value < 1) return `${Math.round(value * 60)}m`;
+  if (value < 48) return `${value.toFixed(value < 10 ? 1 : 0)}h`;
+  return `${(value / 24).toFixed(1)}d`;
+};
 
 function Section({
   title,
@@ -355,6 +367,70 @@ async function Product() {
   );
 }
 
+async function AuthoringOperations() {
+  const metrics = await getAuthoringOperationsMetrics();
+  const cards = [
+    {
+      title: "First authoring event",
+      value: seconds(metrics.firstAuthoringEvent.medianSeconds),
+      detail: `p95 ${seconds(metrics.firstAuthoringEvent.p95Seconds)} · ${metrics.firstAuthoringEvent.sample} runs`,
+    },
+    {
+      title: "Waiting for author",
+      value: String(metrics.actionWaits.count),
+      detail: `median ${hours(metrics.actionWaits.medianHours)} · oldest ${hours(metrics.actionWaits.oldestHours)}`,
+    },
+    {
+      title: "Open anomalies",
+      value: String(metrics.anomalies.count),
+      detail: `median ${hours(metrics.anomalies.medianHours)} · oldest ${hours(metrics.anomalies.oldestHours)}`,
+    },
+    {
+      title: "Redispatch handoff",
+      value: pct(metrics.redispatch.rate),
+      detail: `${metrics.redispatch.recovered} of ${metrics.redispatch.attempts} retries produced durable work without terminal failure`,
+    },
+    {
+      title: "Saved-work recovery",
+      value: pct(metrics.recovery.rate),
+      detail: `${metrics.recovery.completed} of ${metrics.recovery.attempts} explicit recovery runs completed`,
+    },
+    {
+      title: "Stale credit holds",
+      value: String(metrics.staleHolds.count),
+      detail: `${formatCredits(metrics.staleHolds.credits)} trapped · oldest ${hours(metrics.staleHolds.oldestHours)}`,
+    },
+    {
+      title: "Story to purchase",
+      value: pct(metrics.trialConversion.rate),
+      detail: `${metrics.trialConversion.purchasers} of ${metrics.trialConversion.completedTrials} completed included stories`,
+    },
+  ];
+
+  return (
+    <Section
+      title="Authoring operations"
+      hint="Durable server evidence. Latency covers the last 30 days; waits, incidents, recovery, stale holds, and post-story purchase conversion are current/all-time cohorts."
+    >
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {cards.map((card) => (
+          <Card key={card.title}>
+            <CardHeader className="pb-1">
+              <CardTitle className="font-mono text-[0.68rem] font-normal tracking-[0.14em] text-muted-foreground uppercase">
+                {card.title}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="font-display text-2xl font-semibold tabular-nums">{card.value}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{card.detail}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function Loading() {
   return <Skeleton className="h-48 w-full rounded-sm" />;
 }
@@ -368,7 +444,6 @@ export default function AdminMetrics() {
   return (
     <div className="space-y-10">
       <PageHeader
-        label="Admin / Intelligence"
         title="Metrics"
         description="Acquisition, economics, product behavior, and wizard completion."
       />
@@ -383,6 +458,9 @@ export default function AdminMetrics() {
       </Suspense>
       <Suspense fallback={<Loading />}>
         <Product />
+      </Suspense>
+      <Suspense fallback={<Loading />}>
+        <AuthoringOperations />
       </Suspense>
       <Suspense fallback={<Loading />}>
         <Wizard />

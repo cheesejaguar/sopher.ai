@@ -89,6 +89,7 @@ export async function POST(req: Request) {
             packName: packId,
             credits,
             usd: (session.amount_total ?? 0) / 100,
+            idempotencyKey: `stripe-receipt:${session.id}`,
           });
         }
       } catch (error) {

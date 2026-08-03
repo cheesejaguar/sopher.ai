@@ -27,6 +27,7 @@ export function PublicNavLink({
   currentClassName,
   match = "exact",
   className,
+  prefetch = false,
   ...props
 }: PublicNavLinkProps) {
   const pathname = usePathname();
@@ -36,10 +37,14 @@ export function PublicNavLink({
     match === "section" && targetPath !== "/" && pathname.startsWith(`${targetPath}/`);
   const current = exact || descendant;
 
+  // Desktop and mobile navigation are both server-rendered, then hidden by
+  // breakpoint. Avoid prefetching every hidden destination during the
+  // homepage's LCP window; individual callers can still opt back in.
   return (
     <Link
       {...props}
       href={href}
+      prefetch={prefetch}
       aria-current={exact ? "page" : descendant ? "location" : undefined}
       className={cn(className, current && currentClassName)}
     />

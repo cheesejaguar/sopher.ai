@@ -1,9 +1,6 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
-
 import { genreLabel, type GenreId } from "@/lib/genres";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -98,43 +95,49 @@ export function StepBrief({
         </p>
       </div>
 
-      <Collapsible>
-        <CollapsibleTrigger className="group flex min-h-11 items-center gap-1.5 rounded-sm text-sm font-medium text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
-          <ChevronDown
-            aria-hidden="true"
-            className="size-3.5 transition-transform group-data-panel-open:rotate-180"
-          />
-          Add protagonist and setting (optional)
-        </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="instrument-surface mt-3 grid gap-4 rounded-sm p-4 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="wizard-protagonist">Protagonist</Label>
-              <Input
-                id="wizard-protagonist"
-                value={state.protagonist}
-                maxLength={200}
-                placeholder="Name, and who they are"
-                onChange={(event) =>
-                  dispatch({ type: "patch", patch: { protagonist: event.target.value } })
-                }
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="wizard-setting">Setting</Label>
-              <Input
-                id="wizard-setting"
-                value={state.setting}
-                maxLength={200}
-                placeholder="Where and when"
-                onChange={(event) =>
-                  dispatch({ type: "patch", patch: { setting: event.target.value } })
-                }
-              />
-            </div>
+      <section aria-labelledby="story-anchors-title" className="instrument-surface rounded-sm p-4">
+        <h3 id="story-anchors-title" className="text-sm font-semibold">
+          Give the Story Bible a head start
+        </h3>
+        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+          These details are optional. Specific appearance, motivation, place, and period notes help
+          the writing team keep later chapters and generated portraits consistent.
+        </p>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="wizard-protagonist">Protagonist</Label>
+            <Input
+              id="wizard-protagonist"
+              value={state.protagonist}
+              maxLength={200}
+              placeholder="Mara, a stubborn retired cartographer with a silver braid"
+              aria-describedby="wizard-protagonist-hint"
+              onChange={(event) =>
+                dispatch({ type: "patch", patch: { protagonist: event.target.value } })
+              }
+            />
+            <p id="wizard-protagonist-hint" className="text-xs text-muted-foreground">
+              Name, role, appearance, and what drives them.
+            </p>
           </div>
-        </CollapsibleContent>
-      </Collapsible>
+          <div className="space-y-1.5">
+            <Label htmlFor="wizard-setting">Setting</Label>
+            <Input
+              id="wizard-setting"
+              value={state.setting}
+              maxLength={200}
+              placeholder="A storm-battered island observatory in 1932"
+              aria-describedby="wizard-setting-hint"
+              onChange={(event) =>
+                dispatch({ type: "patch", patch: { setting: event.target.value } })
+              }
+            />
+            <p id="wizard-setting-hint" className="text-xs text-muted-foreground">
+              Place, time period, and one detail that defines the world.
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

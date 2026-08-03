@@ -118,7 +118,17 @@ async function invalidateSpendCache(userId: string): Promise<void> {
  */
 export type MeteredCallIntentResult = {
   status:
-    "started" | "pending" | "settled" | "insufficient" | "trial_cap" | "project_busy" | "suspended";
+    | "started"
+    | "pending"
+    | "settled"
+    | "delivered"
+    | "delivery_pending"
+    | "insufficient"
+    | "trial_cap"
+    | "project_busy"
+    | "suspended"
+    | "cancelled"
+    | "run_inactive";
   balance: number;
   required: number;
   intentRef: string;
@@ -136,6 +146,8 @@ export async function beginMeteredCallIntent(input: {
   intentRef: string;
   intentPrefix: string;
   usagePrefix: string;
+  /** Exact immutable receipt written atomically with optional author-facing output. */
+  deliveryReceiptRef?: string;
   parentReservationRef?: string;
   maxCredits: number;
   description: string;
@@ -154,6 +166,8 @@ export async function beginMeteredCallIntent(input: {
   const reservationRef = `metering-claim:${input.intentRef}`;
   const optionalLeaseRef =
     input.projectId && !input.runId ? `optional-operation-lease:${input.intentRef}` : null;
+  const optionalLeaseAttemptPrefix =
+    input.projectId && !input.runId ? `optional-operation-lease:${input.intentPrefix}` : null;
   const claimReleaseRef = input.parentReservationRef
     ? `reservation-claim-release:${input.parentReservationRef}:${input.intentRef}`
     : null;
@@ -189,6 +203,36 @@ export async function beginMeteredCallIntent(input: {
           where compensated.external_ref =
             'delivery-refund:' ||
             regexp_replace(usage.external_ref, ':step:[0-9]+$', '')
+        )
+      limit 1
+    ),
+    delivered_receipt as materialized (
+      select receipt.id
+      from credit_ledger receipt
+      where ${input.deliveryReceiptRef ?? null}::text is not null
+        and receipt.user_id = ${input.userId}
+        and receipt.project_id is not distinct from ${input.projectId ?? null}
+        and receipt.run_id is null
+        and receipt.kind = 'adjustment'
+        and receipt.amount = 0
+        and receipt.external_ref = ${input.deliveryReceiptRef ?? null}
+      limit 1
+    ),
+    open_optional_delivery as materialized (
+      select lease.id
+      from credit_ledger lease
+      where ${optionalLeaseAttemptPrefix}::text is not null
+        and lease.user_id = ${input.userId}
+        and lease.project_id is not distinct from ${input.projectId ?? null}
+        and lease.run_id is null
+        and lease.kind = 'adjustment'
+        and lease.amount = 0
+        and left(lease.external_ref, length(${optionalLeaseAttemptPrefix})) =
+          ${optionalLeaseAttemptPrefix}
+        and not exists (
+          select 1
+          from credit_ledger released
+          where released.external_ref = 'release:' || lease.external_ref
         )
       limit 1
     ),
@@ -229,21 +273,20 @@ export async function beginMeteredCallIntent(input: {
         and project.user_id = ${input.userId}
       limit 1
     ),
+    run_state as materialized (
+      select active_run.status, active_run.cancellation_requested_at
+      from generation_runs active_run
+      where ${input.runId ?? null}::uuid is not null
+        and active_run.id = ${input.runId ?? null}
+        and active_run.user_id = ${input.userId}
+        and active_run.project_id is not distinct from ${input.projectId ?? null}
+      limit 1
+    ),
     trial_spend as materialized (
       select
         coalesce(
           -sum(entry.amount) filter (
             where entry.kind = 'usage'
-              and not exists (
-                select 1
-                from credit_ledger compensated
-                where compensated.user_id = entry.user_id
-                  and compensated.kind = 'adjustment'
-                  and compensated.amount > 0
-                  and compensated.external_ref =
-                    'delivery-refund:' ||
-                    regexp_replace(entry.external_ref, ':step:[0-9]+$', '')
-              )
           ),
           0
         ) as credits_used,
@@ -327,6 +370,8 @@ export async function beginMeteredCallIntent(input: {
         ) as additional_required
       from wallet
       where not exists (select 1 from existing_usage)
+        and not exists (select 1 from delivered_receipt)
+        and not exists (select 1 from open_optional_delivery)
         and not exists (select 1 from pending_intent)
         and (
           ${input.projectId ?? null}::uuid is null
@@ -352,11 +397,9 @@ export async function beginMeteredCallIntent(input: {
           ${input.runId ?? null}::uuid is null
           or exists (
             select 1
-            from generation_runs active_run
-            where active_run.id = ${input.runId ?? null}
-              and active_run.user_id = ${input.userId}
-              and active_run.project_id is not distinct from ${input.projectId ?? null}
-              and active_run.status in ('queued', 'running', 'awaiting_input')
+            from run_state
+            where run_state.status in ('queued', 'running', 'awaiting_input')
+              and run_state.cancellation_requested_at is null
           )
         )
         and (
@@ -439,11 +482,27 @@ export async function beginMeteredCallIntent(input: {
     )
     select
       case
+        when exists (select 1 from delivered_receipt) then 'delivered'
+        when exists (select 1 from open_optional_delivery) then 'delivery_pending'
+        when exists (select 1 from existing_usage) then 'settled'
+        when exists (select 1 from pending_intent) then 'pending'
+        when ${input.runId ?? null}::uuid is not null
+          and exists (
+            select 1 from run_state
+            where run_state.cancellation_requested_at is not null
+              or run_state.status = 'cancelled'
+          )
+          then 'cancelled'
+        when ${input.runId ?? null}::uuid is not null
+          and not exists (
+            select 1 from run_state
+            where run_state.status in ('queued', 'running', 'awaiting_input')
+              and run_state.cancellation_requested_at is null
+          )
+          then 'run_inactive'
         when exists (
           select 1 from project_access access where access.suspended
         ) then 'suspended'
-        when exists (select 1 from existing_usage) then 'settled'
-        when exists (select 1 from pending_intent) then 'pending'
         when exists (select 1 from intent_insert)
           and (
             ${optionalLeaseRef}::text is null
@@ -672,14 +731,34 @@ export async function releaseOptionalOperationLeases(input: {
 export async function releaseReplayedOptionalOperationLeases(input: {
   userId: string;
   projectId: string;
-  idempotencyKey: string;
+  /** Legacy exact caller key. New callers should supply optionalLeasePrefix. */
+  idempotencyKey?: string;
+  /** Immutable output receipt required by hardened optional-delivery callers. */
+  deliveryReceiptRef?: string;
+  /** Exact full-action lease prefix; avoids wildcard matching raw request keys. */
+  optionalLeasePrefix?: string;
 }): Promise<void> {
+  if (!input.idempotencyKey && !input.optionalLeasePrefix) {
+    throw new Error("Optional delivery replay repair requires an exact lease identity");
+  }
   const client = getSqlClient();
   await client.transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${input.projectId}, 0)
     )`,
     tx`
+      with delivered_receipt as materialized (
+        select receipt.id
+        from credit_ledger receipt
+        where ${input.deliveryReceiptRef ?? null}::text is not null
+          and receipt.user_id = ${input.userId}
+          and receipt.project_id = ${input.projectId}
+          and receipt.run_id is null
+          and receipt.kind = 'adjustment'
+          and receipt.amount = 0
+          and receipt.external_ref = ${input.deliveryReceiptRef ?? null}
+        limit 1
+      )
       insert into credit_ledger (
         user_id, amount, kind, description, project_id, run_id, external_ref
       )
@@ -695,7 +774,21 @@ export async function releaseReplayedOptionalOperationLeases(input: {
       where lease.user_id = ${input.userId}
         and lease.project_id = ${input.projectId}
         and lease.external_ref like 'optional-operation-lease:%'
-        and lease.external_ref like ${`%:${input.idempotencyKey}:%`}
+        and (
+          (
+            ${input.optionalLeasePrefix ?? null}::text is not null
+            and left(lease.external_ref, length(${input.optionalLeasePrefix ?? null})) =
+              ${input.optionalLeasePrefix ?? null}
+          )
+          or (
+            ${input.optionalLeasePrefix ?? null}::text is null
+            and lease.external_ref like ${input.idempotencyKey ? `%:${input.idempotencyKey}:%` : ""}
+          )
+        )
+        and (
+          ${input.deliveryReceiptRef ?? null}::text is null
+          or exists (select 1 from delivered_receipt)
+        )
         and not exists (
           select 1
           from credit_ledger released
@@ -1272,6 +1365,10 @@ export async function refundSettledLogicalUsageForRedo(input: {
   userId: string;
   usagePrefix: string;
   projectId?: string | null;
+  /** Exact durable-delivery evidence that makes compensation unsafe. */
+  deliveryReceiptRef?: string;
+  /** Exact action prefix for leases that prove delivery is still in flight. */
+  optionalLeasePrefix?: string;
 }): Promise<boolean> {
   const client = getSqlClient();
   const results = await client.transaction((tx) => [
@@ -1284,7 +1381,37 @@ export async function refundSettledLogicalUsageForRedo(input: {
       : []),
     tx`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`,
     tx`
-      with attempts as materialized (
+      with delivered_receipt as materialized (
+        select receipt.id
+        from credit_ledger receipt
+        where ${input.deliveryReceiptRef ?? null}::text is not null
+          and receipt.user_id = ${input.userId}
+          and receipt.project_id is not distinct from ${input.projectId ?? null}
+          and receipt.run_id is null
+          and receipt.kind = 'adjustment'
+          and receipt.amount = 0
+          and receipt.external_ref = ${input.deliveryReceiptRef ?? null}
+        limit 1
+      ),
+      open_optional_delivery as materialized (
+        select lease.id
+        from credit_ledger lease
+        where ${input.optionalLeasePrefix ?? null}::text is not null
+          and lease.user_id = ${input.userId}
+          and lease.project_id is not distinct from ${input.projectId ?? null}
+          and lease.run_id is null
+          and lease.kind = 'adjustment'
+          and lease.amount = 0
+          and left(lease.external_ref, length(${input.optionalLeasePrefix ?? null})) =
+            ${input.optionalLeasePrefix ?? null}
+          and not exists (
+            select 1
+            from credit_ledger released
+            where released.external_ref = 'release:' || lease.external_ref
+          )
+        limit 1
+      ),
+      attempts as materialized (
         select
           regexp_replace(usage.external_ref, ':step:[0-9]+$', '') as prefix,
           sum(-usage.amount) as credits,
@@ -1295,6 +1422,8 @@ export async function refundSettledLogicalUsageForRedo(input: {
         where usage.user_id = ${input.userId}
           and usage.kind = 'usage'
           and usage.external_ref like ${`${input.usagePrefix}%`}
+          and not exists (select 1 from delivered_receipt)
+          and not exists (select 1 from open_optional_delivery)
           and not exists (
             select 1 from credit_ledger refunded
             where refunded.external_ref =

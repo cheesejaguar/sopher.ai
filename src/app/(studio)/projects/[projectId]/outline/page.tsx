@@ -1,8 +1,6 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { requireUser } from "@/lib/auth";
 import { getActiveFullBookRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
 import { bookOutlineSchema, type BookOutline } from "@/ai/schemas";
@@ -60,16 +58,9 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
         <div className="manuscript-sheet flex flex-col items-center gap-3 px-6 py-16 text-center">
           <p className="font-serif text-lg text-paper-muted">No outline yet.</p>
           <p className="max-w-sm font-sans text-xs text-paper-muted">
-            The Outliner drafts a chapter-by-chapter structure at the start of a run. Start writing
-            and it appears here.
+            The Outliner creates a chapter-by-chapter structure after production begins. The
+            project-wide next step above shows what this book needs now.
           </p>
-          <Button
-            className="mt-2"
-            render={<Link href={`/projects/${projectId}/write`} />}
-            nativeButton={false}
-          >
-            Go to the write desk
-          </Button>
         </div>
       </div>
     );
@@ -104,7 +95,12 @@ export default async function OutlinePage({ params }: { params: Promise<{ projec
         </div>
 
         <div className="mt-5 flex flex-wrap items-center gap-1.5">
-          <Badge variant="outline">{outline.plotStructure}</Badge>
+          <Badge
+            variant="outline"
+            className="border-paper-edge bg-transparent text-paper-foreground"
+          >
+            {outline.plotStructure}
+          </Badge>
           {outline.themes.map((theme) => (
             <Badge key={theme} variant="secondary">
               {theme}

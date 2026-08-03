@@ -2,6 +2,7 @@ import { cache } from "react";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { countWords } from "@/lib/editor/anchors";
+import { validFullBookCompletionExistsSql } from "@/lib/run-completion-proof";
 
 type ChapterVisibilitySeed = {
   status: "planned" | "drafting" | "drafted" | "edited" | "final";
@@ -91,13 +92,21 @@ export function latestArchivedChapterRecoveries(
 export const getProjectWithBook = cache(async (userId: string, projectId: string) => {
   const db = getDb();
   const [row] = await db
-    .select({ project: schema.projects, book: schema.books })
+    .select({
+      project: schema.projects,
+      book: schema.books,
+      fullBookCompletionReady: validFullBookCompletionExistsSql(sql.raw('"projects"."id"')),
+    })
     .from(schema.projects)
     .leftJoin(schema.books, eq(schema.books.projectId, schema.projects.id))
     .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
     .limit(1);
   if (!row) return null;
-  return { project: row.project, book: row.book ?? null };
+  return {
+    project: row.project,
+    book: row.book ?? null,
+    fullBookCompletionReady: row.fullBookCompletionReady,
+  };
 });
 
 export const getChapterList = cache(async (bookId: string) => {
@@ -219,6 +228,24 @@ export async function getActiveRun(projectId: string) {
   return run ?? null;
 }
 
+/** Any active manuscript mutation, excluding read-only export rendering. */
+export async function getActiveAuthoringRun(projectId: string) {
+  const db = getDb();
+  const [run] = await db
+    .select()
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        inArray(schema.generationRuns.kind, ["full_book", "chapter", "edit_pass", "continuity"]),
+        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+      ),
+    )
+    .orderBy(desc(schema.generationRuns.createdAt))
+    .limit(1);
+  return run ?? null;
+}
+
 export async function getLatestRun(projectId: string) {
   const db = getDb();
   const [run] = await db
@@ -260,6 +287,36 @@ export async function getLatestFullBookRun(projectId: string) {
       ),
     )
     .orderBy(desc(schema.generationRuns.createdAt))
+    .limit(1);
+  return run ?? null;
+}
+
+/**
+ * Active authoring owns the manuscript until it stops. Among terminal runs,
+ * whole-book production remains authoritative over later scoped editor work:
+ * a chapter or edit pass cannot prove that an interrupted book finished.
+ */
+export function authoringJourneyRunPrioritySql() {
+  return sql<number>`case
+    when ${schema.generationRuns.status} in ('queued', 'running', 'awaiting_input') then 0
+    when ${schema.generationRuns.kind} = 'full_book' then 1
+    else 2
+  end`;
+}
+
+/** Select the run that currently governs the author's next step. */
+export async function getLatestAuthoringJourneyRun(projectId: string) {
+  const db = getDb();
+  const [run] = await db
+    .select()
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        inArray(schema.generationRuns.kind, ["full_book", "chapter", "edit_pass", "continuity"]),
+      ),
+    )
+    .orderBy(authoringJourneyRunPrioritySql(), desc(schema.generationRuns.createdAt))
     .limit(1);
   return run ?? null;
 }

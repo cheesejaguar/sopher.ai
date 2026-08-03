@@ -58,9 +58,8 @@ test("forced colors preserve keyboard focus and current-state cues", async ({ pa
 
   expect(await page.evaluate(() => matchMedia("(forced-colors: active)").matches)).toBe(true);
 
-  const pricing = page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Pricing", exact: true });
+  await page.getByRole("button", { name: "Open main menu" }).click();
+  const pricing = page.getByRole("dialog").getByRole("link", { name: "Pricing", exact: true });
   await expectForcedColorsCurrentState(pricing);
   await focusWithKeyboard(page, pricing);
   await expect(pricing).toBeFocused();
@@ -76,9 +75,8 @@ test("forced colors preserve keyboard focus and current-state cues", async ({ pa
   expect(focusIndicator.outlineWidth).toBeGreaterThanOrEqual(2);
 
   await page.goto("/guides/how-book-generation-works");
-  const guides = page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Guides", exact: true });
+  await page.getByRole("button", { name: "Open main menu" }).click();
+  const guides = page.getByRole("dialog").getByRole("link", { name: "Guides", exact: true });
   await expect(guides).toHaveAttribute("aria-current", "location");
   await expectForcedColorsCurrentState(guides);
 

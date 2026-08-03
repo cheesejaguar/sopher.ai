@@ -1,12 +1,3 @@
-"use client";
-
-import { useCallback, useEffect, useState } from "react";
-import { Pause, Play } from "lucide-react";
-
-import { cn } from "@/lib/utils";
-import { useElementVisibility } from "@/hooks/use-element-visibility";
-import { useReducedMotion } from "@/hooks/use-reduced-motion";
-
 type Example = {
   id: string;
   kind: string;
@@ -45,144 +36,59 @@ const EXAMPLES: Example[] = [
   },
 ];
 
-const TYPE_TICK_MS = 18;
-const CHARS_PER_TICK = 3;
-const HOLD_MS = 4200;
 export function BriefDemo() {
-  const reduced = useReducedMotion();
-  const { ref: demoRef, isVisible } = useElementVisibility<HTMLDivElement>({
-    threshold: 0.01,
-  });
-  const [index, setIndex] = useState(0);
-  const [progress, setProgress] = useState({ id: EXAMPLES[0].id, chars: 0 });
-  const [paused, setPaused] = useState(false);
-  // Once the reader takes control, we stop advancing on our own for good.
-  const [userDriven, setUserDriven] = useState(false);
-  const [announcement, setAnnouncement] = useState("");
-
-  const example = EXAMPLES[index];
-  const typedChars =
-    reduced || userDriven
-      ? example.opening.length
-      : progress.id === example.id
-        ? progress.chars
-        : 0;
-  const complete = typedChars >= example.opening.length;
-  const autoAdvancing = isVisible && !reduced && !paused && !userDriven;
-
-  // Type the current opening out. Reduced motion skips straight to the full text.
-  useEffect(() => {
-    if (!isVisible || reduced || paused || userDriven || complete) return;
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        const base = prev.id === example.id ? prev.chars : 0;
-        if (base >= example.opening.length) return prev;
-        return { id: example.id, chars: Math.min(base + CHARS_PER_TICK, example.opening.length) };
-      });
-    }, TYPE_TICK_MS);
-    return () => clearInterval(interval);
-  }, [complete, example, isVisible, paused, reduced, userDriven]);
-
-  // Hold the finished passage briefly, then move to the next brief.
-  useEffect(() => {
-    if (!autoAdvancing || !complete) return;
-    const timer = setTimeout(() => setIndex((i) => (i + 1) % EXAMPLES.length), HOLD_MS);
-    return () => clearTimeout(timer);
-  }, [autoAdvancing, complete, index]);
-
-  const choose = useCallback((next: number) => {
-    setUserDriven(true);
-    setIndex(next);
-    setAnnouncement(`${EXAMPLES[next].kind} example selected: ${EXAMPLES[next].title}.`);
-  }, []);
-
   return (
-    <div ref={demoRef} className="grid w-full gap-6 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
-      <div className="min-w-0">
-        <span className="sr-only" id="brief-demo-label">
-          Example books, each written from a one-sentence brief
-        </span>
-        <span className="sr-only" aria-live="polite" aria-atomic="true">
-          {announcement}
-        </span>
-        <div
-          className="grid grid-cols-3 gap-px bg-black/10 dark:bg-white/10 md:grid-cols-1"
-          role="group"
-          aria-labelledby="brief-demo-label"
+    <div role="group" aria-labelledby="brief-demo-label" className="grid w-full gap-3">
+      <span className="sr-only" id="brief-demo-label">
+        Example books, each written from a one-sentence brief
+      </span>
+      {EXAMPLES.map((example, index) => (
+        <details
+          key={example.id}
+          name="brief-example"
+          open={index === 0}
+          className="group border-y border-black/10 bg-instrument/55 dark:border-white/10"
         >
-          {EXAMPLES.map((item, i) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => choose(i)}
-              aria-pressed={i === index}
-              className={cn(
-                "grid min-h-11 min-w-0 grid-cols-[auto_1fr] items-center gap-2 bg-instrument px-2.5 py-2 text-left text-xs font-medium transition-colors aria-[pressed=true]:underline aria-[pressed=true]:underline-offset-4 md:px-3",
-                i === index
-                  ? "border-l border-primary text-foreground"
-                  : "border-l border-transparent text-muted-foreground hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.045]",
-              )}
-            >
-              <span className="font-mono text-[0.6875rem] text-primary">
-                {String(i + 1).padStart(2, "0")}
+          <summary className="grid min-h-14 cursor-pointer list-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-black/[0.04] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring dark:hover:bg-white/[0.045] sm:px-4 [&::-webkit-details-marker]:hidden">
+            <span className="font-mono text-[0.6875rem] text-primary">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold tracking-[0.08em] uppercase">
+                {example.kind}
               </span>
-              <span className="min-w-0 leading-tight whitespace-normal">{item.kind}</span>
-            </button>
-          ))}
-        </div>
-        {!reduced && !userDriven ? (
-          <button
-            type="button"
-            onClick={() => setPaused((p) => !p)}
-            className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 border border-black/10 px-3 text-xs text-muted-foreground transition-colors hover:text-foreground dark:border-white/12"
-            aria-label={
-              paused ? "Resume cycling through examples" : "Pause cycling through examples"
-            }
-          >
-            {paused ? (
-              <Play aria-hidden="true" className="size-3" />
-            ) : (
-              <Pause aria-hidden="true" className="size-3" />
-            )}
-            <span>{paused ? "Resume" : "Pause"}</span>
-          </button>
-        ) : null}
-
-        <div className="mt-6 text-left">
-          <p className="font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
-            The brief
-          </p>
-          <p className="mt-2 text-sm leading-6 text-pretty text-foreground/85">
-            &ldquo;{example.brief}&rdquo;
-          </p>
-        </div>
-      </div>
-
-      <article className="manuscript-sheet min-w-0 px-6 py-8 text-left sm:px-10 sm:py-10">
-        <div className="absolute top-0 right-6 h-5 w-16 bg-primary/80" aria-hidden="true" />
-        <p className="font-sans text-[0.6875rem] font-medium tracking-[0.16em] text-paper-muted uppercase">
-          {example.title} · Chapter one
-        </p>
-        <div className="prose-manuscript mt-5 min-h-[15rem] sm:min-h-[12rem]">
-          <div className="relative">
-            {/* Invisible full passage reserves the final height so nothing jumps while typing. */}
-            <p aria-hidden="true" className="invisible" style={{ marginBlock: 0 }}>
-              {example.opening}
-            </p>
-            <p
+              <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                {example.title}
+              </span>
+            </span>
+            <span
               aria-hidden="true"
-              className={cn("absolute inset-0", complete ? "" : "stream-caret")}
-              style={{ marginBlock: 0 }}
+              className="font-mono text-base text-primary transition-transform group-open:rotate-45 motion-reduce:transition-none"
             >
-              {example.opening.slice(0, typedChars)}
-            </p>
-            {/* Screen readers get the finished passage, never the character-by-character churn. */}
-            <p className="sr-only">
-              {example.title}, chapter one. {example.opening}
-            </p>
+              +
+            </span>
+          </summary>
+
+          <div className="grid gap-5 border-t border-black/10 p-3 dark:border-white/10 sm:p-5 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
+            <div className="min-w-0 text-left">
+              <p className="font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
+                The brief
+              </p>
+              <p className="mt-2 text-sm leading-6 text-pretty text-foreground/85">
+                &ldquo;{example.brief}&rdquo;
+              </p>
+            </div>
+
+            <article className="manuscript-sheet min-w-0 px-4 py-8 text-left min-[360px]:px-6 sm:px-10 sm:py-10">
+              <div className="absolute top-0 right-6 h-5 w-16 bg-primary/80" aria-hidden="true" />
+              <p className="font-sans text-[0.6875rem] font-medium tracking-[0.16em] text-paper-muted uppercase">
+                {example.title} · Chapter one
+              </p>
+              <p className="prose-manuscript mt-5">{example.opening}</p>
+            </article>
           </div>
-        </div>
-      </article>
+        </details>
+      ))}
     </div>
   );
 }

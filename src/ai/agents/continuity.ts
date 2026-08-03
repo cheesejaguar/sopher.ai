@@ -1,6 +1,6 @@
 import { generateText, isStepCount, Output } from "ai";
 import { and, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction, type DbTransaction } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { assertMeteredInputWithinBudget, meteredMaxOutputTokens } from "@/ai/metering-limits";
@@ -223,26 +223,30 @@ export async function persistContinuityIssues(
   bookId: string,
   runId: string | null | undefined,
   issues: ContinuityIssue[],
+  transaction?: DbTransaction,
 ): Promise<void> {
-  const db = getDb();
-  // A workflow step may retry after inserts commit but before its return is
-  // checkpointed. Replace this run's finding set so retries cannot duplicate
-  // rows or leave findings from a partially completed aggregation.
-  if (runId) {
-    await db.delete(schema.continuityIssues).where(eq(schema.continuityIssues.runId, runId));
-  }
-  if (issues.length === 0) return;
-  await db.insert(schema.continuityIssues).values(
-    issues.map((issue) => ({
-      bookId,
-      runId: runId ?? null,
-      chapters: issue.chapters,
-      category: issue.category,
-      severity: issue.severity,
-      description: issue.description,
-      suggestedFix: issue.suggestedFix,
-    })),
-  );
+  const persist = async (db: DbTransaction) => {
+    // A workflow step may retry after inserts commit but before its return is
+    // checkpointed. Replace this run's finding set so retries cannot duplicate
+    // rows or leave findings from a partially completed aggregation.
+    if (runId) {
+      await db.delete(schema.continuityIssues).where(eq(schema.continuityIssues.runId, runId));
+    }
+    if (issues.length === 0) return;
+    await db.insert(schema.continuityIssues).values(
+      issues.map((issue) => ({
+        bookId,
+        runId: runId ?? null,
+        chapters: issue.chapters,
+        category: issue.category,
+        severity: issue.severity,
+        description: issue.description,
+        suggestedFix: issue.suggestedFix,
+      })),
+    );
+  };
+  if (transaction) return persist(transaction);
+  await withDbTransaction(persist);
 }
 
 /**

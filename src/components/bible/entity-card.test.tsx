@@ -67,6 +67,33 @@ const character: BibleEntity = {
   ],
 };
 
+const location: BibleEntity = {
+  id: "66666666-6666-4666-8666-666666666662",
+  kind: "location",
+  name: "Bellweather Observatory",
+  aliases: [],
+  attrs: {
+    locationType: "observatory",
+    description: "A sealed observatory above the river quarter.",
+  },
+  portraitUrl: null,
+  firstAppearanceChapter: 2,
+  relationships: [],
+};
+
+const object: BibleEntity = {
+  id: "66666666-6666-4666-8666-666666666663",
+  kind: "object",
+  name: "Brass Compass",
+  aliases: [],
+  attrs: {
+    description: "A compass whose needle points through time.",
+  },
+  portraitUrl: null,
+  firstAppearanceChapter: 1,
+  relationships: [],
+};
+
 describe("EntityCard", () => {
   it("presents a sectioned profile and relationship context", () => {
     render(<EntityCard entity={character} conflicts={[]} />);
@@ -78,6 +105,15 @@ describe("EntityCard", () => {
     expect(
       screen.getByText("Mara inherits and carries the compass her grandfather left behind."),
     ).toBeTruthy();
+  });
+
+  it("names generated-image actions for the entity kind", () => {
+    const locationCard = render(<EntityCard entity={location} conflicts={[]} />);
+    expect(screen.getByRole("button", { name: /Generate location image/ })).toBeVisible();
+    locationCard.unmount();
+
+    render(<EntityCard entity={object} conflicts={[]} />);
+    expect(screen.getByRole("button", { name: /Generate object illustration/ })).toBeVisible();
   });
 
   it("opens the full image with a named control, closes on Escape, and restores focus", async () => {

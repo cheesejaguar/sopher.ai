@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 const mocks = vi.hoisted(() => ({
   getSqlClient: vi.fn(),
@@ -29,9 +30,11 @@ vi.mock("@/lib/billing/credits", async (importOriginal) => {
 import {
   claimUncertainAuthoringRun,
   deriveAuthoringRunAcceptanceState,
+  FullBookStartInsufficientCreditsError,
   insertQueuedAuthoringRun,
   linkAuthoringRunWorkflow,
   markAuthoringRunAcceptanceUncertain,
+  ProjectStartSnapshotChangedError,
   settleStubbedAuthoringRunHandoff,
   terminalizeAuthoringRun,
   TrialOptionalWorkInProgressError,
@@ -254,6 +257,76 @@ describe("insertQueuedAuthoringRun", () => {
     ).rejects.toBeInstanceOf(TrialOptionalWorkInProgressError);
   });
 
+  it("locks the wallet and refuses an underfunded full-book run before insertion", async () => {
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      expect(queries).toHaveLength(5);
+      expect(queries[0].strings.join("?")).toContain("sopher:project-authoring:");
+      expect(queries[1].strings.join("?")).toContain("pg_advisory_xact_lock");
+      expect(queries[2].strings.join("?")).toContain("sum(amount)");
+      expect(queries[4].strings.join("?")).toContain("wallet.user_id");
+      return [[], [], [{ balance: "3.5" }], [], []];
+    });
+
+    await expect(
+      insertQueuedAuthoringRun({
+        projectId: "project-1",
+        userId: "user-1",
+        kind: "full_book",
+        config: { tier: "standard" },
+        requestKey: "33333333-3333-4333-8333-333333333333",
+        minimumBalanceCredits: 8,
+      }),
+    ).rejects.toEqual(new FullBookStartInsufficientCreditsError(3.5, 8));
+  });
+
+  it("refuses a stale full-book shape before its old funding estimate can create a run", async () => {
+    const expectedUpdatedAt = new Date("2026-07-30T12:00:00.000Z");
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      expect(queries).toHaveLength(6);
+      expect(queries[3].strings.join("?")).toContain('updated_at as "updatedAt"');
+      const insertSql = queries[5].strings.join("?");
+      expect(insertSql).toContain("project_snapshot.updated_at");
+      expect(insertSql).toContain("project_snapshot.target_chapters");
+      expect(insertSql).toContain("project_snapshot.target_words_per_chapter");
+      return [
+        [],
+        [],
+        [{ balance: "50" }],
+        [
+          {
+            updatedAt: new Date("2026-07-30T12:00:01.000Z"),
+            targetChapters: 24,
+            targetWordsPerChapter: 2_000,
+            experience: "full_book",
+          },
+        ],
+        [],
+        [],
+      ];
+    });
+
+    await expect(
+      insertQueuedAuthoringRun({
+        projectId: "project-1",
+        userId: "user-1",
+        kind: "full_book",
+        config: { tier: "standard", targetChapters: 12, targetWordsPerChapter: 1_500 },
+        requestKey: "33333333-3333-4333-8333-333333333333",
+        minimumBalanceCredits: 8,
+        expectedProjectSnapshot: {
+          updatedAt: expectedUpdatedAt,
+          targetChapters: 12,
+          targetWordsPerChapter: 1_500,
+          experience: "full_book",
+        },
+      }),
+    ).rejects.toBeInstanceOf(ProjectStartSnapshotChangedError);
+  });
+
   it("locks project then wallet, closes claims, and terminalizes atomically", async () => {
     const { execute, nestedTransaction, update, runSet, projectSet } = terminalDb({
       status: "failed",
@@ -328,11 +401,14 @@ describe("Workflow dispatch ownership", () => {
       }),
     ).resolves.toBe(true);
 
-    expect(query.set).toHaveBeenCalledWith({
-      workflowRunId: "workflow-1",
-      acceptanceUncertainAt: null,
-      acceptanceDispatchClaimedAt: null,
-    });
+    expect(query.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowRunId: "workflow-1",
+        acceptanceUncertainAt: null,
+        acceptanceDispatchClaimedAt: null,
+        heartbeatAt: expect.any(Date),
+      }),
+    );
   });
 
   it("distinguishes a normal initial dispatch from an ambiguous response", () => {
@@ -428,10 +504,16 @@ describe("Workflow dispatch ownership", () => {
       config: { tier: "standard" },
     });
     expect(execute).toHaveBeenCalledOnce();
-    expect(set).toHaveBeenCalledWith({
-      acceptanceUncertainAt: expect.any(Date),
-      acceptanceDispatchClaimedAt: expect.any(Date),
-    });
+    expect(set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptanceUncertainAt: expect.any(Date),
+        acceptanceDispatchClaimedAt: expect.any(Date),
+        dispatchAttempts: expect.anything(),
+      }),
+    );
+    const predicate = where.mock.calls[0]?.[0] as { getSQL: () => unknown };
+    const sqlText = new PgDialect().sqlToQuery(predicate.getSQL() as never).sql;
+    expect(sqlText).toContain('"generation_runs"."cancellation_requested_at" is null');
   });
 
   it("re-arms an ambiguous response without terminalizing the queued run", async () => {
@@ -446,7 +528,6 @@ describe("Workflow dispatch ownership", () => {
     ).resolves.toBe(true);
     expect(query.set).toHaveBeenCalledWith({
       acceptanceUncertainAt: expect.any(Date),
-      acceptanceDispatchClaimedAt: null,
     });
   });
 
@@ -454,6 +535,8 @@ describe("Workflow dispatch ownership", () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.stubEnv("E2E_DATABASE_ISOLATED", "1");
     vi.stubEnv("E2E_STUB_WORKFLOW", "1");
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.example.test");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@isolated.example.test/test");
     vi.stubEnv("VERCEL_ENV", "");
     const query = mockUpdateReturning([{ id: "run-1" }]);
 

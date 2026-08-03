@@ -2,16 +2,16 @@ import { createHash } from "node:crypto";
 import { FatalError, RetryableError, getStepMetadata, getWritable } from "workflow";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
-import { getDb, schema } from "@/db";
+import { getDb, schema, withDbTransaction, type DbTransaction } from "@/db";
 import { generateConcept, persistConcept } from "@/ai/agents/concept";
 import {
   generateOutline,
   persistOutline,
   type OutlineGenerationCheckpoint,
 } from "@/ai/agents/outline";
-import { writeChapter, persistChapter } from "@/ai/agents/chapter-writer";
+import { writeChapter } from "@/ai/agents/chapter-writer";
 import { generateChapterSummary, persistChapterSummary } from "@/ai/agents/summarizer";
-import { buildEntityBible } from "@/ai/agents/entity-bible";
+import { generateEntityBible, persistEntityBible } from "@/ai/agents/entity-bible";
 import { editChapter } from "@/ai/agents/editor";
 import {
   aggregateContinuityOutcomes,
@@ -32,7 +32,12 @@ import {
 import { netRunCreditsUsedSql } from "@/lib/billing/run-spend";
 import { getOrCreateBook } from "@/db/queries/projects";
 import { listEntities, seedEntities } from "@/db/queries/entities";
-import { sendBookFinishedEmail, sendCreditsPausedEmail } from "@/lib/email/send";
+import {
+  sendBookFinishedEmail,
+  sendCreditsPausedEmail,
+  sendIncludedStoryPausedEmail,
+  sendOutlineApprovalEmail,
+} from "@/lib/email/send";
 import {
   chapterNs,
   generationBillingScope,
@@ -75,6 +80,21 @@ import type { MeterCtx } from "@/ai/metering";
 import type { ToolCtx } from "@/ai/tools";
 import { buildFrozenAuthoringContract } from "@/ai/authoring-guidelines";
 import { linkAuthoringRunWorkflow, transitionAuthoringRunState } from "@/lib/generation-runs";
+import { nextRunEventSequence, persistRunEvent } from "@/lib/run-event-store";
+import { recordAuthoringIncident, resolveAuthoringIncident } from "@/lib/authoring-incidents";
+import {
+  AUTHORING_CANCELLATION_MESSAGE,
+  AUTHORING_RUN_INACTIVE_MESSAGE,
+  throwIfAuthoringCancellationRequested,
+} from "@/lib/authoring-cancellation";
+import {
+  allocateAuthoringPause,
+  clearAuthoringPause,
+  consumeAuthoringRunInput,
+  markAuthoringPauseRegistered,
+} from "@/lib/authoring-inputs";
+import type { AuthoringRunInputKind } from "@/db/schema";
+import type { AuthoringPauseDetails } from "@/db/schema";
 
 type RunRef = {
   dbRunId: string;
@@ -91,20 +111,66 @@ async function writeEvent(namespace: string, event: RunEvent | string) {
   }
 }
 
-async function persistEvent(dbRunId: string, event: RunEvent) {
-  const db = getDb();
-  await db.insert(schema.generationEvents).values({
-    runId: dbRunId,
-    seq: sql`coalesce((select max(seq) from ${schema.generationEvents} where ${schema.generationEvents.runId} = ${dbRunId}), 0) + 1` as unknown as number,
-    type: event.type,
-    payload: event,
+async function persistAndPublishProgress(
+  ref: RunRef,
+  event: RunEvent,
+  subkey: string,
+): Promise<void> {
+  const { stepId } = getStepMetadata();
+  await persistRunEvent({
+    runId: ref.dbRunId,
+    eventKey: `${stepId}:${subkey}`,
+    event,
   });
+  try {
+    await writeEvent(PROGRESS_NS, event);
+  } catch (error) {
+    console.warn("Could not publish persisted authoring progress", {
+      runId: ref.dbRunId,
+      eventType: event.type,
+      error,
+    });
+  }
 }
 
 export async function emitProgress(ref: RunRef, event: RunEvent) {
   "use step";
-  await writeEvent(PROGRESS_NS, event);
-  await persistEvent(ref.dbRunId, event);
+  const { stepId } = getStepMetadata();
+  try {
+    await persistRunEvent({ runId: ref.dbRunId, eventKey: stepId, event });
+  } catch (error) {
+    try {
+      await recordAuthoringIncident({
+        runId: ref.dbRunId,
+        projectId: ref.projectId,
+        category: "event_persistence",
+        severity: "critical",
+        dedupeKey: `event-persistence:${stepId}`,
+        evidence: {
+          eventType: event.type,
+          stage: event.type === "stage" ? event.stage : null,
+        },
+      });
+    } catch {
+      // The original database error is the actionable failure.
+    }
+    throw error;
+  }
+  await resolveAuthoringIncident({
+    runId: ref.dbRunId,
+    dedupeKey: `event-persistence:${stepId}`,
+  });
+  try {
+    await writeEvent(PROGRESS_NS, event);
+  } catch (error) {
+    // The database projection is canonical and the client polls health beside
+    // the stream. A transient stream failure must not repeat paid work.
+    console.warn("Could not publish persisted authoring progress", {
+      runId: ref.dbRunId,
+      eventType: event.type,
+      error,
+    });
+  }
 }
 
 export async function emitCost(ref: RunRef) {
@@ -123,10 +189,22 @@ export async function emitCost(ref: RunRef) {
       .where(eq(schema.creditLedger.runId, ref.dbRunId)),
   ]);
   const event = runCostEvent(Number(provider?.total ?? 0), Number(ledger?.total ?? 0));
-  await writeEvent(PROGRESS_NS, event);
+  const { stepId } = getStepMetadata();
+  await persistRunEvent({ runId: ref.dbRunId, eventKey: stepId, event });
+  try {
+    await writeEvent(PROGRESS_NS, event);
+  } catch (error) {
+    console.warn("Could not publish persisted authoring cost", {
+      runId: ref.dbRunId,
+      error,
+    });
+  }
 }
 
 function toWorkflowError(error: unknown): never {
+  if (error instanceof FatalError || error instanceof RetryableError) {
+    throw error;
+  }
   if (APICallError.isInstance(error)) {
     if (error.statusCode === 429 || (error.statusCode ?? 0) >= 500) {
       throw new RetryableError(error.message, { retryAfter: "30s" });
@@ -230,14 +308,111 @@ async function updateStoredGenerationConfig(
           eq(schema.generationRuns.id, ref.dbRunId),
           eq(schema.generationRuns.projectId, ref.projectId),
           eq(schema.generationRuns.config, current),
+          inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+          isNull(schema.generationRuns.cancellationRequestedAt),
         ),
       )
       .returning({ config: schema.generationRuns.config });
     if (stored) return stored.config as GenerationConfig;
+    try {
+      await throwIfAuthoringCancellationRequested(ref.dbRunId);
+    } catch (error) {
+      toWorkflowError(error);
+    }
   }
   throw new RetryableError("Generation state changed too many times while checkpointing", {
     retryAfter: "1s",
   });
+}
+
+/**
+ * Serializes every manuscript mutation against cancellation. The same
+ * project-scoped advisory lock is held by requestAuthoringRunCancellation, so
+ * exactly one side wins: a committed mutation happened before the stop
+ * request, or the mutation observes cancellation and writes nothing.
+ */
+export async function withActiveAuthoringMutation<T>(
+  ref: RunRef,
+  mutate: (tx: DbTransaction) => Promise<T>,
+): Promise<T> {
+  return withDbTransaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:project-authoring:' || ${ref.projectId}, 0)
+      )`,
+    );
+    const [run] = await tx
+      .select({
+        status: schema.generationRuns.status,
+        cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+      })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.id, ref.dbRunId),
+          eq(schema.generationRuns.projectId, ref.projectId),
+          eq(schema.generationRuns.userId, ref.userId),
+        ),
+      )
+      .limit(1);
+    if (run?.cancellationRequestedAt || run?.status === "cancelled") {
+      throw new FatalError(AUTHORING_CANCELLATION_MESSAGE);
+    }
+    if (!run || !["queued", "running", "awaiting_input"].includes(run.status)) {
+      throw new FatalError(AUTHORING_RUN_INACTIVE_MESSAGE);
+    }
+    return mutate(tx);
+  });
+}
+
+async function updateStoredGenerationConfigInTransaction(
+  tx: DbTransaction,
+  ref: RunRef,
+  update: (current: GenerationConfig) => GenerationConfig,
+): Promise<GenerationConfig> {
+  const [run] = await tx
+    .select({
+      config: schema.generationRuns.config,
+      status: schema.generationRuns.status,
+      cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+    })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.id, ref.dbRunId),
+        eq(schema.generationRuns.projectId, ref.projectId),
+        eq(schema.generationRuns.userId, ref.userId),
+      ),
+    )
+    .limit(1);
+  if (run?.cancellationRequestedAt || run?.status === "cancelled") {
+    throw new FatalError(AUTHORING_CANCELLATION_MESSAGE);
+  }
+  if (!run || !["queued", "running", "awaiting_input"].includes(run.status)) {
+    throw new FatalError(AUTHORING_RUN_INACTIVE_MESSAGE);
+  }
+  const current = run.config as GenerationConfig;
+  const next = update(current);
+  const [stored] = await tx
+    .update(schema.generationRuns)
+    .set({ config: next })
+    .where(
+      and(
+        eq(schema.generationRuns.id, ref.dbRunId),
+        eq(schema.generationRuns.projectId, ref.projectId),
+        eq(schema.generationRuns.userId, ref.userId),
+        eq(schema.generationRuns.config, current),
+        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
+        isNull(schema.generationRuns.cancellationRequestedAt),
+      ),
+    )
+    .returning({ config: schema.generationRuns.config });
+  if (!stored) {
+    throw new RetryableError("Generation state changed while committing output", {
+      retryAfter: "1s",
+    });
+  }
+  return stored.config as GenerationConfig;
 }
 
 async function loadPreparedResumeSource(
@@ -284,9 +459,12 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? "null";
 }
 
-async function ensureConceptPersisted(bookId: string, concept: BookConcept): Promise<void> {
-  const db = getDb();
-  const [book] = await db
+async function ensureConceptPersisted(
+  tx: DbTransaction,
+  bookId: string,
+  concept: BookConcept,
+): Promise<void> {
+  const [book] = await tx
     .select({
       title: schema.books.title,
       synopsis: schema.books.synopsis,
@@ -305,7 +483,7 @@ async function ensureConceptPersisted(bookId: string, concept: BookConcept): Pro
     stableJson(book.concept) === stableJson(persistableConcept);
 
   if (!alreadyPersisted) {
-    await persistConcept(bookId, concept);
+    await persistConcept(bookId, concept, tx);
     return;
   }
 
@@ -323,12 +501,17 @@ async function ensureConceptPersisted(bookId: string, concept: BookConcept): Pro
         facts: [character.description, `Arc: ${character.arc}`],
       },
     })),
+    tx,
   );
 }
 
-async function ensureOutlineChapterRows(bookId: string, outline: BookOutline): Promise<void> {
+async function ensureOutlineChapterRows(
+  tx: DbTransaction,
+  bookId: string,
+  outline: BookOutline,
+): Promise<void> {
   if (outline.chapters.length === 0) return;
-  await getDb()
+  await tx
     .insert(schema.chapters)
     .values(
       outline.chapters.map((chapter) => ({
@@ -349,9 +532,12 @@ async function ensureOutlineChapterRows(bookId: string, outline: BookOutline): P
     });
 }
 
-async function ensureOutlinePersisted(bookId: string, outline: BookOutline): Promise<void> {
-  const db = getDb();
-  const [latest] = await db
+async function ensureOutlinePersisted(
+  tx: DbTransaction,
+  bookId: string,
+  outline: BookOutline,
+): Promise<void> {
+  const [latest] = await tx
     .select({ content: schema.outlines.content })
     .from(schema.outlines)
     .where(eq(schema.outlines.bookId, bookId))
@@ -360,10 +546,10 @@ async function ensureOutlinePersisted(bookId: string, outline: BookOutline): Pro
   if (latest && stableJson(latest.content) === stableJson(outline)) {
     // Covers a retry after the outline version committed but before its
     // chapter upsert completed.
-    await ensureOutlineChapterRows(bookId, outline);
+    await ensureOutlineChapterRows(tx, bookId, outline);
     return;
   }
-  await persistOutline(bookId, outline);
+  await persistOutline(bookId, outline, tx);
 }
 
 async function loadOutlineFingerprint(bookId: string): Promise<string> {
@@ -381,11 +567,18 @@ async function loadOutlineFingerprint(bookId: string): Promise<string> {
   return outlineStateFingerprint(latest);
 }
 
+type RequestedRunStatus = "running" | "awaiting_input" | "completed" | "failed" | "cancelled";
+
+export type MarkRunStatusOutcome =
+  | { outcome: "matched"; status: RequestedRunStatus }
+  | { outcome: "cancellation_won"; status: "cancelled" }
+  | { outcome: "terminal_preserved"; status: RequestedRunStatus | "queued" | null };
+
 export async function markRunStatus(
   ref: RunRef,
-  status: "running" | "awaiting_input" | "completed" | "failed" | "cancelled",
+  status: RequestedRunStatus,
   error?: string,
-) {
+): Promise<MarkRunStatusOutcome> {
   "use step";
   const result = await transitionAuthoringRunState({
     runId: ref.dbRunId,
@@ -393,11 +586,21 @@ export async function markRunStatus(
     userId: ref.userId,
     status,
     error,
+    ...(status === "completed" ? { resolveCancellationOnComplete: true } : {}),
   });
+  if (status !== "cancelled" && result.status === "cancelled") {
+    if (status === "completed") {
+      return { outcome: "cancellation_won", status: "cancelled" };
+    }
+    throw new FatalError(AUTHORING_CANCELLATION_MESSAGE);
+  }
   if (result.status !== status) {
-    if (status === "failed" || status === "cancelled") return;
+    if (status === "failed" || status === "cancelled") {
+      return { outcome: "terminal_preserved", status: result.status };
+    }
     throw new FatalError("Generation run is no longer active");
   }
+  return { outcome: "matched", status };
 }
 
 export async function linkWorkflowRunStep(ref: RunRef, workflowRunId: string) {
@@ -407,6 +610,70 @@ export async function linkWorkflowRunStep(ref: RunRef, workflowRunId: string) {
     projectId: ref.projectId,
     userId: ref.userId,
     workflowRunId,
+  });
+}
+
+export async function allocateAuthoringPauseStep(
+  ref: RunRef,
+  kind: AuthoringRunInputKind,
+  details?: AuthoringPauseDetails,
+) {
+  "use step";
+  const { stepId } = getStepMetadata();
+  return allocateAuthoringPause({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    kind,
+    pauseKey: stepId,
+    details,
+  });
+}
+
+export async function markAuthoringPauseRegisteredStep(
+  ref: RunRef,
+  kind: AuthoringRunInputKind,
+  pauseVersion: number,
+) {
+  "use step";
+  const registered = await markAuthoringPauseRegistered({
+    runId: ref.dbRunId,
+    projectId: ref.projectId,
+    userId: ref.userId,
+    kind,
+    pauseVersion,
+  });
+  if (!registered) {
+    await throwIfAuthoringCancellationRequested(ref.dbRunId);
+    throw new FatalError("Generation run is no longer active");
+  }
+}
+
+export async function consumeAuthoringRunInputStep(
+  ref: RunRef,
+  kind: AuthoringRunInputKind,
+  pauseVersion: number,
+  inputId: string,
+) {
+  "use step";
+  return consumeAuthoringRunInput({
+    runId: ref.dbRunId,
+    kind,
+    pauseVersion,
+    inputId,
+  });
+}
+
+export async function clearAuthoringPauseStep(
+  ref: RunRef,
+  kind: AuthoringRunInputKind,
+  pauseVersion: number,
+) {
+  "use step";
+  await clearAuthoringPause({
+    runId: ref.dbRunId,
+    kind,
+    pauseVersion,
   });
 }
 
@@ -817,101 +1084,114 @@ async function resetManuscriptForPreparation(
   config: GenerationConfig,
   bookId: string,
 ): Promise<{ archived: number; reset: number }> {
-  const db = getDb();
-  const chapters = await db
-    .select({
-      id: schema.chapters.id,
-      chapterNumber: schema.chapters.chapterNumber,
-      title: schema.chapters.title,
-      summary: schema.chapters.summary,
-      content: schema.chapters.content,
-      wordCount: schema.chapters.wordCount,
-      qualityScore: schema.chapters.qualityScore,
-      status: schema.chapters.status,
-      version: schema.chapters.version,
-    })
-    .from(schema.chapters)
-    .where(eq(schema.chapters.bookId, bookId));
-
-  let archived = 0;
-  let reset = 0;
-  for (const chapter of chapters) {
-    const shouldSoftRetire = chapter.chapterNumber > config.targetChapters;
-    const needsSoftRetire =
-      shouldSoftRetire && (chapter.title !== null || chapter.summary !== null);
-    const hasRecoverableState = chapter.content.length > 0 || needsSoftRetire;
-    let contentAlreadyArchived = false;
-    if (hasRecoverableState) {
-      const [existingArchive] = await db
-        .select({ id: schema.chapterRevisions.id })
-        .from(schema.chapterRevisions)
-        .where(
-          and(
-            eq(schema.chapterRevisions.chapterId, chapter.id),
-            eq(schema.chapterRevisions.runId, ref.dbRunId),
-            sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
-            eq(schema.chapterRevisions.content, chapter.content),
-          ),
-        )
-        .limit(1);
-      contentAlreadyArchived = Boolean(existingArchive);
-    }
-    const plan = planFreshRunChapter(chapter, contentAlreadyArchived);
-    if (!plan.reset && !needsSoftRetire) continue;
-
-    if (shouldArchiveGenerationReset(chapter, shouldSoftRetire, contentAlreadyArchived)) {
-      await db.insert(schema.chapterRevisions).values({
-        chapterId: chapter.id,
-        content: chapter.content,
-        source: generationResetSource({
-          title: chapter.title,
-          summary: chapter.summary,
-          status: chapter.status,
-        }),
-        runId: ref.dbRunId,
-      });
-      archived += 1;
-    }
-
-    const [updated] = await db
-      .update(schema.chapters)
-      .set({
-        content: "",
-        wordCount: 0,
-        qualityScore: null,
-        status: "planned",
-        ...(shouldSoftRetire ? { title: null, summary: null } : {}),
-        version: sql`${schema.chapters.version} + 1`,
-        updatedAt: new Date(),
+  return withActiveAuthoringMutation(ref, async (tx) => {
+    const chapters = await tx
+      .select({
+        id: schema.chapters.id,
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+        content: schema.chapters.content,
+        wordCount: schema.chapters.wordCount,
+        qualityScore: schema.chapters.qualityScore,
+        status: schema.chapters.status,
+        version: schema.chapters.version,
       })
-      .where(and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)))
-      .returning({ id: schema.chapters.id });
-    if (!updated) {
-      throw new RetryableError("A chapter changed while the new run was preparing it", {
-        retryAfter: "1s",
-      });
-    }
-    reset += 1;
-  }
+      .from(schema.chapters)
+      .where(eq(schema.chapters.bookId, bookId));
 
-  return { archived, reset };
+    let archived = 0;
+    let reset = 0;
+    for (const chapter of chapters) {
+      const shouldSoftRetire = chapter.chapterNumber > config.targetChapters;
+      const needsSoftRetire =
+        shouldSoftRetire && (chapter.title !== null || chapter.summary !== null);
+      const hasRecoverableState = chapter.content.length > 0 || needsSoftRetire;
+      let contentAlreadyArchived = false;
+      if (hasRecoverableState) {
+        const [existingArchive] = await tx
+          .select({ id: schema.chapterRevisions.id })
+          .from(schema.chapterRevisions)
+          .where(
+            and(
+              eq(schema.chapterRevisions.chapterId, chapter.id),
+              eq(schema.chapterRevisions.runId, ref.dbRunId),
+              sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
+              eq(schema.chapterRevisions.content, chapter.content),
+            ),
+          )
+          .limit(1);
+        contentAlreadyArchived = Boolean(existingArchive);
+      }
+      const plan = planFreshRunChapter(chapter, contentAlreadyArchived);
+      if (!plan.reset && !needsSoftRetire) continue;
+
+      if (shouldArchiveGenerationReset(chapter, shouldSoftRetire, contentAlreadyArchived)) {
+        await tx.insert(schema.chapterRevisions).values({
+          chapterId: chapter.id,
+          content: chapter.content,
+          source: generationResetSource({
+            title: chapter.title,
+            summary: chapter.summary,
+            status: chapter.status,
+          }),
+          runId: ref.dbRunId,
+        });
+        archived += 1;
+      }
+
+      const [updated] = await tx
+        .update(schema.chapters)
+        .set({
+          content: "",
+          wordCount: 0,
+          qualityScore: null,
+          status: "planned",
+          ...(shouldSoftRetire ? { title: null, summary: null } : {}),
+          version: sql`${schema.chapters.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)),
+        )
+        .returning({ id: schema.chapters.id });
+      if (!updated) {
+        throw new RetryableError("A chapter changed while the new run was preparing it", {
+          retryAfter: "1s",
+        });
+      }
+      reset += 1;
+    }
+
+    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+      ...current,
+      preparation: { ...current.preparation, manuscriptReset: true },
+    }));
+    return { archived, reset };
+  });
 }
 
 /**
  * Retires the prior story bible before a fresh concept is persisted.
  *
  * The snapshot lives on the generation run, so an operator can recover the
- * exact old canon, portraits, and relationship graph. Snapshot, delete, and
- * checkpoint are deliberately separate idempotent actions: a retry after any
- * boundary finishes the remaining tail without ever mixing old/new canon.
+ * exact old canon, portraits, and relationship graph. Snapshot, relationship
+ * deletion, entity deletion, and the preparation checkpoint commit atomically
+ * under the same lock used by cancellation.
  */
 async function resetEntityCanonForPreparation(ref: RunRef, bookId: string): Promise<void> {
-  const db = getDb();
-  const stored = await loadStoredGenerationConfig(ref.dbRunId);
+  await withActiveAuthoringMutation(ref, async (tx) => {
+    const [run] = await tx
+      .select({ config: schema.generationRuns.config })
+      .from(schema.generationRuns)
+      .where(eq(schema.generationRuns.id, ref.dbRunId))
+      .limit(1);
+    if (!run) throw new FatalError("Generation run not found");
+    const stored = run.config as GenerationConfig;
+    let retiredEntityCanon = stored.retiredEntityCanon;
 
-  if (!stored.retiredEntityCanon) {
-    const [entities, relationships] = await Promise.all([
-      db
+    if (!retiredEntityCanon) {
+      const entities = await tx
         .select({
           id: schema.entities.id,
           kind: schema.entities.kind,
@@ -923,8 +1203,8 @@ async function resetEntityCanonForPreparation(ref: RunRef, bookId: string): Prom
           lastUpdatedChapter: schema.entities.lastUpdatedChapter,
         })
         .from(schema.entities)
-        .where(eq(schema.entities.bookId, bookId)),
-      db
+        .where(eq(schema.entities.bookId, bookId));
+      const relationships = await tx
         .select({
           id: schema.entityRelationships.id,
           fromEntityId: schema.entityRelationships.fromEntityId,
@@ -934,27 +1214,29 @@ async function resetEntityCanonForPreparation(ref: RunRef, bookId: string): Prom
           establishedChapter: schema.entityRelationships.establishedChapter,
         })
         .from(schema.entityRelationships)
-        .where(eq(schema.entityRelationships.bookId, bookId)),
-    ]);
-    await updateStoredGenerationConfig(ref, (current) => ({
-      ...current,
-      retiredEntityCanon: current.retiredEntityCanon ?? {
-        entities,
-        relationships,
-      },
-    }));
-  }
+        .where(eq(schema.entityRelationships.bookId, bookId));
+      retiredEntityCanon = { entities, relationships };
+    }
 
-  await db.delete(schema.entityRelationships).where(eq(schema.entityRelationships.bookId, bookId));
-  await db.delete(schema.entities).where(eq(schema.entities.bookId, bookId));
+    await tx
+      .delete(schema.entityRelationships)
+      .where(eq(schema.entityRelationships.bookId, bookId));
+    await tx.delete(schema.entities).where(eq(schema.entities.bookId, bookId));
+    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+      ...current,
+      retiredEntityCanon: current.retiredEntityCanon ?? retiredEntityCanon,
+      preparation: { ...current.preparation, entityCanonReset: true },
+    }));
+  });
 }
 
 /**
  * Commits a run's staged plan at the single durable manuscript boundary.
  *
- * Each checkpoint follows its side effect, and each side effect is itself
- * idempotent. Retrying after any partial failure therefore continues from the
- * first unfinished action without duplicating archives or outline versions.
+ * Each logical side effect and its preparation checkpoint share one
+ * cancellation-ordered transaction. Retrying after a rollback therefore
+ * continues from the first unfinished action without duplicating archives or
+ * outline versions.
  */
 export async function prepareBookRunStep(
   ref: RunRef,
@@ -1041,35 +1323,31 @@ export async function prepareBookRunStep(
         const result = await resetManuscriptForPreparation(ref, config, book.id);
         archived += result.archived;
         reset += result.reset;
-        await updateStoredGenerationConfig(ref, (current) => ({
-          ...current,
-          preparation: { ...current.preparation, manuscriptReset: true },
-        }));
         break;
       }
       case "reset_entity_canon":
         await resetEntityCanonForPreparation(ref, book.id);
-        await updateStoredGenerationConfig(ref, (current) => ({
-          ...current,
-          preparation: { ...current.preparation, entityCanonReset: true },
-        }));
         break;
       case "persist_concept": {
         const stagedConcept = conceptSchema.parse(stored.stagedConcept);
-        await ensureConceptPersisted(book.id, stagedConcept);
-        await updateStoredGenerationConfig(ref, (current) => ({
-          ...current,
-          preparation: { ...current.preparation, conceptPersisted: true },
-        }));
+        await withActiveAuthoringMutation(ref, async (tx) => {
+          await ensureConceptPersisted(tx, book.id, stagedConcept);
+          await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+            ...current,
+            preparation: { ...current.preparation, conceptPersisted: true },
+          }));
+        });
         break;
       }
       case "persist_outline": {
         const stagedOutline = bookOutlineSchema.parse(stored.stagedOutline);
-        await ensureOutlinePersisted(book.id, stagedOutline);
-        await updateStoredGenerationConfig(ref, (current) => ({
-          ...current,
-          preparation: { ...current.preparation, outlinePersisted: true },
-        }));
+        await withActiveAuthoringMutation(ref, async (tx) => {
+          await ensureOutlinePersisted(tx, book.id, stagedOutline);
+          await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+            ...current,
+            preparation: { ...current.preparation, outlinePersisted: true },
+          }));
+        });
         break;
       }
       case "mark_prepared": {
@@ -1111,7 +1389,12 @@ export async function conceptStep(
     return stagedConcept;
   }
 
-  const tools: ToolCtx = { userId: ref.userId, projectId: ref.projectId, bookId: book.id };
+  const tools: ToolCtx = {
+    runId: ref.dbRunId,
+    userId: ref.userId,
+    projectId: ref.projectId,
+    bookId: book.id,
+  };
   const contentGuidelines = buildFrozenAuthoringContract(config.inputSnapshot);
   try {
     const concept = await generateConcept(
@@ -1171,7 +1454,12 @@ export async function outlineStep(
       return stagedOutline;
     }
   }
-  const tools: ToolCtx = { userId: ref.userId, projectId: ref.projectId, bookId: book.id };
+  const tools: ToolCtx = {
+    runId: ref.dbRunId,
+    userId: ref.userId,
+    projectId: ref.projectId,
+    bookId: book.id,
+  };
   const contentGuidelines = buildFrozenAuthoringContract(config.inputSnapshot);
   try {
     const revisionKey = revisionNotes ?? null;
@@ -1263,7 +1551,7 @@ export async function entityBibleStep(
   }
   try {
     const existing = await listEntities(book.id);
-    const result = await buildEntityBible({
+    const bible = await generateEntityBible({
       meter: await meteredScope(meter, ref, config, "entity-bible", reservationRef),
       bookId: book.id,
       tier: config.tier,
@@ -1273,13 +1561,17 @@ export async function entityBibleStep(
       authoringContract: buildFrozenAuthoringContract(config.inputSnapshot),
       existingNames: existing.map((e) => e.name),
     });
-    await updateStoredGenerationConfig(ref, (current) => ({
-      ...current,
-      completion: {
-        ...current.completion,
-        entityBible: { sourceRunId: ref.dbRunId, ...result },
-      },
-    }));
+    const result = await withActiveAuthoringMutation(ref, async (tx) => {
+      const persisted = await persistEntityBible(book.id, bible, tx);
+      await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+        ...current,
+        completion: {
+          ...current.completion,
+          entityBible: { sourceRunId: ref.dbRunId, ...persisted },
+        },
+      }));
+      return persisted;
+    });
     return result;
   } catch (error) {
     toWorkflowError(error);
@@ -1294,63 +1586,64 @@ export async function entityBibleStep(
 export async function resetChapterStep(ref: RunRef, chapterNumber: number): Promise<void> {
   "use step";
   const { book } = await loadRunContext(ref);
-  const db = getDb();
-  const [chapter] = await db
-    .select({
-      id: schema.chapters.id,
-      content: schema.chapters.content,
-      version: schema.chapters.version,
-    })
-    .from(schema.chapters)
-    .where(
-      and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
-    )
-    .limit(1);
-  if (!chapter) return;
-
-  if (chapter.content.trim().length > 0) {
-    const [archive] = await db
-      .select({ id: schema.chapterRevisions.id })
-      .from(schema.chapterRevisions)
+  await withActiveAuthoringMutation(ref, async (tx) => {
+    const [chapter] = await tx
+      .select({
+        id: schema.chapters.id,
+        content: schema.chapters.content,
+        version: schema.chapters.version,
+      })
+      .from(schema.chapters)
       .where(
-        and(
-          eq(schema.chapterRevisions.chapterId, chapter.id),
-          eq(schema.chapterRevisions.runId, ref.dbRunId),
-          eq(schema.chapterRevisions.source, "regenerate"),
-          eq(schema.chapterRevisions.content, chapter.content),
-        ),
+        and(eq(schema.chapters.bookId, book.id), eq(schema.chapters.chapterNumber, chapterNumber)),
       )
       .limit(1);
-    if (!archive) {
-      await db.insert(schema.chapterRevisions).values({
-        chapterId: chapter.id,
-        content: chapter.content,
-        source: "regenerate",
-        runId: ref.dbRunId,
+    if (!chapter) return;
+
+    if (chapter.content.trim().length > 0) {
+      const [archive] = await tx
+        .select({ id: schema.chapterRevisions.id })
+        .from(schema.chapterRevisions)
+        .where(
+          and(
+            eq(schema.chapterRevisions.chapterId, chapter.id),
+            eq(schema.chapterRevisions.runId, ref.dbRunId),
+            eq(schema.chapterRevisions.source, "regenerate"),
+            eq(schema.chapterRevisions.content, chapter.content),
+          ),
+        )
+        .limit(1);
+      if (!archive) {
+        await tx.insert(schema.chapterRevisions).values({
+          chapterId: chapter.id,
+          content: chapter.content,
+          source: "regenerate",
+          runId: ref.dbRunId,
+        });
+      }
+    }
+    const [updated] = await tx
+      .update(schema.chapters)
+      .set({
+        content: "",
+        // Summary stays: it doubles as regeneration context when the outline no
+        // longer has an entry for this number (user-added or reordered chapters).
+        wordCount: 0,
+        qualityScore: null,
+        status: "planned",
+        // Invalidate any open editor tab: a stale baseVersion must conflict
+        // rather than silently overwrite the freshly generated prose.
+        version: sql`${schema.chapters.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)))
+      .returning({ id: schema.chapters.id });
+    if (!updated) {
+      throw new RetryableError("Chapter changed while regeneration was preparing it", {
+        retryAfter: "1s",
       });
     }
-  }
-  const [updated] = await db
-    .update(schema.chapters)
-    .set({
-      content: "",
-      // Summary stays: it doubles as regeneration context when the outline no
-      // longer has an entry for this number (user-added or reordered chapters).
-      wordCount: 0,
-      qualityScore: null,
-      status: "planned",
-      // Invalidate any open editor tab: a stale baseVersion must conflict
-      // rather than silently overwrite the freshly generated prose.
-      version: sql`${schema.chapters.version} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)))
-    .returning({ id: schema.chapters.id });
-  if (!updated) {
-    throw new RetryableError("Chapter changed while regeneration was preparing it", {
-      retryAfter: "1s",
-    });
-  }
+  });
 }
 
 async function ensureChapterPostWrite(
@@ -1404,17 +1697,19 @@ async function ensureChapterPostWrite(
     summaryCheckpoint = stored.work?.chapters?.[key]?.summary ?? summaryCheckpoint;
   }
 
-  await persistChapterSummary(summaryInput, summaryCheckpoint.result);
-  await updateStoredGenerationConfig(ref, (current) => ({
-    ...current,
-    completion: {
-      ...current.completion,
-      chapterSummaries: {
-        ...current.completion?.chapterSummaries,
-        [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+  await withActiveAuthoringMutation(ref, async (tx) => {
+    await persistChapterSummary(summaryInput, summaryCheckpoint.result, tx);
+    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+      ...current,
+      completion: {
+        ...current.completion,
+        chapterSummaries: {
+          ...current.completion?.chapterSummaries,
+          [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+        },
       },
-    },
-  }));
+    }));
+  });
 }
 
 export function resolvedChapterTargetWords(
@@ -1513,13 +1808,17 @@ export async function writeChapterStep(
     } catch (error) {
       toWorkflowError(error);
     }
-    await writeEvent(PROGRESS_NS, {
-      type: "chapter",
-      chapterNumber,
-      status: existing.status as "drafted" | "edited" | "final",
-      wordCount: existing.wordCount,
-      qualityScore: existing.qualityScore ? Number(existing.qualityScore) : undefined,
-    });
+    await persistAndPublishProgress(
+      ref,
+      {
+        type: "chapter",
+        chapterNumber,
+        status: existing.status as "drafted" | "edited" | "final",
+        wordCount: existing.wordCount,
+        qualityScore: existing.qualityScore ? Number(existing.qualityScore) : undefined,
+      },
+      `chapter:${chapterNumber}:${existing.status}`,
+    );
     return {
       chapterNumber,
       wordCount: existing.wordCount,
@@ -1573,21 +1872,30 @@ export async function writeChapterStep(
     )
     .orderBy(schema.chapters.chapterNumber);
 
-  const [claimed] = await db
-    .update(schema.chapters)
-    .set({
-      status: "drafting",
-      version: sql`${schema.chapters.version} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(schema.chapters.id, existing.id), eq(schema.chapters.version, existing.version)))
-    .returning({ version: schema.chapters.version });
+  const claimed = await withActiveAuthoringMutation(ref, async (tx) => {
+    const [row] = await tx
+      .update(schema.chapters)
+      .set({
+        status: "drafting",
+        version: sql`${schema.chapters.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(schema.chapters.id, existing.id), eq(schema.chapters.version, existing.version)),
+      )
+      .returning({ version: schema.chapters.version });
+    return row;
+  });
   if (!claimed) {
     throw new RetryableError("Chapter changed while generation was claiming it", {
       retryAfter: "1s",
     });
   }
-  await writeEvent(PROGRESS_NS, { type: "chapter", chapterNumber, status: "drafting" });
+  await persistAndPublishProgress(
+    ref,
+    { type: "chapter", chapterNumber, status: "drafting" },
+    `chapter:${chapterNumber}:drafting`,
+  );
 
   const proseWriter = getWritable<string>({ namespace: chapterNs(chapterNumber) }).getWriter();
   try {
@@ -1606,10 +1914,12 @@ export async function writeChapterStep(
       {
         meter: scopedMeter,
         tools: {
+          runId: ref.dbRunId,
           userId: ref.userId,
           projectId: ref.projectId,
           bookId: book.id,
           chapterNumber,
+          mutationScope: `chapter:${chapterNumber}:writer`,
         },
         tier: config.tier,
         chapterNumber,
@@ -1652,14 +1962,27 @@ export async function writeChapterStep(
       },
     );
 
-    const persistedId = await persistChapter(
-      {
-        tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id, chapterNumber },
-        chapterNumber,
-      } as Parameters<typeof persistChapter>[0],
-      result,
-      claimed.version,
-    );
+    const persistedId = await withActiveAuthoringMutation(ref, async (tx) => {
+      const [persisted] = await tx
+        .update(schema.chapters)
+        .set({
+          content: result.content,
+          wordCount: result.wordCount,
+          qualityScore: result.qualityScore.toFixed(3),
+          status: "drafted",
+          version: sql`${schema.chapters.version} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(schema.chapters.bookId, book.id),
+            eq(schema.chapters.chapterNumber, chapterNumber),
+            eq(schema.chapters.version, claimed.version),
+          ),
+        )
+        .returning({ id: schema.chapters.id });
+      return persisted?.id;
+    });
     if (!persistedId) {
       throw new RetryableError("Chapter changed while generated prose was applying", {
         retryAfter: "1s",
@@ -1673,13 +1996,17 @@ export async function writeChapterStep(
       content: result.content,
     });
 
-    await writeEvent(PROGRESS_NS, {
-      type: "chapter",
-      chapterNumber,
-      status: "drafted",
-      wordCount: result.wordCount,
-      qualityScore: result.qualityScore,
-    });
+    await persistAndPublishProgress(
+      ref,
+      {
+        type: "chapter",
+        chapterNumber,
+        status: "drafted",
+        wordCount: result.wordCount,
+        qualityScore: result.qualityScore,
+      },
+      `chapter:${chapterNumber}:drafted`,
+    );
     return {
       chapterNumber,
       wordCount: result.wordCount,
@@ -1749,7 +2076,13 @@ export async function editChapterStep(
           }`,
           reservationRef,
         ),
-        tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id, chapterNumber },
+        tools: {
+          runId: ref.dbRunId,
+          userId: ref.userId,
+          projectId: ref.projectId,
+          bookId: book.id,
+          chapterNumber,
+        },
         tier: config.tier,
         chapterNumber,
         content: chapter.content,
@@ -1774,41 +2107,42 @@ export async function editChapterStep(
     let finalContent = chapter.content;
     if (edited.changed && !cachedOutputAlreadyApplied) {
       const revisionSource = mode === "revision" ? "continuity-revision" : "writer";
-      const [archive] = await db
-        .select({ id: schema.chapterRevisions.id })
-        .from(schema.chapterRevisions)
-        .where(
-          and(
-            eq(schema.chapterRevisions.chapterId, chapter.id),
-            eq(schema.chapterRevisions.runId, ref.dbRunId),
-            eq(schema.chapterRevisions.source, revisionSource),
-            eq(schema.chapterRevisions.content, chapter.content),
-          ),
-        )
-        .limit(1);
-      if (!archive) {
-        await db.insert(schema.chapterRevisions).values({
-          chapterId: chapter.id,
-          content: chapter.content,
-          source: revisionSource,
-          runId: ref.dbRunId,
-        });
-      }
-      const [updated] = await db
-        .update(schema.chapters)
-        .set({
-          content: edited.content,
-          wordCount: edited.content.split(/\s+/).filter(Boolean).length,
-          status: "edited",
-          version: chapter.version + 1,
-          updatedAt: new Date(),
-        })
-        .where(
-          and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)),
-        )
-        .returning({ content: schema.chapters.content });
-      if (!updated) {
-        const [current] = await db
+      await withActiveAuthoringMutation(ref, async (tx) => {
+        const [archive] = await tx
+          .select({ id: schema.chapterRevisions.id })
+          .from(schema.chapterRevisions)
+          .where(
+            and(
+              eq(schema.chapterRevisions.chapterId, chapter.id),
+              eq(schema.chapterRevisions.runId, ref.dbRunId),
+              eq(schema.chapterRevisions.source, revisionSource),
+              eq(schema.chapterRevisions.content, chapter.content),
+            ),
+          )
+          .limit(1);
+        if (!archive) {
+          await tx.insert(schema.chapterRevisions).values({
+            chapterId: chapter.id,
+            content: chapter.content,
+            source: revisionSource,
+            runId: ref.dbRunId,
+          });
+        }
+        const [updated] = await tx
+          .update(schema.chapters)
+          .set({
+            content: edited.content,
+            wordCount: edited.content.split(/\s+/).filter(Boolean).length,
+            status: "edited",
+            version: chapter.version + 1,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(eq(schema.chapters.id, chapter.id), eq(schema.chapters.version, chapter.version)),
+          )
+          .returning({ content: schema.chapters.content });
+        if (updated) return;
+        const [current] = await tx
           .select({ content: schema.chapters.content })
           .from(schema.chapters)
           .where(eq(schema.chapters.id, chapter.id))
@@ -1818,7 +2152,7 @@ export async function editChapterStep(
             retryAfter: "1s",
           });
         }
-      }
+      });
       finalContent = edited.content;
     }
 
@@ -1847,11 +2181,15 @@ export async function editChapterStep(
             }),
       },
     }));
-    await writeEvent(PROGRESS_NS, {
-      type: "chapter",
-      chapterNumber,
-      status: "edited",
-    });
+    await persistAndPublishProgress(
+      ref,
+      {
+        type: "chapter",
+        chapterNumber,
+        status: "edited",
+      },
+      `chapter:${chapterNumber}:edited`,
+    );
     return { chapterNumber, changed: edited.changed };
   } catch (error) {
     toWorkflowError(error);
@@ -1900,7 +2238,13 @@ export async function continuityPhaseStep(
           `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
           reservationRef,
         ),
-        tools: { userId: ref.userId, projectId: ref.projectId, bookId: book.id },
+        tools: {
+          runId: ref.dbRunId,
+          userId: ref.userId,
+          projectId: ref.projectId,
+          bookId: book.id,
+          mutationScope: `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
+        },
         tier: config.tier,
       },
       phaseKey,
@@ -1940,12 +2284,16 @@ export async function continuityFinalizeStep(
   const stored = await loadStoredGenerationConfig(ref.dbRunId);
   const checkpoint = stored.completion?.continuityReport;
   if (checkpoint?.manuscriptDigest === currentManuscriptDigest) {
-    await writeEvent(PROGRESS_NS, {
-      type: "review",
-      score: checkpoint.report.score,
-      recommendation: checkpoint.report.recommendation,
-      issueCount: checkpoint.report.issues.length,
-    });
+    await persistAndPublishProgress(
+      ref,
+      {
+        type: "review",
+        score: checkpoint.report.score,
+        recommendation: checkpoint.report.recommendation,
+        issueCount: checkpoint.report.issues.length,
+      },
+      "review",
+    );
     return checkpoint.report;
   }
   if (
@@ -1960,62 +2308,209 @@ export async function continuityFinalizeStep(
     });
   }
   const report = aggregateContinuityOutcomes(outcomes);
-  await persistContinuityIssues(book.id, ref.dbRunId, report.issues);
-  await updateStoredGenerationConfig(ref, (current) => ({
-    ...current,
-    completion: {
-      ...current.completion,
-      continuityReport: {
-        sourceRunId: ref.dbRunId,
-        manuscriptDigest: currentManuscriptDigest,
-        report,
+  await withActiveAuthoringMutation(ref, async (tx) => {
+    await persistContinuityIssues(book.id, ref.dbRunId, report.issues, tx);
+    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
+      ...current,
+      completion: {
+        ...current.completion,
+        continuityReport: {
+          sourceRunId: ref.dbRunId,
+          manuscriptDigest: currentManuscriptDigest,
+          report,
+        },
       },
-    },
-  }));
-  await writeEvent(PROGRESS_NS, {
-    type: "review",
-    score: report.score,
-    recommendation: report.recommendation,
-    issueCount: report.issues.length,
+    }));
   });
+  await persistAndPublishProgress(
+    ref,
+    {
+      type: "review",
+      score: report.score,
+      recommendation: report.recommendation,
+      issueCount: report.issues.length,
+    },
+    "review",
+  );
   return report;
 }
 
-export async function finalizeStep(ref: RunRef): Promise<void> {
+export async function finalizeStep(ref: RunRef, detail?: string): Promise<void> {
   "use step";
-  const { book } = await loadRunContext(ref);
-  const beforeFinalizeDigest = await loadManuscriptDigest(book.id);
-  const stored = await loadStoredGenerationConfig(ref.dbRunId);
-  if (stored.completion?.finalized?.manuscriptDigest === beforeFinalizeDigest) return;
-  const db = getDb();
-  await db
-    .update(schema.chapters)
-    .set({ status: "final" })
-    .where(
-      sql`${schema.chapters.bookId} = (select id from ${schema.books} where ${schema.books.projectId} = ${ref.projectId}) and ${schema.chapters.status} in ('drafted', 'edited')`,
+  const { stepId } = getStepMetadata();
+  const doneEvent: RunEvent = {
+    type: "stage",
+    stage: "done",
+    pct: 100,
+    ...(detail ? { detail } : {}),
+  };
+  await withDbTransaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:project-authoring:' || ${ref.projectId}, 0)
+      )`,
     );
-  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ref.userId}, 0))`);
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(
+        hashtextextended('sopher:run-events:' || ${ref.dbRunId}, 0)
+      )`,
+    );
+    const [run] = await tx
+      .select({
+        status: schema.generationRuns.status,
+        config: schema.generationRuns.config,
+        nextEventSeq: schema.generationRuns.nextEventSeq,
+        cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+      })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.id, ref.dbRunId),
+          eq(schema.generationRuns.projectId, ref.projectId),
+          eq(schema.generationRuns.userId, ref.userId),
+        ),
+      )
+      .limit(1);
+    if (!run) throw new FatalError("Generation run not found");
+    const stored = run.config as GenerationConfig;
+    if (run.status === "completed" && stored.completion?.finalized?.manuscriptDigest) return;
+    if (run.cancellationRequestedAt || run.status === "cancelled") {
+      throw new FatalError(AUTHORING_CANCELLATION_MESSAGE);
+    }
+    if (!["queued", "running", "awaiting_input"].includes(run.status)) {
+      throw new FatalError(AUTHORING_RUN_INACTIVE_MESSAGE);
+    }
 
-  // The moment a book is actually finished. Only ever set once — a re-run of a
-  // finished book must not restart the clock, and time-to-first-book is
-  // measured from the first completion.
-  //
-  // Note this is deliberately independent of projects.status, which moves to
-  // "editing" here rather than "complete" (authors edit after generation, and
-  // the status reflects where they are, not whether the book exists).
-  await db
-    .update(schema.projects)
-    .set({ completedAt: new Date() })
-    .where(and(eq(schema.projects.id, ref.projectId), isNull(schema.projects.completedAt)));
+    const [book] = await tx
+      .select({ id: schema.books.id })
+      .from(schema.books)
+      .where(eq(schema.books.projectId, ref.projectId))
+      .limit(1);
+    if (!book) throw new FatalError("Book not found");
+    const beforeRows = await tx
+      .select({
+        id: schema.chapters.id,
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+        content: schema.chapters.content,
+        status: schema.chapters.status,
+        wordCount: schema.chapters.wordCount,
+      })
+      .from(schema.chapters)
+      .where(eq(schema.chapters.bookId, book.id));
+    const expected = stored.targetChapters;
+    const completeNumbers = new Set(
+      beforeRows
+        .filter(
+          (chapter) =>
+            chapter.chapterNumber >= 1 &&
+            chapter.chapterNumber <= expected &&
+            chapter.wordCount > 0 &&
+            chapter.content.trim().length > 0,
+        )
+        .map((chapter) => chapter.chapterNumber),
+    );
+    if (completeNumbers.size < expected) {
+      throw new FatalError(
+        `Cannot finalize: expected ${expected} complete chapters, found ${completeNumbers.size}`,
+      );
+    }
 
-  await updateStoredGenerationConfig(ref, (current) => ({
-    ...current,
-    completion: {
-      ...current.completion,
-      finalized: { sourceRunId: ref.dbRunId, manuscriptDigest: currentManuscriptDigest },
-    },
-  }));
+    await tx
+      .update(schema.chapters)
+      .set({ status: "final" })
+      .where(
+        and(
+          eq(schema.chapters.bookId, book.id),
+          inArray(schema.chapters.status, ["drafted", "edited"]),
+        ),
+      );
+    const finalizedRows = beforeRows.map((chapter) =>
+      chapter.status === "drafted" || chapter.status === "edited"
+        ? { ...chapter, status: "final" }
+        : chapter,
+    ) as ManuscriptStateRow[];
+    const digest = manuscriptDigest(finalizedRows);
+    const config: GenerationConfig = {
+      ...stored,
+      completion: {
+        ...stored.completion,
+        finalized: { sourceRunId: ref.dbRunId, manuscriptDigest: digest },
+      },
+    };
+    const now = new Date();
 
+    const [existingDone] = await tx
+      .select({ id: schema.generationEvents.id })
+      .from(schema.generationEvents)
+      .where(
+        and(
+          eq(schema.generationEvents.runId, ref.dbRunId),
+          eq(schema.generationEvents.eventKey, `${stepId}:done`),
+        ),
+      )
+      .limit(1);
+    const allocatedDoneSeq = await nextRunEventSequence(tx, ref.dbRunId, run.nextEventSeq);
+    if (!existingDone) {
+      await tx.insert(schema.generationEvents).values({
+        runId: ref.dbRunId,
+        seq: allocatedDoneSeq,
+        eventKey: `${stepId}:done`,
+        type: "stage",
+        payload: doneEvent,
+        createdAt: now,
+      });
+    }
+    await tx
+      .update(schema.generationRuns)
+      .set({
+        config,
+        status: "completed",
+        currentStage: "done",
+        progressPct: 100,
+        stageDescription: detail ?? null,
+        lastProgressAt: now,
+        heartbeatAt: now,
+        completedAt: now,
+        acceptanceUncertainAt: null,
+        acceptanceDispatchClaimedAt: null,
+        nextEventSeq: existingDone ? allocatedDoneSeq : allocatedDoneSeq + 1,
+      })
+      .where(eq(schema.generationRuns.id, ref.dbRunId));
+    await tx
+      .update(schema.projects)
+      .set({
+        status: "editing",
+        completedAt: sql`coalesce(${schema.projects.completedAt}, ${now})`,
+        updatedAt: now,
+      })
+      .where(and(eq(schema.projects.id, ref.projectId), eq(schema.projects.userId, ref.userId)));
+    await tx
+      .insert(schema.creditLedger)
+      .values({
+        userId: ref.userId,
+        amount: "0",
+        kind: "adjustment",
+        description: "Close generation reservations after active calls settle",
+        projectId: ref.projectId,
+        runId: ref.dbRunId,
+        externalRef: `reservation-close-request:${ref.dbRunId}`,
+      })
+      .onConflictDoNothing({ target: schema.creditLedger.externalRef });
+  });
+
+  try {
+    await writeEvent(PROGRESS_NS, doneEvent);
+  } catch (error) {
+    console.warn("Could not publish persisted completion event", {
+      runId: ref.dbRunId,
+      error,
+    });
+  }
+
+  const db = getDb();
   // Tell the author. Best-effort: a book that finished but could not say so
   // is still a finished book, so email failures never fail the step.
   try {
@@ -2048,6 +2543,7 @@ export async function finalizeStep(ref: RunRef): Promise<void> {
         projectId: ref.projectId,
         chapterCount: row.chapters,
         wordCount: row.words,
+        runId: ref.dbRunId,
       });
     }
   } catch (error) {
@@ -2060,11 +2556,61 @@ export async function notifyCreditsPausedStep(
   ref: RunRef,
   balance: number,
   required: number,
+  pauseVersion?: number,
 ): Promise<void> {
   "use step";
   try {
     const db = getDb();
     const [row] = await db
+      .select({
+        email: schema.users.email,
+        title: schema.books.title,
+        experience: schema.projects.experience,
+        supportReference: schema.generationRuns.supportReference,
+      })
+      .from(schema.books)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.books.projectId))
+      .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+      .innerJoin(schema.generationRuns, eq(schema.generationRuns.id, ref.dbRunId))
+      .where(
+        and(
+          eq(schema.projects.id, ref.projectId),
+          eq(schema.generationRuns.projectId, ref.projectId),
+        ),
+      )
+      .limit(1);
+    if (row?.email) {
+      if (row.experience === "trial_short_story") {
+        await sendIncludedStoryPausedEmail({
+          to: row.email,
+          bookTitle: row.title,
+          projectId: ref.projectId,
+          runId: ref.dbRunId,
+          pauseVersion,
+          supportReference: row.supportReference,
+        });
+      } else {
+        await sendCreditsPausedEmail({
+          to: row.email,
+          bookTitle: row.title,
+          projectId: ref.projectId,
+          balance,
+          required,
+          runId: ref.dbRunId,
+          pauseVersion,
+        });
+      }
+    }
+  } catch (error) {
+    console.warn("[email] credits-paused notification failed:", error);
+  }
+}
+
+/** Emails one idempotent outline-ready notice after the hook is actionable. */
+export async function notifyOutlineApprovalStep(ref: RunRef, pauseVersion: number): Promise<void> {
+  "use step";
+  try {
+    const [row] = await getDb()
       .select({ email: schema.users.email, title: schema.books.title })
       .from(schema.books)
       .innerJoin(schema.projects, eq(schema.projects.id, schema.books.projectId))
@@ -2072,15 +2618,24 @@ export async function notifyCreditsPausedStep(
       .where(eq(schema.projects.id, ref.projectId))
       .limit(1);
     if (row?.email) {
-      await sendCreditsPausedEmail({
+      await sendOutlineApprovalEmail({
         to: row.email,
         bookTitle: row.title,
         projectId: ref.projectId,
-        balance,
-        required,
+        runId: ref.dbRunId,
+        pauseVersion,
       });
+      try {
+        const [{ start }, { outlineApprovalReminder }] = await Promise.all([
+          import("workflow/api"),
+          import("@/workflows/outline-reminder"),
+        ]);
+        await start(outlineApprovalReminder, [ref.dbRunId, ref.projectId, pauseVersion]);
+      } catch (error) {
+        console.warn("[email] outline reminder could not be scheduled:", error);
+      }
     }
   } catch (error) {
-    console.warn("[email] credits-paused notification failed:", error);
+    console.warn("[email] outline-approval notification failed:", error);
   }
 }

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { getRun } from "workflow/api";
 
 import { estimateBookCost } from "@/ai/estimate";
@@ -12,12 +12,68 @@ import {
   transitionAuthoringRunState,
   type AuthoringRunStatus,
 } from "@/lib/generation-runs";
+import { redeliverAcceptedAuthoringRunInput } from "@/lib/authoring-inputs";
 import { runEventSchema, type GenerationConfig, type Stage } from "@/lib/run-events";
+import { recordAuthoringIncident, resolveAuthoringIncident } from "@/lib/authoring-incidents";
+import { sendAuthoringNeedsAttentionEmail } from "@/lib/email/send";
+import { resolveAuthoringEmailAction } from "@/lib/authoring-email-action";
+import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
+import { requiresRunOwnedFullBookCompletionProof } from "@/lib/run-completion-proof";
 
 export type WorkflowHealthStatus =
   "pending" | "running" | "completed" | "failed" | "cancelled" | "missing" | "unavailable";
 
 export type EffectiveRunStatus = AuthoringRunStatus;
+
+function countPresent(values: unknown[]): number {
+  return values.filter((value) => value !== undefined && value !== null).length;
+}
+
+/**
+ * Counts durable, resumable boundaries without inspecting or exposing their
+ * prose. Work checkpoints and applied completion checkpoints are distinct:
+ * both can prevent paid work from being repeated after an interruption.
+ */
+export function countSavedAuthoringCheckpoints(rawConfig: unknown): number {
+  const config = (rawConfig ?? {}) as Partial<GenerationConfig>;
+  const work = config.work;
+  const completion = config.completion;
+  const chapterWorkCount = Object.values(work?.chapters ?? {}).reduce(
+    (total, chapter) =>
+      total +
+      countPresent([
+        chapter.scenePlan,
+        chapter.draft,
+        chapter.critique,
+        chapter.summary,
+        chapter.result,
+      ]),
+    0,
+  );
+
+  return (
+    countPresent([
+      config.stagedConcept,
+      config.stagedOutline,
+      config.retiredEntityCanon,
+      config.manuscriptPrepared === true ? true : undefined,
+      work?.conceptExpanded,
+      work?.outline?.plan,
+      work?.outline?.draft,
+      work?.outline?.final,
+      completion?.entityBible,
+      completion?.continuityReport,
+      completion?.finalized,
+    ]) +
+    Object.values(config.preparation ?? {}).filter((value) => value === true).length +
+    chapterWorkCount +
+    Object.keys(work?.edits ?? {}).length +
+    Object.keys(completion?.chapterSummaries ?? {}).length +
+    Object.keys(completion?.editedChapters ?? {}).length +
+    Object.keys(completion?.revisionChapters ?? {}).length +
+    Object.keys(completion?.continuityOutcomes ?? {}).length
+  );
+}
 
 export type RunHealth = {
   databaseStatus: AuthoringRunStatus;
@@ -29,6 +85,7 @@ export type RunHealth = {
   workflowStartedAt: string | null;
   workflowCompletedAt: string | null;
   lastEventAt: string | null;
+  heartbeatAt: string | null;
   lastUpdateAt: string;
   elapsedMs: number;
   estimatedMinutes: number | null;
@@ -52,7 +109,68 @@ export type RunHealth = {
   acceptanceUncertain: boolean;
   safeToRetry: boolean;
   completionArtifactsReady: boolean;
+  completionEvidence?: FullBookCompletionEvidence | null;
+  health: "healthy" | "warning" | "critical" | "degraded";
+  dispatchAttempts: number;
+  workflowMissingCount: number;
+  workflowMissingSince: string | null;
+  cancellation: {
+    requestedAt: string;
+    reason: string | null;
+  } | null;
+  pause: {
+    kind: "outline_approval" | "credits_topup";
+    version: number;
+    registeredAt: string;
+    details: {
+      balanceCredits?: number;
+      requiredCredits?: number;
+      resumeStage?: string;
+    } | null;
+  } | null;
+  savedChapterCount: number;
+  savedCheckpointCount: number;
+  supportReference: string;
+  rootErrorCode: string | null;
+  rootErrorStage: string | null;
 };
+
+export type FullBookCompletionEvidence = {
+  requiresRunOwnedFinalization: boolean;
+  runOwnedFinalization: boolean;
+  legacyCompletionCompatible: boolean;
+  finalChaptersComplete: boolean;
+  expectedChapterCount: number;
+  finalChapterContentCount: number;
+  projectCompletedAt: boolean;
+  projectStatus: "draft" | "generating" | "editing" | "complete" | "archived" | null;
+};
+
+export function completedFullBookProjectionRepairPlan(input: {
+  runKind: string;
+  runCompletedAt: string | null;
+  evidence: FullBookCompletionEvidence | null | undefined;
+}): {
+  conclusive: boolean;
+  repairCompletedAt: boolean;
+  repairStatus: boolean;
+  completedAt: Date | null;
+} {
+  const completedAt = normalizeRunTimestamp(input.runCompletedAt);
+  const evidence = input.evidence;
+  const conclusive =
+    input.runKind === "full_book" &&
+    Boolean(evidence?.runOwnedFinalization || evidence?.legacyCompletionCompatible) &&
+    (Boolean(evidence?.projectCompletedAt) || completedAt !== null);
+  return {
+    conclusive,
+    repairCompletedAt: conclusive && !evidence?.projectCompletedAt,
+    repairStatus:
+      conclusive &&
+      (evidence?.projectStatus === "draft" || evidence?.projectStatus === "generating"),
+    completedAt,
+  };
+}
 
 type WorkflowSnapshot = {
   status: WorkflowHealthStatus;
@@ -74,12 +192,36 @@ type RunForHealth = {
   acceptanceUncertainAt: Date | null;
   acceptanceDispatchClaimedAt: Date | null;
   healthCheckedAt: Date | null;
+  currentStage: Stage;
+  progressPct: number;
+  stageDescription: string | null;
+  lastProgressAt: Date | null;
+  heartbeatAt: Date | null;
+  workflowObservedStatus: WorkflowHealthStatus | null;
+  workflowObservedAt: Date | null;
+  workflowMissingSince: Date | null;
+  workflowMissingCount: number;
+  dispatchAttempts: number;
+  cancellationRequestedAt: Date | null;
+  cancellationReason: string | null;
+  pauseKind: "outline_approval" | "credits_topup" | null;
+  pauseVersion: number;
+  pauseDetails: {
+    balanceCredits?: number;
+    requiredCredits?: number;
+    resumeStage?: string;
+  } | null;
+  pauseRegisteredAt: Date | null;
+  supportReference: string;
+  rootErrorCode: string | null;
+  rootErrorStage: string | null;
   createdAt: Date;
 };
 
 type RunFacts = {
   authoringEventCount: number;
   lastEventAt: Date | null;
+  lastStageEventAt: Date | null;
   stage: Stage;
   progressPct: number;
   stageDescription: string | null;
@@ -88,9 +230,62 @@ type RunFacts = {
   creditsUsed: number;
   reservationCount: number;
   projectCompletedAt: Date | null;
+  projectStatus: FullBookCompletionEvidence["projectStatus"];
   chapterCounts: RunHealth["chapters"];
   finalChapterContentCount: number;
 };
+
+export function canonicalRunProgress(input: {
+  effectiveStatus: AuthoringRunStatus;
+  persisted: {
+    stage: Stage;
+    progressPct: number;
+    stageDescription: string | null;
+    lastProgressAt: Date | null;
+  };
+  event: {
+    stage: Stage;
+    progressPct: number;
+    stageDescription: string | null;
+    createdAt: Date | null;
+  };
+}): { stage: Stage; progressPct: number; stageDescription: string | null } {
+  const persistedIsAtLeastAsNew =
+    input.persisted.lastProgressAt !== null &&
+    (input.event.createdAt === null ||
+      input.persisted.lastProgressAt.getTime() >= input.event.createdAt.getTime());
+  const usePersisted =
+    persistedIsAtLeastAsNew ||
+    (input.event.createdAt === null && input.persisted.stage !== "queued");
+  const projection = usePersisted ? input.persisted : input.event;
+  const terminalStage =
+    input.effectiveStatus === "completed"
+      ? "done"
+      : input.effectiveStatus === "failed"
+        ? "failed"
+        : input.effectiveStatus === "cancelled"
+          ? "cancelled"
+          : null;
+
+  // Protocol-v1 Workflows remain pinned to their original deployment. They can
+  // terminalize after this deployment's migration without updating the new
+  // progress projection columns. The terminal database/Workflow result is
+  // authoritative, while the newest projection or event still supplies the
+  // last truthful percentage and explanation.
+  if (terminalStage) {
+    return {
+      stage: terminalStage,
+      progressPct: terminalStage === "done" ? 100 : projection.progressPct,
+      stageDescription: projection.stageDescription,
+    };
+  }
+
+  return {
+    stage: projection.stage,
+    progressPct: projection.progressPct,
+    stageDescription: projection.stageDescription,
+  };
+}
 
 type ChapterHealthRow = {
   chapterNumber: number;
@@ -107,6 +302,86 @@ const TERMINAL_DATABASE_STATUSES = new Set<AuthoringRunStatus>([
 ]);
 
 const WORKFLOW_PROBE_TIMEOUT_MS = 4_000;
+export const RUN_HEARTBEAT_WARNING_MS = 15 * 60_000;
+export const RUN_HEARTBEAT_CRITICAL_MS = 30 * 60_000;
+export const RUN_QUEUED_WARNING_MS = 10 * 60_000;
+export const RUN_MISSING_TERMINAL_EVIDENCE_MS = 10 * 60_000;
+export const RUN_CANCELLATION_WARNING_MS = 10 * 60_000;
+
+export function deriveWorkflowMissingObservationTransition(input: {
+  status: WorkflowHealthStatus;
+  currentCount: number;
+  currentSince: Date | null;
+  observedAt: Date;
+}): {
+  mode: "increment" | "preserve" | "reset";
+  nextCount: number;
+  nextSince: Date | null;
+} {
+  if (input.status === "missing") {
+    return {
+      mode: "increment",
+      nextCount: input.currentCount + 1,
+      nextSince: input.currentSince ?? input.observedAt,
+    };
+  }
+  if (input.status === "unavailable") {
+    return {
+      mode: "preserve",
+      nextCount: input.currentCount,
+      nextSince: input.currentSince,
+    };
+  }
+  return { mode: "reset", nextCount: 0, nextSince: null };
+}
+
+export function hasConclusiveMissingWorkflowEvidence(input: {
+  count: number;
+  since: Date | string | null;
+  now?: Date;
+}): boolean {
+  const since = normalizeRunTimestamp(input.since);
+  const now = input.now ?? new Date();
+  return Boolean(
+    input.count >= 3 &&
+    since &&
+    now.getTime() - since.getTime() >= RUN_MISSING_TERMINAL_EVIDENCE_MS,
+  );
+}
+
+export function classifyRunHealth(input: {
+  databaseStatus: AuthoringRunStatus;
+  workflowStatus: WorkflowHealthStatus;
+  acceptedAt: Date;
+  lastUpdateAt: Date;
+  cancellationRequestedAt: Date | null;
+  remainingEstimateMs?: number | null;
+  now?: Date;
+}): RunHealth["health"] {
+  const now = input.now ?? new Date();
+  if (TERMINAL_DATABASE_STATUSES.has(input.databaseStatus)) return "healthy";
+  if (
+    input.cancellationRequestedAt &&
+    now.getTime() - input.cancellationRequestedAt.getTime() >= RUN_CANCELLATION_WARNING_MS
+  ) {
+    return "critical";
+  }
+  const silenceMs = now.getTime() - input.lastUpdateAt.getTime();
+  const estimateCritical =
+    typeof input.remainingEstimateMs === "number" &&
+    input.remainingEstimateMs > 0 &&
+    silenceMs >= input.remainingEstimateMs * 2;
+  if (silenceMs >= RUN_HEARTBEAT_CRITICAL_MS || estimateCritical) return "critical";
+  if (
+    input.databaseStatus === "queued" &&
+    now.getTime() - input.acceptedAt.getTime() >= RUN_QUEUED_WARNING_MS
+  ) {
+    return "warning";
+  }
+  if (silenceMs >= RUN_HEARTBEAT_WARNING_MS || input.cancellationRequestedAt) return "warning";
+  if (input.workflowStatus === "unavailable") return "degraded";
+  return "healthy";
+}
 
 function asAuthoringRunStatus(status: string): AuthoringRunStatus {
   if (
@@ -170,6 +445,9 @@ export async function readWorkflowSnapshot(
   if (!workflowRunId) {
     return { status: "missing", startedAt: null, completedAt: null };
   }
+  if (isE2EWorkflowStubEnabled() && workflowRunId === "e2e-workflow-unavailable") {
+    return { status: "unavailable", startedAt: null, completedAt: null };
+  }
 
   try {
     return await withTimeout(
@@ -197,12 +475,70 @@ export async function readWorkflowSnapshot(
   }
 }
 
+async function persistWorkflowObservation(
+  run: RunForHealth,
+  workflow: WorkflowSnapshot,
+): Promise<{
+  missingCount: number;
+  missingSince: Date | null;
+}> {
+  const now = new Date();
+  const transition = deriveWorkflowMissingObservationTransition({
+    status: workflow.status,
+    currentCount: run.workflowMissingCount,
+    currentSince: run.workflowMissingSince,
+    observedAt: now,
+  });
+  try {
+    const [observed] = await getDb()
+      .update(schema.generationRuns)
+      .set({
+        workflowObservedStatus: workflow.status,
+        workflowObservedAt: now,
+        workflowMissingCount:
+          transition.mode === "increment"
+            ? sql`${schema.generationRuns.workflowMissingCount} + 1`
+            : transition.mode === "preserve"
+              ? sql`${schema.generationRuns.workflowMissingCount}`
+              : 0,
+        workflowMissingSince:
+          transition.mode === "increment"
+            ? sql`coalesce(${schema.generationRuns.workflowMissingSince}, ${now})`
+            : transition.mode === "preserve"
+              ? sql`${schema.generationRuns.workflowMissingSince}`
+              : null,
+      })
+      .where(eq(schema.generationRuns.id, run.id))
+      .returning({
+        missingCount: schema.generationRuns.workflowMissingCount,
+        missingSince: schema.generationRuns.workflowMissingSince,
+      });
+    return {
+      missingCount: observed?.missingCount ?? run.workflowMissingCount,
+      missingSince: observed?.missingSince ?? run.workflowMissingSince,
+    };
+  } catch (error) {
+    // Observation persistence improves recovery evidence, but a status page
+    // must still render when this best-effort write is unavailable.
+    console.error("Could not persist Workflow observation", { runId: run.id, error });
+  }
+  return {
+    missingCount: run.workflowMissingCount,
+    missingSince: run.workflowMissingSince,
+  };
+}
+
 export function deriveEffectiveRunStatus(input: {
   databaseStatus: AuthoringRunStatus;
   workflowStatus: WorkflowHealthStatus;
   completionArtifactsReady: boolean;
   workflowCompletionRequiresArtifacts?: boolean;
 }): EffectiveRunStatus {
+  if (input.databaseStatus === "completed") {
+    return input.workflowCompletionRequiresArtifacts === false || input.completionArtifactsReady
+      ? "completed"
+      : "failed";
+  }
   if (TERMINAL_DATABASE_STATUSES.has(input.databaseStatus)) return input.databaseStatus;
 
   switch (input.workflowStatus) {
@@ -230,7 +566,7 @@ export function workflowCompletionRequiresArtifacts(kind: string): boolean {
   );
 }
 
-function generationEstimate(config: Partial<GenerationConfig>): number | null {
+export function generationEstimate(config: Partial<GenerationConfig>): number | null {
   const tier = config.tier;
   const chapters = config.targetChapters;
   const words = config.targetWordsPerChapter;
@@ -296,16 +632,51 @@ export function summarizeChapterRowsForRun(
 }
 
 export function completionArtifactsAreReady(input: {
+  runId: string;
   config: Partial<GenerationConfig>;
   projectCompletedAt: Date | null;
   finalChapterCount: number;
+  databaseStatus?: AuthoringRunStatus;
 }): boolean {
-  const finalized = input.config.completion?.finalized;
-  return Boolean(
-    finalized?.manuscriptDigest &&
-    input.projectCompletedAt &&
-    input.finalChapterCount >= expectedChapterCount(input.config),
+  const evidence = fullBookCompletionEvidence({
+    ...input,
+    projectStatus: null,
+  });
+  return (
+    (evidence.runOwnedFinalization || evidence.legacyCompletionCompatible) &&
+    evidence.projectCompletedAt &&
+    (input.databaseStatus === "completed" || evidence.finalChaptersComplete)
   );
+}
+
+export function fullBookCompletionEvidence(input: {
+  runId: string;
+  config: Partial<GenerationConfig>;
+  projectCompletedAt: Date | null;
+  projectStatus: FullBookCompletionEvidence["projectStatus"];
+  finalChapterCount: number;
+  databaseStatus?: AuthoringRunStatus;
+}): FullBookCompletionEvidence {
+  const finalized = input.config.completion?.finalized;
+  const expected = expectedChapterCount(input.config);
+  const requiresRunOwnedFinalization = requiresRunOwnedFullBookCompletionProof(input.config);
+  const runOwnedFinalization = Boolean(
+    finalized?.manuscriptDigest && finalized.sourceRunId === input.runId,
+  );
+  const finalChaptersComplete = input.finalChapterCount >= expected;
+  const projectCompletedAt = input.projectCompletedAt !== null;
+  return {
+    requiresRunOwnedFinalization,
+    runOwnedFinalization,
+    legacyCompletionCompatible:
+      !requiresRunOwnedFinalization &&
+      (input.databaseStatus === "completed" || (projectCompletedAt && finalChaptersComplete)),
+    finalChaptersComplete,
+    expectedChapterCount: expected,
+    finalChapterContentCount: input.finalChapterCount,
+    projectCompletedAt,
+    projectStatus: input.projectStatus,
+  };
 }
 
 /**
@@ -319,9 +690,16 @@ export function runCompletionArtifactsAreReady(input: {
   config: Partial<GenerationConfig>;
   projectCompletedAt: Date | null;
   finalChapterCount: number;
+  databaseStatus?: AuthoringRunStatus;
 }): boolean {
   if (input.kind === "full_book") {
-    return completionArtifactsAreReady(input);
+    return completionArtifactsAreReady({
+      runId: input.runId,
+      config: input.config,
+      projectCompletedAt: input.projectCompletedAt,
+      finalChapterCount: input.finalChapterCount,
+      databaseStatus: input.databaseStatus,
+    });
   }
 
   const completion = input.config.completion;
@@ -363,6 +741,25 @@ async function readCurrentRun(run: RunForHealth): Promise<RunForHealth | null> {
       acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
       acceptanceDispatchClaimedAt: schema.generationRuns.acceptanceDispatchClaimedAt,
       healthCheckedAt: schema.generationRuns.healthCheckedAt,
+      currentStage: schema.generationRuns.currentStage,
+      progressPct: schema.generationRuns.progressPct,
+      stageDescription: schema.generationRuns.stageDescription,
+      lastProgressAt: schema.generationRuns.lastProgressAt,
+      heartbeatAt: schema.generationRuns.heartbeatAt,
+      workflowObservedStatus: schema.generationRuns.workflowObservedStatus,
+      workflowObservedAt: schema.generationRuns.workflowObservedAt,
+      workflowMissingSince: schema.generationRuns.workflowMissingSince,
+      workflowMissingCount: schema.generationRuns.workflowMissingCount,
+      dispatchAttempts: schema.generationRuns.dispatchAttempts,
+      cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+      cancellationReason: schema.generationRuns.cancellationReason,
+      pauseKind: schema.generationRuns.pauseKind,
+      pauseVersion: schema.generationRuns.pauseVersion,
+      pauseDetails: schema.generationRuns.pauseDetails,
+      pauseRegisteredAt: schema.generationRuns.pauseRegisteredAt,
+      supportReference: schema.generationRuns.supportReference,
+      rootErrorCode: schema.generationRuns.rootErrorCode,
+      rootErrorStage: schema.generationRuns.rootErrorStage,
       createdAt: schema.generationRuns.createdAt,
     })
     .from(schema.generationRuns)
@@ -393,7 +790,7 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
     db
       .select({
         authoringCount: sql<number>`count(*) filter (
-          where ${schema.generationEvents.type} in ('agent', 'chapter', 'review')
+          where ${schema.generationEvents.type} in ('agent', 'chapter', 'review', 'tool_mutation')
             or (
               ${schema.generationEvents.type} = 'stage'
               and ${schema.generationEvents.payload}->>'stage' <> 'queued'
@@ -407,6 +804,7 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
     db
       .select({
         payload: schema.generationEvents.payload,
+        createdAt: schema.generationEvents.createdAt,
       })
       .from(schema.generationEvents)
       .where(
@@ -434,10 +832,18 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
         and(
           eq(schema.creditLedger.runId, run.id),
           sql`coalesce(${schema.creditLedger.externalRef}, '') ~ '^(generation-reservation:|interactive-reservation:)'`,
+          sql`not exists (
+            select 1
+            from credit_ledger released
+            where released.external_ref = 'release:' || ${schema.creditLedger.externalRef}
+          )`,
         ),
       ),
     db
-      .select({ completedAt: schema.projects.completedAt })
+      .select({
+        completedAt: schema.projects.completedAt,
+        status: schema.projects.status,
+      })
       .from(schema.projects)
       .where(eq(schema.projects.id, run.projectId))
       .limit(1),
@@ -473,6 +879,7 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
   return {
     authoringEventCount: eventFacts?.authoringCount ?? 0,
     lastEventAt: normalizeRunTimestamp(eventFacts?.lastAt),
+    lastStageEventAt: stageEvent?.createdAt ?? null,
     stage: latestStage,
     progressPct,
     stageDescription,
@@ -481,6 +888,7 @@ async function readRunFacts(run: RunForHealth): Promise<RunFacts> {
     creditsUsed: Number(usageFacts?.credits ?? 0),
     reservationCount: reservationFacts?.count ?? 0,
     projectCompletedAt: projectFacts?.completedAt ?? null,
+    projectStatus: projectFacts?.status ?? null,
     chapterCounts: chapterSummary.chapters,
     finalChapterContentCount: chapterSummary.finalChapterContentCount,
   };
@@ -491,11 +899,23 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
     readWorkflowSnapshot(run.workflowRunId),
     readRunFacts(run),
   ]);
+  const workflowObservation = await persistWorkflowObservation(run, workflow);
   let currentRun = run;
   let facts = initialFacts;
   let databaseStatus = asAuthoringRunStatus(currentRun.status);
   let config = (currentRun.config ?? {}) as Partial<GenerationConfig>;
   let requiresCompletionArtifacts = workflowCompletionRequiresArtifacts(currentRun.kind);
+  let completionEvidence =
+    currentRun.kind === "full_book"
+      ? fullBookCompletionEvidence({
+          runId: currentRun.id,
+          config,
+          projectCompletedAt: facts.projectCompletedAt,
+          projectStatus: facts.projectStatus,
+          finalChapterCount: facts.finalChapterContentCount,
+          databaseStatus,
+        })
+      : null;
   let completionArtifactsReady =
     requiresCompletionArtifacts &&
     runCompletionArtifactsAreReady({
@@ -504,6 +924,7 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
       config,
       projectCompletedAt: facts.projectCompletedAt,
       finalChapterCount: facts.finalChapterContentCount,
+      databaseStatus,
     });
 
   // Workflow can become completed while the status endpoint is waiting on its
@@ -522,6 +943,17 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
       databaseStatus = asAuthoringRunStatus(currentRun.status);
       config = (currentRun.config ?? {}) as Partial<GenerationConfig>;
       requiresCompletionArtifacts = workflowCompletionRequiresArtifacts(currentRun.kind);
+      completionEvidence =
+        currentRun.kind === "full_book"
+          ? fullBookCompletionEvidence({
+              runId: currentRun.id,
+              config,
+              projectCompletedAt: facts.projectCompletedAt,
+              projectStatus: facts.projectStatus,
+              finalChapterCount: facts.finalChapterContentCount,
+              databaseStatus,
+            })
+          : null;
       completionArtifactsReady =
         requiresCompletionArtifacts &&
         runCompletionArtifactsAreReady({
@@ -530,6 +962,7 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
           config,
           projectCompletedAt: facts.projectCompletedAt,
           finalChapterCount: facts.finalChapterContentCount,
+          databaseStatus,
         });
     }
   }
@@ -556,11 +989,49 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
   const lastUpdateAt =
     latestDate(
       facts.lastEventAt,
+      currentRun.heartbeatAt,
+      currentRun.lastProgressAt,
       currentRun.completedAt,
       workflow.completedAt,
       currentRun.startedAt,
       workflow.startedAt,
     ) ?? acceptedAt;
+  const heartbeatAt = latestDate(
+    currentRun.heartbeatAt,
+    currentRun.lastProgressAt,
+    facts.lastEventAt,
+  );
+  const canonicalProgress = canonicalRunProgress({
+    effectiveStatus,
+    persisted: {
+      stage: currentRun.currentStage,
+      progressPct: currentRun.progressPct,
+      stageDescription: currentRun.stageDescription,
+      lastProgressAt: currentRun.lastProgressAt,
+    },
+    event: {
+      stage: facts.stage,
+      progressPct: facts.progressPct,
+      stageDescription: facts.stageDescription,
+      createdAt: facts.lastStageEventAt,
+    },
+  });
+  const canonicalStage = canonicalProgress.stage;
+  const canonicalPct = canonicalProgress.progressPct;
+  const canonicalDescription = canonicalProgress.stageDescription;
+  const estimatedMinutes = generationEstimate(config);
+  const remainingEstimateMs =
+    estimatedMinutes === null
+      ? null
+      : estimatedMinutes * 60_000 * Math.max(0, 1 - canonicalPct / 100);
+  const health = classifyRunHealth({
+    databaseStatus,
+    workflowStatus: workflow.status,
+    acceptedAt,
+    lastUpdateAt,
+    cancellationRequestedAt: currentRun.cancellationRequestedAt,
+    remainingEstimateMs,
+  });
 
   return {
     databaseStatus,
@@ -572,12 +1043,13 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
     workflowStartedAt: workflow.startedAt?.toISOString() ?? null,
     workflowCompletedAt: workflow.completedAt?.toISOString() ?? null,
     lastEventAt: facts.lastEventAt?.toISOString() ?? null,
+    heartbeatAt: heartbeatAt?.toISOString() ?? null,
     lastUpdateAt: lastUpdateAt.toISOString(),
     elapsedMs: Math.max(0, (terminalAt ?? new Date()).getTime() - acceptedAt.getTime()),
-    estimatedMinutes: generationEstimate(config),
-    stage: facts.stage,
-    progressPct: facts.progressPct,
-    stageDescription: facts.stageDescription,
+    estimatedMinutes,
+    stage: canonicalStage,
+    progressPct: canonicalPct,
+    stageDescription: canonicalDescription,
     chapters: facts.chapterCounts,
     spend: {
       meteredUsd: facts.meteredUsd,
@@ -588,6 +1060,32 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
     acceptanceUncertain,
     safeToRetry: acceptanceUncertain && acceptanceState.safeToRetry,
     completionArtifactsReady,
+    completionEvidence,
+    health,
+    dispatchAttempts: currentRun.dispatchAttempts,
+    workflowMissingCount: workflowObservation.missingCount,
+    workflowMissingSince: workflowObservation.missingSince?.toISOString() ?? null,
+    cancellation: currentRun.cancellationRequestedAt
+      ? {
+          requestedAt: currentRun.cancellationRequestedAt.toISOString(),
+          reason: currentRun.cancellationReason,
+        }
+      : null,
+    pause:
+      currentRun.pauseKind && currentRun.pauseRegisteredAt
+        ? {
+            kind: currentRun.pauseKind,
+            version: currentRun.pauseVersion,
+            registeredAt: currentRun.pauseRegisteredAt.toISOString(),
+            details: currentRun.pauseDetails,
+          }
+        : null,
+    savedChapterCount:
+      facts.chapterCounts.drafted + facts.chapterCounts.edited + facts.chapterCounts.final,
+    savedCheckpointCount: countSavedAuthoringCheckpoints(config),
+    supportReference: currentRun.supportReference,
+    rootErrorCode: currentRun.rootErrorCode,
+    rootErrorStage: currentRun.rootErrorStage,
   };
 }
 
@@ -596,7 +1094,7 @@ export type ReconcileRunResult =
   | {
       runId: string;
       outcome: "completed" | "failed" | "cancelled";
-      workflowStatus: "completed" | "failed" | "cancelled";
+      workflowStatus: WorkflowHealthStatus;
     }
   | {
       runId: string;
@@ -605,34 +1103,240 @@ export type ReconcileRunResult =
       error: string;
     };
 
+type AcceptedInputRedeliveryOutcome = Awaited<
+  ReturnType<typeof redeliverAcceptedAuthoringRunInput>
+>;
+
+type WatchdogInputRedeliveryDependencies = {
+  findAcceptedInputId(input: {
+    runId: string;
+    kind: "outline_approval" | "credits_topup";
+    pauseVersion: number;
+  }): Promise<string | null>;
+  redeliver(input: { inputId: string }): Promise<AcceptedInputRedeliveryOutcome>;
+};
+
+const watchdogInputRedeliveryDependencies: WatchdogInputRedeliveryDependencies = {
+  async findAcceptedInputId(input) {
+    const [row] = await getDb()
+      .select({ id: schema.authoringRunInputs.id })
+      .from(schema.authoringRunInputs)
+      .where(
+        and(
+          eq(schema.authoringRunInputs.runId, input.runId),
+          eq(schema.authoringRunInputs.kind, input.kind),
+          eq(schema.authoringRunInputs.pauseVersion, input.pauseVersion),
+          eq(schema.authoringRunInputs.status, "accepted"),
+        ),
+      )
+      .orderBy(desc(schema.authoringRunInputs.acceptedAt))
+      .limit(1);
+    return row?.id ?? null;
+  },
+  redeliver: redeliverAcceptedAuthoringRunInput,
+};
+
 /**
- * Repairs only a proven terminal mismatch. Pending, running, missing, and
- * unavailable Workflow states are intentionally read-only.
+ * Replays a response-loss-safe v2 input only while its exact pause remains
+ * authoritative. The durable input helper rechecks the run under the project
+ * lock and enforces its grace period, making repeated watchdog passes safe.
  */
-export async function reconcileAuthoringRun(run: RunForHealth): Promise<ReconcileRunResult> {
-  const health = await getRunHealth(run);
+export async function redeliverAcceptedInputForWatchdog(
+  input: {
+    runId: string;
+    config: unknown;
+    databaseStatus: AuthoringRunStatus;
+    effectiveStatus: AuthoringRunStatus;
+    cancellation: RunHealth["cancellation"];
+    pause: RunHealth["pause"];
+  },
+  dependencies: WatchdogInputRedeliveryDependencies = watchdogInputRedeliveryDependencies,
+): Promise<AcceptedInputRedeliveryOutcome> {
+  const protocolVersion = (input.config as Partial<GenerationConfig> | null)?.protocolVersion;
+  if (
+    protocolVersion !== 2 ||
+    input.databaseStatus !== "awaiting_input" ||
+    input.effectiveStatus !== "awaiting_input" ||
+    input.cancellation ||
+    !input.pause
+  ) {
+    return "not_eligible";
+  }
+
+  const inputId = await dependencies.findAcceptedInputId({
+    runId: input.runId,
+    kind: input.pause.kind,
+    pauseVersion: input.pause.version,
+  });
+  if (!inputId) return "not_eligible";
+  return dependencies.redeliver({ inputId });
+}
+
+async function notifyRunNeedsAttention(run: RunForHealth, health: RunHealth): Promise<void> {
+  try {
+    const [row] = await getDb()
+      .select({
+        email: schema.users.email,
+        title: schema.projects.title,
+      })
+      .from(schema.projects)
+      .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+      .where(eq(schema.projects.id, run.projectId))
+      .limit(1);
+    if (!row?.email) return;
+    const nextAction = await resolveAuthoringEmailAction({
+      userId: run.userId,
+      projectId: run.projectId,
+      supportReference: health.supportReference,
+    });
+    await sendAuthoringNeedsAttentionEmail({
+      to: row.email,
+      bookTitle: row.title,
+      runId: run.id,
+      savedChapterCount: health.savedChapterCount,
+      creditsUsed: health.spend.creditsUsed,
+      noWorkStarted: health.noWorkStarted,
+      supportReference: health.supportReference,
+      nextActionHref: nextAction.href,
+      nextActionLabel: nextAction.label,
+    });
+  } catch (error) {
+    console.warn("[email] authoring attention notification failed:", error);
+  }
+}
+
+async function repairConclusiveCompletedProjectProjection(
+  run: RunForHealth,
+  health: RunHealth,
+): Promise<boolean> {
+  const plan = completedFullBookProjectionRepairPlan({
+    runKind: run.kind,
+    runCompletedAt: health.completedAt,
+    evidence: health.completionEvidence,
+  });
+  if (!plan.conclusive) return false;
+
+  if (plan.repairStatus || plan.repairCompletedAt) {
+    await getDb()
+      .update(schema.projects)
+      .set({
+        ...(plan.repairCompletedAt ? { completedAt: plan.completedAt } : {}),
+        ...(plan.repairStatus ? { status: "editing" as const } : {}),
+      })
+      .where(and(eq(schema.projects.id, run.projectId), eq(schema.projects.userId, run.userId)));
+  }
+  return true;
+}
+
+type ReconcileAuthoringRunDependencies = {
+  getHealth: (run: RunForHealth) => Promise<RunHealth>;
+  transitionRun: typeof transitionAuthoringRunState;
+};
+
+/** Reconciles only evidence-backed terminal states and records ambiguity. */
+export async function reconcileAuthoringRun(
+  run: RunForHealth,
+  dependencies: Partial<ReconcileAuthoringRunDependencies> = {},
+): Promise<ReconcileRunResult> {
+  const health = await (dependencies.getHealth ?? getRunHealth)(run);
+  try {
+    await redeliverAcceptedInputForWatchdog({
+      runId: run.id,
+      config: run.config,
+      databaseStatus: health.databaseStatus,
+      effectiveStatus: health.effectiveStatus,
+      cancellation: health.cancellation,
+      pause: health.pause,
+    });
+  } catch (error) {
+    // The input remains accepted with its delivery error recorded. A later
+    // watchdog pass can retry it without changing the pause or author answer.
+    console.warn("Could not redeliver accepted authoring input", {
+      runId: run.id,
+      error,
+    });
+  }
   if (TERMINAL_DATABASE_STATUSES.has(health.databaseStatus)) {
+    if (
+      health.databaseStatus === "completed" &&
+      (await repairConclusiveCompletedProjectProjection(run, health))
+    ) {
+      await resolveAuthoringIncident({ runId: run.id, dedupeKey: "completion-contradiction" });
+      return { runId: run.id, outcome: "unchanged", workflowStatus: health.workflowStatus };
+    }
+    if (health.databaseStatus === "completed" && !health.completionArtifactsReady) {
+      await recordAuthoringIncident({
+        runId: run.id,
+        projectId: run.projectId,
+        category: "completion_contradiction",
+        severity: "critical",
+        dedupeKey: "completion-contradiction",
+        evidence: {
+          databaseStatus: health.databaseStatus,
+          expectedChapters: health.chapters.total,
+          finalChapters: health.chapters.final,
+        },
+      });
+      await transitionAuthoringRunState({
+        runId: run.id,
+        projectId: run.projectId,
+        userId: run.userId,
+        status: "failed",
+        error: "Completed run is missing its run-owned finalization proof",
+        errorCode: "completion_contradiction",
+        errorStage: health.stage,
+      });
+      await notifyRunNeedsAttention(run, health);
+      return { runId: run.id, outcome: "failed", workflowStatus: health.workflowStatus };
+    }
     return { runId: run.id, outcome: "unchanged", workflowStatus: health.workflowStatus };
   }
 
   if (health.workflowStatus === "completed") {
     if (health.completionArtifactsReady) {
-      await transitionAuthoringRunState({
+      const transition = await (dependencies.transitionRun ?? transitionAuthoringRunState)({
         runId: run.id,
         projectId: run.projectId,
         userId: run.userId,
         status: "completed",
+        resolveCancellationOnComplete: true,
       });
-      return { runId: run.id, outcome: "completed", workflowStatus: "completed" };
+      if (
+        transition.status === "completed" ||
+        transition.status === "cancelled" ||
+        transition.status === "failed"
+      ) {
+        return {
+          runId: run.id,
+          outcome: transition.status,
+          workflowStatus: "completed",
+        };
+      }
+      return { runId: run.id, outcome: "unchanged", workflowStatus: "completed" };
     }
+    await recordAuthoringIncident({
+      runId: run.id,
+      projectId: run.projectId,
+      category: "completion_contradiction",
+      severity: "critical",
+      dedupeKey: "completion-contradiction",
+      evidence: {
+        expectedChapters: health.chapters.total,
+        finalChapters: health.chapters.final,
+        workflowStatus: health.workflowStatus,
+      },
+    });
     await terminalizeAuthoringRun({
       runId: run.id,
       projectId: run.projectId,
       userId: run.userId,
       status: "failed",
       error: "Workflow completed without the expected authoring artifacts",
+      errorCode: "completion_contradiction",
+      errorStage: health.stage,
       releaseImmediately: true,
     });
+    await notifyRunNeedsAttention(run, health);
     return { runId: run.id, outcome: "failed", workflowStatus: "completed" };
   }
 
@@ -646,8 +1350,11 @@ export async function reconcileAuthoringRun(run: RunForHealth): Promise<Reconcil
         health.workflowStatus === "failed"
           ? "The authoring workflow stopped before production completed"
           : "The authoring workflow was cancelled",
+      errorCode: health.workflowStatus === "failed" ? "workflow_failed" : undefined,
+      errorStage: health.stage,
       releaseImmediately: true,
     });
+    if (health.workflowStatus === "failed") await notifyRunNeedsAttention(run, health);
     return {
       runId: run.id,
       outcome: health.workflowStatus,
@@ -655,7 +1362,161 @@ export async function reconcileAuthoringRun(run: RunForHealth): Promise<Reconcil
     };
   }
 
+  if (health.safeToRetry && health.dispatchAttempts < 3 && !health.cancellation) {
+    await recordAuthoringIncident({
+      runId: run.id,
+      projectId: run.projectId,
+      category: "dispatch",
+      severity: "warning",
+      dedupeKey: "dispatch-recovery",
+      evidence: {
+        attempts: health.dispatchAttempts,
+        acceptedAgeMs: health.elapsedMs,
+      },
+    });
+    const { redispatchUncertainAuthoringRun } = await import("@/lib/authoring-dispatch");
+    const redispatch = await redispatchUncertainAuthoringRun({
+      runId: run.id,
+      projectId: run.projectId,
+      userId: run.userId,
+    });
+    if (redispatch.outcome === "started" || redispatch.outcome === "reattached") {
+      await resolveAuthoringIncident({ runId: run.id, dedupeKey: "dispatch-recovery" });
+    }
+    return { runId: run.id, outcome: "unchanged", workflowStatus: health.workflowStatus };
+  }
+
+  if (
+    health.safeToRetry &&
+    health.dispatchAttempts >= 3 &&
+    health.noWorkStarted &&
+    !health.cancellation
+  ) {
+    await recordAuthoringIncident({
+      runId: run.id,
+      projectId: run.projectId,
+      category: "dispatch",
+      severity: "critical",
+      dedupeKey: "dispatch-exhausted",
+      evidence: { attempts: health.dispatchAttempts },
+    });
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: run.projectId,
+      userId: run.userId,
+      status: "failed",
+      error: "Writing didn’t begin. No credits were used.",
+      errorCode: "dispatch_exhausted",
+      errorStage: health.stage,
+      releaseImmediately: true,
+    });
+    await notifyRunNeedsAttention(run, health);
+    return { runId: run.id, outcome: "failed", workflowStatus: health.workflowStatus };
+  }
+
+  if (
+    health.workflowStatus === "missing" &&
+    hasConclusiveMissingWorkflowEvidence({
+      count: health.workflowMissingCount,
+      since: health.workflowMissingSince,
+    })
+  ) {
+    await recordAuthoringIncident({
+      runId: run.id,
+      projectId: run.projectId,
+      category: "workflow_missing",
+      severity: "critical",
+      dedupeKey: "workflow-missing",
+      evidence: {
+        observations: health.workflowMissingCount,
+        authoringBegan: health.authoringBegan,
+      },
+    });
+    const cancelled = Boolean(health.cancellation);
+    // Three authoritative missing observations prove that no remote call can
+    // still consume the reservation. An untouched hold is released by the
+    // terminalization below and is not evidence that writing began.
+    const zeroWork = !health.authoringBegan;
+    await terminalizeAuthoringRun({
+      runId: run.id,
+      projectId: run.projectId,
+      userId: run.userId,
+      status: cancelled ? "cancelled" : "failed",
+      error: cancelled
+        ? "The authoring workflow was cancelled"
+        : zeroWork
+          ? "Writing didn’t begin. No credits were used."
+          : "Production was interrupted. Your completed work is saved.",
+      errorCode: cancelled ? undefined : zeroWork ? "workflow_missing_zero_work" : "needs_recovery",
+      errorStage: health.stage,
+      releaseImmediately: true,
+    });
+    if (!cancelled) await notifyRunNeedsAttention(run, health);
+    return {
+      runId: run.id,
+      outcome: cancelled ? "cancelled" : "failed",
+      workflowStatus: "missing",
+    };
+  }
+
+  if (health.workflowStatus !== "missing") {
+    await resolveAuthoringIncident({ runId: run.id, dedupeKey: "workflow-missing" });
+  }
+  if (run.status === "awaiting_input" && !health.pause) {
+    await recordAuthoringIncident({
+      runId: run.id,
+      projectId: run.projectId,
+      category: "invalid_pause",
+      severity: "critical",
+      dedupeKey: "invalid-pause",
+      evidence: { databaseStatus: run.status, stage: health.stage },
+    });
+  } else {
+    await resolveAuthoringIncident({ runId: run.id, dedupeKey: "invalid-pause" });
+  }
+
+  if (health.health === "warning" || health.health === "critical") {
+    const lastUpdate = normalizeRunTimestamp(health.lastUpdateAt);
+    await recordAuthoringIncident({
+      runId: run.id,
+      projectId: run.projectId,
+      category: "stalled_heartbeat",
+      severity: health.health,
+      dedupeKey: "stalled-heartbeat",
+      evidence: {
+        silenceMs: lastUpdate ? Date.now() - lastUpdate.getTime() : null,
+        workflowStatus: health.workflowStatus,
+        stage: health.stage,
+      },
+    });
+  } else {
+    await resolveAuthoringIncident({ runId: run.id, dedupeKey: "stalled-heartbeat" });
+  }
+  if (health.cancellation) {
+    const requestedAt = normalizeRunTimestamp(health.cancellation.requestedAt);
+    const ageMs = requestedAt ? Date.now() - requestedAt.getTime() : 0;
+    if (ageMs >= RUN_CANCELLATION_WARNING_MS) {
+      await recordAuthoringIncident({
+        runId: run.id,
+        projectId: run.projectId,
+        category: "cancellation_unconfirmed",
+        severity: "critical",
+        dedupeKey: "cancellation-unconfirmed",
+        evidence: { ageMs, workflowStatus: health.workflowStatus },
+      });
+    }
+  } else {
+    await resolveAuthoringIncident({ runId: run.id, dedupeKey: "cancellation-unconfirmed" });
+  }
+
   return { runId: run.id, outcome: "unchanged", workflowStatus: health.workflowStatus };
+}
+
+export function authoringReconciliationCandidateCondition() {
+  return or(
+    inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
+    and(eq(schema.generationRuns.status, "completed"), eq(schema.generationRuns.kind, "full_book")),
+  )!;
 }
 
 export async function reconcileActiveAuthoringRuns(input?: {
@@ -664,8 +1525,8 @@ export async function reconcileActiveAuthoringRuns(input?: {
 }): Promise<ReconcileRunResult[]> {
   const db = getDb();
   const conditions = [
-    inArray(schema.generationRuns.status, [...ACTIVE_AUTHORING_RUN_STATUSES]),
     ne(schema.generationRuns.kind, "export"),
+    authoringReconciliationCandidateCondition(),
   ];
   if (input?.projectId) conditions.push(eq(schema.generationRuns.projectId, input.projectId));
 

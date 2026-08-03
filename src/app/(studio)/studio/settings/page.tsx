@@ -70,7 +70,6 @@ export default function SettingsPage() {
   return (
     <div className="mx-auto max-w-4xl space-y-8">
       <PageHeader
-        label="Account / Settings"
         title="Settings"
         description="Choose how the studio looks and what each new book assumes."
       />

@@ -10,9 +10,12 @@ import { latestResumableRunId, type GenerationConfig } from "@/lib/run-events";
 import { chapterTopologyFingerprint, outlineStateFingerprint } from "@/lib/manuscript-state";
 import {
   insertQueuedAuthoringRun,
+  FullBookStartInsufficientCreditsError,
   linkAuthoringRunWorkflow,
   markAuthoringRunAcceptanceUncertain,
+  ProjectStartSnapshotChangedError,
   reconcileBeforeAuthoringRunConflict,
+  requestAuthoringRunCancellation,
   RunRequestKeyMismatchError,
   scheduleRunReservationCleanup,
   settleStubbedAuthoringRunHandoff,
@@ -23,6 +26,8 @@ import { authorizeProjectSpend } from "@/lib/project-spend-http";
 import { TRIAL_STORY_CONFIG } from "@/lib/trial-story";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 import { prepareFullBookRunDispatch } from "@/lib/authoring-dispatch";
+import { fullBookRequiredCredits } from "@/lib/full-book-credit-requirement";
+import { getAuthoringStartSafetyBlock } from "@/lib/authoring-start-safety";
 
 export const maxDuration = 60;
 
@@ -30,6 +35,10 @@ const bodySchema = z.object({
   requestKey: z.uuid().optional(),
   tier: z.enum(["draft", "standard", "premium"]).default("standard"),
   requireOutlineApproval: z.boolean().default(false),
+});
+
+const cancellationBodySchema = z.object({
+  runId: z.uuid(),
 });
 
 function buildBaseGenerationConfig(input: {
@@ -42,6 +51,7 @@ function buildBaseGenerationConfig(input: {
   const { project } = input;
   const trial = project.experience === "trial_short_story";
   return {
+    protocolVersion: 2,
     productionMode: project.experience,
     tier: trial ? TRIAL_STORY_CONFIG.tier : input.tier,
     requireOutlineApproval: trial
@@ -156,6 +166,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     );
   }
 
+  await reconcileBeforeAuthoringRunConflict({ projectId, userId });
+  const safetyBlock = await getAuthoringStartSafetyBlock({ projectId, userId });
+  if (safetyBlock) {
+    return Response.json(
+      {
+        error: "This project needs a safety recheck before another authoring run can be created.",
+        ...safetyBlock,
+      },
+      { status: 409 },
+    );
+  }
+
   const spendDenied = await authorizeProjectSpend({
     userId,
     projectId,
@@ -163,7 +185,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   });
   if (spendDenied) return spendDenied;
 
-  await reconcileBeforeAuthoringRunConflict({ projectId, userId });
   const [activeRun] = await db
     .select({
       id: schema.generationRuns.id,
@@ -199,6 +220,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   const limited = await rateLimit(LIMITS.bookStart, req, userId);
   if (limited.limited) return limited.response;
 
+  const minimumBalanceCredits =
+    project.experience === "full_book"
+      ? fullBookRequiredCredits({
+          tier: parsed.data.tier,
+          targetChapters: project.targetChapters,
+          targetWordsPerChapter: project.targetWordsPerChapter,
+        })
+      : undefined;
   const book = await getOrCreateBook(project.id, project.title);
   const chapterRows = await db
     .select({
@@ -275,6 +304,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
       kind: "full_book",
       config,
       requestKey,
+      expectedProjectSnapshot: {
+        updatedAt: project.updatedAt,
+        targetChapters: project.targetChapters,
+        targetWordsPerChapter: project.targetWordsPerChapter,
+        experience: project.experience,
+      },
+      ...(minimumBalanceCredits !== undefined ? { minimumBalanceCredits } : {}),
     });
     if (!run.inserted) {
       return Response.json(
@@ -298,8 +334,34 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         { status: 409 },
       );
     }
+    if (error instanceof ProjectStartSnapshotChangedError) {
+      return Response.json(
+        {
+          error:
+            "Your book setup changed before production started. Review the refreshed estimate and try again.",
+          code: "setup_changed",
+          retryable: true,
+        },
+        { status: 409 },
+      );
+    }
     if (error instanceof TrialOptionalWorkInProgressError) {
       return Response.json({ error: error.message, code: "trial_busy" }, { status: 409 });
+    }
+    if (error instanceof FullBookStartInsufficientCreditsError) {
+      return Response.json(
+        {
+          error: `${error.balance.toFixed(2)} credits available; ${error.required.toFixed(2)} needed to begin.`,
+          code: "insufficient_credits",
+          balance: error.balance,
+          required: error.required,
+          action: {
+            kind: "add_credits",
+            href: `/studio/credits?return=${encodeURIComponent(`/projects/${projectId}/write`)}&needed=${encodeURIComponent(String(error.required - error.balance))}`,
+          },
+        },
+        { status: 402 },
+      );
     }
     // The partial unique index is the race-proof backstop behind the pre-check above.
     if (!isActiveRunConflict(error)) throw error;
@@ -395,7 +457,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   return Response.json({ runId: run.id, requestKey, config }, { status: 202 });
 }
 
-export async function DELETE(_req: Request, ctx: { params: Promise<{ projectId: string }> }) {
+export async function DELETE(req: Request, ctx: { params: Promise<{ projectId: string }> }) {
   let userId: string;
   try {
     ({ userId } = await requireUser());
@@ -409,36 +471,39 @@ export async function DELETE(_req: Request, ctx: { params: Promise<{ projectId: 
   if (!z.uuid().safeParse(projectId).success) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
-  const db = getDb();
-  const [run] = await db
-    .select()
-    .from(schema.generationRuns)
-    .where(
-      and(
-        eq(schema.generationRuns.projectId, projectId),
-        eq(schema.generationRuns.userId, userId),
-        inArray(schema.generationRuns.status, ["queued", "running", "awaiting_input"]),
-        ne(schema.generationRuns.kind, "export"),
-      ),
-    )
-    .limit(1);
-  if (!run) return Response.json({ error: "No active run" }, { status: 404 });
-
-  if (run.workflowRunId) {
-    try {
-      await getRun(run.workflowRunId).cancel();
-    } catch {
-      // The workflow may already be terminal. DB state remains authoritative.
-    }
+  const body = cancellationBodySchema.safeParse(await req.json().catch(() => null));
+  if (!body.success) {
+    return Response.json({ error: "A valid run ID is required" }, { status: 400 });
   }
-  await terminalizeAuthoringRun({
-    runId: run.id,
+
+  const cancellation = await requestAuthoringRunCancellation({
+    runId: body.data.runId,
     projectId,
     userId,
-    status: "cancelled",
-    error: "Cancelled by author",
+    reason: "Cancelled by author",
   });
-  await scheduleRunReservationCleanup({ userId, runId: run.id });
+  if (!cancellation?.requested) {
+    return Response.json(
+      {
+        error: "This run is no longer the active authoring run. Refresh before stopping work.",
+        code: "stale_run",
+      },
+      { status: 409 },
+    );
+  }
 
-  return Response.json({ cancelled: true });
+  if (cancellation.workflowRunId) {
+    try {
+      await getRun(cancellation.workflowRunId).cancel();
+    } catch (error) {
+      console.warn("Could not immediately forward authoring cancellation", {
+        runId: cancellation.runId,
+        workflowRunId: cancellation.workflowRunId,
+        error,
+      });
+    }
+  }
+  await scheduleRunReservationCleanup({ userId, runId: cancellation.runId });
+
+  return Response.json({ cancelled: false, cancellationRequested: true });
 }

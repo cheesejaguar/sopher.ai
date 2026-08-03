@@ -7,13 +7,31 @@ const E2E_TRIAL_USER_PATTERN =
  * Allows DB-backed browser tests to exercise the real start boundary without
  * invoking Vercel Workflow or a model provider.
  *
- * All three conditions are required. In particular, a production build can
- * never enable this path even if the two explicit E2E variables are present.
+ * Every condition is required. Optimized local acceptance may opt in because
+ * browser tests should exercise the production server, but only with the
+ * disposable database host, explicit dev auth, and a non-Vercel runtime.
  */
 export function isE2EWorkflowStubEnabled(): boolean {
+  let databaseHostMatches = false;
+  try {
+    const allowedHost = process.env.E2E_DATABASE_HOST?.trim();
+    databaseHostMatches = Boolean(
+      allowedHost &&
+      process.env.DATABASE_URL &&
+      new URL(process.env.DATABASE_URL).hostname === allowedHost,
+    );
+  } catch {
+    databaseHostMatches = false;
+  }
+
+  const runtimeAllowed =
+    process.env.NODE_ENV !== "production" ||
+    (process.env.E2E_PRODUCTION_SERVER === "1" && process.env.ALLOW_DEV_AUTH === "1");
+
   return (
     !process.env.VERCEL_ENV &&
-    process.env.NODE_ENV !== "production" &&
+    runtimeAllowed &&
+    databaseHostMatches &&
     process.env.E2E_DATABASE_ISOLATED === "1" &&
     process.env.E2E_STUB_WORKFLOW === "1"
   );

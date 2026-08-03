@@ -47,7 +47,7 @@ describe("credit checkout continuation", () => {
     expect(mocks.createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
         success_url:
-          "https://preview.sopher.test/studio/credits?purchase=complete&return=%2Fstudio%2Fnew",
+          "https://preview.sopher.test/studio/credits?purchase=complete&session_id={CHECKOUT_SESSION_ID}&return=%2Fstudio%2Fnew",
         cancel_url:
           "https://preview.sopher.test/studio/credits?purchase=cancelled&return=%2Fstudio%2Fnew",
       }),
@@ -81,7 +81,8 @@ describe("credit checkout continuation", () => {
     expect(response.status).toBe(200);
     expect(mocks.createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://sopher.ai/studio/credits?purchase=complete&return=%2Fstudio%2Fnew",
+        success_url:
+          "https://sopher.ai/studio/credits?purchase=complete&session_id={CHECKOUT_SESSION_ID}&return=%2Fstudio%2Fnew",
         cancel_url: "https://sopher.ai/studio/credits?purchase=cancelled&return=%2Fstudio%2Fnew",
       }),
     );
@@ -102,7 +103,8 @@ describe("credit checkout continuation", () => {
     expect(response.status).toBe(200);
     expect(mocks.createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({
-        success_url: "https://sopher.ai/studio/credits?purchase=complete",
+        success_url:
+          "https://sopher.ai/studio/credits?purchase=complete&session_id={CHECKOUT_SESSION_ID}",
         cancel_url: "https://sopher.ai/studio/credits?purchase=cancelled",
       }),
     );

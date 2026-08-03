@@ -9,6 +9,8 @@ export type ProjectProgressSnapshot = {
   detail?: string;
   /** Concrete work phase suspended by an awaiting_credits gate. */
   pausedStage?: Exclude<ProductionStage, "awaiting_credits">;
+  /** Durable or locally accepted cancellation request for this exact run. */
+  cancellationRequestedAt?: string;
   draftedCount: number;
   totalChapters: number;
 };
@@ -30,6 +32,23 @@ export const PRODUCTION_STAGE_LABELS: Record<ProductionStage, string> = {
   done: "Manuscript complete",
   failed: "Production needs attention",
   cancelled: "Production stopped",
+};
+
+const CANCELLATION_CHECKPOINT_LABELS: Record<ProductionStage, string> = {
+  queued: "Start",
+  concept: "Concept",
+  outline: "Outline",
+  awaiting_approval: "Outline approval",
+  bible: "Story bible",
+  awaiting_credits: "Credits pause",
+  chapters: "Chapters",
+  editing: "Editing",
+  continuity: "Continuity",
+  revising: "Revision",
+  finalizing: "Finishing",
+  done: "Completion",
+  failed: "Failure",
+  cancelled: "Cancellation",
 };
 
 const TERMINAL_PRODUCTION_STAGES: ReadonlySet<ProductionStage> = new Set([
@@ -74,6 +93,9 @@ export function isProjectProgressSnapshot(value: unknown): value is ProjectProgr
     Number.isInteger(candidate.totalChapters) &&
     candidate.totalChapters >= 0 &&
     (candidate.detail === undefined || typeof candidate.detail === "string") &&
+    (candidate.cancellationRequestedAt === undefined ||
+      (typeof candidate.cancellationRequestedAt === "string" &&
+        Number.isFinite(Date.parse(candidate.cancellationRequestedAt)))) &&
     (candidate.pausedStage === undefined ||
       (typeof candidate.pausedStage === "string" &&
         PAUSABLE_PRODUCTION_STAGES.has(candidate.pausedStage)))
@@ -120,4 +142,14 @@ export function describeProductionProgress(progress: ProjectProgressSnapshot): s
     return `${label} · ${progress.draftedCount} of ${progress.totalChapters} assembled`;
   }
   return detail ? `${label} · ${detail}` : label;
+}
+
+export function describeCancellationProgress(progress: ProjectProgressSnapshot): string {
+  const checkpoint =
+    progress.stage === "awaiting_credits" && progress.pausedStage
+      ? progress.pausedStage
+      : progress.stage;
+  return `Stopping safely after ${CANCELLATION_CHECKPOINT_LABELS[checkpoint]} · ${Math.round(
+    progress.pct,
+  )}%`;
 }

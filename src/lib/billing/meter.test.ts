@@ -389,9 +389,9 @@ describe("metered intent authorization", () => {
     expect(authorizationSql).toContain("intent_insert");
     expect(authorizationSql).toContain("regexp_replace");
     expect(authorizationSql).toContain("delivery-refund:");
-    expect(authorizationSql).toContain("from generation_runs active_run");
+    expect(authorizationSql).toContain("run_state as materialized");
     expect(authorizationSql).toContain(
-      "active_run.status in ('queued', 'running', 'awaiting_input')",
+      "run_state.status in ('queued', 'running', 'awaiting_input')",
     );
     expect(queries[1].values.map(String).join("\n")).toContain("reservation-close-request:");
     expect(authorizationSql).toContain("wallet.balance >=");
@@ -441,7 +441,40 @@ describe("metered intent authorization", () => {
     expect(queries[2].values.map(String)).toContain("10");
   });
 
-  it("restores the trial cap only for an exact delivery refund, not unrelated adjustments", async () => {
+  it("classifies exact delivery receipts and open leases before settled compensation", async () => {
+    let authorizationSql = "";
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      authorizationSql = queries.at(-1)!.strings.join("?");
+      return [[], [], [{ status: "delivery_pending", balance: "10", required: "1" }]];
+    });
+
+    await beginMeteredCallIntent({
+      userId: "user-1",
+      projectId: firstRecord.projectId,
+      intentRef: debit.intentRef,
+      intentPrefix: "metering-intent:interactive:user-1:cover:key:cover.generate:attempt:",
+      usagePrefix: "llm:interactive:user-1:cover:key:cover.generate:",
+      deliveryReceiptRef: "optional-delivery:project-1:cover:key",
+      maxCredits: 1,
+      description: "Cover",
+    });
+
+    expect(authorizationSql).toContain("delivered_receipt as materialized");
+    expect(authorizationSql).toContain("open_optional_delivery as materialized");
+    expect(authorizationSql).toContain("left(lease.external_ref");
+    expect(authorizationSql).toContain("not exists (select 1 from delivered_receipt)");
+    expect(authorizationSql).toContain("not exists (select 1 from open_optional_delivery)");
+    expect(authorizationSql.indexOf("then 'delivered'")).toBeLessThan(
+      authorizationSql.indexOf("then 'settled'"),
+    );
+    expect(authorizationSql.indexOf("then 'delivery_pending'")).toBeLessThan(
+      authorizationSql.indexOf("then 'settled'"),
+    );
+  });
+
+  it("keeps the trial provider-spend cap gross after delivery refunds", async () => {
     let authorizationSql = "";
     mocks.transaction.mockImplementation(async (build) => {
       const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
@@ -467,13 +500,8 @@ describe("metered intent authorization", () => {
       authorizationSql.indexOf("trial_cap_blocked as materialized"),
     );
     expect(trialSpendSql).toContain("where entry.kind = 'usage'");
-    expect(trialSpendSql).toContain("from credit_ledger compensated");
-    expect(trialSpendSql).toContain("compensated.user_id = entry.user_id");
-    expect(trialSpendSql).toContain("compensated.kind = 'adjustment'");
-    expect(trialSpendSql).toContain("compensated.amount > 0");
-    expect(trialSpendSql).toContain(
-      "'delivery-refund:' ||\n                    regexp_replace(entry.external_ref, ':step:[0-9]+$', '')",
-    );
+    expect(trialSpendSql).not.toContain("delivery-refund:");
+    expect(trialSpendSql).not.toContain("from credit_ledger compensated");
     expect(trialSpendSql).not.toMatch(
       /sum\(entry\.amount\)\s+filter\s*\(\s*where entry\.kind = 'adjustment'\s+and entry\.amount > 0/i,
     );
@@ -506,6 +534,36 @@ describe("metered intent authorization", () => {
     expect(authorizationSql).toContain("then 'suspended'");
   });
 
+  it("distinguishes cancellation and inactive runs from insufficient credit", async () => {
+    let authorizationSql = "";
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      authorizationSql = queries.at(-1)!.strings.join("?");
+      return [[], [{ status: "cancelled", balance: "10", required: "1" }]];
+    });
+
+    await expect(
+      beginMeteredCallIntent({
+        userId: "user-1",
+        projectId: firstRecord.projectId,
+        runId: firstRecord.runId,
+        intentRef: debit.intentRef,
+        intentPrefix: "metering-intent:generation:run-1:chapter:1:writer.draft:attempt:",
+        usagePrefix: debit.externalRefPrefix,
+        maxCredits: 1,
+        description: "Metering intent for writer.draft",
+      }),
+    ).resolves.toMatchObject({ status: "cancelled" });
+
+    expect(authorizationSql).toContain("run_state.cancellation_requested_at is not null");
+    expect(authorizationSql).toContain("then 'cancelled'");
+    expect(authorizationSql).toContain("then 'run_inactive'");
+    expect(authorizationSql.indexOf("then 'cancelled'")).toBeLessThan(
+      authorizationSql.indexOf("then 'trial_cap'"),
+    );
+  });
+
   it("repairs an optional delivery lease only for the exact replay key", async () => {
     let repairSql = "";
     let repairValues: unknown[] = [];
@@ -527,6 +585,28 @@ describe("metered intent authorization", () => {
     expect(repairSql).toContain("optional-operation-lease:%");
     expect(repairSql).toContain("on conflict (external_ref) do nothing");
     expect(repairValues.map(String)).toContain("%:33333333-3333-4333-8333-333333333333:%");
+  });
+
+  it("requires an exact immutable receipt before hardened replay repair", async () => {
+    let repairSql = "";
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      repairSql = queries[1].strings.join("?");
+      return [[], []];
+    });
+
+    await releaseReplayedOptionalOperationLeases({
+      userId: "user-1",
+      projectId: firstRecord.projectId,
+      deliveryReceiptRef: "optional-delivery:project-1:cover:key",
+      optionalLeasePrefix:
+        "optional-operation-lease:metering-intent:interactive:user-1:project:cover:key:",
+    });
+
+    expect(repairSql).toContain("delivered_receipt as materialized");
+    expect(repairSql).toContain("or exists (select 1 from delivered_receipt)");
+    expect(repairSql).toContain("left(lease.external_ref");
   });
 
   it("requires an aged unresolved intent and explicit terminal/release checks for operator recovery", async () => {
@@ -565,14 +645,18 @@ describe("metered intent authorization", () => {
     mocks.transaction.mockImplementation(async (build) => {
       const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
       const queries = build(tx);
-      retrySql = queries[1].strings.join("?");
-      return [[], [{ refunded: true }]];
+      retrySql = queries.at(-1)!.strings.join("?");
+      return [...queries.slice(0, -1).map(() => []), [{ refunded: true }]];
     });
 
     await expect(
       refundSettledLogicalUsageForRedo({
         userId: "user-1",
         usagePrefix: "llm:generation:run-1:chapter:1:writer:writer.draft:",
+        projectId: firstRecord.projectId,
+        deliveryReceiptRef: "optional-delivery:project-1:chapter:1:key",
+        optionalLeasePrefix:
+          "optional-operation-lease:metering-intent:interactive:user-1:chapter:1:key:",
       }),
     ).resolves.toBe(true);
 
@@ -581,5 +665,9 @@ describe("metered intent authorization", () => {
     expect(retrySql).toContain("claimed.run_id is not distinct from attempts.run_id");
     expect(retrySql).toContain("'release:' || parent.external_ref");
     expect(retrySql).toContain("parent_claim.external_ref || ':delivery-restore'");
+    expect(retrySql).toContain("delivered_receipt as materialized");
+    expect(retrySql).toContain("open_optional_delivery as materialized");
+    expect(retrySql).toContain("not exists (select 1 from delivered_receipt)");
+    expect(retrySql).toContain("not exists (select 1 from open_optional_delivery)");
   });
 });

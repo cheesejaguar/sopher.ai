@@ -26,6 +26,10 @@ export const EVENT_NAMES = [
   "export_downloaded",
   /** An AI suggestion was accepted into the prose. */
   "suggestion_applied",
+  /** The Studio help drawer was opened. */
+  "help_opened",
+  /** The optional first-book checklist was hidden or restored. */
+  "onboarding_checklist_changed",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];

@@ -1,10 +1,10 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { ArrowUpRight, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { StatusBadge } from "@/components/studio/status-badge";
 import { RelativeTime } from "@/components/relative-time";
 import { genreLabel } from "@/lib/genres";
 import { ProjectMenu } from "@/components/studio/project-menu";
@@ -15,6 +15,7 @@ import {
   fullBookUnlockHref,
   INCLUDED_STORY_NO_CARD_NOTE,
 } from "@/lib/marketing/trial-offer";
+import { journeyStatusLabel, type AuthoringNextAction } from "@/lib/authoring-journey";
 
 export type ProjectCardStatus = "draft" | "generating" | "editing" | "complete" | "archived";
 
@@ -29,35 +30,54 @@ export interface ProjectCardData {
   wordCount: number;
   chaptersDone: number;
   chaptersTotal: number;
-  spendUsd: number;
+  /** Net author-facing ledger debit, after delivery refunds. */
+  creditsUsed: number;
   estimateUsd: number;
+  nextAction: AuthoringNextAction;
   archived?: boolean;
-}
-
-/** The workspace stage a book naturally opens on, given its status. */
-function stageForStatus(status: ProjectCardStatus): "brief" | "write" | "editor" | "manuscript" {
-  switch (status) {
-    case "draft":
-      return "brief";
-    case "generating":
-      return "write";
-    case "editing":
-      return "editor";
-    case "complete":
-      return "manuscript";
-    case "archived":
-      // Read-only stroll through what exists; brief is the safest landing.
-      return "brief";
-  }
 }
 
 function formatSpendCredits(value: number): string {
   return `${(value * CREDIT_MARKUP).toFixed(1)} cr`;
 }
 
+function formatCredits(value: number): string {
+  return `${value.toFixed(1)} cr`;
+}
+
+function journeyNeedsAttention(action: AuthoringNextAction): boolean {
+  return (
+    action.kind === "contact_support" ||
+    action.kind === "recover_saved_work" ||
+    action.kind === "recover_dispatch" ||
+    action.kind === "add_credits"
+  );
+}
+
+function JourneyStatusBadge({ action }: { action: AuthoringNextAction }) {
+  const needsAttention = journeyNeedsAttention(action);
+  const active = action.kind === "watch_production" || action.kind === "finish_cancellation";
+  const complete = action.kind === "read_or_export";
+  return (
+    <Badge
+      variant="secondary"
+      className={cn(
+        "rounded-sm",
+        needsAttention && "bg-destructive/12 text-destructive",
+        active && "bg-ai-soft text-ai",
+        complete && "bg-success/15 text-success",
+      )}
+    >
+      {active ? <span aria-hidden="true" className="size-1.5 rounded-full bg-current" /> : null}
+      {journeyStatusLabel(action)}
+    </Badge>
+  );
+}
+
 export function ProjectCard({ project }: { project: ProjectCardData }) {
   const progress =
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
+  const needsAttention = journeyNeedsAttention(project.nextAction);
 
   return (
     <div className="group relative h-full">
@@ -67,8 +87,9 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
         <ProjectMenu projectId={project.id} title={project.title} archived={project.archived} />
       </div>
       <Link
-        href={`/projects/${project.id}/${stageForStatus(project.status)}`}
-        className="instrument-surface-raised relative flex h-full min-h-64 flex-col overflow-hidden rounded-sm p-5 transition-colors hover:border-foreground/30"
+        href={project.nextAction.href as Route}
+        aria-label={`${project.nextAction.label}: ${project.title}`}
+        className="instrument-surface relative flex h-full min-h-36 flex-col overflow-hidden rounded-sm p-4 transition-colors hover:border-foreground/30 md:min-h-64 md:p-5"
       >
         <span
           aria-hidden="true"
@@ -76,16 +97,15 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
         />
         <span
           aria-hidden="true"
-          className="absolute top-10 right-5 h-24 w-16 border border-border/70 bg-background/30 shadow-[4px_4px_0_var(--border)] transition-transform duration-300 group-hover:-translate-y-1"
+          className="absolute top-10 right-5 hidden h-24 w-16 border border-border/70 bg-background/30 shadow-[4px_4px_0_var(--border)] transition-transform duration-300 group-hover:-translate-y-1 md:block"
         >
           <span className="absolute top-4 right-3 left-3 h-px bg-border" />
           <span className="absolute top-7 right-3 left-3 h-px bg-border" />
           <span className="absolute top-10 right-5 left-3 h-px bg-border" />
         </span>
 
-        <div className="relative pr-20">
-          <p className="folio-label text-muted-foreground">Manuscript / project</p>
-          <h2 className="mt-3 text-lg leading-snug font-semibold tracking-[-0.02em] text-balance">
+        <div className="relative pr-10 md:pr-20">
+          <h2 className="text-lg leading-snug font-semibold tracking-[-0.02em] text-balance [overflow-wrap:anywhere]">
             {project.title}
           </h2>
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -94,11 +114,25 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
                 {genreLabel(project.genre)}
               </Badge>
             ) : null}
-            <StatusBadge status={project.status} className="rounded-sm" />
+            {project.archived ? (
+              <Badge variant="secondary" className="rounded-sm bg-muted text-muted-foreground">
+                Archived
+              </Badge>
+            ) : (
+              <JourneyStatusBadge action={project.nextAction} />
+            )}
           </div>
         </div>
+        <p
+          className={cn(
+            "relative mt-3 pr-10 text-xs leading-relaxed text-muted-foreground md:mt-4 md:line-clamp-none md:pr-20",
+            !needsAttention && "line-clamp-2",
+          )}
+        >
+          {project.nextAction.description}
+        </p>
 
-        <div className="mt-auto pt-8">
+        <div className="mt-auto pt-4 md:pt-8">
           <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
             <div>
               <p className="folio-label text-muted-foreground">Production</p>
@@ -108,31 +142,38 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
               </p>
             </div>
             <div className="text-right">
-              <p className="folio-label text-muted-foreground">Length</p>
-              <p className="mt-1 font-mono text-sm tabular-nums">
+              <p className="folio-label text-muted-foreground md:hidden">Credits used</p>
+              <p className="mt-1 font-mono text-sm tabular-nums md:hidden">
+                {formatCredits(project.creditsUsed)}
+              </p>
+              <p className="folio-label hidden text-muted-foreground md:block">Length</p>
+              <p className="mt-1 hidden font-mono text-sm tabular-nums md:block">
                 {new Intl.NumberFormat("en-US").format(project.wordCount)} words
               </p>
             </div>
           </div>
-          <div className="py-3">
+          <div className="py-3 md:py-3">
             <Progress
               value={progress}
-              aria-label={`Chapters completed: ${project.chaptersDone} of ${project.chaptersTotal}`}
+              aria-label={`Chapters saved: ${project.chaptersDone} of ${project.chaptersTotal}`}
               className="h-1"
             />
           </div>
-          <div className="flex items-end justify-between gap-4 border-t border-border pt-3 text-xs">
-            <span>
+          <div className="flex items-end justify-end gap-4 border-t border-border pt-3 text-xs md:justify-between">
+            <span className="hidden md:block">
               <span className="folio-label block text-muted-foreground">Credits used</span>
               <span className="mt-1 block font-mono tabular-nums">
-                {formatSpendCredits(project.spendUsd)}{" "}
+                {formatCredits(project.creditsUsed)}{" "}
                 <span className="text-muted-foreground">
                   / ~{formatSpendCredits(project.estimateUsd)}
                 </span>
               </span>
             </span>
-            <span className="text-right text-muted-foreground">
-              Updated <RelativeTime iso={project.updatedAt} />
+            <span className="max-w-36 text-right text-muted-foreground">
+              <span className="block font-medium text-foreground">{project.nextAction.label}</span>
+              <span className="mt-1 block">
+                Updated <RelativeTime iso={project.updatedAt} />
+              </span>
               <ArrowUpRight
                 aria-hidden="true"
                 className="ml-1 inline size-3 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
@@ -148,15 +189,6 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
 export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
   const progress =
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
-  const stage = stageForStatus(project.status);
-  const stageLabel =
-    stage === "brief"
-      ? "Open the brief"
-      : stage === "write"
-        ? "Watch production"
-        : stage === "editor"
-          ? "Continue editing"
-          : "Read the manuscript";
 
   return (
     <div className="group relative">
@@ -164,14 +196,14 @@ export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
         <ProjectMenu projectId={project.id} title={project.title} archived={project.archived} />
       </div>
       <Link
-        href={`/projects/${project.id}/${stage}`}
+        href={project.nextAction.href as Route}
+        aria-label={`${project.nextAction.label}: ${project.title}`}
         className="instrument-surface-raised relative grid min-h-72 overflow-hidden rounded-sm transition-colors hover:border-foreground/30 md:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]"
       >
         <span aria-hidden="true" className="spectral-rule absolute inset-y-0 left-0 w-px" />
         <div className="flex min-w-0 flex-col justify-between p-6 sm:p-8">
           <div>
-            <p className="folio-label text-primary">Continue where you left off</p>
-            <h2 className="mt-5 max-w-3xl pr-8 text-2xl font-semibold tracking-[-0.03em] text-balance sm:text-3xl">
+            <h2 className="max-w-3xl pr-8 text-2xl font-semibold tracking-[-0.03em] text-balance sm:text-3xl">
               {project.title}
             </h2>
             <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -180,11 +212,14 @@ export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
                   {genreLabel(project.genre)}
                 </Badge>
               ) : null}
-              <StatusBadge status={project.status} className="rounded-sm" />
+              <JourneyStatusBadge action={project.nextAction} />
             </div>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              {project.nextAction.description}
+            </p>
           </div>
           <span className="mt-8 inline-flex min-h-11 w-fit items-center gap-2 rounded-sm bg-primary px-4 text-sm font-semibold text-primary-foreground">
-            {stageLabel}
+            {project.nextAction.label}
             <ArrowUpRight
               aria-hidden="true"
               className="size-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5"
@@ -218,14 +253,14 @@ export function FeaturedProjectCard({ project }: { project: ProjectCardData }) {
           </div>
           <Progress
             value={progress}
-            aria-label={`Chapters completed: ${project.chaptersDone} of ${project.chaptersTotal}`}
+            aria-label={`Chapters saved: ${project.chaptersDone} of ${project.chaptersTotal}`}
             className="h-1"
           />
           <div className="mt-5 grid grid-cols-2 gap-4 border-t border-border pt-4 text-xs">
             <div>
               <span className="folio-label block text-muted-foreground">Credits used</span>
               <span className="mt-1 block font-mono tabular-nums">
-                {formatSpendCredits(project.spendUsd)}
+                {formatCredits(project.creditsUsed)}
                 <span className="text-muted-foreground">
                   {" "}
                   / ~{formatSpendCredits(project.estimateUsd)}
@@ -263,19 +298,18 @@ export function NewBookCard({
       href={href}
       className="group relative flex h-full min-h-64 flex-col justify-between overflow-hidden rounded-sm border border-border border-l-primary bg-instrument p-5 text-foreground transition-colors hover:border-primary/55 hover:bg-instrument-high"
     >
-      <span aria-hidden="true" className="absolute inset-y-0 right-10 w-px bg-primary/12" />
-      <span aria-hidden="true" className="absolute right-0 bottom-12 left-0 h-px bg-primary/12" />
-      <span className="folio-label text-primary">
-        {unlockFullBooks ? "Full-length production" : "New production"}
+      <span
+        aria-hidden="true"
+        data-slot="new-book-decoration"
+        className="pointer-events-none relative flex items-center"
+      >
+        <span className="grid size-11 shrink-0 place-items-center border border-primary/35 bg-primary/10 text-primary">
+          {unlockFullBooks ? <ArrowUpRight className="size-4" /> : <Plus className="size-4" />}
+        </span>
+        <span className="ml-4 h-px flex-1 bg-primary/12" />
+        <span className="absolute inset-y-0 right-10 w-px bg-primary/12" />
       </span>
-      <span className="relative grid size-11 place-items-center border border-primary/35 bg-primary/10 text-primary">
-        {unlockFullBooks ? (
-          <ArrowUpRight aria-hidden="true" className="size-4" />
-        ) : (
-          <Plus aria-hidden="true" className="size-4" />
-        )}
-      </span>
-      <span className="relative">
+      <span data-slot="new-book-copy" className="relative">
         <span className="block text-xl font-semibold tracking-[-0.02em]">
           {unlockFullBooks ? "Take your story to full length" : "Start a new book"}
         </span>

@@ -145,7 +145,11 @@ export async function POST(req: Request) {
         },
       },
     ],
-    success_url: `${origin}/studio/credits?purchase=complete${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`,
+    // Stripe replaces this literal placeholder after Checkout completes. The
+    // credits page then confirms the exact, user-owned ledger row written by
+    // the webhook instead of treating an existing unlock as proof that this
+    // purchase settled.
+    success_url: `${origin}/studio/credits?purchase=complete&session_id={CHECKOUT_SESSION_ID}${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`,
     cancel_url: `${origin}/studio/credits?purchase=cancelled${returnTo ? `&return=${encodeURIComponent(returnTo)}` : ""}`,
   });
 

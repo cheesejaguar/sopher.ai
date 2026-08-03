@@ -1,5 +1,3 @@
-import Link from "next/link";
-import type { Route } from "next";
 import { notFound } from "next/navigation";
 
 import { ChapterPager } from "@/components/manuscript/chapter-pager";
@@ -9,13 +7,14 @@ import { BookIdentityDialog } from "@/components/manuscript/book-identity-dialog
 import { CoverButton } from "@/components/manuscript/cover-button";
 import { ExportDialog } from "@/components/manuscript/export-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
-import { buttonVariants } from "@/components/ui/button";
 import { markdownToHtml } from "@/lib/export/assemble";
 import { loadFigures } from "@/lib/export/figures";
 import { requireUser } from "@/lib/auth";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
+import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
+import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 
-function EmptyManuscript({ projectId }: { projectId: string }) {
+function EmptyManuscript() {
   return (
     <div className="manuscript-sheet flex flex-col items-center gap-4 px-6 py-20 text-center">
       <p aria-hidden="true" className="text-2xl text-paper-muted">
@@ -26,13 +25,10 @@ function EmptyManuscript({ projectId }: { projectId: string }) {
           Nothing to read yet
         </h3>
         <p className="font-serif text-paper-muted italic">the writing desk is empty</p>
+        <p className="max-w-sm text-sm leading-relaxed text-paper-muted">
+          The project-wide next step above shows what is needed before chapters can be read here.
+        </p>
       </div>
-      <Link
-        href={`/projects/${projectId}/write` as Route}
-        className={buttonVariants({ variant: "default", size: "sm" })}
-      >
-        Start writing
-      </Link>
     </div>
   );
 }
@@ -52,12 +48,18 @@ export default async function ManuscriptPage({
 
   const chapterRows = book ? await getChapterList(book.id) : [];
   const readable = chapterRows.filter((c) => c.wordCount > 0);
+  const journey = await getAuthoringJourneySnapshot({
+    userId,
+    projectId,
+    data,
+    chapters: chapterRows,
+  });
 
   if (!book || readable.length === 0) {
     return (
       <div className="space-y-4">
         <h2 className="sr-only">Manuscript</h2>
-        <EmptyManuscript projectId={projectId} />
+        <EmptyManuscript />
       </div>
     );
   }
@@ -84,6 +86,7 @@ export default async function ManuscriptPage({
   return (
     <div className="space-y-4">
       <h2 className="sr-only">Manuscript</h2>
+      {journey ? <IncompleteProductionNotice journey={journey} /> : null}
 
       <header className="instrument-surface flex flex-wrap items-center justify-between gap-4 rounded-sm p-4">
         <div className="min-w-0 space-y-2">
@@ -122,9 +125,9 @@ export default async function ManuscriptPage({
         </div>
       </header>
 
-      <div className="manuscript-sheet px-6 py-12 sm:px-12 sm:py-16">
+      <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (
-          <header className="mx-auto max-w-2xl py-10 text-center sm:py-16 [content-visibility:auto]">
+          <header className="mx-auto max-w-2xl py-6 text-center sm:py-16 [content-visibility:auto]">
             {(book.frontMatter as { coverUrl?: string }).coverUrl ? (
               <Image
                 src={(book.frontMatter as { coverUrl?: string }).coverUrl as string}

@@ -26,6 +26,45 @@ type Conflict = { id: string; severity: string; description: string };
 
 type ProfileField = { key: string; label: string; list?: true };
 type ProfileSection = { title: string; fields: ProfileField[] };
+type GeneratedImageCopy = {
+  action: string;
+  pending: string;
+  ready: string;
+  failure: string;
+};
+
+const GENERATED_IMAGE_COPY: Record<BibleEntity["kind"], GeneratedImageCopy> = {
+  character: {
+    action: "Generate portrait",
+    pending: "Generating portrait",
+    ready: "Portrait ready",
+    failure: "Could not generate a portrait",
+  },
+  location: {
+    action: "Generate location image",
+    pending: "Generating location image",
+    ready: "Location image ready",
+    failure: "Could not generate a location image",
+  },
+  object: {
+    action: "Generate object illustration",
+    pending: "Generating object illustration",
+    ready: "Object illustration ready",
+    failure: "Could not generate an object illustration",
+  },
+  organization: {
+    action: "Generate organization illustration",
+    pending: "Generating organization illustration",
+    ready: "Organization illustration ready",
+    failure: "Could not generate an organization illustration",
+  },
+  event: {
+    action: "Generate event illustration",
+    pending: "Generating event illustration",
+    ready: "Event illustration ready",
+    failure: "Could not generate an event illustration",
+  },
+};
 
 const PROFILE_SECTIONS: Record<BibleEntity["kind"], ProfileSection[]> = {
   character: [
@@ -204,6 +243,7 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
   const attrs = entity.attrs as Record<string, unknown>;
   const facts = asList(attrs.facts);
   const visualSummary = visualCanonSummary(entity.kind, attrs);
+  const generatedImageCopy = GENERATED_IMAGE_COPY[entity.kind];
   const canHavePortrait = PORTRAIT_KINDS.includes(entity.kind);
   const populatedSections = PROFILE_SECTIONS[entity.kind]
     .map((section) => ({
@@ -218,23 +258,25 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
     if (busy) return;
     setBusy(true);
     setError(null);
-    setActivityStatus(`Generating portrait for ${entity.name}…`);
+    setActivityStatus(`${generatedImageCopy.pending} for ${entity.name}…`);
     try {
       const response = await idempotentPaidFetch(`/api/entities/${entity.id}/portrait`, {
         method: "POST",
       });
       const body = (await response.json()) as { url?: string; error?: string };
       if (!response.ok || !body.url) {
-        setError(body.error ?? "Could not generate a portrait");
+        setError(body.error ?? generatedImageCopy.failure);
         setActivityStatus("");
         return;
       }
       focusPortraitWhenReadyRef.current = true;
       setPortraitUrl(body.url);
-      setActivityStatus(`Portrait ready for ${entity.name}. Open the full image to inspect it.`);
+      setActivityStatus(
+        `${generatedImageCopy.ready} for ${entity.name}. Open the full image to inspect it.`,
+      );
       acknowledgePaidResponse(response);
     } catch {
-      setError("Could not generate a portrait");
+      setError(generatedImageCopy.failure);
       setActivityStatus("");
     } finally {
       setBusy(false);
@@ -444,7 +486,7 @@ export function EntityCard({ entity, conflicts }: { entity: BibleEntity; conflic
               )}
               {busy
                 ? "Generating…"
-                : `Generate portrait · ${creditsForUsd(PORTRAIT_USD).toFixed(1)} credits`}
+                : `${generatedImageCopy.action} · ${creditsForUsd(PORTRAIT_USD).toFixed(1)} credits`}
             </Button>
             <p className="mt-1 text-[0.65rem] text-muted-foreground">
               ${PORTRAIT_USD.toFixed(3)} metered image cost

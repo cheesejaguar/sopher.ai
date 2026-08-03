@@ -1,4 +1,10 @@
 import { FatalError, getWorkflowMetadata } from "workflow";
+import {
+  AUTHORING_CANCELLATION_MESSAGE,
+  AUTHORING_RUN_INACTIVE_MESSAGE,
+} from "@/lib/authoring-cancellation";
+import { withPreservedPrimaryError } from "@/lib/async-cleanup";
+import { notifyAuthoringFailureStep } from "./notify-authoring-failure";
 import type { GenerationConfig } from "@/lib/run-events";
 import {
   emitCost,
@@ -42,11 +48,32 @@ export async function generateChapter(
       message: `Rewriting chapter ${chapterNumber}`,
     });
 
-    await resetChapterStep(ref, chapterNumber);
-    const result = await writeChapterStep(ref, config, chapterNumber, reservationRef);
-    await emitCost(ref);
+    const result = await withPreservedPrimaryError(
+      async () => {
+        await resetChapterStep(ref, chapterNumber);
+        const chapter = await writeChapterStep(ref, config, chapterNumber, reservationRef);
+        await emitCost(ref);
+        return chapter;
+      },
+      () => releaseCreditsStep(ref, reservationRef),
+      (cleanupError) => {
+        console.error("Chapter reservation cleanup failed after writing had already failed", {
+          runId: ref.dbRunId,
+          cleanupError,
+        });
+      },
+    );
 
-    await markRunStatus(ref, "completed");
+    const completion = await markRunStatus(ref, "completed");
+    if (completion.outcome === "cancellation_won") {
+      await emitProgress(ref, {
+        type: "stage",
+        stage: "cancelled",
+        pct: 100,
+        detail: "Stopped safely after saving the completed chapter",
+      });
+      return result;
+    }
     await emitProgress(ref, {
       type: "stage",
       stage: "done",
@@ -56,10 +83,32 @@ export async function generateChapter(
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Chapter regeneration failed";
-    await markRunStatus(ref, "failed", message);
-    await emitProgress(ref, { type: "error", message, fatal: true });
+    if (message === AUTHORING_RUN_INACTIVE_MESSAGE) {
+      throw error instanceof FatalError ? error : new FatalError(message);
+    }
+    const cancelled = message === AUTHORING_CANCELLATION_MESSAGE;
+    try {
+      await markRunStatus(ref, cancelled ? "cancelled" : "failed", message);
+      if (!cancelled) await notifyAuthoringFailureStep(ref);
+    } catch (statusError) {
+      console.error("Could not persist the initiating chapter failure", {
+        runId: ref.dbRunId,
+        statusError,
+      });
+    }
+    try {
+      await emitProgress(
+        ref,
+        cancelled
+          ? { type: "stage", stage: "cancelled", pct: 100, detail: "Stopped safely" }
+          : { type: "error", message, fatal: true },
+      );
+    } catch (eventError) {
+      console.warn("Could not publish the initiating chapter failure", {
+        runId: ref.dbRunId,
+        eventError,
+      });
+    }
     throw error instanceof FatalError ? error : new FatalError(message);
-  } finally {
-    await releaseCreditsStep(ref, reservationRef);
   }
 }

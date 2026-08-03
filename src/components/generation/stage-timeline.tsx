@@ -101,7 +101,7 @@ function StageMark({ label, state, note }: { label: string; state: StepState; no
           <span className="sr-only"> — {STEP_STATE_TEXT[state]}</span>
         </span>
         {note ? (
-          <span className="text-[10px] whitespace-nowrap text-muted-foreground">{note}</span>
+          <span className="text-[11px] whitespace-nowrap text-muted-foreground">{note}</span>
         ) : null}
       </span>
     </div>

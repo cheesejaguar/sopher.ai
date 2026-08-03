@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   reconcileCreditReservations: vi.fn(),
   start: vi.fn(),
   cleanupUserProjectBlobsAfterDelete: vi.fn(),
+  requestDeletedUserCancellations: vi.fn(),
+  scheduleDeletedUserFinalization: vi.fn(),
 }));
 
 vi.mock("@clerk/nextjs/webhooks", () => ({
@@ -32,6 +34,10 @@ vi.mock("@/lib/billing/credits", async (importOriginal) => {
 vi.mock("workflow/api", () => ({ start: mocks.start }));
 vi.mock("@/workflows/cleanup-project-blobs", () => ({
   cleanupUserProjectBlobsAfterDelete: mocks.cleanupUserProjectBlobsAfterDelete,
+}));
+vi.mock("@/lib/clerk-deletion-finalizer", () => ({
+  requestDeletedClerkUserRunCancellations: mocks.requestDeletedUserCancellations,
+  scheduleDeletedClerkUserFinalization: mocks.scheduleDeletedUserFinalization,
 }));
 
 import { POST } from "./route";
@@ -92,6 +98,8 @@ beforeEach(() => {
   });
   mocks.start.mockResolvedValue({ runId: "cleanup-1" });
   mocks.reconcileCreditReservations.mockResolvedValue(0);
+  mocks.requestDeletedUserCancellations.mockResolvedValue(1);
+  mocks.scheduleDeletedUserFinalization.mockResolvedValue(undefined);
 });
 
 describe("Clerk user deletion", () => {
@@ -116,29 +124,48 @@ describe("Clerk user deletion", () => {
   });
 
   it("asks Clerk to retry while authoring is active", async () => {
-    const { tx } = deletionDb([[{ id: "user-1" }], [{ id: "project-1" }], [{ id: "run-1" }]]);
+    const { tx } = deletionDb([
+      [{ id: "user-1" }],
+      [{ id: "project-1" }],
+      [{ id: "user-1" }],
+      [{ id: "project-1" }],
+      [{ id: "run-1" }],
+    ]);
 
     const response = await POST(request() as never);
 
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("60");
-    expect(tx.execute).toHaveBeenCalledTimes(2);
+    expect(tx.execute).toHaveBeenCalledTimes(3);
     expect(tx.delete).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.requestDeletedUserCancellations).toHaveBeenCalledWith("user-1");
+    expect(mocks.scheduleDeletedUserFinalization).toHaveBeenCalledWith("user-1");
   });
 
   it("asks Clerk to retry while a paid-call protocol is open", async () => {
-    const { tx } = deletionDb([[{ id: "user-1" }], [], [], [{ id: "intent-1" }]]);
+    const { tx } = deletionDb([
+      [{ id: "user-1" }],
+      [],
+      [{ id: "user-1" }],
+      [],
+      [],
+      [{ id: "intent-1" }],
+    ]);
 
     const response = await POST(request() as never);
 
     expect(response.status).toBe(503);
-    expect(tx.execute).toHaveBeenCalledOnce();
+    expect(tx.execute).toHaveBeenCalledTimes(2);
     expect(tx.delete).not.toHaveBeenCalled();
+    expect(mocks.requestDeletedUserCancellations).toHaveBeenCalledWith("user-1");
+    expect(mocks.scheduleDeletedUserFinalization).toHaveBeenCalledWith("user-1");
   });
 
   it("durably captures every Blob pathname before the account cascade", async () => {
     const { tx, deleteChain } = deletionDb([
+      [{ id: "user-1" }],
+      [{ id: "project-1" }, { id: "project-2" }],
       [{ id: "user-1" }],
       [{ id: "project-1" }, { id: "project-2" }],
       [],
@@ -154,7 +181,7 @@ describe("Clerk user deletion", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ deleted: true });
-    expect(tx.execute).toHaveBeenCalledTimes(3);
+    expect(tx.execute).toHaveBeenCalledTimes(4);
     expect(mocks.start).toHaveBeenCalledWith(mocks.cleanupUserProjectBlobsAfterDelete, [
       [
         { projectId: "project-1", pathnames: ["covers/one.png"] },
@@ -168,6 +195,8 @@ describe("Clerk user deletion", () => {
 
   it("does not delete rows when durable cleanup cannot be scheduled", async () => {
     const { tx } = deletionDb([
+      [{ id: "user-1" }],
+      [{ id: "project-1" }],
       [{ id: "user-1" }],
       [{ id: "project-1" }],
       [],

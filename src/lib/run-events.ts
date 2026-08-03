@@ -232,6 +232,12 @@ export type GenerationWorkState = {
 
 export type GenerationConfig = {
   /**
+   * Version 2 uses registered, versioned durable inputs. Historical and
+   * deployment-pinned runs may omit this or explicitly store v1; new snapshots
+   * write v2.
+   */
+  protocolVersion?: 1 | 2;
+  /**
    * Set only after the post-insert, project-locked snapshot has been frozen.
    * An uncertain Workflow retry must never dispatch a config without this
    * durable readiness proof.
@@ -251,6 +257,14 @@ export type GenerationConfig = {
   targetWordsPerChapter: number;
   /** Single-chapter replacement must override a stale persisted outline target. */
   chapterRegeneration?: true;
+  /**
+   * Durable identity for a single-chapter request key. Historical chapter runs
+   * may omit it, but they cannot be safely reattached through a new request.
+   */
+  chapterRegenerationTarget?: {
+    chapterId: string;
+    chapterNumber: number;
+  };
   /**
    * Every mutable project field consulted by an authoring agent. Workflow
    * steps read this snapshot rather than the live project row so an edit made

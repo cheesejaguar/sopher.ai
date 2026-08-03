@@ -125,16 +125,18 @@ export function AuthorInputsPanel({ inputs }: { inputs: AuthorInputs }) {
       </div>
 
       <div className="rounded-xl border border-border bg-card p-5">
-        <dl className="space-y-4">
-          <Field label="Brief">
-            {inputs.brief ? (
-              <p className="whitespace-pre-wrap text-pretty">{inputs.brief}</p>
-            ) : (
-              <Absent reason="no brief — this project was not created through the wizard" />
-            )}
-          </Field>
+        <div className="space-y-4">
+          <dl>
+            <Field label="Brief">
+              {inputs.brief ? (
+                <p className="whitespace-pre-wrap text-pretty">{inputs.brief}</p>
+              ) : (
+                <Absent reason="no brief — this project was not created through the wizard" />
+              )}
+            </Field>
+          </dl>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <dl className="grid gap-4 sm:grid-cols-3">
             <Field label="Genre">{inputs.genre ?? <Absent />}</Field>
             <Field label="Subgenre">
               {inputs.subgenre ?? <Absent reason="not recorded separately" />}
@@ -152,33 +154,37 @@ export function AuthorInputsPanel({ inputs }: { inputs: AuthorInputs }) {
             <Field label="Tier at run time">
               {runTier ? <span className="capitalize">{runTier}</span> : <Absent />}
             </Field>
-          </div>
+          </dl>
 
-          <Field label="Settings">
-            {settingKeys.length === 0 ? (
-              <Absent reason="all defaults" />
-            ) : (
-              <ul className="flex flex-wrap gap-1.5">
-                {settingKeys.map((key) => (
-                  <li key={key}>
-                    <Badge variant="outline" className="font-normal">
-                      <span className="text-muted-foreground">{SETTING_LABELS[key]}:</span>{" "}
-                      {settingValue(inputs.settings[key])}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Field>
+          <dl>
+            <Field label="Settings">
+              {settingKeys.length === 0 ? (
+                <Absent reason="all defaults" />
+              ) : (
+                <ul className="flex flex-wrap gap-1.5">
+                  {settingKeys.map((key) => (
+                    <li key={key}>
+                      <Badge variant="outline" className="font-normal">
+                        <span className="text-muted-foreground">{SETTING_LABELS[key]}:</span>{" "}
+                        {settingValue(inputs.settings[key])}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Field>
+          </dl>
 
-          <Field label="Style guide">
-            {inputs.styleGuide ? (
-              <p className="whitespace-pre-wrap text-pretty">{inputs.styleGuide}</p>
-            ) : (
-              <Absent reason="none — the wizard does not set one" />
-            )}
-          </Field>
-        </dl>
+          <dl>
+            <Field label="Style guide">
+              {inputs.styleGuide ? (
+                <p className="whitespace-pre-wrap text-pretty">{inputs.styleGuide}</p>
+              ) : (
+                <Absent reason="none — the wizard does not set one" />
+              )}
+            </Field>
+          </dl>
+        </div>
       </div>
 
       {revisionNotes.length > 0 ? (

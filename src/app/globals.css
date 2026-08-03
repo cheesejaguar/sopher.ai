@@ -239,8 +239,10 @@
     border-color: var(--color-border);
   }
 
-  html {
-    scrollbar-gutter: stable;
+  @media (min-width: 48rem) {
+    html {
+      scrollbar-gutter: stable;
+    }
   }
 
   body {
@@ -263,11 +265,14 @@
 
 /* Manuscript typography — shared by streaming preview, editor canvas, and reading view */
 .prose-manuscript {
+  min-width: 0;
+  width: 100%;
   font-family: var(--font-serif), Georgia, serif;
   font-size: 1.0625rem;
   line-height: 1.75;
   max-width: 68ch;
   color: var(--paper-foreground);
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 1024px) {
@@ -278,6 +283,38 @@
 
 .prose-manuscript p {
   margin-block: 0.9em;
+}
+
+.prose-manuscript a,
+.prose-manuscript code {
+  overflow-wrap: anywhere;
+}
+
+.prose-manuscript pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--paper-edge);
+  padding: 0.875rem 1rem;
+  background: color-mix(in oklch, var(--paper) 92%, var(--paper-edge));
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.875em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prose-manuscript img,
+.prose-manuscript video,
+.prose-manuscript svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.prose-manuscript table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
 }
 
 .prose-manuscript h1,
@@ -420,6 +457,211 @@
   /* Keep the mobile offer immediately paintable on every CI/OS font stack.
      Archivo still owns display and UI type without delaying the core promise. */
   font-family: system-ui, sans-serif;
+}
+
+/* Keep the server-rendered long-form page available to search, assistive
+   technology, and find-in-page while deferring offscreen paint/layout work.
+   The browser replaces the estimate with the measured size after first view. */
+.defer-offscreen {
+  content-visibility: auto;
+  /* Reserve a few lines beyond the measured macOS footprint. Linux font
+     metrics can wrap an offscreen section slightly taller; an estimate that
+     grows after a native End jump leaves keyboard users above the footer. */
+  contain-intrinsic-block-size: auto calc(var(--defer-block-size, 52rem) + 3rem);
+}
+
+/* Firefox does not preserve the document-end anchor when content-visibility
+   replaces several intrinsic estimates during one native End-key jump. Keep
+   the complete page laid out there so keyboard users reliably reach the real
+   footer; Chromium retains the measured mobile paint optimization. */
+@supports (-moz-appearance: none) {
+  .defer-offscreen {
+    content-visibility: visible;
+    contain-intrinsic-size: none;
+  }
+}
+
+/* Intrinsic block sizes follow each homepage section's real responsive
+   footprint. Slightly conservative values keep keyboard End/Page Down and
+   scrollbar positions stable before an offscreen section is first painted. */
+.defer-proof {
+  --defer-block-size: 77rem;
+}
+
+.defer-how {
+  --defer-block-size: 113rem;
+}
+
+.defer-samples {
+  --defer-block-size: 85rem;
+}
+
+.defer-pricing {
+  --defer-block-size: 103rem;
+}
+
+.defer-faq {
+  --defer-block-size: 75rem;
+}
+
+.defer-final {
+  --defer-block-size: 34rem;
+}
+
+@media (min-width: 22.5rem) {
+  .defer-proof {
+    --defer-block-size: 72rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 111rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 81rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 100rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 71rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 31rem;
+  }
+}
+
+@media (min-width: 24rem) {
+  .defer-proof {
+    --defer-block-size: 68rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 107rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 75rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 96rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 70rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 30rem;
+  }
+}
+
+@media (min-width: 30rem) {
+  .defer-proof {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 106rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 68rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 90rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 26rem;
+  }
+}
+
+@media (min-width: 40rem) {
+  .defer-proof {
+    --defer-block-size: 69rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 109rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 72rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 92rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 33rem;
+  }
+}
+
+@media (min-width: 48rem) {
+  .defer-proof {
+    --defer-block-size: 65rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 107rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 68rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 115rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 60rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 33rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  .defer-proof {
+    --defer-block-size: 55rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 104rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 95rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 61rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 27rem;
+  }
 }
 
 .instrument-surface {
@@ -577,6 +819,33 @@
 
 .safe-area-bottom {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+.safe-area-page {
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+
+@media (min-width: 40rem) {
+  .safe-area-page {
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+  }
+}
+
+@media (min-width: 64rem) {
+  .safe-area-page {
+    padding-right: max(2rem, env(safe-area-inset-right));
+    padding-left: max(2rem, env(safe-area-inset-left));
+  }
+}
+
+@media (min-width: 80rem) {
+  .safe-area-page {
+    padding-right: max(2.5rem, env(safe-area-inset-right));
+    padding-left: max(2.5rem, env(safe-area-inset-left));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-07-30T00:19:38Z",
+  "generatedAt": "2026-07-31T06:53:14Z",
   "title": "Design System: sopher.ai — The Future Proof",
   "extensions": {
     "colorMeta": {
@@ -312,6 +312,20 @@
       "css": ".ds-nav { display: flex; gap: 4px; border-bottom: 1px solid var(--border, oklch(0.255 0.028 274)); } .ds-nav-link { min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-bottom: 2px solid transparent; color: var(--muted-foreground, oklch(0.69 0.022 270)); font: 600 13px/1 Archivo, Arial, sans-serif; text-decoration: none; } .ds-nav-link:hover { color: var(--foreground, oklch(0.95 0.01 270)); } .ds-nav-link-active { border-bottom-color: var(--primary, oklch(0.56 0.24 289)); color: var(--foreground, oklch(0.95 0.01 270)); background: var(--accent, oklch(0.205 0.045 281)); } .ds-nav-link:focus-visible { outline: 2px solid var(--ring, oklch(0.71 0.16 251)); outline-offset: 2px; }"
     },
     {
+      "name": "Authoring Next Step",
+      "kind": "custom",
+      "description": "One server-derived action that follows durable production evidence across every project surface.",
+      "html": "<section class=\"ds-next-step\" aria-labelledby=\"ds-next-step-title\"><div><h3 id=\"ds-next-step-title\">Resume from saved work</h3><p>Two chapters are safe. Review the recovery details before production resumes.</p></div><a class=\"ds-next-step-action\" href=\"#\">Resume from saved work</a></section>",
+      "css": ".ds-next-step { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px; border: 1px solid var(--border, oklch(0.255 0.028 274)); border-radius: 4px; background: var(--instrument, oklch(0.125 0.022 274)); color: var(--foreground, oklch(0.95 0.01 270)); font-family: Archivo, Arial, sans-serif; } .ds-next-step h3 { margin: 0; font-size: 18px; line-height: 1.25; letter-spacing: -.02em; } .ds-next-step p { max-width: 58ch; margin: 6px 0 0; color: var(--muted-foreground, oklch(0.69 0.022 270)); font-size: 14px; line-height: 1.5; } .ds-next-step-action { min-height: 44px; display: inline-flex; flex: none; align-items: center; padding: 0 16px; border-radius: 4px; background: var(--primary, oklch(0.56 0.24 289)); color: var(--primary-foreground, oklch(0.99 0.004 275)); font-size: 14px; font-weight: 600; text-decoration: none; } .ds-next-step-action:hover { background: color-mix(in oklch, var(--primary, oklch(0.56 0.24 289)) 88%, transparent); } .ds-next-step-action:focus-visible { outline: 2px solid var(--ring, oklch(0.71 0.16 251)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Contextual Help",
+      "kind": "custom",
+      "description": "Persistent, nonmodal guidance with an artifact-derived first-book checklist.",
+      "html": "<aside class=\"ds-help\" aria-labelledby=\"ds-help-title\"><h3 id=\"ds-help-title\">Help with this page</h3><p>Clear guidance for writing, production, editing, and recovery.</p><ol><li><span aria-hidden=\"true\">✓</span> Shape your idea</li><li><span aria-hidden=\"true\">✓</span> Review the outline</li><li><span aria-hidden=\"true\">○</span> Watch the chapters arrive</li></ol><button class=\"ds-help-close\" type=\"button\">Close help</button></aside>",
+      "css": ".ds-help { max-width: 360px; padding: 24px; border-left: 1px solid var(--border, oklch(0.255 0.028 274)); background: var(--instrument, oklch(0.125 0.022 274)); color: var(--foreground, oklch(0.95 0.01 270)); box-shadow: -18px 0 50px -34px oklch(0.02 0.02 274 / 90%); font-family: Archivo, Arial, sans-serif; } .ds-help h3 { margin: 0; font-size: 20px; letter-spacing: -.02em; } .ds-help p { margin: 8px 0 20px; color: var(--muted-foreground, oklch(0.69 0.022 270)); font-size: 14px; line-height: 1.5; } .ds-help ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; } .ds-help li { display: flex; gap: 10px; align-items: center; min-height: 32px; font-size: 14px; } .ds-help li span { color: var(--primary, oklch(0.56 0.24 289)); } .ds-help-close { min-height: 44px; margin-top: 24px; padding: 0 16px; border: 1px solid var(--border, oklch(0.255 0.028 274)); border-radius: 4px; background: transparent; color: inherit; font: 600 14px/1 Archivo, Arial, sans-serif; } .ds-help-close:hover { background: var(--muted, oklch(0.18 0.02 274)); } .ds-help-close:focus-visible { outline: 2px solid var(--ring, oklch(0.71 0.16 251)); outline-offset: 2px; }"
+    },
+    {
       "name": "Instrument Surface",
       "kind": "card",
       "description": "A flat-at-rest operational grouping separated by tone and an etched rule.",
@@ -336,13 +350,15 @@
   ],
   "narrative": {
     "northStar": "The Future Proof",
-    "overview": "sopher.ai feels like a world-class editorial instrument built for someone who has never used one before. It is dark-first, exact, and quietly futuristic rather than theatrical or intimidating. The system makes sequence visible: numbered telemetry, hovering page signatures, edge tabs, and fine proof marks show ideas moving from brief to finished manuscript.\n\nPersuade surfaces use restrained spectral light and dimensional manuscript planes at page scale. Operate surfaces become calmer and denser while keeping the same instrument topology. Read surfaces recede around luminous text and use telemetry as quiet orientation rather than decoration.",
+    "overview": "sopher.ai gives advanced writing technology the confidence of a world-class tool while placing it inside the most familiar place an amateur author begins: a notebook. It is dark-first, exact, and quietly futuristic rather than theatrical or intimidating. The story comes first—an unrealized book becoming visible—while the five-stage system supplies credible proof beneath it.\n\nPersuade surfaces center one dominant dark college-ruled notebook that transforms from brief to outline to prose to finished manuscript. Restrained spectral light marks the machine's work without coloring every stage. Operate surfaces become calmer and denser while keeping the manuscript central. Read surfaces recede around luminous text and use folios as quiet orientation rather than decoration.",
     "keyCharacteristics": [
-      "Sequence is visible and legible.",
+      "The author's book is the subject; the technology is the convincing mechanism.",
+      "One transforming notebook artifact carries the sequence from idea to finished pages.",
+      "College ruling and the margin rule belong only to the transforming page artifact, never page backgrounds or operational product surfaces.",
       "Light, etched rules, and precise offsets create depth without neon card chrome.",
       "Manuscript typography appears only where prose is genuinely being read.",
       "Color fields own regions; accents are not sprinkled across generic neutral cards.",
-      "Motion shows editorial progress and never hides content."
+      "Motion belongs to the notebook's transformation, shows editorial progress, and never hides content."
     ],
     "rules": [
       {
@@ -368,14 +384,18 @@
     ],
     "dos": [
       "Do make the current stage, state, and next action obvious before adding expression.",
-      "Do use deep instrument fields, numbered telemetry, edge tabs, etched rules, luminous page planes, and precise offsets as the identity.",
+      "Do use deep writing fields, one dominant ruled notebook, restrained stage telemetry, luminous page planes, and precise offsets as the identity.",
+      "Do lead with the story-first promise, then use the five-stage system as proof.",
       "Do preserve semantic HTML, server-rendered public content, and familiar control behavior.",
       "Do adapt the same world into persuasive, operational, and reading densities.",
       "Do keep authored sample content clearly labeled."
     ],
     "donts": [
       "Don't use auroras, gradient text, generic glass cards, neon outlines on every surface, generic icon tiles, or stock AI imagery.",
+      "Don't use ruled or gridded page backgrounds; the line motif belongs only inside the five-stage notebook artifact.",
       "Don't use a centered headline-plus-two-buttons hero as the first viewport.",
+      "Don't use two-axis grid texture, or carry notebook ruling into operational product surfaces.",
+      "Don't give every stage an equally dominant visual container; the transforming notebook is the hero artifact.",
       "Don't repeat the same rounded card grid for unrelated tasks.",
       "Don't use decorative serif typography outside real prose.",
       "Don't hide navigation on mobile without an accessible replacement.",

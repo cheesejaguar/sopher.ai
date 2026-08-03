@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { WRITER_SYSTEM_PROMPT, buildChapterUserPrompt } from "./writer";
+import {
+  CHAPTER_PROSE_RESPONSE_FORMAT,
+  WRITER_SYSTEM_PROMPT,
+  buildChapterUserPrompt,
+} from "./writer";
 
 describe("WRITER_SYSTEM_PROMPT", () => {
   it("carries the role and all five writing principles", () => {
@@ -25,10 +29,20 @@ describe("WRITER_SYSTEM_PROMPT", () => {
     expect(WRITER_SYSTEM_PROMPT).not.toContain("Tool Workflow");
   });
 
-  it("keeps chapter requirements and response format", () => {
+  it("keeps chapter requirements without constraining structured-output calls", () => {
     expect(WRITER_SYSTEM_PROMPT).toContain("Match the target word count (within 10%)");
-    expect(WRITER_SYSTEM_PROMPT).toContain("word_count: Actual word count of the content");
+    expect(WRITER_SYSTEM_PROMPT).not.toContain("Return only the chapter prose in plain Markdown");
+    expect(WRITER_SYSTEM_PROMPT).not.toContain("Do not wrap it in JSON");
+    expect(WRITER_SYSTEM_PROMPT).not.toContain("valid JSON object");
     expect(WRITER_SYSTEM_PROMPT).toContain("End with a hook that encourages continued reading");
+  });
+
+  it("keeps prose-only formatting scoped to chapter drafts", () => {
+    expect(CHAPTER_PROSE_RESPONSE_FORMAT).toContain(
+      "Return only the chapter prose in plain Markdown",
+    );
+    expect(CHAPTER_PROSE_RESPONSE_FORMAT).toContain("Do not wrap it in JSON");
+    expect(CHAPTER_PROSE_RESPONSE_FORMAT).toContain("indented code block");
   });
 });
 

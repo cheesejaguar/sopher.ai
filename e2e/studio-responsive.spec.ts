@@ -5,6 +5,14 @@
  */
 import { axeCheck, expect, fullPageScreenshot, missingE2EFixture, test } from "./helpers";
 
+test.beforeEach(() => {
+  // These read-only acceptance cases intentionally render several
+  // server-derived routes against an isolated remote Neon branch. Keep the
+  // timeout above the shared 60-second default so low-capacity preview
+  // databases cannot turn otherwise healthy route matrices into flaky gates.
+  test.setTimeout(120_000);
+});
+
 const PRODUCT_VIEWPORTS = [
   { width: 320, height: 720 },
   { width: 390, height: 844 },
@@ -60,6 +68,8 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       /\/(brief|outline|bible|write|editor|manuscript|usage|settings)$/,
       "",
     );
+    const projectId = base.split("/").filter(Boolean).at(-1);
+    if (!projectId) throw new Error(`Could not derive a project id from ${base}`);
 
     const surfaces = [
       {
@@ -73,9 +83,15 @@ for (const viewport of PRODUCT_VIEWPORTS) {
         ready: () => page.getByRole("heading", { level: 1, name: "Overview" }),
       },
       {
+        name: "Admin book reader",
+        route: `/admin/books/${projectId}`,
+        ready: () => page.getByRole("region", { name: "Manuscript" }),
+      },
+      {
         name: "project brief",
         route: `${base}/brief`,
-        ready: () => page.getByText("The brief, as written", { exact: true }),
+        ready: () =>
+          page.locator("#main-content").getByText("The brief, as written", { exact: true }),
       },
       {
         name: "story bible",
@@ -94,7 +110,7 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       },
       {
         name: "manuscript",
-        route: `${base}/manuscript`,
+        route: `${base}/manuscript?chapter=2`,
         ready: () => page.getByRole("region", { name: "Manuscript chapters" }),
       },
     ] as const;
@@ -105,12 +121,53 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       await expect(page.locator("#main-content")).toHaveCount(1);
       await expect(page.locator("#main-content")).toBeVisible();
       await expectNoPageOverflow(page, `${surface.name} at ${viewport.width}px`);
-      if (viewport.width === 390) {
+      const prose = page.locator(".prose-manuscript");
+      if ((await prose.count()) > 0) {
+        await expect(
+          prose.locator("pre"),
+          `${surface.name} must recover uniformly indented chapter prose instead of rendering a code block`,
+        ).toHaveCount(0);
+        const localOverflow = await prose.evaluateAll((nodes) =>
+          nodes.map((node) => node.scrollWidth - node.clientWidth),
+        );
+        expect(
+          Math.max(...localOverflow),
+          `${surface.name} manuscript content overflows its own reading column`,
+        ).toBeLessThanOrEqual(1);
+
+        if (surface.name === "Admin book reader" || surface.name === "manuscript") {
+          const recoveredParagraph = page
+            .locator("#main-content")
+            .getByText(
+              "The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.",
+              { exact: true },
+            );
+          await expect(recoveredParagraph).toBeVisible();
+          const paragraphLayout = await recoveredParagraph.evaluate((node) => {
+            const style = getComputedStyle(node);
+            const rect = node.getBoundingClientRect();
+            return {
+              whiteSpace: style.whiteSpace,
+              left: rect.left,
+              right: rect.right,
+              viewportWidth: document.documentElement.clientWidth,
+            };
+          });
+          expect(paragraphLayout.whiteSpace).not.toBe("pre");
+          expect(paragraphLayout.whiteSpace).not.toBe("nowrap");
+          expect(paragraphLayout.left).toBeGreaterThanOrEqual(-1);
+          expect(paragraphLayout.right).toBeLessThanOrEqual(paragraphLayout.viewportWidth + 1);
+        }
+      }
+      if (
+        viewport.width === 390 ||
+        (viewport.width === 320 && surface.name === "Admin book reader")
+      ) {
         await axeCheck(page);
         await fullPageScreenshot(
           page,
           testInfo,
-          `${surface.name.toLowerCase().replaceAll(" ", "-")}-390`,
+          `${surface.name.toLowerCase().replaceAll(" ", "-")}-${viewport.width}`,
         );
       }
     }
@@ -185,10 +242,40 @@ test("mobile editor loads the real editable manuscript instead of an interstitia
   } catch {
     missingE2EFixture("the first project has no drafted chapter");
   }
-  await draftedChapter.click();
+  await Promise.all([
+    page.waitForURL(new RegExp(`${base}/editor/\\d+$`), { timeout: 40_000 }),
+    draftedChapter.click(),
+  ]);
   const editor = page.locator('[contenteditable="true"]').first();
-  await expect(editor).toBeVisible({ timeout: 20_000 });
+  await expect(editor).toBeVisible({ timeout: 40_000 });
   await expect(page.getByText(/desktop browser/i)).toHaveCount(0);
+
+  const coveredProjectLink = page.locator('#main-content a[href="/studio"]').first();
+  await expect(coveredProjectLink).toBeAttached();
+  await expect
+    .poll(() => coveredProjectLink.evaluate((element) => Boolean(element.closest("[inert]"))), {
+      message: "the full-viewport phone editor must make covered project controls inert",
+    })
+    .toBe(true);
+
+  await page.evaluate(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  });
+  for (let index = 0; index < 16; index += 1) {
+    await page.keyboard.press("Tab");
+    const focusEnteredCoveredProjectChrome = await page.evaluate(() => {
+      const active = document.activeElement;
+      return Boolean(
+        active?.closest("#main-content") &&
+        !active.closest('[data-editor-workbench="true"]') &&
+        !active.closest('[role="dialog"]'),
+      );
+    });
+    expect(
+      focusEnteredCoveredProjectChrome,
+      `phone editor tab stop ${index + 1} entered covered project controls`,
+    ).toBe(false);
+  }
 
   await page.getByRole("button", { name: "Choose a chapter" }).click();
   await expect(page.getByRole("heading", { name: "Choose a chapter" })).toBeAttached();

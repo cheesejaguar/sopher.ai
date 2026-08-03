@@ -15,9 +15,9 @@
  *    disposable Neon branch.
  *
  * Auth: the webServer command blanks NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and
- * CLERK_SECRET_KEY, which forces guest mode (shared dev-user, no sign-in)
- * even when .env.local carries real Clerk keys — variables already set in the
- * process environment take precedence over .env files in Next.js.
+ * CLERK_SECRET_KEY even when .env.local carries real Clerk keys. Public-only
+ * optimized builds then prove that private access fails closed. Full isolated
+ * acceptance explicitly sets ALLOW_DEV_AUTH and uses the shared test identity.
  *
  * Theming is class-based via next-themes (localStorage key "theme", "dark"
  * class on <html>). The light and dark projects run the same specs; the theme
@@ -40,18 +40,20 @@ if (runDbTests && (!e2eDatabaseUrl || process.env.E2E_DATABASE_ISOLATED !== "1")
 }
 
 /** Specs that require a reachable (Neon) database. */
-const DB_DESKTOP_SPEC = /[/\\]studio\.spec\.ts$/;
+const DB_DESKTOP_SPEC = /[/\\](studio|authoring-journey)\.spec\.ts$/;
 const DB_RESPONSIVE_SPEC = /[/\\]studio-responsive\.spec\.ts$/;
-const DB_SPEC = /(studio|studio-responsive)\.spec\.ts$/;
+const DB_SPEC = /(studio|studio-responsive|authoring-journey)\.spec\.ts$/;
 const WIZARD_SPEC = /[/\\]wizard\.spec\.ts$/;
 const RESPONSIVE_SPEC = /[/\\]responsive\.spec\.ts$/;
-const BROWSER_SMOKE_SPEC = /browser-smoke\.spec\.ts$/;
+const BROWSER_SMOKE_SPEC = /[/\\]browser-smoke\.spec\.ts$/;
+const AUTHENTICATED_BROWSER_SMOKE_SPEC = /authenticated-browser-smoke\.spec\.ts$/;
 const EDITOR_MUTATION_SPEC = /editor-mobile\.spec\.ts$/;
 const DB_FREE_EXCLUSIONS = [
   DB_SPEC,
   WIZARD_SPEC,
   RESPONSIVE_SPEC,
   BROWSER_SMOKE_SPEC,
+  AUTHENTICATED_BROWSER_SMOKE_SPEC,
   EDITOR_MUTATION_SPEC,
 ];
 
@@ -142,6 +144,21 @@ export default defineConfig<ThemeOptions>({
             },
           },
           {
+            name: "dbFirefox-smoke",
+            testMatch: AUTHENTICATED_BROWSER_SMOKE_SPEC,
+            // The isolated preview database is intentionally small. Run the
+            // private cross-engine smoke after the two route matrices so a
+            // browser startup cannot starve server-rendered journey queries.
+            dependencies: ["dbMobile-light", "dbMobile-dark"],
+            use: { ...devices["Desktop Firefox"], appTheme: "dark" as const },
+          },
+          {
+            name: "dbWebKit-smoke",
+            testMatch: AUTHENTICATED_BROWSER_SMOKE_SPEC,
+            dependencies: ["dbFirefox-smoke"],
+            use: { ...devices["Desktop Safari"], appTheme: "light" as const },
+          },
+          {
             name: "dbWizard-light",
             testMatch: WIZARD_SPEC,
             // Wizard submission creates durable projects and runs. Keep those
@@ -150,7 +167,14 @@ export default defineConfig<ThemeOptions>({
             // ordering cannot make another test select a newly queued stub.
             dependencies: runEditorMutationTests
               ? ["dbEditor-mobile"]
-              : ["dbDependent-light", "dbDependent-dark", "dbMobile-light", "dbMobile-dark"],
+              : [
+                  "dbDependent-light",
+                  "dbDependent-dark",
+                  "dbMobile-light",
+                  "dbMobile-dark",
+                  "dbFirefox-smoke",
+                  "dbWebKit-smoke",
+                ],
             use: { ...devices["Desktop Chrome"], appTheme: "light" as const },
           },
           {
@@ -182,6 +206,8 @@ export default defineConfig<ThemeOptions>({
               "dbDependent-dark",
               "dbMobile-light",
               "dbMobile-dark",
+              "dbFirefox-smoke",
+              "dbWebKit-smoke",
             ],
             use: {
               ...devices["Desktop Chrome"],
@@ -193,13 +219,17 @@ export default defineConfig<ThemeOptions>({
       : []),
   ],
   webServer: {
-    // Explicit empty Clerk vars force guest mode; explicit PORT avoids the
-    // "3000 busy, fall back to 3001" dance in `next dev`.
-    command: "pnpm dev --hostname 127.0.0.1",
+    // Acceptance runs against the optimized server built immediately before
+    // Playwright. This matches Vercel's runtime and keeps development HMR out
+    // of browser results: trace/screenshots written during a test can otherwise
+    // trigger repeated dev-server reloads and incomplete streamed documents.
+    command: "pnpm start --hostname 127.0.0.1",
     env: {
       ...process.env,
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
       CLERK_SECRET_KEY: "",
+      E2E_PRODUCTION_SERVER: "1",
+      ...(runDbTests ? { ALLOW_DEV_AUTH: "1" } : {}),
       PORT: e2ePort,
       ...(e2eDatabaseUrl ? { DATABASE_URL: e2eDatabaseUrl } : {}),
     },

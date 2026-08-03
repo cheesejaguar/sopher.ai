@@ -48,6 +48,7 @@ describe("BookAssembly", () => {
     );
     expect(screen.getByLabelText("Chapter 5: planned")).toBeTruthy();
     expect(screen.getByText("Run plan: 5 chapters × ~2,000 words")).toBeTruthy();
+    expect(screen.queryByText("Live book assembly")).toBeNull();
   });
 
   it("only marks chapters final when final state exists", () => {
@@ -88,5 +89,34 @@ describe("BookAssembly", () => {
     expect(
       screen.getByText(/writing team is being assigned|production desk is ready/i),
     ).toBeTruthy();
+  });
+
+  it("replaces active writing semantics and motion while a stop is settling", () => {
+    const { container } = render(
+      <BookAssembly
+        chapters={
+          new Map([
+            [1, { status: "drafted", wordCount: 1_104 }],
+            [2, { status: "drafting" }],
+          ])
+        }
+        titles={{ 1: "The Crossing", 2: "Night Water" }}
+        plannedTotal={3}
+        targetWordsPerChapter={1_000}
+        stage="chapters"
+        cancellationRequested
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Manuscript saved so far" })).toBeTruthy();
+    expect(screen.getByText("Settling now")).toBeTruthy();
+    expect(
+      screen.getByLabelText("Chapter 2, Night Water: finishing at the safe boundary"),
+    ).toBeTruthy();
+    expect(screen.getByText(/S settling/)).toBeTruthy();
+    expect(screen.queryByText("Writing now")).toBeNull();
+    expect(screen.queryByLabelText(/being written/i)).toBeNull();
+    expect(screen.queryByText(/W writing/)).toBeNull();
+    expect(container.querySelector(".production-book-page-active")).toBeNull();
   });
 });

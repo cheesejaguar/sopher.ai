@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, CircleAlert } from "lucide-react";
 import Link from "next/link";
+import type { Route } from "next";
+import { Check, CircleAlert, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -13,20 +14,16 @@ import { LiveDraftPane } from "@/components/generation/live-draft-pane";
 import { AgentFeed } from "@/components/generation/agent-feed";
 import { CostTicker } from "@/components/generation/cost-ticker";
 import { RunControls } from "@/components/generation/run-controls";
+import { useAuthoringJourneyCommand } from "@/components/studio/authoring-journey-command";
 import { ApprovalBanner } from "@/components/generation/approval-banner";
 import { CreditsBanner } from "@/components/generation/credits-banner";
 import { CompletionMoment } from "@/components/generation/completion-moment";
-import { AsyncState, ResponsiveInspector } from "@/components/studio/product-primitives";
+import { ResponsiveInspector } from "@/components/studio/product-primitives";
 import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
 import { PRODUCTION_STAGE_LABELS } from "@/lib/project-progress";
 import type { ProjectExperience } from "@/lib/trial-story";
-import {
-  FULL_BOOK_UNLOCK_DESCRIPTION,
-  fullBookSetupHref,
-  fullBookUnlockHref,
-  INCLUDED_STORY_NO_CARD_NOTE,
-} from "@/lib/marketing/trial-offer";
+import type { AuthoringNextAction } from "@/lib/authoring-journey";
 
 /**
  * One short sentence per stage. Deliberately excludes the percentage, the cost
@@ -101,12 +98,14 @@ function ProductionTelemetry({
   draftedCount,
   plannedTotal,
   estimatedMinutes,
+  cancellationRequested,
 }: {
   state: RunStreamState;
   now: number;
   draftedCount: number;
   plannedTotal: number;
   estimatedMinutes?: number;
+  cancellationRequested: boolean;
 }) {
   const acceptedAt = state.health.acceptedAt ? Date.parse(state.health.acceptedAt) : Number.NaN;
   const completedAt = state.health.completedAt ? Date.parse(state.health.completedAt) : Number.NaN;
@@ -126,7 +125,10 @@ function ProductionTelemetry({
     },
     { label: "Chapters assembled", value: `${draftedCount} of ${plannedTotal}` },
     { label: "Credits used", value: state.totalCredits.toFixed(1) },
-    { label: "Last production update", value: formatEventTime(state.health.lastEventAt) },
+    {
+      label: "Last confirmed update",
+      value: formatEventTime(state.health.lastUpdateAt ?? state.health.lastEventAt),
+    },
   ];
 
   return (
@@ -138,10 +140,12 @@ function ProductionTelemetry({
         <div>
           <p className="folio-label text-ai">Production now</p>
           <h2 id="production-now-title" className="mt-1 text-base font-semibold">
-            {PRODUCTION_STAGE_LABELS[state.stage]}
+            {cancellationRequested ? "Stopping safely" : PRODUCTION_STAGE_LABELS[state.stage]}
           </h2>
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            {state.detail ?? "The production record will update as each stage begins."}
+            {cancellationRequested
+              ? "No new model calls will begin. Work already saved remains available while the Studio confirms the stop."
+              : (state.detail ?? "The production record will update as each stage begins.")}
           </p>
         </div>
         <p className="font-mono text-xs text-muted-foreground">
@@ -164,7 +168,7 @@ function ProductionTelemetry({
           </div>
         ))}
       </dl>
-      {state.health.noWorkStarted && state.stage === "queued" ? (
+      {state.health.noWorkStarted && state.stage === "queued" && !cancellationRequested ? (
         <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground sm:px-5">
           Your run is accepted and the writing team is being assigned. No credits have been used
           yet.
@@ -179,45 +183,28 @@ function ProductionTelemetry({
   );
 }
 
-export function IncludedStoryNextStep({
-  projectId,
-  fullBookUnlocked,
-}: {
-  projectId: string;
-  fullBookUnlocked: boolean;
-}) {
+export function isAuthoritativeFullBookCompletion(
+  runKind: "full_book" | "chapter" | "edit_pass" | "continuity" | "export",
+  state: Pick<RunStreamState, "stage" | "health">,
+): boolean {
   return (
-    <aside
-      aria-labelledby="included-story-next-step-title"
-      className="instrument-surface flex flex-col gap-4 rounded-sm px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
-    >
-      <div className="max-w-3xl">
-        <p className="folio-label text-ai">After this story</p>
-        <h2 id="included-story-next-step-title" className="mt-1 text-sm font-semibold">
-          {fullBookUnlocked
-            ? "This story is ready to go full length."
-            : "Take this story from short form to full length."}
-        </h2>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          {fullBookUnlocked
-            ? "The included story stays intact. A new full-length setup opens with its title, genre, and brief ready to review."
-            : `${INCLUDED_STORY_NO_CARD_NOTE} ${FULL_BOOK_UNLOCK_DESCRIPTION} Your title, genre, and brief carry into the full-length setup after checkout.`}
-        </p>
-      </div>
-      <Button
-        variant="outline"
-        render={
-          <Link
-            href={fullBookUnlocked ? fullBookSetupHref(projectId) : fullBookUnlockHref(projectId)}
-          />
-        }
-        nativeButton={false}
-        className="shrink-0"
-      >
-        {fullBookUnlocked ? "Continue at full length" : "Unlock the full-length version"}
-        <ArrowRight aria-hidden="true" data-icon="inline-end" />
-      </Button>
-    </aside>
+    runKind === "full_book" &&
+    state.stage === "done" &&
+    state.health.effectiveStatus === "completed" &&
+    state.health.completionArtifactsReady === true
+  );
+}
+
+/**
+ * Terminal stream events are presentation hints only. The run-health endpoint
+ * is the authority for ending a run, including a completed run whose artifact
+ * proof is contradictory and must route to support rather than success.
+ */
+export function isAuthoritativeRunTerminal(state: Pick<RunStreamState, "health">): boolean {
+  return (
+    state.health.effectiveStatus === "completed" ||
+    state.health.effectiveStatus === "failed" ||
+    state.health.effectiveStatus === "cancelled"
   );
 }
 
@@ -266,7 +253,15 @@ export function RunViewer({
   onProgress?: (progress: RunProgressSnapshot) => void;
   onStartConfirmed?: () => void;
 }) {
-  const { state, subscribeChapterProse, markCancelled } = useRunStream(runId, snapshot);
+  const { state, subscribeChapterProse, markCancelled, checkHealth } = useRunStream(
+    runId,
+    snapshot,
+  );
+  const { nextAction } = useAuthoringJourneyCommand();
+  const recoveryAuthorized =
+    runKind === "full_book" &&
+    nextAction?.kind === "recover_saved_work" &&
+    nextAction.href === `/projects/${projectId}/write`;
   const terminal =
     state.stage === "done" || state.stage === "failed" || state.stage === "cancelled";
   const runSurfaceRef = React.useRef<HTMLDivElement | null>(null);
@@ -275,6 +270,7 @@ export function RunViewer({
   const [handoffRetryPending, setHandoffRetryPending] = React.useState(false);
   const [handoffRetryMessage, setHandoffRetryMessage] = React.useState<string | null>(null);
   const [handoffRetryError, setHandoffRetryError] = React.useState<string | null>(null);
+  const [healthCheckPending, setHealthCheckPending] = React.useState(false);
 
   const railChapters = React.useMemo(
     () =>
@@ -298,7 +294,13 @@ export function RunViewer({
     plannedChapters,
     state.health.chapters?.total ?? 0,
   );
-  const announcement = announcementFor(state.stage, draftedCount, plannedTotal, experience);
+  const cancellationRequestedAt = state.health.cancellation?.requestedAt;
+  const cancellationRequested = Boolean(cancellationRequestedAt);
+  const authoritativeTerminal = isAuthoritativeRunTerminal(state);
+  const authoritativeCompletion = isAuthoritativeFullBookCompletion(runKind, state);
+  const announcement = cancellationRequested
+    ? "Stopping safely. No new model calls will begin while the Studio confirms the stop."
+    : announcementFor(state.stage, draftedCount, plannedTotal, experience);
   const [now, setNow] = React.useState(() => Date.now());
 
   React.useEffect(() => {
@@ -362,9 +364,17 @@ export function RunViewer({
         },
         draftedCount,
         plannedTotal,
+        {
+          cancellationRequestedAt,
+          authoritativeTerminal,
+          authoritativeCompletion,
+        },
       ),
     );
   }, [
+    authoritativeCompletion,
+    authoritativeTerminal,
+    cancellationRequestedAt,
     draftedCount,
     onProgress,
     plannedTotal,
@@ -396,31 +406,29 @@ export function RunViewer({
       />
     );
   } else if (state.stage === "failed") {
-    const noWorkStarted = state.health.noWorkStarted && state.totalCredits <= 0;
     content = (
-      <EndCard
-        status="error"
-        title={noWorkStarted ? "Writing didn’t begin." : "The run hit a wall."}
-        body={
-          noWorkStarted
-            ? `No credits were used. ${state.error?.message ?? "The Studio could not start production."}`
-            : (state.error?.message ??
-              "Something went wrong while writing. Chapters already drafted are saved.")
-        }
-        actionLabel={runKind === "full_book" ? "Try again" : undefined}
-        onAction={runKind === "full_book" ? onRestart : undefined}
+      <RecoveryCard
+        runId={runId}
+        projectId={projectId}
+        state={state}
+        savedChapterCount={draftedCount}
+        cancelled={false}
+        onRecover={recoveryAuthorized ? onRestart : undefined}
+        nextAction={nextAction}
         pending={restartPending}
         error={restartError}
       />
     );
   } else if (state.stage === "cancelled") {
     content = (
-      <EndCard
-        status="empty"
-        title="You stopped this run."
-        body="Everything drafted before the stop is saved. Start again with the same production settings to keep that work; changed settings rebuild the book and preserve replaced prose in History."
-        actionLabel={runKind === "full_book" ? "Start a new run" : undefined}
-        onAction={runKind === "full_book" ? onRestart : undefined}
+      <RecoveryCard
+        runId={runId}
+        projectId={projectId}
+        state={state}
+        savedChapterCount={draftedCount}
+        cancelled
+        onRecover={recoveryAuthorized ? onRestart : undefined}
+        nextAction={nextAction}
         pending={restartPending}
         error={restartError}
       />
@@ -428,6 +436,51 @@ export function RunViewer({
   } else {
     content = (
       <div className="space-y-4">
+        {state.health.telemetryDegraded ? (
+          <section
+            aria-labelledby="telemetry-degraded-title"
+            className="rounded-sm border border-ember/40 bg-ember/8 px-4 py-3 sm:flex sm:items-center sm:justify-between sm:gap-4"
+          >
+            <div>
+              <h2 id="telemetry-degraded-title" className="text-sm font-semibold">
+                Live updates are temporarily unavailable
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                The last confirmed production state is still shown. This does not mean writing
+                stopped.
+                {state.health.supportReference
+                  ? ` Support reference: ${state.health.supportReference}.`
+                  : ""}
+              </p>
+            </div>
+            <div className="mt-3 flex shrink-0 flex-wrap gap-2 sm:mt-0">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={healthCheckPending}
+                onClick={async () => {
+                  setHealthCheckPending(true);
+                  try {
+                    await checkHealth();
+                  } finally {
+                    setHealthCheckPending(false);
+                  }
+                }}
+              >
+                {healthCheckPending ? <Spinner aria-hidden="true" /> : null}
+                Check again
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                render={<a href="mailto:support@sopher.ai?subject=Authoring%20run%20help" />}
+                nativeButton={false}
+              >
+                Get help
+              </Button>
+            </div>
+          </section>
+        ) : null}
         {state.health.acceptanceUncertain ? (
           <section
             aria-labelledby="production-handoff-title"
@@ -488,13 +541,8 @@ export function RunViewer({
           draftedCount={draftedCount}
           plannedTotal={plannedTotal}
           estimatedMinutes={estimatedMinutes ?? state.health.estimatedMinutes}
+          cancellationRequested={cancellationRequested}
         />
-        {experience === "trial_short_story" &&
-        state.stage !== "awaiting_credits" &&
-        !state.health.acceptanceUncertain &&
-        (state.health.handoffConfirmed || !state.health.noWorkStarted) ? (
-          <IncludedStoryNextStep projectId={projectId} fullBookUnlocked={fullBookUnlocked} />
-        ) : null}
         <StageTimeline
           stage={state.stage}
           pct={state.pct}
@@ -514,6 +562,7 @@ export function RunViewer({
             detail={state.detail}
             experience={experience}
             fullBookUnlocked={fullBookUnlocked}
+            supportReference={state.health.supportReference}
           />
         ) : null}
 
@@ -535,12 +584,14 @@ export function RunViewer({
               plannedTotal={plannedTotal}
               targetWordsPerChapter={targetWordsPerChapter}
               stage={state.stage}
+              cancellationRequested={cancellationRequested}
             />
             <LiveDraftPane
               chapters={state.chapters}
               titles={titles}
               stage={state.stage}
               experience={experience}
+              cancellationRequested={cancellationRequested}
               subscribeChapterProse={subscribeChapterProse}
             />
           </div>
@@ -557,7 +608,9 @@ export function RunViewer({
             <AgentFeed items={state.agentFeed} connection={state.connection} />
             <RunControls
               projectId={projectId}
+              runId={runId}
               connection={state.connection}
+              cancellationRequested={cancellationRequested}
               onCancelled={markCancelled}
             />
           </ResponsiveInspector>
@@ -612,6 +665,11 @@ export type RunProgressSnapshot = {
   pct: number;
   detail?: string;
   pausedStage?: RunStreamState["pausedStage"];
+  cancellationRequestedAt?: string;
+  /** True only after Workflow-aware health confirms any terminal status. */
+  authoritativeTerminal?: true;
+  /** True only after Workflow-aware health validates full-book completion artifacts. */
+  authoritativeCompletion?: true;
   draftedCount: number;
   totalChapters: number;
 };
@@ -620,65 +678,221 @@ export function projectProgressForRun(
   state: Pick<RunStreamState, "stage" | "pct" | "detail" | "pausedStage">,
   draftedCount: number,
   totalChapters: number,
+  signals: {
+    cancellationRequestedAt?: string;
+    authoritativeTerminal?: boolean;
+    authoritativeCompletion?: boolean;
+  } = {},
 ): RunProgressSnapshot {
   return {
     stage: state.stage,
     pct: state.pct,
     detail: state.detail,
     pausedStage: state.pausedStage,
+    ...(signals.cancellationRequestedAt
+      ? { cancellationRequestedAt: signals.cancellationRequestedAt }
+      : {}),
+    ...(signals.authoritativeTerminal ? { authoritativeTerminal: true as const } : {}),
+    ...(signals.authoritativeCompletion ? { authoritativeCompletion: true as const } : {}),
     draftedCount,
     totalChapters,
   };
 }
 
-function EndCard({
-  status,
-  title,
-  body,
-  actionLabel,
-  onAction,
+export function recoveryCardPrimaryAction(input: {
+  projectId: string;
+  savedChapterCount: number;
+  nextAction: AuthoringNextAction | null;
+  canRecover: boolean;
+}): { kind: "recover"; label: string } | { kind: "link"; label: string; href: string } {
+  if (input.nextAction) {
+    if (input.nextAction.kind === "recover_saved_work" && input.canRecover) {
+      return { kind: "recover", label: input.nextAction.label };
+    }
+    return {
+      kind: "link",
+      label: input.nextAction.label,
+      href: input.nextAction.href,
+    };
+  }
+  if (input.savedChapterCount > 0) {
+    return {
+      kind: "link",
+      label: "Open saved manuscript",
+      href: `/projects/${input.projectId}/editor`,
+    };
+  }
+  return {
+    kind: "link",
+    label: "Contact support",
+    href: "mailto:support@sopher.ai?subject=Authoring%20help",
+  };
+}
+
+function RecoveryCard({
+  runId,
+  projectId,
+  state,
+  savedChapterCount,
+  cancelled,
+  onRecover,
+  nextAction,
   pending,
   error,
 }: {
-  status: "error" | "empty";
-  title: string;
-  body: string;
-  actionLabel?: string;
-  onAction?: () => void;
+  runId: string;
+  projectId: string;
+  state: RunStreamState;
+  savedChapterCount: number;
+  cancelled: boolean;
+  onRecover?: () => void;
+  nextAction: AuthoringNextAction | null;
   pending: boolean;
   error: string | null;
 }) {
+  const [copied, setCopied] = React.useState(false);
+  const saved = Math.max(savedChapterCount, state.health.savedChapterCount ?? 0);
+  const checkpoints = Math.max(0, state.health.savedCheckpointCount ?? 0);
+  const noWorkStarted = state.health.noWorkStarted && state.totalCredits <= 0 && saved === 0;
+  const primaryAction = recoveryCardPrimaryAction({
+    projectId,
+    savedChapterCount: saved,
+    nextAction,
+    canRecover: Boolean(onRecover),
+  });
+  const diagnostic = [
+    "sopher.ai authoring diagnostic",
+    `Run: ${runId}`,
+    `Database status: ${state.health.databaseStatus}`,
+    `Workflow status: ${state.health.workflowStatus ?? "unknown"}`,
+    `Effective status: ${state.health.effectiveStatus}`,
+    `Stage: ${state.health.rootErrorStage ?? state.stage}`,
+    ...(state.health.rootErrorCode ? [`Error code: ${state.health.rootErrorCode}`] : []),
+    ...(state.health.acceptedAt ? [`Accepted: ${state.health.acceptedAt}`] : []),
+    ...(state.health.lastUpdateAt ? [`Last update: ${state.health.lastUpdateAt}`] : []),
+    ...(state.health.supportReference
+      ? [`Support reference: ${state.health.supportReference}`]
+      : []),
+  ].join("\n");
+
   return (
-    <AsyncState
-      status={status}
-      headingLevel={2}
-      title={title}
-      description={body}
-      action={
-        actionLabel && onAction ? (
-          <div className="space-y-3">
-            <Button
-              onClick={() => {
-                if (!pending) onAction();
-              }}
-              aria-busy={pending || undefined}
-              aria-disabled={pending}
-            >
-              {pending ? <Spinner aria-hidden="true" /> : null}
-              {actionLabel}
-            </Button>
-            {error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            ) : null}
+    <section
+      aria-labelledby="authoring-recovery-title"
+      className="instrument-surface-raised rounded-sm border-l-destructive px-5 py-6 sm:px-7"
+    >
+      <p className="folio-label text-destructive">
+        {cancelled ? "Production stopped" : "Production needs attention"}
+      </p>
+      <h2 id="authoring-recovery-title" className="mt-2 text-xl font-semibold">
+        {cancelled
+          ? "The run stopped safely."
+          : noWorkStarted
+            ? "Writing didn’t begin."
+            : "Production was interrupted."}
+      </h2>
+      <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+        {cancelled
+          ? "No new model calls or manuscript commits will begin for this run."
+          : noWorkStarted
+            ? `No credits were used. ${state.error?.message ?? "The Studio could not start production."}`
+            : (state.error?.message ??
+              "The current run could not finish, but every successfully committed chapter remains saved.")}
+      </p>
+
+      <dl className="mt-5 grid gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-3">
+        {[
+          {
+            label: "Saved work",
+            value: `${saved} ${saved === 1 ? "chapter" : "chapters"} · ${checkpoints} ${
+              checkpoints === 1 ? "checkpoint" : "checkpoints"
+            }`,
+          },
+          { label: "Credits used", value: state.totalCredits.toFixed(2) },
+          {
+            label: "What happens next",
+            value:
+              nextAction?.kind === "contact_support"
+                ? "Support safely rechecks the durable evidence"
+                : saved > 0
+                  ? "Reuse compatible checkpoints"
+                  : primaryAction.label,
+          },
+        ].map((fact) => (
+          <div key={fact.label} className="bg-card px-4 py-3">
+            <dt className="folio-label text-muted-foreground">{fact.label}</dt>
+            <dd className="mt-1 text-sm font-medium">{fact.value}</dd>
           </div>
-        ) : error ? (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
-        ) : null
-      }
-    />
+        ))}
+      </dl>
+
+      {state.health.supportReference ? (
+        <p className="mt-4 font-mono text-xs text-muted-foreground">
+          Support reference: {state.health.supportReference}
+        </p>
+      ) : null}
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        {primaryAction.kind === "recover" && onRecover ? (
+          <Button
+            onClick={() => {
+              if (!pending) onRecover();
+            }}
+            aria-busy={pending || undefined}
+            aria-disabled={pending}
+          >
+            {pending ? <Spinner aria-hidden="true" /> : null}
+            {primaryAction.label}
+          </Button>
+        ) : (
+          <Button
+            render={
+              primaryAction.kind === "link" && primaryAction.href.startsWith("/") ? (
+                <Link href={primaryAction.href as Route} />
+              ) : (
+                <a href={primaryAction.kind === "link" ? primaryAction.href : undefined} />
+              )
+            }
+            nativeButton={false}
+          >
+            {primaryAction.label}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(diagnostic);
+              setCopied(true);
+            } catch {
+              setCopied(false);
+            }
+          }}
+        >
+          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          {copied ? "Diagnostics copied" : "Copy diagnostics"}
+        </Button>
+        {nextAction?.kind !== "contact_support" ? (
+          <Button
+            variant="ghost"
+            render={
+              <a
+                href={`mailto:support@sopher.ai?subject=${encodeURIComponent(
+                  `Authoring help ${state.health.supportReference ?? runId}`,
+                )}`}
+              />
+            }
+            nativeButton={false}
+          >
+            Get help
+          </Button>
+        ) : null}
+      </div>
+      {error ? (
+        <p role="alert" className="mt-3 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+    </section>
   );
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  describeCancellationProgress,
   describeProductionProgress,
   isActiveProductionProgress,
   isProjectProgressSnapshot,
@@ -77,6 +78,29 @@ describe("project production progress", () => {
     ).toBe("Waiting for credits before checking continuity · Add credits to continue");
   });
 
+  it("describes a cancellation request as one transitional state", () => {
+    expect(
+      describeCancellationProgress({
+        runId: "run-1",
+        stage: "chapters",
+        pct: 37,
+        draftedCount: 1,
+        totalChapters: 3,
+      }),
+    ).toBe("Stopping safely after Chapters · 37%");
+
+    expect(
+      describeCancellationProgress({
+        runId: "run-1",
+        stage: "awaiting_credits",
+        pausedStage: "continuity",
+        pct: 85,
+        draftedCount: 3,
+        totalChapters: 3,
+      }),
+    ).toBe("Stopping safely after Continuity · 85%");
+  });
+
   it.each(["done", "failed", "cancelled"] as const)(
     "stops background refreshes after %s",
     (stage) => {
@@ -113,6 +137,7 @@ describe("project production progress", () => {
         stage: "chapters",
         pct: 42,
         detail: "4 of 12 chapters drafted",
+        cancellationRequestedAt: "2026-07-30T12:05:00.000Z",
         draftedCount: 4,
         totalChapters: 12,
       }),
@@ -142,6 +167,16 @@ describe("project production progress", () => {
         runId: "run-1",
         stage: "invented",
         pct: 42,
+        draftedCount: 4,
+        totalChapters: 12,
+      }),
+    ).toBe(false);
+    expect(
+      isProjectProgressSnapshot({
+        runId: "run-1",
+        stage: "chapters",
+        pct: 42,
+        cancellationRequestedAt: "not-a-timestamp",
         draftedCount: 4,
         totalChapters: 12,
       }),

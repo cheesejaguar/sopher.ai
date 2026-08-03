@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +12,9 @@ import type { ProjectSettings } from "@/db/schema";
 import { updateProject } from "@/lib/actions/projects";
 import { GENRES } from "@/lib/genres";
 import { VOICE_PROFILE_IDS, VOICE_PROFILES } from "@/ai/knowledge/voice-profiles";
+import type { ProjectExperience } from "@/lib/trial-story";
+import { TRIAL_STORY_CONFIG } from "@/lib/trial-story";
+import { fullBookUnlockHref } from "@/lib/marketing/trial-offer";
 
 /**
  * Post-creation editing for everything the wizard set: genre, shape, style
@@ -18,8 +23,10 @@ import { VOICE_PROFILE_IDS, VOICE_PROFILES } from "@/ai/knowledge/voice-profiles
 export function ProjectSettingsForm({
   projectId,
   defaults,
+  experience = "full_book",
 }: {
   projectId: string;
+  experience?: ProjectExperience;
   defaults: {
     genre: string;
     targetChapters: number;
@@ -61,7 +68,10 @@ export function ProjectSettingsForm({
             profanity: (read("profanity") || undefined) as ProjectSettings["profanity"],
             avoidTopics,
             qualityTier: (read("qualityTier") || undefined) as ProjectSettings["qualityTier"],
-            requireOutlineApproval: formData.get("requireOutlineApproval") === "on",
+            requireOutlineApproval:
+              experience === "trial_short_story"
+                ? TRIAL_STORY_CONFIG.requireOutlineApproval
+                : formData.get("requireOutlineApproval") === "on",
           },
         });
         setSaved(true);
@@ -83,6 +93,53 @@ export function ProjectSettingsForm({
       }}
       className="instrument-surface space-y-5 rounded-sm p-5 sm:p-6"
     >
+      {experience === "trial_short_story" ? (
+        <section aria-labelledby="included-shape-title" className="border-b border-border pb-5">
+          <input type="hidden" name="targetChapters" value={TRIAL_STORY_CONFIG.targetChapters} />
+          <input
+            type="hidden"
+            name="targetWordsPerChapter"
+            value={TRIAL_STORY_CONFIG.targetWordsPerChapter}
+          />
+          <input type="hidden" name="qualityTier" value={TRIAL_STORY_CONFIG.tier} />
+          <h2 id="included-shape-title" className="text-sm font-semibold">
+            Included short-story shape
+          </h2>
+          <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+            This project stays at three chapters, about 1,000 words each, and Standard quality.
+            Voice, perspective, boundaries, and style remain yours to change below.
+          </p>
+          <dl className="mt-4 grid grid-cols-3 border-y border-border">
+            <div className="border-r border-border py-3 pr-3">
+              <dt className="folio-label text-muted-foreground">Chapters</dt>
+              <dd className="mt-1 font-mono text-sm tabular-nums">
+                {TRIAL_STORY_CONFIG.targetChapters}
+              </dd>
+            </div>
+            <div className="border-r border-border px-3 py-3">
+              <dt className="folio-label text-muted-foreground">Length</dt>
+              <dd className="mt-1 font-mono text-sm tabular-nums">
+                ~{TRIAL_STORY_CONFIG.targetWordsPerChapter.toLocaleString("en-US")}
+              </dd>
+            </div>
+            <div className="py-3 pl-3">
+              <dt className="folio-label text-muted-foreground">Quality</dt>
+              <dd className="mt-1 text-sm font-medium capitalize">{TRIAL_STORY_CONFIG.tier}</dd>
+            </div>
+          </dl>
+          <Button
+            nativeButton={false}
+            variant="outline"
+            size="sm"
+            render={<Link href={fullBookUnlockHref(projectId)} />}
+            className="mt-4 rounded-sm"
+          >
+            Unlock full-length controls
+            <ArrowRight aria-hidden="true" data-icon="inline-end" />
+          </Button>
+        </section>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="ps-genre">Genre</Label>
@@ -94,42 +151,46 @@ export function ProjectSettingsForm({
             ))}
           </select>
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ps-tier">Quality tier</Label>
-          <select
-            id="ps-tier"
-            name="qualityTier"
-            defaultValue={defaults.settings.qualityTier ?? "standard"}
-            className={selectClass}
-          >
-            <option value="draft">Draft</option>
-            <option value="standard">Standard</option>
-            <option value="premium">Premium</option>
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ps-chapters">Chapters</Label>
-          <Input
-            id="ps-chapters"
-            name="targetChapters"
-            type="number"
-            min={3}
-            max={60}
-            defaultValue={defaults.targetChapters}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="ps-words">Words per chapter</Label>
-          <Input
-            id="ps-words"
-            name="targetWordsPerChapter"
-            type="number"
-            min={800}
-            max={8000}
-            step={100}
-            defaultValue={defaults.targetWordsPerChapter}
-          />
-        </div>
+        {experience === "full_book" ? (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="ps-tier">Quality tier</Label>
+              <select
+                id="ps-tier"
+                name="qualityTier"
+                defaultValue={defaults.settings.qualityTier ?? "standard"}
+                className={selectClass}
+              >
+                <option value="draft">Draft</option>
+                <option value="standard">Standard</option>
+                <option value="premium">Premium</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ps-chapters">Chapters</Label>
+              <Input
+                id="ps-chapters"
+                name="targetChapters"
+                type="number"
+                min={3}
+                max={60}
+                defaultValue={defaults.targetChapters}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ps-words">Words per chapter</Label>
+              <Input
+                id="ps-words"
+                name="targetWordsPerChapter"
+                type="number"
+                min={800}
+                max={8000}
+                step={100}
+                defaultValue={defaults.targetWordsPerChapter}
+              />
+            </div>
+          </>
+        ) : null}
         <div className="space-y-1.5">
           <Label htmlFor="ps-pov">Point of view</Label>
           <select
@@ -259,19 +320,39 @@ export function ProjectSettingsForm({
 
       <label
         htmlFor="ps-outline-approval"
-        className="flex min-h-11 cursor-pointer items-center gap-3 rounded-sm border border-border px-3 py-2 text-sm"
+        className={`flex min-h-11 items-center gap-3 rounded-sm border border-border px-3 py-2 text-sm ${
+          experience === "trial_short_story" ? "cursor-default bg-muted/30" : "cursor-pointer"
+        }`}
       >
+        {experience === "trial_short_story" ? (
+          <input type="hidden" name="requireOutlineApproval" value="on" />
+        ) : null}
         <input
           id="ps-outline-approval"
-          name="requireOutlineApproval"
+          name={experience === "trial_short_story" ? undefined : "requireOutlineApproval"}
           type="checkbox"
-          defaultChecked={defaults.settings.requireOutlineApproval ?? false}
+          defaultChecked={
+            experience === "trial_short_story"
+              ? undefined
+              : (defaults.settings.requireOutlineApproval ?? false)
+          }
+          checked={experience === "trial_short_story" ? true : undefined}
+          disabled={experience === "trial_short_story"}
+          readOnly={experience === "trial_short_story"}
+          aria-describedby={
+            experience === "trial_short_story" ? "ps-outline-approval-help" : undefined
+          }
           className="size-4 accent-primary"
         />
         <span>
           Pause for my approval before writing chapters
-          <span className="mt-0.5 block text-xs text-muted-foreground">
-            You can review or request a revised outline before manuscript production begins.
+          <span
+            id={experience === "trial_short_story" ? "ps-outline-approval-help" : undefined}
+            className="mt-0.5 block text-xs text-muted-foreground"
+          >
+            {experience === "trial_short_story"
+              ? "Included stories always pause here so you can approve or revise the plan before any chapters are written."
+              : "You can review or request a revised outline before manuscript production begins."}
           </span>
         </span>
       </label>

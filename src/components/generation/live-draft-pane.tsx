@@ -34,12 +34,14 @@ export function LiveDraftPane({
   titles,
   stage,
   experience = "full_book",
+  cancellationRequested = false,
   subscribeChapterProse,
 }: {
   chapters: Map<number, ChapterProgress>;
   titles: Record<number, string | null>;
   stage: Stage;
   experience?: ProjectExperience;
+  cancellationRequested?: boolean;
   subscribeChapterProse: (chapterNumber: number, onText: (fullText: string) => void) => () => void;
 }) {
   const [selected, setSelected] = React.useState<string | undefined>(undefined);
@@ -77,17 +79,25 @@ export function LiveDraftPane({
     return (
       <div className="manuscript-sheet flex min-h-72 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
         <p className="font-serif text-lg text-paper-muted">
-          {stage === "queued" || stage === "concept" || stage === "outline" || stage === "bible"
-            ? "The writers take over once the outline is set."
-            : stage === "awaiting_approval"
-              ? "Drafting begins after you approve the outline."
-              : "Waiting for the next chapter to begin."}
+          {cancellationRequested
+            ? "Stopping safely at the current production boundary."
+            : stage === "queued" || stage === "concept" || stage === "outline" || stage === "bible"
+              ? "The writers take over once the outline is set."
+              : stage === "awaiting_approval"
+                ? "Drafting begins after you approve the outline."
+                : "Waiting for the next chapter to begin."}
         </p>
         <p className="max-w-sm font-sans text-xs text-paper-muted">
-          {experience === "trial_short_story"
-            ? "Chapter drafts arrive word by word, one chapter at a time."
-            : "Chapter drafts arrive word by word as each coordinated writing wave begins."}{" "}
-          Everything you see here is saved as it lands.
+          {cancellationRequested ? (
+            "Completed chapter work remains saved while the Studio confirms the stop."
+          ) : (
+            <>
+              {experience === "trial_short_story"
+                ? "Chapter drafts arrive word by word, one chapter at a time."
+                : "Chapter drafts arrive word by word as each coordinated writing wave begins."}{" "}
+              Everything you see here is saved as it lands.
+            </>
+          )}
         </p>
       </div>
     );
@@ -104,12 +114,26 @@ export function LiveDraftPane({
         }
       }}
     >
-      <TabsList aria-label="Drafting chapters" className="max-w-full overflow-x-auto">
+      <TabsList
+        aria-label={cancellationRequested ? "Chapters at the safe stop" : "Drafting chapters"}
+        className="max-w-full overflow-x-auto"
+      >
         {openTabs.map((n) => {
           const status = chapters.get(n)?.status;
           const live = status === "drafting";
           return (
-            <TabsTrigger key={n} value={String(n)} onFocus={() => setFocusPinned(String(n))}>
+            <TabsTrigger
+              key={n}
+              value={String(n)}
+              aria-label={`Chapter ${n}${
+                live
+                  ? cancellationRequested
+                    ? " (finishing at the safe boundary)"
+                    : " (drafting now)"
+                  : ""
+              }`}
+              onFocus={() => setFocusPinned(String(n))}
+            >
               {live ? (
                 <span
                   aria-hidden="true"
@@ -118,7 +142,11 @@ export function LiveDraftPane({
                 />
               ) : null}
               Chapter {n}
-              {live ? <span className="sr-only"> (drafting now)</span> : null}
+              {live ? (
+                <span className="sr-only">
+                  {cancellationRequested ? " (finishing at the safe boundary)" : " (drafting now)"}
+                </span>
+              ) : null}
             </TabsTrigger>
           );
         })}
@@ -129,6 +157,7 @@ export function LiveDraftPane({
             chapterNumber={n}
             title={titles[n] ?? null}
             progress={chapters.get(n)}
+            cancellationRequested={cancellationRequested}
             subscribeChapterProse={subscribeChapterProse}
           />
         </TabsContent>
@@ -143,24 +172,29 @@ function ChapterProseView({
   chapterNumber,
   title,
   progress,
+  cancellationRequested,
   subscribeChapterProse,
 }: {
   chapterNumber: number;
   title: string | null;
   progress?: ChapterProgress;
+  cancellationRequested: boolean;
   subscribeChapterProse: (chapterNumber: number, onText: (fullText: string) => void) => () => void;
 }) {
   const [text, setText] = React.useState("");
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const followRef = React.useRef(true);
   const [showJump, setShowJump] = React.useState(false);
-  const live = progress?.status === "drafting";
+  const atSafeBoundary = cancellationRequested && progress?.status === "drafting";
+  const live = progress?.status === "drafting" && !cancellationRequested;
 
   // Each subscription replays the chapter's prose from the start and reports
   // the full accumulated text, so re-subscribing safely replaces local state.
+  // Re-subscribe at the durable status boundary: a Workflow stream can remain
+  // open after the chapter row is already saved.
   React.useEffect(
     () => subscribeChapterProse(chapterNumber, setText),
-    [chapterNumber, subscribeChapterProse],
+    [chapterNumber, progress?.status, subscribeChapterProse],
   );
 
   React.useEffect(() => {
@@ -199,7 +233,11 @@ function ChapterProseView({
         // Deliberately NOT a live region: prose arrives token by token.
         role="region"
         tabIndex={0}
-        aria-label={`Chapter ${chapterNumber} draft`}
+        aria-label={
+          cancellationRequested
+            ? `Chapter ${chapterNumber} saved work`
+            : `Chapter ${chapterNumber} draft`
+        }
         className="manuscript-sheet max-h-[32rem] min-h-72 overflow-y-auto px-6 py-8 sm:px-10"
       >
         <p className="font-sans text-xs tracking-widest text-paper-muted uppercase">
@@ -211,7 +249,9 @@ function ChapterProseView({
             <p className={cn("text-paper-muted", live && "stream-caret")}>
               {live
                 ? "The writer is opening the chapter"
-                : "No prose has streamed for this chapter yet."}
+                : atSafeBoundary
+                  ? "Finishing at the safe boundary."
+                  : "No prose has streamed for this chapter yet."}
             </p>
           ) : (
             paragraphs.map((paragraph, index) => {
@@ -227,7 +267,11 @@ function ChapterProseView({
         {!live && progress?.wordCount ? (
           <p className="mt-6 font-mono text-xs text-paper-muted tabular-nums">
             {new Intl.NumberFormat("en-US").format(progress.wordCount)} words ·{" "}
-            {progress.status === "drafted" ? "draft complete" : progress.status}
+            {progress.status === "drafted"
+              ? "draft complete"
+              : atSafeBoundary
+                ? "settling at safe boundary"
+                : progress.status}
           </p>
         ) : null}
       </div>

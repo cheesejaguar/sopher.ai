@@ -1,5 +1,5 @@
 import PDFDocument from "pdfkit/js/pdfkit.standalone.js";
-import { markdownToBlocks, READING_LINE, stripInline, type AssembledManuscript } from "./assemble";
+import { markdownToBlocks, stripInline, type AssembledManuscript } from "./assemble";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 // 6in × 9in trade page, in PDF points.
@@ -65,7 +65,7 @@ export async function exportPdf(m: AssembledManuscript): Promise<ExportResult> {
       .text(pdfSafe(m.synopsis), { width: BODY_WIDTH, align: "center" });
   }
   doc.moveDown(2);
-  doc.font(SERIF).fontSize(9).text(pdfSafe(READING_LINE), { width: BODY_WIDTH, align: "center" });
+  doc.font(SERIF).fontSize(9).text(pdfSafe(m.editionNote), { width: BODY_WIDTH, align: "center" });
   doc.moveDown(0.5);
   doc.text(pdfSafe(m.author), { width: BODY_WIDTH, align: "center" });
 

@@ -26,7 +26,6 @@ export default async function AdminBookView({
   return (
     <div className="space-y-6">
       <PageHeader
-        label="Admin / Read-only manuscript"
         title={book.title}
         description={`By ${book.email} · ${book.genre ?? "no genre"} · ${book.status}`}
         actions={
@@ -76,16 +75,18 @@ export default async function AdminBookView({
 
       <section aria-label="Manuscript" className="space-y-8">
         {book.chapters.map((chapter) => (
-          <article key={chapter.id} className="manuscript-sheet px-6 py-8 sm:px-10">
-            <h2 className="font-display text-lg font-semibold text-paper-foreground">
-              Chapter {chapter.chapterNumber}
-              {chapter.title ? ` — ${chapter.title}` : ""}
-              <span className="ml-2 font-mono text-xs font-normal text-paper-muted">
+          <article key={chapter.id} className="manuscript-sheet min-w-0 px-4 py-6 sm:px-10 sm:py-8">
+            <h2 className="min-w-0 font-display text-lg leading-snug font-semibold text-paper-foreground [overflow-wrap:anywhere]">
+              <span>
+                Chapter {chapter.chapterNumber}
+                {chapter.title ? ` — ${chapter.title}` : ""}
+              </span>
+              <span className="mt-2 block font-mono text-xs font-normal text-paper-muted sm:mt-0 sm:ml-2 sm:inline">
                 {chapter.wordCount.toLocaleString()} words
               </span>
             </h2>
             <div
-              className="prose-manuscript mt-4 [content-visibility:auto]"
+              className="prose-manuscript mt-4 bg-paper text-paper-foreground"
               // Same escaped-HTML renderer as the author-facing reading view.
               dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content) }}
             />

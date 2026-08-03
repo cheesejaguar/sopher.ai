@@ -1,7 +1,9 @@
 import { and, desc, eq, gte, inArray, isNotNull, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
+import { recommendAdminRunAction, summarizeAdminRunCheckpoints } from "@/lib/admin/run-operations";
 import { requireAdmin } from "@/lib/auth";
+import { getRunHealth } from "@/lib/run-health";
 
 /**
  * Admin aggregates. Every function here reads across ALL users by design, so
@@ -269,9 +271,6 @@ export async function listFlags(status?: "open" | "dismissed" | "actioned") {
     .limit(200);
 }
 
-const STUCK_AWAITING_MS = 24 * 3_600_000;
-const STUCK_RUNNING_MS = 2 * 3_600_000;
-
 export async function listRuns() {
   await requireAdmin();
   const db = getDb();
@@ -283,12 +282,46 @@ export async function listRuns() {
       kind: schema.generationRuns.kind,
       status: schema.generationRuns.status,
       error: schema.generationRuns.error,
+      rootErrorCode: schema.generationRuns.rootErrorCode,
+      rootErrorStage: schema.generationRuns.rootErrorStage,
       workflowRunId: schema.generationRuns.workflowRunId,
+      workflowStatus: schema.generationRuns.workflowObservedStatus,
+      workflowObservedAt: schema.generationRuns.workflowObservedAt,
+      currentStage: schema.generationRuns.currentStage,
+      progressPct: schema.generationRuns.progressPct,
+      lastProgressAt: schema.generationRuns.lastProgressAt,
+      heartbeatAt: schema.generationRuns.heartbeatAt,
+      pauseKind: schema.generationRuns.pauseKind,
+      pauseVersion: schema.generationRuns.pauseVersion,
+      cancellationRequestedAt: schema.generationRuns.cancellationRequestedAt,
+      dispatchAttempts: schema.generationRuns.dispatchAttempts,
+      supportReference: schema.generationRuns.supportReference,
       projectId: schema.generationRuns.projectId,
       title: schema.projects.title,
       email: schema.users.email,
       userId: schema.users.id,
       usd: sql<string>`coalesce((select sum(l.usd) from llm_calls l where l.run_id = "generation_runs"."id"), 0)`,
+      lastEventAt: sql<Date | null>`(
+        select max(e.created_at)
+        from generation_events e
+        where e.run_id = "generation_runs"."id"
+      )`,
+      incidentSeverity: sql<"warning" | "critical" | null>`(
+        select case
+          when bool_or(i.severity = 'critical') then 'critical'
+          when count(*) > 0 then 'warning'
+          else null
+        end
+        from authoring_incidents i
+        where i.run_id = "generation_runs"."id"
+          and i.resolved_at is null
+      )`,
+      incidentCategories: sql<string | null>`(
+        select string_agg(distinct i.category, ', ' order by i.category)
+        from authoring_incidents i
+        where i.run_id = "generation_runs"."id"
+          and i.resolved_at is null
+      )`,
     })
     .from(schema.generationRuns)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.generationRuns.projectId))
@@ -296,15 +329,22 @@ export async function listRuns() {
     .orderBy(desc(schema.generationRuns.createdAt))
     .limit(100);
 
-  const now = Date.now();
   return rows.map((run) => {
-    const since = new Date(run.startedAt ?? run.createdAt).getTime();
+    const active = ["queued", "running", "awaiting_input"].includes(run.status);
+    const health =
+      run.incidentSeverity ??
+      (run.cancellationRequestedAt
+        ? "waiting"
+        : active
+          ? run.status === "awaiting_input"
+            ? "waiting"
+            : "healthy"
+          : "terminal");
     return {
       ...run,
       usd: Number(run.usd),
-      stuck:
-        (run.status === "awaiting_input" && now - since > STUCK_AWAITING_MS) ||
-        (run.status === "running" && now - since > STUCK_RUNNING_MS),
+      health,
+      stuck: run.incidentSeverity === "warning" || run.incidentSeverity === "critical",
     };
   });
 }
@@ -366,37 +406,195 @@ export async function listUnresolvedMeteringIntents() {
 export async function getRunEvents(runId: string) {
   await requireAdmin();
   const db = getDb();
-  const [run] = await db
-    .select({
-      id: schema.generationRuns.id,
-      status: schema.generationRuns.status,
-      kind: schema.generationRuns.kind,
-      error: schema.generationRuns.error,
-      workflowRunId: schema.generationRuns.workflowRunId,
-      createdAt: schema.generationRuns.createdAt,
-      title: schema.projects.title,
-      email: schema.users.email,
-      projectId: schema.projects.id,
-    })
+  const [runRow] = await db
+    .select()
     .from(schema.generationRuns)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.generationRuns.projectId))
-    .innerJoin(schema.users, eq(schema.users.id, schema.generationRuns.userId))
     .where(eq(schema.generationRuns.id, runId))
     .limit(1);
-  if (!run) return null;
+  if (!runRow) return null;
 
-  const events = await db
+  const [identity] = await db
     .select({
-      seq: schema.generationEvents.seq,
-      type: schema.generationEvents.type,
-      payload: schema.generationEvents.payload,
-      createdAt: schema.generationEvents.createdAt,
+      title: schema.projects.title,
+      email: schema.users.email,
     })
-    .from(schema.generationEvents)
-    .where(eq(schema.generationEvents.runId, runId))
-    .orderBy(schema.generationEvents.seq);
+    .from(schema.projects)
+    .innerJoin(schema.users, eq(schema.users.id, schema.projects.userId))
+    .where(eq(schema.projects.id, runRow.projectId))
+    .limit(1);
+  if (!identity) return null;
 
-  return { run, events };
+  const [events, incidents, inputs, artifactResult, holdResult, health] = await Promise.all([
+    db
+      .select({
+        seq: schema.generationEvents.seq,
+        eventKey: schema.generationEvents.eventKey,
+        type: schema.generationEvents.type,
+        payload: schema.generationEvents.payload,
+        createdAt: schema.generationEvents.createdAt,
+      })
+      .from(schema.generationEvents)
+      .where(eq(schema.generationEvents.runId, runId))
+      .orderBy(schema.generationEvents.seq),
+    db
+      .select({
+        id: schema.authoringIncidents.id,
+        category: schema.authoringIncidents.category,
+        severity: schema.authoringIncidents.severity,
+        evidence: schema.authoringIncidents.evidence,
+        occurrenceCount: schema.authoringIncidents.occurrenceCount,
+        firstObservedAt: schema.authoringIncidents.firstObservedAt,
+        lastObservedAt: schema.authoringIncidents.lastObservedAt,
+        resolvedAt: schema.authoringIncidents.resolvedAt,
+      })
+      .from(schema.authoringIncidents)
+      .where(eq(schema.authoringIncidents.runId, runId))
+      .orderBy(desc(schema.authoringIncidents.lastObservedAt)),
+    db
+      .select({
+        id: schema.authoringRunInputs.id,
+        kind: schema.authoringRunInputs.kind,
+        pauseVersion: schema.authoringRunInputs.pauseVersion,
+        status: schema.authoringRunInputs.status,
+        deliveryAttempts: schema.authoringRunInputs.deliveryAttempts,
+        acceptedAt: schema.authoringRunInputs.acceptedAt,
+        deliveredAt: schema.authoringRunInputs.deliveredAt,
+        consumedAt: schema.authoringRunInputs.consumedAt,
+        lastDeliveryError: schema.authoringRunInputs.lastDeliveryError,
+      })
+      .from(schema.authoringRunInputs)
+      .where(eq(schema.authoringRunInputs.runId, runId))
+      .orderBy(desc(schema.authoringRunInputs.acceptedAt)),
+    db.execute<{
+      outlineCount: number;
+      chapterCount: number;
+      contentChapterCount: number;
+      finalChapterCount: number;
+      entityCount: number;
+      relationshipCount: number;
+      assetCount: number;
+      exportCount: number;
+    }>(sql`
+      with project_book as (
+        select id
+        from ${schema.books}
+        where project_id = ${runRow.projectId}
+        limit 1
+      )
+      select
+        (select count(*)::int
+          from ${schema.outlines}
+          where book_id in (select id from project_book)) as "outlineCount",
+        (select count(*)::int
+          from ${schema.chapters}
+          where book_id in (select id from project_book)) as "chapterCount",
+        (select count(*)::int
+          from ${schema.chapters}
+          where book_id in (select id from project_book)
+            and word_count > 0
+            and length(btrim(content)) > 0) as "contentChapterCount",
+        (select count(*)::int
+          from ${schema.chapters}
+          where book_id in (select id from project_book)
+            and status = 'final'
+            and word_count > 0
+            and length(btrim(content)) > 0) as "finalChapterCount",
+        (select count(*)::int
+          from ${schema.entities}
+          where book_id in (select id from project_book)) as "entityCount",
+        (select count(*)::int
+          from ${schema.entityRelationships} relationship
+          where exists (
+            select 1
+            from ${schema.entities} source
+            where source.id = relationship.from_entity_id
+              and source.book_id in (select id from project_book)
+          )) as "relationshipCount",
+        (select count(*)::int
+          from ${schema.assets}
+          where project_id = ${runRow.projectId}) as "assetCount",
+        (select count(*)::int
+          from ${schema.assets}
+          where project_id = ${runRow.projectId}
+            and kind in ('export_epub', 'export_pdf', 'export_docx', 'export_md')) as "exportCount"
+    `),
+    db.execute<{
+      externalRef: string;
+      heldCredits: string;
+      createdAt: Date;
+    }>(sql`
+      select
+        reservation.external_ref as "externalRef",
+        greatest(
+          0,
+          -reservation.amount - coalesce((
+            select sum(claimed.amount)
+            from ${schema.creditLedger} claimed
+            where claimed.user_id = reservation.user_id
+              and claimed.external_ref like
+                ('reservation-claim-release:' || reservation.external_ref || ':%')
+          ), 0)
+        )::text as "heldCredits",
+        reservation.created_at as "createdAt"
+      from ${schema.creditLedger} reservation
+      where reservation.run_id = ${runId}
+        and reservation.kind = 'adjustment'
+        and reservation.amount < 0
+        and coalesce(reservation.external_ref, '') ~
+          '^(generation-reservation:|interactive-reservation:)'
+        and not exists (
+          select 1
+          from ${schema.creditLedger} released
+          where released.external_ref = 'release:' || reservation.external_ref
+        )
+      order by reservation.created_at asc
+      limit 100
+    `),
+    getRunHealth(runRow),
+  ]);
+
+  const artifacts = artifactResult.rows[0] ?? {
+    outlineCount: 0,
+    chapterCount: 0,
+    contentChapterCount: 0,
+    finalChapterCount: 0,
+    entityCount: 0,
+    relationshipCount: 0,
+    assetCount: 0,
+    exportCount: 0,
+  };
+  const openHolds = holdResult.rows.map((hold) => ({
+    ...hold,
+    heldCredits: Number(hold.heldCredits),
+  }));
+  const recommendedAction = recommendAdminRunAction({
+    health,
+    acceptedInputCount: inputs.filter(
+      (input) =>
+        input.status === "accepted" &&
+        input.kind === health.pause?.kind &&
+        input.pauseVersion === health.pause.version,
+    ).length,
+    hasOpenCriticalIncident: incidents.some(
+      (incident) => incident.severity === "critical" && !incident.resolvedAt,
+    ),
+  });
+
+  return {
+    run: { ...runRow, ...identity },
+    health,
+    checkpoints: summarizeAdminRunCheckpoints(runId, runRow.config),
+    artifacts,
+    credit: {
+      ...health.spend,
+      openHolds,
+      openHeldCredits: openHolds.reduce((sum, hold) => sum + hold.heldCredits, 0),
+    },
+    recommendedAction,
+    events,
+    incidents,
+    inputs,
+  };
 }
 
 export async function getAdminBook(projectId: string) {

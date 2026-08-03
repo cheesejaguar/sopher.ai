@@ -14,10 +14,10 @@ import {
 /**
  * Shown on the write screen while the run is suspended for credits.
  *
- * Everything drafted so far is durable — the workflow is parked on a hook, so
- * resuming continues from the next wave without re-billing anything. "Resume"
- * posts the top-up input; the server re-checks the balance and refuses (402)
- * if nothing was actually added.
+ * Everything drafted so far is durable. Full books return through checkout,
+ * which submits the accepted top-up input automatically. An included story
+ * never turns a product-side credit pause into a purchase prompt; its
+ * "Check again" control only revalidates the existing included entitlement.
  */
 export function CreditsBanner({
   projectId,
@@ -25,18 +25,20 @@ export function CreditsBanner({
   detail,
   experience = "full_book",
   fullBookUnlocked = false,
+  supportReference,
 }: {
   projectId: string;
   runId: string;
   detail?: string;
   experience?: ProjectExperience;
   fullBookUnlocked?: boolean;
+  supportReference?: string;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const includedStory = experience === "trial_short_story";
 
-  async function resume() {
+  async function recheckIncludedStory() {
     setBusy(true);
     setError(null);
     try {
@@ -56,7 +58,7 @@ export function CreditsBanner({
         );
         return;
       }
-      // The run stream picks the resume up on its own; nothing to navigate.
+      // The run stream picks the accepted input up on its own.
     } catch {
       setError("Could not resume the run");
     } finally {
@@ -78,7 +80,7 @@ export function CreditsBanner({
             <p className="text-xs text-muted-foreground">
               {includedStory ? (
                 <>
-                  {INCLUDED_STORY_NO_CARD_NOTE} Every chapter drafted so far is safe. Try resuming;
+                  {INCLUDED_STORY_NO_CARD_NOTE} Every chapter drafted so far is safe. Check again;
                   {fullBookUnlocked
                     ? " your account’s full-length controls are already unlocked."
                     : ` a purchase is optional here and is only the next step for future full-length books. ${FULL_BOOK_UNLOCK_DESCRIPTION}`}
@@ -93,25 +95,39 @@ export function CreditsBanner({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={resume} disabled={busy}>
-            {busy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
-            {busy ? "Resuming…" : "Resume writing"}
-          </Button>
-          <Button
-            variant="outline"
-            render={
-              <Link
-                href={`/studio/credits?return=${encodeURIComponent(`/projects/${projectId}/write`)}`}
-              />
-            }
-            nativeButton={false}
-          >
-            {includedStory
-              ? fullBookUnlocked
-                ? "Credits for future books"
-                : "Explore full-book credits"
-              : "Add credits"}
-          </Button>
+          {includedStory ? (
+            <>
+              <Button onClick={recheckIncludedStory} disabled={busy}>
+                {busy ? <Loader2 aria-hidden="true" className="size-4 animate-spin" /> : null}
+                {busy ? "Checking…" : "Check again"}
+              </Button>
+              <Button
+                variant="outline"
+                render={
+                  <a
+                    href={`mailto:support@sopher.ai?subject=${encodeURIComponent(
+                      `Included story pause${supportReference ? ` ${supportReference}` : ""}`,
+                    )}`}
+                  />
+                }
+                nativeButton={false}
+              >
+                Get help
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="outline"
+              render={
+                <Link
+                  href={`/studio/credits?return=${encodeURIComponent(`/projects/${projectId}/write`)}&resumeRun=${encodeURIComponent(runId)}`}
+                />
+              }
+              nativeButton={false}
+            >
+              Add credits
+            </Button>
+          )}
         </div>
       </div>
       {error ? (

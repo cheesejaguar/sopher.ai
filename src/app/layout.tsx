@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Suspense } from "react";
 import { Archivo, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { BaseUiFocusGuardLabels } from "@/components/ui/base-ui-focus-guard-labels";
 import { SkipLink } from "@/components/ui/skip-link";
 import { SITE_URL, SiteJsonLd } from "@/components/seo/json-ld";
 import "./globals.css";
@@ -69,6 +69,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
   colorScheme: "dark light",
   themeColor: [
     { media: "(prefers-color-scheme: dark)", color: "#080910" },
@@ -81,26 +83,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const route = (
-    <Suspense
-      fallback={
-        <div
-          role="status"
-          aria-label="Loading sopher.ai"
-          className="instrument-canvas grid min-h-dvh place-items-center px-6"
-        >
-          <div className="instrument-surface-raised w-full max-w-sm p-6">
-            <p className="folio-label text-primary">Sopher.ai / loading</p>
-            <div className="mt-5 h-px w-full bg-border" aria-hidden="true" />
-            <p className="mt-5 text-sm text-muted-foreground">Preparing your writing desk…</p>
-          </div>
-        </div>
-      }
-    >
-      {children}
-    </Suspense>
-  );
-
   return (
     <html
       lang="en"
@@ -109,9 +91,10 @@ export default function RootLayout({
     >
       <body className="min-h-dvh antialiased [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff]">
         <SiteJsonLd />
-        <SkipLink />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-          {route}
+          <BaseUiFocusGuardLabels />
+          <SkipLink />
+          {children}
         </ThemeProvider>
       </body>
     </html>

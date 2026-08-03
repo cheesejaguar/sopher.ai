@@ -5,7 +5,24 @@ import {
   canAttachToWholeBookRun,
   clearRecoveredWizardStorage,
   generationRequestStorageKey,
+  shouldRefreshAuthoritativeJourney,
 } from "./write-experience";
+
+describe("shouldRefreshAuthoritativeJourney", () => {
+  const progress = {
+    stage: "failed" as const,
+    pct: 42,
+    draftedCount: 1,
+    totalChapters: 3,
+  };
+
+  it("refreshes only after terminal health has been confirmed", () => {
+    expect(shouldRefreshAuthoritativeJourney(progress)).toBe(false);
+    expect(shouldRefreshAuthoritativeJourney({ ...progress, authoritativeTerminal: true })).toBe(
+      true,
+    );
+  });
+});
 
 describe("canAttachToWholeBookRun", () => {
   it("accepts a newly queued full-book run", () => {

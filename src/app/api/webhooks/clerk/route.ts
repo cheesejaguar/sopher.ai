@@ -4,6 +4,10 @@ import { getDb, schema, withDbTransaction } from "@/db";
 import { grantCredits, reconcileCreditReservations } from "@/lib/billing/credits";
 import { SIGNUP_GRANT_CREDITS } from "@/lib/billing/credits-shared";
 import { deleteClerkUserTransaction } from "@/lib/account-deletion-transaction";
+import {
+  requestDeletedClerkUserRunCancellations,
+  scheduleDeletedClerkUserFinalization,
+} from "@/lib/clerk-deletion-finalizer";
 
 export const maxDuration = 60;
 
@@ -74,7 +78,12 @@ export async function POST(req: NextRequest) {
       }),
     );
 
-    if (outcome === "active_run" || outcome === "open_billing") {
+    if (outcome === "retry" || outcome === "active_run" || outcome === "open_billing") {
+      // The Clerk identity is already gone. Mark cancellation before returning
+      // so no paused or running workflow can authorize another provider call,
+      // then leave a durable finalizer in case Svix exhausts its webhook retries.
+      await requestDeletedClerkUserRunCancellations(userId);
+      await scheduleDeletedClerkUserFinalization(userId);
       // Svix retries 5xx deliveries. Retrying is safer than erasing an active
       // workflow or an unsettled paid-call protocol.
       return Response.json(

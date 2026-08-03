@@ -15,7 +15,6 @@ import {
   chapterHeading,
   markdownToBlocks,
   parseInline,
-  READING_LINE,
   type AssembledManuscript,
   type ProseBlock,
 } from "./assemble";
@@ -118,7 +117,7 @@ function frontMatterSection(m: AssembledManuscript): ISectionOptions {
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 200 },
-      children: [new TextRun({ text: READING_LINE, italics: true, size: 20 })],
+      children: [new TextRun({ text: m.editionNote, italics: true, size: 20 })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,

@@ -2,13 +2,18 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import { schema, type DbTransaction } from "@/db";
 import { lockProjectAuthoring } from "@/db/transaction-operations";
+import {
+  repairDeliveredOptionalOperationLeases,
+  unreleasedBillingProtocolSql,
+} from "@/lib/project-transaction-operations";
 
 export type AccountDeletionCleanup = {
   projectId: string;
   pathnames: string[];
 };
 
-export type AccountDeletionOutcome = "deleted" | "already_deleted" | "active_run" | "open_billing";
+export type AccountDeletionOutcome =
+  "deleted" | "already_deleted" | "retry" | "active_run" | "open_billing";
 
 export async function deleteClerkUserTransaction(
   tx: DbTransaction,
@@ -17,15 +22,12 @@ export async function deleteClerkUserTransaction(
     scheduleCleanup: (projects: AccountDeletionCleanup[]) => Promise<void>;
   },
 ): Promise<AccountDeletionOutcome> {
-  // PostgreSQL foreign-key inserts need a conflicting key-share lock, so once
-  // this returns no new project can appear outside the cleanup snapshot.
-  const [lockedUser] = await tx
+  const [existingUser] = await tx
     .select({ id: schema.users.id })
     .from(schema.users)
     .where(eq(schema.users.id, input.userId))
-    .for("update")
     .limit(1);
-  if (!lockedUser) return "already_deleted";
+  if (!existingUser) return "already_deleted";
 
   const projectRows = await tx
     .select({ id: schema.projects.id })
@@ -39,6 +41,32 @@ export async function deleteClerkUserTransaction(
     await lockProjectAuthoring(tx, project.id);
   }
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.userId}, 0))`);
+
+  // Optional metering takes project -> wallet -> user-row locks. Follow the same order
+  // so deleting a Clerk identity cannot deadlock an in-flight optional tool.
+  // The row lock then freezes foreign-key project inserts; if one committed
+  // while the project lock snapshot was being acquired, retry from a fresh
+  // ordered snapshot instead of locking the new project in reverse order.
+  const [lockedUser] = await tx
+    .select({ id: schema.users.id })
+    .from(schema.users)
+    .where(eq(schema.users.id, input.userId))
+    .for("update")
+    .limit(1);
+  if (!lockedUser) return "already_deleted";
+  const confirmedProjects = await tx
+    .select({ id: schema.projects.id })
+    .from(schema.projects)
+    .where(eq(schema.projects.userId, input.userId))
+    .orderBy(asc(schema.projects.id));
+  if (
+    confirmedProjects.length !== projectRows.length ||
+    confirmedProjects.some((project, index) => project.id !== projectRows[index]?.id)
+  ) {
+    return "retry";
+  }
+
+  await repairDeliveredOptionalOperationLeases(tx, { userId: input.userId });
 
   const [activeRun] = await tx
     .select({ id: schema.generationRuns.id })
@@ -55,36 +83,7 @@ export async function deleteClerkUserTransaction(
   const [openBillingProtocol] = await tx
     .select({ id: schema.creditLedger.id })
     .from(schema.creditLedger)
-    .where(
-      and(
-        eq(schema.creditLedger.userId, input.userId),
-        sql`(
-          (
-            (
-              ${schema.creditLedger.externalRef} like 'generation-reservation:%'
-              or ${schema.creditLedger.externalRef} like 'interactive-reservation:%'
-            )
-            and ${schema.creditLedger.amount} < 0
-            and not exists (
-              select 1 from credit_ledger released
-              where released.external_ref =
-                'release:' || ${schema.creditLedger.externalRef}
-            )
-          )
-          or (
-            ${schema.creditLedger.externalRef} like 'metering-intent:%'
-            and ${schema.creditLedger.amount} = 0
-            and not exists (
-              select 1 from credit_ledger terminal
-              where terminal.external_ref in (
-                'intent-settled:' || ${schema.creditLedger.externalRef},
-                'intent-aborted:' || ${schema.creditLedger.externalRef}
-              )
-            )
-          )
-        )`,
-      ),
-    )
+    .where(unreleasedBillingProtocolSql({ userId: input.userId }))
     .limit(1);
   if (openBillingProtocol) return "open_billing";
 

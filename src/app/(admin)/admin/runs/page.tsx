@@ -29,9 +29,8 @@ export default async function AdminRuns() {
   return (
     <div className="space-y-4">
       <PageHeader
-        label="Admin / Production"
         title="Generation runs"
-        description="Stuck means awaiting input for 24h+ or running for 2h+. The event log shows exactly what the author saw."
+        description="Database state, Workflow observations, durable progress, and active incidents. Silence is flagged for investigation, never treated as proof of failure."
       />
       <Table aria-label="Recent generation runs" scrollLabel="Recent generation runs">
         <TableHeader>
@@ -41,6 +40,8 @@ export default async function AdminRuns() {
             <TableHead scope="col">User</TableHead>
             <TableHead scope="col">Kind</TableHead>
             <TableHead scope="col">Status</TableHead>
+            <TableHead scope="col">Stage</TableHead>
+            <TableHead scope="col">Last signal</TableHead>
             <TableHead scope="col" className="text-right">
               Cost
             </TableHead>
@@ -52,7 +53,10 @@ export default async function AdminRuns() {
         </TableHeader>
         <TableBody>
           {runs.map((run) => (
-            <TableRow key={run.id} className={run.stuck ? "bg-ember/5" : undefined}>
+            <TableRow
+              key={run.id}
+              className={run.health === "critical" ? "bg-destructive/5" : undefined}
+            >
               <TableCell className="whitespace-nowrap text-muted-foreground">
                 <Link href={`/admin/runs/${run.id}`} className="text-primary hover:underline">
                   <RelativeTime iso={run.createdAt.toISOString()} />
@@ -68,28 +72,56 @@ export default async function AdminRuns() {
               <TableCell>
                 <Badge
                   variant={
-                    run.status === "failed" || run.stuck
+                    run.status === "failed" || run.health === "critical"
                       ? "destructive"
-                      : ACTIVE.has(run.status)
+                      : ACTIVE.has(run.status) || run.health === "warning"
                         ? "default"
                         : "outline"
                   }
                 >
                   {run.status}
-                  {run.stuck ? " · stuck" : ""}
+                  {run.cancellationRequestedAt ? " · stopping" : ""}
+                  {run.health === "warning" || run.health === "critical" ? ` · ${run.health}` : ""}
                 </Badge>
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                <span className="font-medium">{run.currentStage}</span>
+                <span className="ml-2 font-mono text-xs text-muted-foreground tabular-nums">
+                  {run.progressPct}%
+                </span>
+                {run.pauseKind ? (
+                  <span className="mt-1 block text-xs text-ember">
+                    {run.pauseKind === "outline_approval" ? "outline review" : "credits required"}
+                  </span>
+                ) : null}
+              </TableCell>
+              <TableCell className="whitespace-nowrap text-muted-foreground">
+                {(run.heartbeatAt ?? run.lastEventAt ?? run.lastProgressAt) ? (
+                  <RelativeTime
+                    iso={new Date(
+                      run.heartbeatAt ?? run.lastEventAt ?? run.lastProgressAt!,
+                    ).toISOString()}
+                  />
+                ) : (
+                  "No signal"
+                )}
+                <span className="mt-1 block text-xs">
+                  Workflow: {run.workflowStatus ?? (run.workflowRunId ? "unchecked" : "unlinked")}
+                </span>
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums">
                 {formatUsd(run.usd)}
               </TableCell>
               <TableCell
                 className="max-w-64 truncate text-muted-foreground"
-                title={run.error ?? ""}
+                title={[run.incidentCategories, run.error].filter(Boolean).join("\n")}
               >
-                {run.error ?? "—"}
+                {run.incidentCategories ?? run.rootErrorCode ?? run.error ?? "—"}
               </TableCell>
               <TableCell>
-                {ACTIVE.has(run.status) ? <CancelRunButton runId={run.id} /> : null}
+                {ACTIVE.has(run.status) && !run.cancellationRequestedAt ? (
+                  <CancelRunButton runId={run.id} />
+                ) : null}
               </TableCell>
             </TableRow>
           ))}
