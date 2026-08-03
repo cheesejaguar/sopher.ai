@@ -467,6 +467,17 @@
   contain-intrinsic-block-size: auto var(--defer-block-size, 52rem);
 }
 
+/* Firefox does not preserve the document-end anchor when content-visibility
+   replaces several intrinsic estimates during one native End-key jump. Keep
+   the complete page laid out there so keyboard users reliably reach the real
+   footer; Chromium retains the measured mobile paint optimization. */
+@supports (-moz-appearance: none) {
+  .defer-offscreen {
+    content-visibility: visible;
+    contain-intrinsic-size: none;
+  }
+}
+
 /* Intrinsic block sizes follow each homepage section's real responsive
    footprint. Slightly conservative values keep keyboard End/Page Down and
    scrollbar positions stable before an offscreen section is first painted. */
