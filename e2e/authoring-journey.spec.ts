@@ -104,8 +104,8 @@ test("library exposes one truthful action for every authoring state", async ({
     },
     {
       title: "The House That Counted",
-      label: "Contact support",
-      href: /^mailto:support@sopher\.ai/,
+      label: "Review production status",
+      href: `/projects/${PROJECTS.invalidCompletion}/write#production-status`,
       detail: "without a complete, verifiable manuscript",
     },
   ] as const;
