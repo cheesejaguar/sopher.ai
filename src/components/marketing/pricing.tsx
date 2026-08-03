@@ -106,7 +106,7 @@ export function Pricing({
     <section
       id="pricing"
       aria-labelledby="pricing-heading"
-      className="border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-pricing border-b border-black/10 dark:border-white/10"
     >
       <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
         <div className="grid gap-10 lg:grid-cols-12">

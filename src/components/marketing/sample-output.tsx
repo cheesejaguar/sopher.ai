@@ -1,5 +1,3 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
 type Sample = {
   value: string;
   genre: string;
@@ -46,7 +44,7 @@ export function SampleOutput() {
   return (
     <section
       aria-labelledby="sample-output-heading"
-      className="border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-samples border-b border-black/10 dark:border-white/10"
     >
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 sm:gap-10 sm:px-6 sm:py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
         <div className="lg:col-span-4">
@@ -66,31 +64,24 @@ export function SampleOutput() {
           </div>
         </div>
 
-        <Tabs defaultValue="fantasy" className="min-w-0 lg:col-span-8">
-          <TabsList
-            aria-label="Sample genre"
-            variant="line"
-            className="grid h-auto w-full min-w-0 max-w-full grid-cols-3 justify-stretch gap-0 border-y border-black/10 p-0 dark:border-white/10"
-          >
-            {SAMPLES.map((sample) => (
-              <TabsTrigger
-                key={sample.value}
-                value={sample.value}
-                className="min-h-11 min-w-0 rounded-none border-r border-black/10 px-1 text-center text-xs whitespace-normal uppercase [overflow-wrap:anywhere] dark:border-white/10 min-[360px]:px-2 sm:px-4"
-              >
-                {sample.genre}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {/*
-            keepMounted holds all three excerpts in the DOM. Base UI still hides
-            the inactive panels, but ~180 words of the only real prose sample on
-            the site were otherwise unreachable to crawlers and text extractors,
-            which unmount-by-default removed from the document entirely.
-          */}
-          {SAMPLES.map((sample) => (
-            <TabsContent key={sample.value} value={sample.value} keepMounted>
-              <article className="manuscript-sheet mt-6 px-4 py-8 min-[360px]:px-6 sm:px-12 sm:py-14">
+        <div className="min-w-0 lg:col-span-8">
+          {SAMPLES.map((sample, index) => (
+            <details
+              key={sample.value}
+              name="sample-genre"
+              open={index === 0}
+              className="group border-b border-black/10 first:border-t dark:border-white/10"
+            >
+              <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 px-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
+                <span>{sample.genre}</span>
+                <span
+                  aria-hidden="true"
+                  className="font-mono text-base text-primary transition-transform group-open:rotate-45 motion-reduce:transition-none"
+                >
+                  +
+                </span>
+              </summary>
+              <article className="manuscript-sheet mb-6 px-4 py-8 min-[360px]:px-6 sm:px-12 sm:py-14">
                 <span
                   aria-hidden="true"
                   className="absolute top-0 right-8 h-6 w-20 bg-primary/75"
@@ -110,9 +101,9 @@ export function SampleOutput() {
                   </p>
                 </div>
               </article>
-            </TabsContent>
+            </details>
           ))}
-        </Tabs>
+        </div>
       </div>
     </section>
   );

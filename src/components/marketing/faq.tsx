@@ -4,7 +4,7 @@ export function Faq() {
   return (
     <section
       aria-labelledby="faq-heading"
-      className="border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-faq border-b border-black/10 dark:border-white/10"
     >
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 sm:gap-10 sm:px-6 sm:py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
         <div className="lg:col-span-4">

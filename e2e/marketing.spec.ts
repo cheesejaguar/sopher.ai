@@ -74,22 +74,70 @@ test.describe("landing page", () => {
     );
   });
 
-  test("the brief demo is switchable by keyboard", async ({ page }) => {
-    await page.goto("/");
+  test.describe("without JavaScript", () => {
+    test.use({ javaScriptEnabled: false });
 
-    const examples = page.getByRole("group", {
-      name: "Example books, each written from a one-sentence brief",
+    test("brief examples are server-rendered and switchable by keyboard", async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 12_000 });
+      const response = await page.goto("/");
+      expect(response?.ok()).toBe(true);
+
+      const examples = page.getByRole("group", {
+        name: "Example books, each written from a one-sentence brief",
+      });
+      const disclosures = examples.locator("details");
+      await expect(disclosures).toHaveCount(3);
+      for (const [index, title] of [
+        "Biscuit Saves Trash Day",
+        "Nine Panes",
+        "Dear Ruth",
+      ].entries()) {
+        const disclosure = disclosures.nth(index);
+        await expect(disclosure.locator("summary").getByText(title, { exact: true })).toHaveCount(
+          1,
+        );
+        await expect(disclosure.locator("article").filter({ hasText: title })).toHaveCount(1);
+      }
+
+      const bedtime = disclosures.nth(0);
+      const mystery = disclosures.nth(1);
+      const mysterySummary = mystery.locator("summary");
+      await expect(bedtime).toHaveAttribute("open", "");
+
+      await mysterySummary.focus();
+      await expect(mysterySummary).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(mystery).toHaveAttribute("open", "");
+      await expect(bedtime).not.toHaveAttribute("open", "");
+      await expect(
+        page.getByText("A locked-room mystery set in my hometown", { exact: false }),
+      ).toBeVisible();
     });
-    const mystery = examples.getByRole("button", { name: "Mystery" });
-    await expect(mystery).toHaveAttribute("aria-pressed", "false");
 
-    await mystery.focus();
-    await expect(mystery).toBeFocused();
-    await page.keyboard.press("Enter");
-    await expect(mystery).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      page.getByText("A locked-room mystery set in my hometown", { exact: false }),
-    ).toBeVisible();
+    test("sample prose uses server-rendered native disclosures", async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 12_000 });
+      const response = await page.goto("/");
+      expect(response?.ok()).toBe(true);
+
+      const samples = page.locator('section[aria-labelledby="sample-output-heading"]');
+      const disclosures = samples.locator("details");
+      await expect(disclosures).toHaveCount(3);
+      for (const title of ["The Ninth Door", "Low Water", "Marginalia"]) {
+        await expect(samples.locator("article").filter({ hasText: title })).toHaveCount(1);
+      }
+
+      const fantasy = disclosures.nth(0);
+      const mystery = disclosures.nth(1);
+      await expect(fantasy).toHaveAttribute("open", "");
+
+      const mysterySummary = mystery.locator("summary");
+      await mysterySummary.focus();
+      await expect(mysterySummary).toBeFocused();
+      await page.keyboard.press("Enter");
+      await expect(mystery).toHaveAttribute("open", "");
+      await expect(fantasy).not.toHaveAttribute("open", "");
+      await expect(mystery.getByText("Low Water", { exact: false })).toBeVisible();
+    });
   });
 
   test("reduced motion exposes the complete production sequence", async ({ page }) => {
@@ -105,24 +153,9 @@ test.describe("landing page", () => {
   });
 
   test.describe("with motion allowed", () => {
-    // The suite runs reduced-motion by default, where the demo never advances on
-    // its own — so the pause affordance only needs to exist when motion is on.
+    // The manuscript journey is the single orchestrated automatic sequence;
+    // the prose examples above stay entirely reader-controlled.
     test.use({ contextOptions: { reducedMotion: "no-preference" } });
-
-    test("auto-advancing examples can be paused (WCAG 2.2.2)", async ({ page }) => {
-      await page.goto("/");
-
-      const pause = page.getByRole("button", { name: "Pause cycling through examples" });
-      await expect(pause).toBeVisible();
-      await pause.click();
-      await expect(
-        page.getByRole("button", { name: "Resume cycling through examples" }),
-      ).toBeVisible();
-
-      // Choosing an example hands control to the reader, so auto-advance stops for good.
-      await page.getByRole("button", { name: "Family memoir" }).click();
-      await expect(page.getByRole("button", { name: /cycling through examples/ })).toHaveCount(0);
-    });
 
     test("the manuscript rail can be paused and controlled by keyboard", async ({ page }) => {
       await page.goto("/");

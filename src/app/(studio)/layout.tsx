@@ -13,7 +13,27 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false, noarchive: true },
 };
 
-export default async function StudioLayout({ children }: { children: React.ReactNode }) {
+export default function StudioLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <main
+          id="main-content"
+          tabIndex={-1}
+          role="status"
+          aria-label="Loading studio"
+          className="outline-none"
+        >
+          <StudioLoading />
+        </main>
+      }
+    >
+      <StudioShell>{children}</StudioShell>
+    </Suspense>
+  );
+}
+
+async function StudioShell({ children }: { children: React.ReactNode }) {
   // Every Studio surface is user-specific. Waiting for the request keeps
   // private data and auth checks out of the public prerender while retaining
   // streaming boundaries for the shell and page content.

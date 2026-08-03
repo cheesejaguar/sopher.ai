@@ -177,6 +177,27 @@ test("mobile story journey changes stages without shifting its frame", async ({ 
   expect(Math.abs(advanced!.height - initial!.height)).toBeLessThanOrEqual(1);
 });
 
+test("mobile End reaches the footer without a second jump", async ({ page }) => {
+  for (const viewport of [
+    { width: 320, height: 720 },
+    { width: 390, height: 844 },
+  ] as const) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await page.evaluate(() => document.fonts.ready);
+    await page.keyboard.press("End");
+    await page.waitForFunction(
+      () => document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) <= 1,
+    );
+
+    const footer = page.locator("footer");
+    await expect(footer).toBeVisible();
+    const footerBox = await footer.boundingBox();
+    expect(footerBox).not.toBeNull();
+    expect(footerBox!.y).toBeLessThan(viewport.height);
+  }
+});
+
 test("mobile long-form guide keeps readable navigation", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/guides/how-book-generation-works");

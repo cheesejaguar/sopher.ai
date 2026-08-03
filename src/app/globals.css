@@ -459,6 +459,197 @@
   font-family: system-ui, sans-serif;
 }
 
+/* Keep the server-rendered long-form page available to search, assistive
+   technology, and find-in-page while deferring offscreen paint/layout work.
+   The browser replaces the estimate with the measured size after first view. */
+.defer-offscreen {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto var(--defer-block-size, 52rem);
+}
+
+/* Intrinsic block sizes follow each homepage section's real responsive
+   footprint. Slightly conservative values keep keyboard End/Page Down and
+   scrollbar positions stable before an offscreen section is first painted. */
+.defer-proof {
+  --defer-block-size: 77rem;
+}
+
+.defer-how {
+  --defer-block-size: 113rem;
+}
+
+.defer-samples {
+  --defer-block-size: 85rem;
+}
+
+.defer-pricing {
+  --defer-block-size: 103rem;
+}
+
+.defer-faq {
+  --defer-block-size: 75rem;
+}
+
+.defer-final {
+  --defer-block-size: 34rem;
+}
+
+@media (min-width: 22.5rem) {
+  .defer-proof {
+    --defer-block-size: 72rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 111rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 81rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 100rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 71rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 31rem;
+  }
+}
+
+@media (min-width: 24rem) {
+  .defer-proof {
+    --defer-block-size: 68rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 107rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 75rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 96rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 70rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 30rem;
+  }
+}
+
+@media (min-width: 30rem) {
+  .defer-proof {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 106rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 68rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 90rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 26rem;
+  }
+}
+
+@media (min-width: 40rem) {
+  .defer-proof {
+    --defer-block-size: 69rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 109rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 72rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 92rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 33rem;
+  }
+}
+
+@media (min-width: 48rem) {
+  .defer-proof {
+    --defer-block-size: 65rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 107rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 68rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 115rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 60rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 33rem;
+  }
+}
+
+@media (min-width: 64rem) {
+  .defer-proof {
+    --defer-block-size: 55rem;
+  }
+
+  .defer-how {
+    --defer-block-size: 104rem;
+  }
+
+  .defer-samples {
+    --defer-block-size: 64rem;
+  }
+
+  .defer-pricing {
+    --defer-block-size: 95rem;
+  }
+
+  .defer-faq {
+    --defer-block-size: 61rem;
+  }
+
+  .defer-final {
+    --defer-block-size: 27rem;
+  }
+}
+
 .instrument-surface {
   background: var(--instrument);
   border: 1px solid var(--border);

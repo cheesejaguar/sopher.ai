@@ -5,7 +5,7 @@ export function HowItWorks() {
     <section
       id="how-it-works"
       aria-labelledby="how-it-works-heading"
-      className="scroll-mt-20 border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-how scroll-mt-20 border-b border-black/10 dark:border-white/10"
     >
       <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
         <div className="grid gap-8 lg:grid-cols-12">

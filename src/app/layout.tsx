@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Suspense } from "react";
 import { Archivo, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { BaseUiFocusGuardLabels } from "@/components/ui/base-ui-focus-guard-labels";
@@ -84,27 +83,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const route = (
-    <Suspense
-      fallback={
-        <div
-          role="status"
-          aria-label="Loading sopher.ai"
-          className="instrument-canvas grid min-h-dvh place-items-center px-6"
-        >
-          <div className="instrument-surface-raised w-full max-w-sm p-6">
-            <p className="folio-label text-primary">Sopher.ai / loading</p>
-            <div className="mt-5 h-px w-full bg-border" aria-hidden="true" />
-            <p className="mt-5 text-sm text-muted-foreground">Preparing your writing desk…</p>
-          </div>
-        </div>
-      }
-    >
-      <SkipLink />
-      {children}
-    </Suspense>
-  );
-
   return (
     <html
       lang="en"
@@ -115,7 +93,8 @@ export default function RootLayout({
         <SiteJsonLd />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <BaseUiFocusGuardLabels />
-          {route}
+          <SkipLink />
+          {children}
         </ThemeProvider>
       </body>
     </html>

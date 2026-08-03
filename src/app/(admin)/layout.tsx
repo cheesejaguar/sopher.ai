@@ -18,18 +18,20 @@ export const metadata: Metadata = {
  * so with cacheComponents the ENTIRE shell (nav included — nothing may leak
  * into static HTML) renders inside the Suspense boundary around it.
  */
-export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  // Admin is both authorization- and data-dependent; never evaluate it during
-  // the public build or include any part of it in a static shell.
-  await connection();
-
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense
       fallback={
-        <div className="mx-auto w-full max-w-7xl space-y-4 px-6 py-8">
+        <main
+          id="main-content"
+          tabIndex={-1}
+          role="status"
+          aria-label="Loading admin workspace"
+          className="mx-auto w-full max-w-7xl space-y-4 px-6 py-8 outline-none"
+        >
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-64 w-full" />
-        </div>
+        </main>
       }
     >
       <GuardedShell>{children}</GuardedShell>
@@ -38,6 +40,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 }
 
 async function GuardedShell({ children }: { children: React.ReactNode }) {
+  // Admin is both authorization- and data-dependent; never evaluate it during
+  // the public build or include any part of it in a static shell.
+  await connection();
+
   try {
     await requireAdmin();
   } catch (error) {

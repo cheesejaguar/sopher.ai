@@ -28,3 +28,19 @@ test("the native skip link focuses the main region", async ({ page }) => {
   await skip.press("Enter");
   await expect(main).toBeFocused();
 });
+
+test("mobile End reaches the footer after deferred sections settle", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/");
+  await page.evaluate(() => document.fonts.ready);
+  await page.keyboard.press("End");
+  await page.waitForFunction(
+    () => document.documentElement.scrollHeight - (window.scrollY + window.innerHeight) <= 1,
+  );
+
+  const footer = page.locator("footer");
+  await expect(footer).toBeVisible();
+  const footerBox = await footer.boundingBox();
+  expect(footerBox).not.toBeNull();
+  expect(footerBox!.y).toBeLessThan(720);
+});

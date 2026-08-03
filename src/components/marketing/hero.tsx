@@ -72,7 +72,7 @@ export function Hero() {
         </div>
       </div>
 
-      <div className="relative z-10 border-t border-black/10 bg-instrument/88 dark:border-white/10">
+      <div className="defer-offscreen defer-proof relative z-10 border-t border-black/10 bg-instrument/88 dark:border-white/10">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-14 sm:gap-10 sm:px-6 sm:py-20 lg:grid-cols-12 lg:px-8 lg:py-24">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Proof 01 / live manuscript</p>

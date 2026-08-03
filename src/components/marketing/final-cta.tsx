@@ -7,7 +7,7 @@ export function FinalCta() {
   return (
     <section
       aria-labelledby="final-cta-heading"
-      className="relative border-y border-white/10 bg-future-stage text-future-stage-foreground"
+      className="defer-offscreen defer-final relative border-y border-white/10 bg-future-stage text-future-stage-foreground"
     >
       <span
         aria-hidden="true"
