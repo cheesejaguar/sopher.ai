@@ -161,6 +161,10 @@ test("project surfaces repeat the authoritative next step", async ({ page }, tes
         .first(),
     ).toBeVisible({ timeout: 20_000 });
     await expectNoPageOverflow(page, surface.route);
+    // The outline is rendered on the light manuscript sheet even in dark
+    // Studio. Scan that mixed-theme surface directly so paper-token contrast
+    // cannot regress behind otherwise healthy shell-level acceptance.
+    if (surface.route.endsWith("/outline")) await axeCheck(page);
   }
 
   await expect(
