@@ -67,7 +67,7 @@ test("library exposes one truthful action for every authoring state", async ({
     {
       title: "Signal at Low Tide",
       label: "Reconnect this start",
-      href: `/projects/${PROJECTS.dispatchUncertain}/write`,
+      href: `/projects/${PROJECTS.dispatchUncertain}/write#production-status`,
       detail: "did not receive a start confirmation",
     },
     {
@@ -93,13 +93,13 @@ test("library exposes one truthful action for every authoring state", async ({
     {
       title: "The Last Weather Station",
       label: "Watch production",
-      href: `/projects/${PROJECTS.degradedTelemetry}/write`,
+      href: `/projects/${PROJECTS.degradedTelemetry}/write#production-status`,
       detail: "live connection is delayed",
     },
     {
       title: "Glasswing County",
       label: "View the safe stop",
-      href: `/projects/${PROJECTS.cancellationRequested}/write`,
+      href: `/projects/${PROJECTS.cancellationRequested}/write#production-status`,
       detail: "stopping before another model call",
     },
     {

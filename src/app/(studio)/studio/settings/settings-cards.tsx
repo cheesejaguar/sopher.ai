@@ -305,6 +305,7 @@ export function NotificationPreferencesCard({
                   <span className="flex min-h-11 min-w-11 shrink-0 items-center justify-end">
                     <Switch
                       id={inputId}
+                      aria-label={row.label}
                       checked={preferences[row.key]}
                       aria-describedby={descriptionId}
                       onCheckedChange={(checked) => {
