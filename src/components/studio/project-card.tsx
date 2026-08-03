@@ -45,12 +45,17 @@ function formatCredits(value: number): string {
   return `${value.toFixed(1)} cr`;
 }
 
-function JourneyStatusBadge({ action }: { action: AuthoringNextAction }) {
-  const needsAttention =
+function journeyNeedsAttention(action: AuthoringNextAction): boolean {
+  return (
     action.kind === "contact_support" ||
     action.kind === "recover_saved_work" ||
     action.kind === "recover_dispatch" ||
-    action.kind === "add_credits";
+    action.kind === "add_credits"
+  );
+}
+
+function JourneyStatusBadge({ action }: { action: AuthoringNextAction }) {
+  const needsAttention = journeyNeedsAttention(action);
   const active = action.kind === "watch_production" || action.kind === "finish_cancellation";
   const complete = action.kind === "read_or_export";
   return (
@@ -72,6 +77,7 @@ function JourneyStatusBadge({ action }: { action: AuthoringNextAction }) {
 export function ProjectCard({ project }: { project: ProjectCardData }) {
   const progress =
     project.chaptersTotal > 0 ? (project.chaptersDone / project.chaptersTotal) * 100 : 0;
+  const needsAttention = journeyNeedsAttention(project.nextAction);
 
   return (
     <div className="group relative h-full">
@@ -83,7 +89,7 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
       <Link
         href={project.nextAction.href as Route}
         aria-label={`${project.nextAction.label}: ${project.title}`}
-        className="instrument-surface relative flex h-full min-h-64 flex-col overflow-hidden rounded-sm p-5 transition-colors hover:border-foreground/30"
+        className="instrument-surface relative flex h-full min-h-36 flex-col overflow-hidden rounded-sm p-4 transition-colors hover:border-foreground/30 md:min-h-64 md:p-5"
       >
         <span
           aria-hidden="true"
@@ -91,15 +97,15 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
         />
         <span
           aria-hidden="true"
-          className="absolute top-10 right-5 h-24 w-16 border border-border/70 bg-background/30 shadow-[4px_4px_0_var(--border)] transition-transform duration-300 group-hover:-translate-y-1"
+          className="absolute top-10 right-5 hidden h-24 w-16 border border-border/70 bg-background/30 shadow-[4px_4px_0_var(--border)] transition-transform duration-300 group-hover:-translate-y-1 md:block"
         >
           <span className="absolute top-4 right-3 left-3 h-px bg-border" />
           <span className="absolute top-7 right-3 left-3 h-px bg-border" />
           <span className="absolute top-10 right-5 left-3 h-px bg-border" />
         </span>
 
-        <div className="relative pr-20">
-          <h2 className="text-lg leading-snug font-semibold tracking-[-0.02em] text-balance">
+        <div className="relative pr-10 md:pr-20">
+          <h2 className="text-lg leading-snug font-semibold tracking-[-0.02em] text-balance [overflow-wrap:anywhere]">
             {project.title}
           </h2>
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -117,11 +123,16 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
             )}
           </div>
         </div>
-        <p className="relative mt-4 pr-20 text-xs leading-relaxed text-muted-foreground">
+        <p
+          className={cn(
+            "relative mt-3 pr-10 text-xs leading-relaxed text-muted-foreground md:mt-4 md:line-clamp-none md:pr-20",
+            !needsAttention && "line-clamp-2",
+          )}
+        >
           {project.nextAction.description}
         </p>
 
-        <div className="mt-auto pt-8">
+        <div className="mt-auto pt-4 md:pt-8">
           <div className="flex items-end justify-between gap-4 border-b border-border pb-3">
             <div>
               <p className="folio-label text-muted-foreground">Production</p>
@@ -131,21 +142,25 @@ export function ProjectCard({ project }: { project: ProjectCardData }) {
               </p>
             </div>
             <div className="text-right">
-              <p className="folio-label text-muted-foreground">Length</p>
-              <p className="mt-1 font-mono text-sm tabular-nums">
+              <p className="folio-label text-muted-foreground md:hidden">Credits used</p>
+              <p className="mt-1 font-mono text-sm tabular-nums md:hidden">
+                {formatCredits(project.creditsUsed)}
+              </p>
+              <p className="folio-label hidden text-muted-foreground md:block">Length</p>
+              <p className="mt-1 hidden font-mono text-sm tabular-nums md:block">
                 {new Intl.NumberFormat("en-US").format(project.wordCount)} words
               </p>
             </div>
           </div>
-          <div className="py-3">
+          <div className="py-3 md:py-3">
             <Progress
               value={progress}
               aria-label={`Chapters saved: ${project.chaptersDone} of ${project.chaptersTotal}`}
               className="h-1"
             />
           </div>
-          <div className="flex items-end justify-between gap-4 border-t border-border pt-3 text-xs">
-            <span>
+          <div className="flex items-end justify-end gap-4 border-t border-border pt-3 text-xs md:justify-between">
+            <span className="hidden md:block">
               <span className="folio-label block text-muted-foreground">Credits used</span>
               <span className="mt-1 block font-mono tabular-nums">
                 {formatCredits(project.creditsUsed)}{" "}

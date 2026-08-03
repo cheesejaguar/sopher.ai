@@ -1177,7 +1177,6 @@ export function EditorShell({
               <SheetDescription>Search within chapter {chapterNumber}.</SheetDescription>
             </SheetHeader>
             <FindReplace editor={editor} onClose={() => setFindOpen(false)} touchLayout />
-            <div className="safe-area-bottom" />
           </SheetContent>
         </Sheet>
       ) : null}
@@ -1215,7 +1214,7 @@ export function EditorShell({
               role="group"
               aria-label="Editor suggestion"
               tabIndex={-1}
-              className="safe-area-bottom focus:ring-2 focus:ring-inset focus:ring-ring focus:outline-none"
+              className="focus:ring-2 focus:ring-inset focus:ring-ring focus:outline-none"
             >
               <SuggestionCard
                 key={activeSuggestion.id}

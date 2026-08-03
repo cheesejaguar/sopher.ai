@@ -1,4 +1,5 @@
-import { Check } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, Check } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { CREDIT_PACKS, type CreditPack } from "@/lib/billing/credits-shared";
@@ -90,7 +91,13 @@ function PackOffer({
   );
 }
 
-export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
+export function Pricing({
+  headingLevel = 2,
+  compactOnMobile = false,
+}: {
+  headingLevel?: 1 | 2;
+  compactOnMobile?: boolean;
+}) {
   const Heading = headingLevel === 1 ? "h1" : "h2";
   // Shifts with the section heading. /pricing must keep h1 -> h2, while the
   // homepage nests pack headings below its h2.
@@ -101,7 +108,7 @@ export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
       aria-labelledby="pricing-heading"
       className="border-b border-black/10 dark:border-white/10"
     >
-      <div className="mx-auto w-full max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
+      <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
         <div className="grid gap-10 lg:grid-cols-12">
           <div className="lg:col-span-7">
             <p className="folio-label text-primary">Credits / no subscription</p>
@@ -160,11 +167,23 @@ export function Pricing({ headingLevel = 2 }: { headingLevel?: 1 | 2 }) {
         </div>
         <ul aria-label="Credit packs" className="mt-5 grid gap-4 md:grid-cols-2">
           {CREDIT_PACKS.map((pack) => (
-            <li key={pack.id}>
+            <li
+              key={pack.id}
+              className={cn(compactOnMobile && pack.id !== "author" && "hidden md:block")}
+            >
               <PackOffer pack={pack} featured={pack.id === "author"} headingLevel={headingLevel} />
             </li>
           ))}
         </ul>
+        {compactOnMobile ? (
+          <Link
+            href="/pricing"
+            className="mt-4 flex min-h-11 items-center justify-center gap-2 border border-border px-4 text-sm font-semibold text-foreground md:hidden"
+          >
+            Compare every credit pack
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
+        ) : null}
       </div>
     </section>
   );

@@ -7,7 +7,7 @@ export function HowItWorks() {
       aria-labelledby="how-it-works-heading"
       className="scroll-mt-20 border-b border-black/10 dark:border-white/10"
     >
-      <div className="mx-auto w-full max-w-7xl px-6 py-24 lg:px-8 lg:py-32">
+      <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
         <div className="grid gap-8 lg:grid-cols-12">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Story journey / 01–05</p>
@@ -27,12 +27,12 @@ export function HowItWorks() {
           </div>
         </div>
 
-        <ol className="mt-16 border-y border-black/10 dark:border-white/10">
+        <ol className="mt-10 border-y border-black/10 dark:border-white/10 sm:mt-16">
           {STEPS.map((step, index) => (
             <li
               id={`pipeline-${step.name.toLowerCase()}`}
               key={step.name}
-              className="grid scroll-mt-24 gap-4 border-b border-black/10 py-7 last:border-b-0 dark:border-white/10 sm:grid-cols-[4rem_12rem_1fr] sm:items-start lg:grid-cols-[5rem_17rem_1fr] lg:py-9"
+              className="grid scroll-mt-24 gap-3 border-b border-black/10 py-5 last:border-b-0 dark:border-white/10 sm:gap-4 sm:py-7 min-[1200px]:grid-cols-[4rem_12rem_1fr] min-[1200px]:items-start min-[1440px]:grid-cols-[5rem_17rem_1fr] min-[1440px]:py-9"
             >
               <span className="font-mono text-xs tracking-[0.12em] text-primary sm:pt-1">
                 {step.num}
@@ -45,13 +45,13 @@ export function HowItWorks() {
                   </span>
                 ) : null}
               </h3>
-              <div className="grid gap-5 sm:grid-cols-[1fr_auto] sm:items-start">
+              <div className="grid gap-5 min-[1200px]:grid-cols-[1fr_auto] min-[1200px]:items-start">
                 <p className="max-w-2xl text-sm leading-6 text-pretty text-muted-foreground sm:text-base sm:leading-7">
                   {step.description}
                 </p>
                 <span
                   aria-hidden="true"
-                  className="marketing-page-signature relative hidden h-16 w-12 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] sm:block"
+                  className="marketing-page-signature relative hidden h-16 w-12 border border-paper-edge bg-paper shadow-[5px_5px_0_var(--paper-edge)] min-[1200px]:block"
                 >
                   <span className="absolute top-3 right-2 left-2 h-px bg-paper-muted/35" />
                   <span className="absolute top-5 right-4 left-2 h-px bg-paper-muted/25" />

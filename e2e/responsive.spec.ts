@@ -40,6 +40,7 @@ test("mobile homepage exposes its core offer and passes axe", async ({ page }, t
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/sentence|book/i);
+  await expect(page.getByText(/first short story is included/i)).toBeVisible();
   await expect(page.getByRole("link", { name: /start.*book/i }).first()).toBeVisible();
   await axeCheck(page);
   await fullPageScreenshot(page, testInfo, "home-390");
@@ -89,17 +90,86 @@ test("mobile homepage keeps the transforming notebook in the first viewport", as
   }
 });
 
-test("mobile main menu closes after client-side navigation", async ({ page }) => {
+test("mobile main menu closes after navigation and restores focus after Escape", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
 
-  const menu = page.locator("header details");
-  await menu.locator("summary").click();
-  await expect(menu).toHaveAttribute("open", "");
-  await menu.getByRole("link", { name: "Pricing", exact: true }).click();
+  const trigger = page.getByRole("button", { name: "Open main menu" });
+  await trigger.click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await page.getByRole("dialog").getByRole("link", { name: "Pricing", exact: true }).click();
 
   await expect(page).toHaveURL(/\/pricing$/);
-  await expect(menu).not.toHaveAttribute("open", "");
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+});
+
+test("public pages reflow at 200% text size", async ({ page }) => {
+  for (const route of ["/", "/pricing", "/guides/how-book-generation-works"] as const) {
+    for (const viewport of [
+      { width: 320, height: 720 },
+      { width: 390, height: 844 },
+      { width: 768, height: 1024 },
+      { width: 1024, height: 768 },
+    ] as const) {
+      await page.setViewportSize(viewport);
+      await page.goto(route);
+      await page.addStyleTag({ content: "html { font-size: 32px !important; }" });
+      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+
+      const dimensions = await page.evaluate(() => {
+        const clientWidth = document.documentElement.clientWidth;
+        return {
+          clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+          offenders: [...document.querySelectorAll<HTMLElement>("body *")]
+            .map((element) => {
+              const rect = element.getBoundingClientRect();
+              return {
+                tag: element.tagName.toLowerCase(),
+                className: element.className.toString().slice(0, 100),
+                text: element.textContent?.trim().slice(0, 60) ?? "",
+                left: Math.round(rect.left),
+                right: Math.round(rect.right),
+              };
+            })
+            .filter(({ left, right }) => left < -1 || right > clientWidth + 1)
+            .slice(0, 8),
+        };
+      });
+      expect(
+        dimensions.scrollWidth,
+        `${route} overflowed at 200% text and ${viewport.width}px: ${JSON.stringify(dimensions.offenders)}`,
+      ).toBeLessThanOrEqual(dimensions.clientWidth + 1);
+    }
+  }
+});
+
+test("mobile story journey changes stages without shifting its frame", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.goto("/");
+  const journey = page.getByRole("navigation", { name: "Five-stage story journey" });
+  await expect(journey).toBeVisible();
+  const initial = await journey.boundingBox();
+  await page.waitForTimeout(2_600);
+  const advanced = await journey.boundingBox();
+
+  expect(initial).not.toBeNull();
+  expect(advanced).not.toBeNull();
+  expect(Math.abs(advanced!.height - initial!.height)).toBeLessThanOrEqual(1);
 });
 
 test("mobile long-form guide keeps readable navigation", async ({ page }, testInfo) => {

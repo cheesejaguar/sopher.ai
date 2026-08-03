@@ -26,7 +26,7 @@ export default function LandingPage() {
       <Hero />
       <HowItWorks />
       <SampleOutput />
-      <Pricing />
+      <Pricing compactOnMobile />
       {/*
         The FAQ lived only on /pricing. It is the site's most retrievable block
         — real dl/dt/dd markup, direct factual answers — and answer engines

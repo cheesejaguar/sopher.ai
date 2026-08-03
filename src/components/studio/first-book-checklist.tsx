@@ -23,6 +23,11 @@ export function FirstBookChecklist({
   onDismissChange: (dismissed: boolean) => void;
 }) {
   const titleId = React.useId();
+  const listId = React.useId();
+  const [showAllMobile, setShowAllMobile] = React.useState(false);
+  const firstIncompleteIndex = snapshot.steps.findIndex((step) => !step.complete);
+  const mobileMilestoneIndex =
+    firstIncompleteIndex >= 0 ? firstIncompleteIndex : Math.max(0, snapshot.steps.length - 1);
 
   if (snapshot.dismissed) {
     return (
@@ -69,12 +74,20 @@ export function FirstBookChecklist({
           Hide
         </Button>
       </div>
-      <ol className="mt-4 grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
-        {snapshot.steps.map((step) => (
-          <li key={step.id}>
+      <ol id={listId} className="mt-4 grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
+        {snapshot.steps.map((step, index) => (
+          <li
+            key={step.id}
+            className={
+              showAllMobile || index === mobileMilestoneIndex ? undefined : "hidden sm:block"
+            }
+          >
             <Link
               href={step.href as Route}
-              className="group flex min-h-11 items-start gap-3 rounded-sm px-2 py-2 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+              aria-current={!step.complete && index === mobileMilestoneIndex ? "step" : undefined}
+              className={`group flex min-h-11 items-start gap-3 rounded-sm px-2 py-2 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring ${
+                !step.complete && index === mobileMilestoneIndex ? "bg-accent/50" : ""
+              }`}
             >
               {step.complete ? (
                 <span className="mt-0.5 grid size-5 shrink-0 place-items-center bg-primary text-primary-foreground">
@@ -97,6 +110,17 @@ export function FirstBookChecklist({
           </li>
         ))}
       </ol>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-expanded={showAllMobile}
+        aria-controls={listId}
+        onClick={() => setShowAllMobile((visible) => !visible)}
+        className="mt-2 rounded-sm sm:hidden"
+      >
+        {showAllMobile ? "Show current milestone only" : "View all milestones"}
+      </Button>
     </section>
   );
 }

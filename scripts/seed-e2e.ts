@@ -139,6 +139,13 @@ const JOURNEY_UPDATED_AT = new Date("2026-07-29T12:00:00.000Z");
 const ACTIVE_RUN_AT = new Date(Date.now() - 5 * 60_000);
 const STALE_DISPATCH_AT = new Date(Date.now() - 20 * 60_000);
 
+function indentedManuscriptFixture(markdown: string): string {
+  return markdown
+    .split("\n")
+    .map((line) => (line.length > 0 ? `    ${line}` : line))
+    .join("\n");
+}
+
 const chapterContents = [
   `# The Brass Compass
 
@@ -151,7 +158,10 @@ At dusk, every public clock in Bellweather stopped. The clock beneath the floor 
 Mara knelt beside the loose board and listened. A second rhythm answered the clock: three patient knocks from somewhere below. She lifted the plank and found a stairway descending into blue light, its first step dustless, as if someone had used it moments before.
 
 She pocketed the compass, left the shop sign turned to CLOSED, and followed the light underground.`,
-  `# The Room Beneath the Hour
+  // Deliberately mirrors a historical model response that indented every
+  // nonblank line. Reader/export acceptance must recover it as prose, not a
+  // horizontally clipped Markdown code block.
+  indentedManuscriptFixture(`# The Room Beneath the Hour
 
 The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.
 
@@ -159,7 +169,7 @@ Mara placed the compass at the center of the room. The tiles rose in sequence an
 
 A quiet mechanism clicked behind her. Elias Venn, the municipal clock keeper, stepped from the shadows with both hands raised. He claimed the stopped clocks were a warning, not a failure. Someone had begun removing hours from the city, and the missing quarter was only the first place to slip out of time.
 
-The map pulsed once. Across its glass surface, a new route appeared in violet light and led straight toward the sealed observatory.`,
+The map pulsed once. Across its glass surface, a new route appeared in violet light and led straight toward the sealed observatory.`),
   `# The Observatory Door
 
 Rain silvered the observatory dome while Mara and Elias crossed the abandoned square. No bell marked the hour. Without the city's clocks, every footstep seemed too loud.

@@ -225,11 +225,11 @@ export function ManuscriptRail() {
 
       <div className="story-notebook-panel relative overflow-hidden">
         <div className="relative border-b border-border/75 px-4 pt-5 sm:px-5">
-          <div className="flex items-baseline justify-between gap-4">
+          <div className="flex min-h-10 items-start justify-between gap-3">
             <span className="font-mono text-[0.6875rem] tracking-[0.12em] text-primary uppercase">
               {PIPELINE_STEPS[visibleActive].num} / {PIPELINE_STEPS[visibleActive].name}
             </span>
-            <span className="text-right text-xs text-muted-foreground">
+            <span className="max-w-[11rem] text-right text-xs leading-5 text-muted-foreground">
               {STAGE_LABELS[visibleActive]}
             </span>
           </div>
@@ -287,7 +287,7 @@ export function ManuscriptRail() {
         </div>
       </div>
 
-      <div className="grid gap-1 border-t border-border px-4 py-3 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
+      <div className="grid min-h-[5.5rem] content-center gap-1 border-t border-border px-4 py-3 sm:min-h-0 sm:grid-cols-[1fr_auto] sm:items-center sm:px-5">
         <p className="text-sm font-medium text-foreground">{STAGE_COPY[visibleActive]}</p>
         <p className="text-xs text-muted-foreground">You can guide every important choice.</p>
       </div>

@@ -319,7 +319,6 @@ export function SelectionToolsSheet({
             </>
           )}
         </div>
-        <div className="safe-area-bottom" />
       </SheetContent>
     </Sheet>
   );

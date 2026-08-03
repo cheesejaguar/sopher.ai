@@ -249,15 +249,13 @@ export function HistoryPanel({
             side="right"
             className="h-dvh w-full max-w-none gap-0 overflow-hidden p-0 sm:max-w-none"
           >
-            <SheetHeader className="safe-area-top shrink-0 border-b border-border px-4 pb-3 pr-14">
+            <SheetHeader className="shrink-0 border-b border-border px-4 pb-3 pr-14">
               <SheetTitle>Chapter history</SheetTitle>
               <SheetDescription>
                 Saved snapshots of this chapter. Restoring keeps a copy of today&rsquo;s text.
               </SheetDescription>
             </SheetHeader>
-            <div className="safe-area-bottom min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              {historyBody}
-            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{historyBody}</div>
           </SheetContent>
         </Sheet>
       ) : (

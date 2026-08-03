@@ -185,6 +185,36 @@ describe("manuscriptToMarkdown", () => {
     );
     expect(md.startsWith("# Untitled\n\nWritten with sopher.ai\n")).toBe(true);
   });
+
+  it("normalizes historical transport formatting in the raw Markdown export", () => {
+    const md = manuscriptToMarkdown(
+      buildManuscript({
+        title: "Recovered manuscript",
+        chapters: [
+          {
+            number: 1,
+            title: "The Storefront",
+            content:
+              "    Noah did not believe in fate.\n\n    The storefront sat on a corner in Queens.",
+          },
+          {
+            number: 2,
+            title: "The Door",
+            content: "```markdown\nRain silvered the pavement.\n\nThe door opened.\n```",
+          },
+        ],
+      }),
+    );
+
+    expect(md).toContain(
+      "## Chapter 1 — The Storefront\n\nNoah did not believe in fate.\n\nThe storefront sat on a corner in Queens.",
+    );
+    expect(md).toContain(
+      "## Chapter 2 — The Door\n\nRain silvered the pavement.\n\nThe door opened.",
+    );
+    expect(md).not.toContain("    Noah");
+    expect(md).not.toContain("```markdown");
+  });
 });
 
 describe("markdownToBlocks", () => {
@@ -229,6 +259,23 @@ describe("markdownToHtml", () => {
     expect(html).toContain("<em>world</em>");
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
+  });
+
+  it("recovers uniformly indented manuscript prose instead of rendering a code block", () => {
+    const html = markdownToHtml(
+      "    Noah did not believe in fate.\n\n    The storefront sat on a corner in Queens.",
+    );
+
+    expect(html).toContain("<p>Noah did not believe in fate.</p>");
+    expect(html).toContain("<p>The storefront sat on a corner in Queens.</p>");
+    expect(html).not.toContain("<pre>");
+  });
+
+  it("unwraps a model-supplied Markdown fence while preserving nested fenced code", () => {
+    const html = markdownToHtml("```markdown\nA paragraph.\n\n```ts\nconst chapter = 1;\n```\n```");
+
+    expect(html).toContain("<p>A paragraph.</p>");
+    expect(html).toContain('<code class="language-ts">');
   });
 });
 

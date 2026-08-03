@@ -48,7 +48,7 @@ export function SampleOutput() {
       aria-labelledby="sample-output-heading"
       className="border-b border-black/10 dark:border-white/10"
     >
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
+      <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 sm:gap-10 sm:px-6 sm:py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
         <div className="lg:col-span-4">
           <p className="folio-label text-primary">Proof 02 / sample output</p>
           <h2
@@ -70,7 +70,7 @@ export function SampleOutput() {
           <TabsList
             aria-label="Sample genre"
             variant="line"
-            className="h-auto w-full justify-start gap-0 border-y border-black/10 p-0 dark:border-white/10"
+            className="h-auto w-full max-w-full justify-start gap-0 overflow-x-auto border-y border-black/10 p-0 dark:border-white/10"
           >
             {SAMPLES.map((sample) => (
               <TabsTrigger
@@ -90,7 +90,7 @@ export function SampleOutput() {
           */}
           {SAMPLES.map((sample) => (
             <TabsContent key={sample.value} value={sample.value} keepMounted>
-              <article className="manuscript-sheet mt-6 px-6 py-10 sm:px-12 sm:py-14">
+              <article className="manuscript-sheet mt-6 px-4 py-8 min-[360px]:px-6 sm:px-12 sm:py-14">
                 <span
                   aria-hidden="true"
                   className="absolute top-0 right-8 h-6 w-20 bg-primary/75"

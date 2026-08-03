@@ -125,9 +125,9 @@ export default async function ManuscriptPage({
         </div>
       </header>
 
-      <div className="manuscript-sheet px-6 py-12 sm:px-12 sm:py-16">
+      <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (
-          <header className="mx-auto max-w-2xl py-10 text-center sm:py-16 [content-visibility:auto]">
+          <header className="mx-auto max-w-2xl py-6 text-center sm:py-16 [content-visibility:auto]">
             {(book.frontMatter as { coverUrl?: string }).coverUrl ? (
               <Image
                 src={(book.frontMatter as { coverUrl?: string }).coverUrl as string}

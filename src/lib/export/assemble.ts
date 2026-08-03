@@ -4,6 +4,7 @@ import { getDb, schema, type DbTransaction } from "@/db";
 import { requiresRunOwnedFullBookCompletionProof } from "@/lib/run-completion-proof";
 import type { GenerationConfig } from "@/lib/run-events";
 import { isSafeHref } from "@/lib/security/url";
+import { normalizeManuscriptMarkdown } from "@/lib/manuscript-markdown";
 import {
   buildFigureMap,
   diagramSourceHash,
@@ -65,7 +66,11 @@ export function buildManuscript(input: {
     .filter((c) => c.content.trim().length > 0)
     .sort((a, b) => a.number - b.number)
     .map((c) => {
-      const markdown = c.content.trim();
+      // Historical model responses may carry a shared four-space indent or a
+      // transport-only Markdown fence. Normalize at the format-neutral
+      // boundary so raw Markdown, PDF, DOCX, and EPUB exports agree with the
+      // in-app reader without rewriting the author's stored chapter.
+      const markdown = normalizeManuscriptMarkdown(c.content);
       return {
         number: c.number,
         title: c.title?.trim() || `Chapter ${c.number}`,
@@ -360,7 +365,7 @@ export function markdownToHtml(
 ): string {
   const renderer =
     figures && Object.keys(figures).length > 0 ? createRenderer(figures, prefer) : defaultRenderer;
-  return renderer.parse(markdown) as string;
+  return renderer.parse(normalizeManuscriptMarkdown(markdown)) as string;
 }
 
 // ---------------------------------------------------------------------------

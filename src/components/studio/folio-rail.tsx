@@ -96,8 +96,8 @@ export function FolioRail({
         aria-label={onSelect ? "Choose a chapter" : "Chapter status"}
         aria-orientation={onSelect ? orientation : undefined}
         className={cn(
-          "flex w-fit max-w-full gap-1",
-          vertical ? "flex-col" : "flex-row overflow-x-auto p-1",
+          "flex gap-1",
+          vertical ? "w-fit max-w-full flex-col" : "min-w-max flex-row p-1",
           className,
         )}
       >

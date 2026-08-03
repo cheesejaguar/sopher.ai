@@ -68,6 +68,8 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       /\/(brief|outline|bible|write|editor|manuscript|usage|settings)$/,
       "",
     );
+    const projectId = base.split("/").filter(Boolean).at(-1);
+    if (!projectId) throw new Error(`Could not derive a project id from ${base}`);
 
     const surfaces = [
       {
@@ -79,6 +81,11 @@ for (const viewport of PRODUCT_VIEWPORTS) {
         name: "Admin",
         route: "/admin",
         ready: () => page.getByRole("heading", { level: 1, name: "Overview" }),
+      },
+      {
+        name: "Admin book reader",
+        route: `/admin/books/${projectId}`,
+        ready: () => page.getByRole("region", { name: "Manuscript" }),
       },
       {
         name: "project brief",
@@ -103,7 +110,7 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       },
       {
         name: "manuscript",
-        route: `${base}/manuscript`,
+        route: `${base}/manuscript?chapter=2`,
         ready: () => page.getByRole("region", { name: "Manuscript chapters" }),
       },
     ] as const;
@@ -114,12 +121,51 @@ for (const viewport of PRODUCT_VIEWPORTS) {
       await expect(page.locator("#main-content")).toHaveCount(1);
       await expect(page.locator("#main-content")).toBeVisible();
       await expectNoPageOverflow(page, `${surface.name} at ${viewport.width}px`);
-      if (viewport.width === 390) {
+      const prose = page.locator(".prose-manuscript");
+      if ((await prose.count()) > 0) {
+        await expect(
+          prose.locator("pre"),
+          `${surface.name} must recover uniformly indented chapter prose instead of rendering a code block`,
+        ).toHaveCount(0);
+        const localOverflow = await prose.evaluateAll((nodes) =>
+          nodes.map((node) => node.scrollWidth - node.clientWidth),
+        );
+        expect(
+          Math.max(...localOverflow),
+          `${surface.name} manuscript content overflows its own reading column`,
+        ).toBeLessThanOrEqual(1);
+
+        if (surface.name === "Admin book reader" || surface.name === "manuscript") {
+          const recoveredParagraph = page.getByText(
+            "The stair ended in a circular chamber lined with brass shelves. Each shelf held a glass tile etched with a different street, bridge, or rooftop from Bellweather.",
+            { exact: true },
+          );
+          await expect(recoveredParagraph).toBeVisible();
+          const paragraphLayout = await recoveredParagraph.evaluate((node) => {
+            const style = getComputedStyle(node);
+            const rect = node.getBoundingClientRect();
+            return {
+              whiteSpace: style.whiteSpace,
+              left: rect.left,
+              right: rect.right,
+              viewportWidth: document.documentElement.clientWidth,
+            };
+          });
+          expect(paragraphLayout.whiteSpace).not.toBe("pre");
+          expect(paragraphLayout.whiteSpace).not.toBe("nowrap");
+          expect(paragraphLayout.left).toBeGreaterThanOrEqual(-1);
+          expect(paragraphLayout.right).toBeLessThanOrEqual(paragraphLayout.viewportWidth + 1);
+        }
+      }
+      if (
+        viewport.width === 390 ||
+        (viewport.width === 320 && surface.name === "Admin book reader")
+      ) {
         await axeCheck(page);
         await fullPageScreenshot(
           page,
           testInfo,
-          `${surface.name.toLowerCase().replaceAll(" ", "-")}-390`,
+          `${surface.name.toLowerCase().replaceAll(" ", "-")}-${viewport.width}`,
         );
       }
     }

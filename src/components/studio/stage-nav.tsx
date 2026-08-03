@@ -213,11 +213,11 @@ function MobileStageMenu({
                 : `${describeProductionProgress(progress)} · ${Math.round(progress.pct)}%`
               : "Not started"}
           </span>
-          <span className="mt-1 block text-xs leading-relaxed text-muted-foreground break-words">
-            {currentPageCancellation
-              ? "Status: Stopping safely"
-              : `Next: ${liveJourney.nextAction.label}`}
-          </span>
+          {currentPageCancellation ? (
+            <span className="mt-1 block text-xs leading-relaxed text-muted-foreground break-words">
+              Status: Stopping safely
+            </span>
+          ) : null}
         </span>
         <ChevronDown
           aria-hidden="true"
@@ -300,7 +300,7 @@ export function StageNav({
       <div
         role="region"
         aria-label="Book production status"
-        className="flex min-h-9 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-4 py-2 text-xs"
+        className="hidden min-h-9 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border px-4 py-2 text-xs lg:flex"
       >
         <span className="folio-label text-muted-foreground">Production now</span>
         {progress.runId ? (

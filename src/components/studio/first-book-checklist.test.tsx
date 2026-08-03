@@ -68,6 +68,21 @@ describe("StudioInlineChecklist", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("expands the full roadmap from its compact mobile milestone", () => {
+    render(<StudioInlineChecklist initialSnapshot={snapshot} />);
+
+    const completedStep = screen.getByRole("link", { name: /shape your idea/i });
+    expect(completedStep.closest("li")).toHaveClass("hidden");
+
+    const disclosure = screen.getByRole("button", { name: "View all milestones" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(completedStep.closest("li")).not.toHaveClass("hidden");
+    expect(screen.getByRole("button", { name: "Show current milestone only" })).toBeVisible();
+  });
+
   it("persists a reversible dismissal from the inline surface", async () => {
     render(<StudioInlineChecklist initialSnapshot={snapshot} />);
 

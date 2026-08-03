@@ -9,7 +9,7 @@ import {
   meteredMaxOutputTokens,
 } from "@/ai/metering-limits";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
-import { WRITER_SYSTEM_PROMPT } from "@/ai/prompts/writer";
+import { CHAPTER_PROSE_RESPONSE_FORMAT, WRITER_SYSTEM_PROMPT } from "@/ai/prompts/writer";
 import {
   critiqueSchema,
   revisionSchema,
@@ -22,6 +22,7 @@ import { analyzeQuality } from "@/ai/analysis/quality-metrics";
 import { chapterGuidance } from "@/ai/knowledge/plot-structures";
 import { voicePrompt, type VoiceProfileId } from "@/ai/knowledge/voice-profiles";
 import { anthropicCachedSystem } from "@/ai/cache";
+import { normalizeManuscriptMarkdown } from "@/lib/manuscript-markdown";
 
 export type ChapterWriterCtx = {
   meter: MeterCtx;
@@ -94,7 +95,8 @@ function planPrompt(ctx: ChapterWriterCtx): string {
 function draftPrompt(ctx: ChapterWriterCtx, plan: ScenePlan): string {
   return [
     `Write chapter ${ctx.chapterNumber}: "${ctx.chapterOutline.title}" in full.`,
-    `Target length: about ${ctx.targetWords} words. Output plain markdown prose only — no JSON, no notes, no headings other than scene breaks if the style calls for them.`,
+    `Target length: about ${ctx.targetWords} words.`,
+    CHAPTER_PROSE_RESPONSE_FORMAT,
     `## Scene plan\n${JSON.stringify(plan, null, 2)}`,
     `## Working method`,
     `Before writing anything involving a person, place, object, organization or event, call entityGet for it — the story bible is canon and you must not contradict it. If you are unsure whether something already exists, call entitySearch before inventing it, so you do not create a near-duplicate under a slightly different name. When you need an earlier event's details, call storySoFarSearch instead of inventing them.`,
@@ -218,7 +220,13 @@ export async function writeChapter(
         return { text, usage, response, steps };
       },
     );
-    draft = draftResult.text.trim();
+    draft = normalizeManuscriptMarkdown(draftResult.text);
+    await save({ ...checkpoint, draft });
+  }
+
+  const normalizedDraft = normalizeManuscriptMarkdown(draft);
+  if (normalizedDraft !== draft) {
+    draft = normalizedDraft;
     await save({ ...checkpoint, draft });
   }
 
@@ -289,7 +297,9 @@ export async function writeChapter(
       }),
   );
 
-  const revised = applyReplacements(draft, revision.output.replacements);
+  const revised = normalizeManuscriptMarkdown(
+    applyReplacements(draft, revision.output.replacements),
+  );
   // Only credit the revision bump when at least one replacement actually landed.
   const qualityScore = revised === draft ? verdict.score : Math.min(1, verdict.score + 0.1);
   const result = {

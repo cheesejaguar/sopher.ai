@@ -42,7 +42,7 @@ test.describe("landing page", () => {
   test("marks the exact public route current in desktop and mobile navigation", async ({
     page,
   }) => {
-    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.setViewportSize({ width: 1280, height: 768 });
     for (const [route, label] of [
       ["/genres", "Genres"],
       ["/guides", "Guides"],
@@ -62,8 +62,8 @@ test.describe("landing page", () => {
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/guides/how-book-generation-works");
-    const menu = page.locator("header details");
-    await menu.locator("summary").click();
+    await page.getByRole("button", { name: "Open main menu" }).click();
+    const menu = page.getByRole("dialog");
     await expect(menu.getByRole("link", { name: "Guides", exact: true })).toHaveAttribute(
       "aria-current",
       "location",

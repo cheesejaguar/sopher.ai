@@ -130,7 +130,7 @@ export function ProjectNextStep({ snapshot }: { snapshot: AuthoringJourneySnapsh
       aria-label={`Next step: ${presentationLabel}`}
       data-compact-mobile={compactMobileRecovery ? "true" : undefined}
       className={cn(
-        "instrument-surface-raised sticky top-14 z-20 grid min-w-0 gap-3 overflow-hidden rounded-sm border-l-primary px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center lg:static lg:z-auto lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-6 lg:px-5 lg:py-4",
+        "instrument-surface-raised sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-20 grid min-w-0 gap-3 overflow-hidden rounded-sm border-l-primary px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center lg:static lg:z-auto lg:grid-cols-[minmax(0,1fr)_auto] lg:gap-6 lg:px-5 lg:py-4",
         compactMobileRecovery &&
           "min-h-14 gap-0 p-1.5 sm:gap-3 sm:px-4 sm:py-3 lg:gap-6 lg:px-5 lg:py-4",
       )}

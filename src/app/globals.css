@@ -239,8 +239,10 @@
     border-color: var(--color-border);
   }
 
-  html {
-    scrollbar-gutter: stable;
+  @media (min-width: 48rem) {
+    html {
+      scrollbar-gutter: stable;
+    }
   }
 
   body {
@@ -263,11 +265,14 @@
 
 /* Manuscript typography — shared by streaming preview, editor canvas, and reading view */
 .prose-manuscript {
+  min-width: 0;
+  width: 100%;
   font-family: var(--font-serif), Georgia, serif;
   font-size: 1.0625rem;
   line-height: 1.75;
   max-width: 68ch;
   color: var(--paper-foreground);
+  overflow-wrap: anywhere;
 }
 
 @media (min-width: 1024px) {
@@ -278,6 +283,38 @@
 
 .prose-manuscript p {
   margin-block: 0.9em;
+}
+
+.prose-manuscript a,
+.prose-manuscript code {
+  overflow-wrap: anywhere;
+}
+
+.prose-manuscript pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--paper-edge);
+  padding: 0.875rem 1rem;
+  background: color-mix(in oklch, var(--paper) 92%, var(--paper-edge));
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.875em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prose-manuscript img,
+.prose-manuscript video,
+.prose-manuscript svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.prose-manuscript table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
 }
 
 .prose-manuscript h1,
@@ -577,6 +614,33 @@
 
 .safe-area-bottom {
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+.safe-area-page {
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+
+@media (min-width: 40rem) {
+  .safe-area-page {
+    padding-right: max(1.5rem, env(safe-area-inset-right));
+    padding-left: max(1.5rem, env(safe-area-inset-left));
+  }
+}
+
+@media (min-width: 64rem) {
+  .safe-area-page {
+    padding-right: max(2rem, env(safe-area-inset-right));
+    padding-left: max(2rem, env(safe-area-inset-left));
+  }
+}
+
+@media (min-width: 80rem) {
+  .safe-area-page {
+    padding-right: max(2.5rem, env(safe-area-inset-right));
+    padding-left: max(2.5rem, env(safe-area-inset-left));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

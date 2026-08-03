@@ -94,14 +94,20 @@ function isCurrent(pathname: string, link: ShellLink, variant: ShellVariant) {
   return undefined;
 }
 
-function ProductMark({ variant }: { variant: ShellVariant }) {
+function ProductMark({
+  variant,
+  showContext = true,
+}: {
+  variant: ShellVariant;
+  showContext?: boolean;
+}) {
   return (
     <Link
       href={variant === "admin" ? "/admin" : "/studio"}
       className="group flex min-h-11 min-w-0 items-center gap-3 rounded-sm"
     >
       <BrandMark className="text-sidebar-foreground" />
-      <span className="hidden min-w-0 min-[360px]:block">
+      <span className={cn("min-w-0", showContext ? "block" : "hidden")}>
         <span className="block font-mono text-[0.6875rem] tracking-[0.12em] text-sidebar-foreground/75 uppercase">
           {variant === "admin" ? "Control room" : "Writing studio"}
         </span>
@@ -448,7 +454,7 @@ function ProductShellWithPathname({
 
         <div className="min-w-0">
           {editorOwnsMobileChrome ? null : (
-            <header className="sticky top-0 z-40 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/95 px-4 supports-[backdrop-filter]:backdrop-blur-md lg:hidden">
+            <header className="sticky top-0 z-40 grid min-h-14 grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-2 border-b border-border bg-background/95 pt-[env(safe-area-inset-top)] pr-[max(0.75rem,env(safe-area-inset-right))] pl-[max(0.75rem,env(safe-area-inset-left))] supports-[backdrop-filter]:backdrop-blur-md lg:hidden">
               <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
                 <SheetTrigger
                   render={
@@ -509,8 +515,10 @@ function ProductShellWithPathname({
                 </SheetContent>
               </Sheet>
 
-              <ProductMark variant={variant} />
-              <div className="flex items-center gap-1">
+              <span className="min-w-0 justify-self-center overflow-hidden">
+                <ProductMark variant={variant} showContext={false} />
+              </span>
+              <div className="flex items-center justify-self-end gap-1">
                 {variant === "studio" ? (
                   <CommandButton compact onOpen={() => setCommandPaletteOpen(true)} />
                 ) : (
@@ -523,7 +531,7 @@ function ProductShellWithPathname({
           <main
             id="main-content"
             tabIndex={-1}
-            className="min-h-[calc(100dvh-3.5rem)] min-w-0 px-4 py-6 sm:px-6 sm:py-8 lg:min-h-dvh lg:px-8 xl:px-10"
+            className="safe-area-page min-h-[calc(100dvh-3.5rem)] min-w-0 pt-6 sm:pt-8 lg:min-h-dvh"
           >
             <div className="mx-auto w-full max-w-[92rem] min-w-0">{children}</div>
           </main>

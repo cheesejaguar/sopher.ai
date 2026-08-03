@@ -11,14 +11,14 @@ export function FinalCta() {
     >
       <span
         aria-hidden="true"
-        className="spectral-rule marketing-final-rule absolute top-0 left-0 h-px w-48 sm:w-72"
+        className="spectral-rule marketing-final-rule absolute top-0 left-0 h-px w-48 max-w-full sm:w-72"
       />
-      <div className="mx-auto grid w-full max-w-7xl gap-9 px-6 py-20 sm:py-24 lg:grid-cols-12 lg:items-end lg:px-8">
-        <div className="lg:col-span-8">
+      <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 sm:gap-9 sm:px-6 sm:py-24 lg:grid-cols-12 lg:items-end lg:px-8">
+        <div className="min-w-0 lg:col-span-8">
           <p className="folio-label text-future-stage-accent">Next action / brief 01</p>
           <h2
             id="final-cta-heading"
-            className="mt-5 max-w-3xl font-display text-5xl font-semibold leading-[0.98] tracking-[-0.04em] text-balance sm:text-6xl"
+            className="mt-5 min-w-0 max-w-full font-display text-5xl font-semibold leading-[0.98] tracking-[-0.04em] text-balance sm:max-w-3xl sm:text-6xl"
           >
             Bring the story you keep coming back to.
           </h2>
@@ -27,7 +27,7 @@ export function FinalCta() {
             shaping in your own voice.
           </p>
         </div>
-        <div className="lg:col-span-4 lg:flex lg:justify-end">
+        <div className="min-w-0 lg:col-span-4 lg:flex lg:justify-end">
           <Link
             href="/studio"
             prefetch={false}

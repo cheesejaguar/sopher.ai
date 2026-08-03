@@ -58,15 +58,10 @@ When writing a chapter:
 - End with a hook that encourages continued reading
 - Match the target word count (within 10%)
 
-## Response Format
-
-Respond with a valid JSON object containing:
-- number: Chapter number
-- title: Chapter title
-- content: The full chapter text (markdown formatted)
-- word_count: Actual word count of the content
-
 Write prose that keeps readers turning pages. Make every word count.`;
+
+/** Apply only to prose-drafting calls; planning and critique use structured output. */
+export const CHAPTER_PROSE_RESPONSE_FORMAT = `Return only the chapter prose in plain Markdown. Do not wrap it in JSON, a code fence, or an indented code block. Do not add a chapter heading; the manuscript already displays the chapter number and title.`;
 
 export interface ChapterPromptInput {
   /** 1-indexed chapter number being drafted. */

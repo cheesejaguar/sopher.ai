@@ -158,12 +158,12 @@ export function BriefDemo() {
         </div>
       </div>
 
-      <article className="manuscript-sheet min-w-0 px-6 py-8 text-left sm:px-10 sm:py-10">
+      <article className="manuscript-sheet min-w-0 px-4 py-8 text-left min-[360px]:px-6 sm:px-10 sm:py-10">
         <div className="absolute top-0 right-6 h-5 w-16 bg-primary/80" aria-hidden="true" />
         <p className="font-sans text-[0.6875rem] font-medium tracking-[0.16em] text-paper-muted uppercase">
           {example.title} · Chapter one
         </p>
-        <div className="prose-manuscript mt-5 min-h-[15rem] sm:min-h-[12rem]">
+        <div className="prose-manuscript mt-5 min-h-[21rem] min-[360px]:min-h-[18rem] sm:min-h-[12rem]">
           <div className="relative">
             {/* Invisible full passage reserves the final height so nothing jumps while typing. */}
             <p aria-hidden="true" className="invisible" style={{ marginBlock: 0 }}>

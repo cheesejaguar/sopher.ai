@@ -14,25 +14,25 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
   const vercelAnalyticsEnabled = process.env.VERCEL === "1";
 
   return (
-    <div className="flex min-h-dvh flex-col bg-background text-foreground [--font-serif:Georgia] [font-family:var(--font-archivo),Arial,sans-serif]">
+    <div className="flex min-h-dvh flex-col bg-background text-foreground [--font-serif:Georgia] [font-family:var(--font-archivo),Arial,sans-serif] [overflow-wrap:anywhere]">
       <PublicAnalytics gaId={gaId} vercelEnabled={vercelAnalyticsEnabled} />
       {/* The skip link lives once, in the root layout; this layout supplies its
           target below so it resolves without JavaScript. */}
       <header className="sticky top-0 z-40 border-b border-black/10 bg-background/95 backdrop-blur-xl dark:border-white/10">
         <nav
           aria-label="Main"
-          className="mx-auto flex h-16 w-full max-w-7xl items-center gap-2 px-4 min-[360px]:gap-4 sm:px-6 lg:px-8"
+          className="mx-auto flex min-h-16 w-full max-w-7xl flex-wrap items-center gap-2 py-2 pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] min-[360px]:gap-3 sm:pr-[max(1.5rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))]"
         >
           <PublicNavLink
             href="/"
             aria-label="sopher.ai"
             currentClassName="border-primary"
-            className="group flex min-h-11 items-center border-b border-transparent"
+            className="group flex min-h-11 min-w-11 shrink-0 items-center justify-center border-b border-transparent"
           >
-            <BrandMark showWordmark={false} className="sm:hidden" />
-            <BrandMark className="hidden sm:inline-flex" />
+            <BrandMark showWordmark={false} className="min-[1200px]:hidden" />
+            <BrandMark className="hidden min-[1200px]:inline-flex" />
           </PublicNavLink>
-          <div className="ml-auto hidden items-center gap-1 md:flex">
+          <div className="ml-auto hidden min-w-0 flex-wrap items-center justify-end gap-1 min-[1200px]:flex">
             <PublicNavLink
               href="/#how-it-works"
               match="none"
@@ -67,24 +67,32 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
           <Link
             href="/studio"
             prefetch={false}
-            className={cn(buttonVariants(), "ml-auto min-h-11 rounded-sm px-4 md:ml-3")}
+            aria-label="Start your book"
+            className={cn(
+              buttonVariants(),
+              "ml-auto inline-flex h-auto min-h-11 min-w-0 shrink rounded-sm px-3 text-center leading-tight whitespace-normal min-[480px]:px-4 min-[1200px]:ml-3",
+            )}
           >
             Start your book
           </Link>
-          <div className="[&_[data-slot=button]]:size-11 [&_[data-slot=button]]:rounded-sm">
+          <div className="hidden min-[1200px]:block [&_[data-slot=button]]:size-11 [&_[data-slot=button]]:rounded-sm">
             <PublicThemeToggle />
           </div>
           <MobileMainMenu />
         </nav>
       </header>
 
-      <main id="main-content" tabIndex={-1} className="flex-1 outline-none">
+      <main
+        id="main-content"
+        tabIndex={-1}
+        className="flex-1 pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] outline-none"
+      >
         {children}
       </main>
 
-      <footer className="border-t border-black/10 dark:border-white/10">
-        <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 sm:grid-cols-2 lg:grid-cols-12 lg:px-8 lg:py-20">
-          <div className="lg:col-span-5">
+      <footer className="border-t border-black/10 pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] dark:border-white/10">
+        <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 sm:grid-cols-2 min-[1200px]:grid-cols-12 min-[1200px]:px-8 min-[1200px]:py-20">
+          <div className="min-[1200px]:col-span-5">
             <p>
               <BrandMark />
             </p>
@@ -96,7 +104,10 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
               © 2026 sopher.ai · Future proof 01
             </p>
           </div>
-          <nav aria-label="Footer" className="grid grid-cols-2 gap-8 lg:col-span-7 lg:grid-cols-3">
+          <nav
+            aria-label="Footer"
+            className="grid grid-cols-2 gap-8 min-[1200px]:col-span-7 min-[1200px]:grid-cols-3"
+          >
             <div className="border-t border-black/10 pt-4 dark:border-white/10">
               <p className="font-mono text-[0.6875rem] tracking-[0.16em] text-muted-foreground uppercase">
                 Product
@@ -105,7 +116,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/#how-it-works"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     How it works
                   </Link>
@@ -113,7 +124,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/pricing"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Pricing
                   </Link>
@@ -121,7 +132,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/genres"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Genres
                   </Link>
@@ -129,7 +140,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/guides"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Guides
                   </Link>
@@ -138,7 +149,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                   <Link
                     href="/studio"
                     prefetch={false}
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Studio
                   </Link>
@@ -153,7 +164,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/terms"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Terms
                   </Link>
@@ -161,7 +172,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/privacy"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Privacy
                   </Link>
@@ -169,7 +180,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <Link
                     href="/refunds"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Refunds
                   </Link>
@@ -177,27 +188,27 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 <li>
                   <a
                     href="mailto:support@sopher.ai"
-                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:min-h-9"
+                    className="flex min-h-11 items-center text-muted-foreground transition-colors hover:text-foreground sm:[@media(pointer:fine)_and_(not_(any-pointer:coarse))]:min-h-9"
                   >
                     Support
                   </a>
                 </li>
               </ul>
             </div>
-            <div className="col-span-2 border-t border-black/10 pt-4 dark:border-white/10 lg:col-span-1">
+            <div className="col-span-2 border-t border-black/10 pt-4 dark:border-white/10 min-[1200px]:col-span-1">
               <p className="font-mono text-[0.65rem] tracking-[0.16em] text-muted-foreground uppercase">
                 Sequence
               </p>
-              <ol className="mt-4 grid grid-cols-5 gap-1 lg:grid-cols-1">
+              <ol className="mt-4 grid grid-cols-5 gap-1 min-[1200px]:grid-cols-1">
                 {["Concept", "Outline", "Chapters", "Editor", "Continuity"].map((stage, index) => (
                   <li key={stage} className="text-xs text-muted-foreground">
-                    <span className="mr-2 hidden font-mono text-[0.6875rem] text-primary lg:inline">
+                    <span className="mr-2 hidden font-mono text-[0.6875rem] text-primary min-[1200px]:inline">
                       {String(index + 1).padStart(2, "0")}
                     </span>
-                    <span className="max-lg:sr-only">{stage}</span>
+                    <span className="max-[1199px]:sr-only">{stage}</span>
                     <span
                       aria-hidden="true"
-                      className="block h-px bg-primary/40 lg:hidden"
+                      className="block h-px bg-primary/40 min-[1200px]:hidden"
                       style={{ opacity: 0.35 + index * 0.15 }}
                     />
                   </li>
