@@ -23,6 +23,7 @@ import {
   creativeDecisionCardKey,
 } from "@/components/generation/creative-decision-card";
 import { ResponsiveInspector } from "@/components/studio/product-primitives";
+import { useHashTargetFocus } from "@/components/studio/hash-focus-target";
 import type { Stage } from "@/lib/run-events";
 import type { QualityTier } from "@/ai/models";
 import { PRODUCTION_STAGE_LABELS } from "@/lib/project-progress";
@@ -96,29 +97,6 @@ function formatEventTime(value: string | undefined): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(date);
-}
-
-function useHashTargetFocus<T extends HTMLElement>(targetId: string) {
-  const targetRef = React.useRef<T | null>(null);
-  React.useEffect(() => {
-    let frame: number | undefined;
-    const focusTarget = () => {
-      if (window.location.hash !== `#${targetId}`) return;
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const target = targetRef.current;
-        if (!target || target.getClientRects().length === 0) return;
-        target.focus({ preventScroll: true });
-      });
-    };
-    focusTarget();
-    window.addEventListener("hashchange", focusTarget);
-    return () => {
-      window.removeEventListener("hashchange", focusTarget);
-      if (frame !== undefined) window.cancelAnimationFrame(frame);
-    };
-  }, [targetId]);
-  return targetRef;
 }
 
 function ProductionTelemetry({

@@ -159,6 +159,27 @@ test("an active book card opens and focuses live production status", async ({ pa
   await expect(productionStatus).toBeFocused();
 });
 
+test("cross-page Editor and Manuscript actions focus their destination", async ({ page }) => {
+  const destinations = [
+    {
+      route: `/projects/${PROJECTS.partialFailure}/editor#editor-production-status`,
+      target: "#editor-production-status",
+    },
+    {
+      route: `/projects/${PROJECTS.partialFailure}/manuscript#manuscript-actions`,
+      target: "#manuscript-actions",
+    },
+  ] as const;
+
+  for (const destination of destinations) {
+    await page.goto(destination.route);
+    await expect(page).toHaveURL(new RegExp(`${destination.target}$`));
+    const target = page.locator(destination.target);
+    await expect(target).toBeVisible();
+    await expect(target).toBeFocused();
+  }
+});
+
 test("project surfaces repeat the authoritative next step", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 1440, height: 900 });

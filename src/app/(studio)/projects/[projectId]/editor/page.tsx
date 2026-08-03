@@ -23,6 +23,7 @@ import {
 } from "@/lib/editor/chapter-status";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
+import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import {
   manuscriptEditMaximumCredits,
   readManuscriptEditPassCompletion,
@@ -135,12 +136,11 @@ export default async function EditorIndexPage({
         </p>
       </header>
 
-      <div
+      <HashFocusTarget
         id="editor-production-status"
-        tabIndex={-1}
         role="region"
         aria-label="Editor production status"
-        className="scroll-mt-28 space-y-5 rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+        className="scroll-mt-28 space-y-5 rounded-sm"
       >
         {journey ? <IncompleteProductionNotice journey={journey} /> : null}
 
@@ -157,7 +157,7 @@ export default async function EditorIndexPage({
             initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
           />
         ) : null}
-      </div>
+      </HashFocusTarget>
 
       {chapters.length === 0 ? (
         <div className="instrument-surface relative flex min-h-56 flex-col items-center justify-center overflow-hidden px-6 py-12 text-center">

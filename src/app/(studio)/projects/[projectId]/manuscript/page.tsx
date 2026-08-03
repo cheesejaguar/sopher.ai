@@ -18,6 +18,7 @@ import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
+import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 
 function EmptyManuscript() {
   return (
@@ -97,7 +98,8 @@ export default async function ManuscriptPage({
       <h2 className="sr-only">Manuscript</h2>
       {journey ? <IncompleteProductionNotice journey={journey} /> : null}
 
-      <header
+      <HashFocusTarget
+        as="header"
         id="manuscript-actions"
         className="instrument-surface scroll-mt-28 flex flex-wrap items-center justify-between gap-4 rounded-sm p-4"
       >
@@ -137,7 +139,7 @@ export default async function ManuscriptPage({
           <ShareReaderDialog projectId={projectId} />
           <ExportDialog projectId={projectId} />
         </div>
-      </header>
+      </HashFocusTarget>
 
       <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (
