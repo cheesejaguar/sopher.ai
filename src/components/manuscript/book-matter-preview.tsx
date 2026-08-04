@@ -88,7 +88,7 @@ function SlotRow({ slot, position }: { slot: BookPageSlot; position: number | nu
 export function BookMatterPreview({
   matter,
   chapterCount,
-  title = "Reading order",
+  title = "Reader order",
   className,
 }: {
   matter: BookMatter;
@@ -107,7 +107,7 @@ export function BookMatterPreview({
   const missingOptional = slots.filter((slot) => !slot.present && !slot.required).length;
 
   return (
-    <section
+    <aside
       aria-label={title}
       className={cn("instrument-surface overflow-hidden rounded-sm", className)}
     >
@@ -126,6 +126,6 @@ export function BookMatterPreview({
           <SlotRow key={slot.key} slot={slot} position={position} />
         ))}
       </ol>
-    </section>
+    </aside>
   );
 }

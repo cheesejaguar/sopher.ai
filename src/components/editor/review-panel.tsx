@@ -343,7 +343,7 @@ export function ReviewPanel({
             variant="outline"
             size="sm"
             className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
-            disabled={reviewing || busy || suspended}
+            disabled={reviewing || proofreading || busy || suspended}
             onClick={() => onReview(instruction.trim() || undefined)}
           >
             <BookOpenCheck aria-hidden="true" className="text-ai" />

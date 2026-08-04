@@ -59,9 +59,11 @@ export default async function BookSetupPage({
         />
       </div>
 
-      <aside className="min-w-0 xl:sticky xl:top-24 xl:self-start">
-        <BookMatterPreview matter={matter} chapterCount={data.project.targetChapters} />
-      </aside>
+      <BookMatterPreview
+        matter={matter}
+        chapterCount={data.project.targetChapters}
+        className="min-w-0 xl:sticky xl:top-24 xl:self-start"
+      />
     </div>
   );
 }

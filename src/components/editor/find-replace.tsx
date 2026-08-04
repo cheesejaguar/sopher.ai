@@ -111,6 +111,8 @@ export function FindReplace({
   const [chosenEntities, setChosenEntities] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
   const [stale, setStale] = useState(false);
+  /** Bumped on every document change, including while a preview is in flight. */
+  const docRevRef = useRef(0);
   const [problem, setProblem] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<string | null>(null);
 
@@ -134,15 +136,34 @@ export function FindReplace({
    * A preview is only as good as the versions it recorded. Any edit here — a
    * keystroke, an accepted suggestion — invalidates it, and the author has to
    * refresh rather than write over prose the preview never saw.
+   *
+   * Subscribed unconditionally rather than only once a preview exists: the
+   * preview round trip scans every chapter and can take seconds, and a
+   * keystroke landing inside that window would otherwise be captured by
+   * neither the recorded versions nor the stale flag, and be silently
+   * overwritten by the apply.
    */
   useEffect(() => {
-    if (!preview) return;
-    const invalidate = () => setStale(true);
+    const invalidate = () => {
+      docRevRef.current += 1;
+      setStale(true);
+    };
     editor.on("update", invalidate);
     return () => {
       editor.off("update", invalidate);
     };
-  }, [editor, preview]);
+  }, [editor]);
+
+  /**
+   * The inputs a preview was computed from. Editing the Find field or toggling
+   * an option changes what would be written, so the preview stops describing
+   * the pending action and must not be applied.
+   */
+  const [previewInputs, setPreviewInputs] = useState<string | null>(null);
+  const inputsKey = JSON.stringify([query, replacement, caseSensitive, wholeWord]);
+  const inputsChanged = preview !== null && previewInputs !== inputsKey;
+  /** Either the prose or the search moved since the preview was computed. */
+  const previewUnusable = stale || inputsChanged;
 
   const jumpTo = useCallback(
     (match: Match | undefined) => {
@@ -217,6 +238,9 @@ export function FindReplace({
         setPreview(null);
         return;
       }
+      // Captured after the flush and compared after the await: a keystroke
+      // inside the round trip is not in the versions this preview recorded.
+      const revAtFlush = docRevRef.current;
       const result = await previewBookReplace(projectId, {
         query,
         replacement,
@@ -228,12 +252,13 @@ export function FindReplace({
         setPreview(null);
         return;
       }
+      setPreviewInputs(JSON.stringify([query, replacement, caseSensitive, wholeWord]));
       setPreview(result);
       setChosenChapters(new Set(result.chapters.map((chapter) => chapter.chapterId)));
       // Canon renames stay opt-in — the author decides whether the character in
       // the Story Bible is the same one the prose is talking about.
       setChosenEntities(new Set());
-      setStale(false);
+      setStale(docRevRef.current !== revAtFlush);
     } catch {
       setProblem("The preview could not be loaded. Check your connection and try again.");
       setPreview(null);
@@ -488,7 +513,7 @@ export function FindReplace({
               <Button
                 size="sm"
                 className={cn("h-8 text-xs", touchLayout && "min-h-11 text-sm")}
-                disabled={busy !== null || stale || chosenCount === 0}
+                disabled={busy !== null || previewUnusable || chosenCount === 0}
                 onClick={() => void runApply()}
               >
                 {busy === "apply" ? (
@@ -500,11 +525,12 @@ export function FindReplace({
             <p className="text-[11px] text-muted-foreground">Free — no credits used.</p>
           </div>
 
-          {stale && preview ? (
+          {previewUnusable && preview ? (
             <p className="flex items-start gap-2 rounded-sm border border-ember/40 bg-ember/10 px-2 py-1.5 text-xs text-foreground">
               <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-ember" />
-              This chapter changed since the preview. Refresh it before replacing, so nothing you
-              just wrote is overwritten.
+              {inputsChanged
+                ? "The search changed since this preview. Preview again so you can see exactly what will be replaced."
+                : "This chapter changed since the preview. Refresh it before replacing, so nothing you just wrote is overwritten."}
             </p>
           ) : null}
 

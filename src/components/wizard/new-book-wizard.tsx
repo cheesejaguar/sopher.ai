@@ -31,6 +31,7 @@ import {
   DEFAULT_TIER_KEY,
   applyTrialStoryShape,
   resolvedGenre,
+  shapeDefaultsForGenre,
   clearLegacyWizardStorage,
   initialWizardState,
   maxReachableStep,
@@ -359,9 +360,16 @@ function initialStateFor(
   initialGenre?: GenreId,
   initialSetup?: Partial<WizardState>,
 ): WizardState {
+  // A genre arriving via ?genre= never passes through selectGenre, so without
+  // this it keeps the adult 12 x 3,000-word shape — which is exactly the path
+  // /genres/childrens sends people down.
+  const genreShape = initialGenre ? shapeDefaultsForGenre(initialGenre) : null;
   const initial = {
     ...initialWizardState,
     ...(initialGenre ? { genre: initialGenre } : {}),
+    ...(genreShape ?? {}),
+    // A carried-forward setup is the author's own prior book; it outranks a
+    // genre default.
     ...initialSetup,
     step: 0,
   };
