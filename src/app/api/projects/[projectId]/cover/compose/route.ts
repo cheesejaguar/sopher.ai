@@ -65,7 +65,11 @@ async function loadBook(projectId: string, userId: string) {
   return row ?? null;
 }
 
-async function loadCoverArt(projectId: string): Promise<{
+async function loadCoverArt(
+  projectId: string,
+  /** The cover the book currently points at, so stale art is not preferred over it. */
+  coverUrl: string | null,
+): Promise<{
   source: CoverArtSource;
   layout: CoverLayoutId | null;
   palette: CoverPaletteId | null;
@@ -76,6 +80,7 @@ async function loadCoverArt(projectId: string): Promise<{
       url: schema.assets.blobUrl,
       contentType: schema.assets.contentType,
       meta: schema.assets.meta,
+      createdAt: schema.assets.createdAt,
     })
     .from(schema.assets)
     .where(
@@ -88,6 +93,27 @@ async function loadCoverArt(projectId: string): Promise<{
     .orderBy(desc(schema.assets.createdAt))
     .limit(1);
   if (!art) return null;
+
+  // A paid regeneration whose lettering step fails stores the raw painting as
+  // the cover and records no cover-art row for it. The newest art row is then
+  // the *previous* painting, and re-lettering it would silently discard the one
+  // the author just paid for. If the live cover is newer than this art, the
+  // cover is itself the painting — letter that instead.
+  if (coverUrl) {
+    const [cover] = await getDb()
+      .select({ createdAt: schema.assets.createdAt })
+      .from(schema.assets)
+      .where(
+        and(
+          eq(schema.assets.projectId, projectId),
+          eq(schema.assets.kind, "cover"),
+          eq(schema.assets.blobUrl, coverUrl),
+        ),
+      )
+      .limit(1);
+    if (cover && cover.createdAt > art.createdAt) return null;
+  }
+
   const meta = art.meta as Record<string, unknown>;
   const layout = COVER_LAYOUT_IDS.find((id) => id === meta.layout) ?? null;
   const palette = COVER_PALETTE_IDS.find((id) => id === meta.palette) ?? null;
@@ -153,7 +179,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ projectId: str
   if (!book) return Response.json({ error: "Book not found" }, { status: 404 });
 
   const matter = readBookMatter(book.frontMatter);
-  const art = await loadCoverArt(projectId.data);
+  const art = await loadCoverArt(projectId.data, matter.coverUrl ?? null);
   return Response.json({
     hasCover: Boolean(matter.coverUrl),
     canCompose: Boolean(art ?? matter.coverUrl),
@@ -189,7 +215,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   if (!book) return Response.json({ error: "Book not found" }, { status: 404 });
 
   const matter = readBookMatter(book.frontMatter);
-  const stored = await loadCoverArt(projectId.data);
+  const stored = await loadCoverArt(projectId.data, matter.coverUrl ?? null);
   const source = stored?.source ?? (await loadLegacyArt(projectId.data, matter.coverUrl ?? null));
   if (!source) {
     return Response.json(

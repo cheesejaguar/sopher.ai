@@ -192,6 +192,7 @@ function resolveStructureId(chosen: string, requested?: string): string {
 }
 
 function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: string): string {
+  const nonFiction = isNonFictionGenre(input.genre);
   const base = buildOutlineUserPrompt({
     concept: conceptText(input.concept),
     workingTitle: input.workingTitle,
@@ -224,9 +225,18 @@ function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: st
         : []),
       `- Every chapter's targetWords within 20% of ${input.targetWordsPerChapter}.`,
       `- Set plotStructure to "${structureId}".`,
-      `- Place structure beats according to the act plan above.`,
+      nonFiction
+        ? `- Each chapter is a unit of meaning that advances the driving question. Do not place plot beats and do not build to a climax.`
+        : `- Place structure beats according to the act plan above.`,
       `- Hook chaining: each chapter's closingHook must raise the question that the next chapter's openingHook picks up.`,
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    // Re-stated last, after the hard requirements. `buildOutlineUserPrompt`
+    // places this framing at the end of `base` precisely so it survives a
+    // conflict — and then `base` becomes the *first* section here, putting the
+    // act-plan imperatives after the instruction that cancels them.
+    ...(nonFiction ? outlineGenreFraming(input.genre) : []),
   ]
     .filter(Boolean)
     .join("\n\n");
