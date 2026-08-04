@@ -1,5 +1,7 @@
+import { inspect } from "node:util";
 import { NoObjectGeneratedError, NoOutputGeneratedError } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const mocks = vi.hoisted(() => ({
   begin: vi.fn(),
@@ -380,7 +382,7 @@ describe("metered atomic authorization", () => {
     expect(mocks.recordMany).not.toHaveBeenCalled();
   });
 
-  it("settles and compensates a rejected structured response before a durable retry", async () => {
+  it("settles and compensates a rejected structured response without repeating it", async () => {
     const malformed = new NoObjectGeneratedError({
       message: "No object generated: response did not match schema.",
       text: '{"entities":[]}',
@@ -412,7 +414,11 @@ describe("metered atomic authorization", () => {
       name: "MeteredOutputDeliveryError",
       operation: "entity.bible",
       finishReason: "stop",
+      // Nothing pins temperature, so a fresh sample can validate where this one
+      // did not — and the callers most exposed to a validation miss produce the
+      // manuscript rather than polish it, so they have no degrade path.
       isRetryable: true,
+      rawText: '{"entities":[]}',
     });
     expect(mocks.recordMany).toHaveBeenCalledWith(
       [
@@ -433,6 +439,163 @@ describe("metered atomic authorization", () => {
     await expect(metered(ctx, info, provider)).resolves.toEqual({ usage });
     expect(provider).toHaveBeenCalledTimes(2);
     expect(mocks.recordMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands the paid text back for local repair without leaking it anywhere else", async () => {
+    // Mirrors the 2026-08-04 continuity rejection: a plausible review that
+    // misses caps Anthropic never forwarded to the model.
+    const reviewSchema = z.object({
+      score: z.number().min(0).max(1),
+      issues: z
+        .array(
+          z.object({
+            severity: z.enum(["minor", "major"]),
+            chapters: z.array(z.number()).max(2),
+          }),
+        )
+        .max(2),
+      notes: z.record(z.string(), z.number()),
+    });
+    const rejected = {
+      score: 85,
+      issues: [
+        { severity: "high", chapters: [1, 2, 3] },
+        { severity: "major", chapters: [4] },
+        { severity: "major", chapters: [5] },
+      ],
+      notes: { "Chapter 3: the lighthouse keeper wept": "unresolved" },
+    };
+    const parsed = reviewSchema.safeParse(rejected);
+    const rawText = JSON.stringify(rejected);
+    const malformed = new NoObjectGeneratedError({
+      message: "No object generated: response did not match schema.",
+      // The real chain is NoObjectGeneratedError -> TypeValidationError (which
+      // carries the offending value) -> ZodError.
+      cause: Object.assign(new Error("Type validation failed"), {
+        name: "AI_TypeValidationError",
+        value: rejected,
+        cause: parsed.error,
+      }),
+      text: rawText,
+      response: {
+        id: "gateway-response-2",
+        timestamp: new Date("2026-08-04T00:00:00.000Z"),
+        modelId: "anthropic/claude-sonnet-5",
+      },
+      usage,
+      finishReason: "stop",
+    });
+
+    const failure = await metered(
+      {
+        userId: "user-1",
+        runId: "run-1",
+        billingScope: "generation:run-1:continuity",
+        reservationRef: "generation-reservation:run-1:continuity",
+      },
+      {
+        role: "continuity",
+        operation: "continuity.narrative_structure",
+        model: "anthropic/claude-sonnet-5",
+      },
+      async () => {
+        throw malformed;
+      },
+    ).then(
+      () => null,
+      (error: unknown) => error as MeteredOutputDeliveryError,
+    );
+
+    expect(failure).toBeInstanceOf(MeteredOutputDeliveryError);
+    expect(failure?.isRetryable).toBe(true);
+    // Paid output is salvageable in process, so a repair costs the author nothing.
+    expect(failure?.rawText).toBe(rawText);
+    // Structure only: every entry is a schema path plus a zod code. The
+    // model-chosen record key is masked because it is author content.
+    expect(failure?.validationIssues).toEqual([
+      "score: too_big",
+      "issues[].severity: invalid_value",
+      "issues[].chapters: too_big",
+      "issues: too_big",
+      "notes.*: invalid_type",
+    ]);
+    for (const leak of ["lighthouse", "keeper wept", "high", "85"]) {
+      expect(failure?.validationIssues.join(" ")).not.toContain(leak);
+      expect(failure?.message).not.toContain(leak);
+      // Own enumerable state is what logging, JSON, and structured clone see.
+      expect(JSON.stringify({ ...failure })).not.toContain(leak);
+      expect(inspect(failure, { depth: 6 })).not.toContain(leak);
+    }
+    expect(Object.keys(failure ?? {})).not.toContain("rawText");
+  });
+
+  it.each([
+    // The provider answered and only local validation refused it, but a retry
+    // is a fresh sample and the essential agents have no degrade path.
+    ["stop", true],
+    // Truncation repeats for an unchanged request and ceiling.
+    ["length", false],
+    ["content-filter", false],
+    // Genuinely ambiguous outcomes may differ on a second attempt.
+    ["tool-calls", true],
+    ["error", true],
+    ["other", true],
+    ["unknown", true],
+  ] as const)("retries a %s output delivery failure: %s", (finishReason, isRetryable) => {
+    expect(
+      new MeteredOutputDeliveryError("continuity.narrative_structure", finishReason, 3_742, 0)
+        .isRetryable,
+    ).toBe(isRetryable);
+  });
+
+  it("reports an unparseable response as a structure-only diagnostic", () => {
+    const failure = new MeteredOutputDeliveryError("concept.refine", "stop", 500, 0, {
+      rawText: "Here is the concept you asked for:\n```json\n{",
+      validationCause: new NoObjectGeneratedError({
+        message: "No object generated: could not parse the response.",
+        cause: Object.assign(new Error("JSON parsing failed"), {
+          name: "AI_JSONParseError",
+          text: "Here is the concept you asked for:\n```json\n{",
+          cause: new SyntaxError("Unexpected end of JSON input"),
+        }),
+        text: "Here is the concept you asked for:\n```json\n{",
+        response: { id: "gateway-response-3", timestamp: new Date(0), modelId: "m" },
+        usage,
+        finishReason: "stop",
+      }),
+    });
+
+    expect(failure.validationIssues).toEqual(["(root): invalid_json"]);
+    expect(failure.message).not.toContain("concept you asked for");
+  });
+
+  it("bounds diagnostics so one rejected response cannot flood a failure record", () => {
+    const wide = z.object(
+      Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`field${index}`, z.number()])),
+    );
+    const parsed = wide.safeParse(
+      Object.fromEntries(Array.from({ length: 10 }, (_, index) => [`field${index}`, "no"])),
+    );
+
+    const failure = new MeteredOutputDeliveryError("editorial.gate", "stop", 400, 0, {
+      validationCause: parsed.error,
+    });
+
+    expect(failure.validationIssues).toHaveLength(9);
+    expect(failure.validationIssues.at(0)).toBe("field0: invalid_type");
+    expect(failure.validationIssues.at(-1)).toBe("+2 more");
+  });
+
+  it("carries no diagnostics when a failure exposes no validation structure", () => {
+    expect(
+      new MeteredOutputDeliveryError("cover.generate", "error", 0, 0).validationIssues,
+    ).toEqual([]);
+    expect(
+      new MeteredOutputDeliveryError("cover.generate", "error", 0, 0, {
+        validationCause: new NoOutputGeneratedError(),
+      }).validationIssues,
+    ).toEqual([]);
+    expect(new MeteredOutputDeliveryError("cover.generate", "error", 0, 0).rawText).toBeUndefined();
   });
 
   it("releases a first-step input guard failure that proves no provider dispatch", async () => {
@@ -559,10 +722,12 @@ describe("metered atomic authorization", () => {
       outputTokens: 5_000,
       outputTokenDetails: { textTokens: 72, reasoningTokens: 4_928 },
     };
+    const partialText = '{"logline":"the lighthouse keeper waits for';
     const provider = vi.fn(async () => ({
       usage: truncatedUsage,
       finishReason: "length",
       rawFinishReason: "max_tokens",
+      text: partialText,
       get output(): never {
         throw new NoOutputGeneratedError();
       },
@@ -592,8 +757,13 @@ describe("metered atomic authorization", () => {
       reasoningTokens: 4_928,
       isRetryable: false,
       message: expect.stringContaining("finish reason: length"),
+      // Truncated JSON is still paid-for output a caller may be able to close.
+      rawText: partialText,
     });
     await expect(call).rejects.toBeInstanceOf(MeteredOutputDeliveryError);
+    await expect(call).rejects.toMatchObject({
+      message: expect.not.stringContaining("lighthouse"),
+    });
     expect(mocks.recordMany).toHaveBeenCalledOnce();
     expect(mocks.recordMany).toHaveBeenCalledWith(
       expect.any(Array),

@@ -11,8 +11,10 @@ import {
 import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { CHAPTER_PROSE_RESPONSE_FORMAT, WRITER_SYSTEM_PROMPT } from "@/ai/prompts/writer";
 import {
-  critiqueSchema,
-  revisionSchema,
+  critiqueWireSchema,
+  normalizeCritique,
+  normalizeRevision,
+  revisionWireSchema,
   scenePlanSchema,
   type ChapterOutlinePlan,
   type Critique,
@@ -264,11 +266,19 @@ export async function writeChapter(
           prompt: critiquePrompt(ctx, draft, metricsNote),
           maxOutputTokens: meteredMaxOutputTokens("writer.critique"),
           prepareStep: meteredInputGuard("writer.critique"),
-          output: Output.object({ schema: critiqueSchema }),
+          // Permissive wire schema, then normalizeCritique back onto the strict
+          // type. The strict schema used to sit here, and its invisible caps
+          // meant a critique naming nine issues instead of eight — or scoring
+          // the chapter 8 instead of 0.8 — threw NoObjectGeneratedError and
+          // discarded a chapter that was already drafted and paid for.
+          output: Output.object({ schema: critiqueWireSchema }),
           providerOptions: gatewayOptions(ctx.meter, "writer"),
         }),
     );
-    verdict = critique.output;
+    // The score here is persisted as the chapter's qualityScore and decides
+    // whether a revision pass runs at all, so it goes through the 0-1 rescale
+    // rather than being trusted as-is.
+    verdict = normalizeCritique(critique.output);
     await save({ ...checkpoint, critique: verdict });
   }
   if (verdict.verdict === "pass" || !verdict.issues.some((i) => i.severity === "major")) {
@@ -292,13 +302,16 @@ export async function writeChapter(
         prompt: revisePrompt(draft, verdict),
         maxOutputTokens: meteredMaxOutputTokens("writer.revise"),
         prepareStep: meteredInputGuard("writer.revise"),
-        output: Output.object({ schema: revisionSchema }),
+        output: Output.object({ schema: revisionWireSchema }),
         providerOptions: gatewayOptions(ctx.meter, "writer", { withFallbacks: true }),
       }),
   );
 
+  // normalizeRevision drops a replacement whose `revised` text is missing
+  // instead of defaulting it to "" — the default would apply as a deletion and
+  // silently cut the anchored passage out of the author's chapter.
   const revised = normalizeManuscriptMarkdown(
-    applyReplacements(draft, revision.output.replacements),
+    applyReplacements(draft, normalizeRevision(revision.output).replacements),
   );
   // Only credit the revision bump when at least one replacement actually landed.
   const qualityScore = revised === draft ? verdict.score : Math.min(1, verdict.score + 0.1);

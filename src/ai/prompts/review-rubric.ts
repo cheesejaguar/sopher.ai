@@ -1,7 +1,15 @@
 // Ported from _port/backend/continuity.py (REVIEW_PHASES, REVIEW_PROMPTS, and the
 // score -> recommendation ladder). Based on NYT Book Review guidelines and
-// professional literary standards. Prompt text is preserved verbatim.
+// professional literary standards. Reviewer prompt text is preserved verbatim.
 // Pure data + functions; no runtime dependencies.
+//
+// The per-phase JSON templates the port shipped (specific_issues, notable_passages,
+// timeline_valid, ...) were deleted: the phase call also carries a structured-output
+// schema, and a request that states two different result shapes teaches the model to
+// answer in the one the schema then rejects. REVIEW_PHASE_OUTPUT_CONTRACT is now the
+// single description of the result, and it must stay in step with
+// reviewPhaseResultSchema — the permissive wire schema no longer carries the enums
+// and caps to the provider, so the prompt is where the model learns them.
 
 export type ReviewPhaseKey =
   | "narrative_structure"
@@ -21,9 +29,32 @@ export interface ReviewPhase {
   weight: number;
   /** The reviewer system prompt for this phase (role + numbered checklist). */
   prompt: string;
-  /** The JSON output template the reviewer must follow. */
-  outputSchemaDescription: string;
 }
+
+/**
+ * The one result contract every review phase is held to.
+ *
+ * Anthropic's structured-output path drops numeric and length bounds from the
+ * schema it shows the model, and the wire schema deliberately widens the enums
+ * so a near-miss answer still parses. Both caps and enums therefore have to be
+ * stated here, in the prose the model actually reads.
+ */
+export const REVIEW_PHASE_OUTPUT_CONTRACT = `## Result format
+
+Return one structured result with exactly these fields:
+- score: a decimal between 0.0 and 1.0, where 1.0 is flawless (0.85, never 85)
+- summary: 2-3 sentence overall assessment
+- strengths: at most 6 short phrases
+- issues: at most 10 entries, strongest findings first, each with
+  - chapters: at most 10 chapter numbers, written as numbers (3, not "3")
+  - category: exactly one of character, timeline, setting, plot, factual
+  - severity: exactly one of critical, major, minor
+  - description: what is wrong
+  - suggestedFix: how to fix it
+
+Anything past those limits is discarded unread, so spend the room on the
+findings that matter most. If a finding does not fit a category or severity
+above, pick the closest one rather than inventing a new word.`;
 
 export const REVIEW_PHASES: readonly ReviewPhase[] = [
   {
@@ -39,15 +70,6 @@ Analyze this manuscript for:
 3. **Pacing**: Is the story well-paced? Are there sections that drag or feel rushed?
 4. **Scene Construction**: Are scenes properly established with clear settings, transitions, and resolutions?
 5. **Story Arc**: Does the overall narrative arc feel complete and satisfying?`,
-    outputSchemaDescription: `{
-    "score": <0.0-1.0>,
-    "strengths": ["strength1", "strength2", ...],
-    "weaknesses": ["weakness1", "weakness2", ...],
-    "specific_issues": [
-        {"chapter": <number>, "issue": "description", "suggestion": "how to fix"}
-    ],
-    "summary": "2-3 sentence overall assessment"
-}`,
   },
   {
     key: "character_development",
@@ -63,16 +85,6 @@ Analyze this manuscript for:
 4. **Distinct Voices**: Does each character have a unique voice in dialogue and internal thoughts?
 5. **Relationships**: Are relationships between characters believable and well-developed?
 6. **Supporting Characters**: Do secondary characters feel three-dimensional or like cardboard cutouts?`,
-    outputSchemaDescription: `{
-    "score": <0.0-1.0>,
-    "characters_analyzed": ["name1", "name2", ...],
-    "strengths": ["strength1", "strength2", ...],
-    "weaknesses": ["weakness1", "weakness2", ...],
-    "specific_issues": [
-        {"character": "name", "chapter": <number>, "issue": "description", "suggestion": "how to fix"}
-    ],
-    "summary": "2-3 sentence overall assessment"
-}`,
   },
   {
     key: "writing_quality",
@@ -89,15 +101,6 @@ Analyze this manuscript for:
 5. **Word Choice**: Is vocabulary appropriate and varied?
 6. **Sentence Structure**: Is there good variety in sentence length and structure?
 7. **Grammar & Mechanics**: Are there noticeable grammatical issues?`,
-    outputSchemaDescription: `{
-    "score": <0.0-1.0>,
-    "strengths": ["strength1", "strength2", ...],
-    "weaknesses": ["weakness1", "weakness2", ...],
-    "notable_passages": [
-        {"chapter": <number>, "type": "strength|weakness", "excerpt": "brief quote", "comment": "why notable"}
-    ],
-    "summary": "2-3 sentence overall assessment"
-}`,
   },
   {
     key: "thematic_elements",
@@ -112,16 +115,6 @@ Analyze this manuscript for:
 3. **Message Clarity**: Is there a clear message or takeaway without being heavy-handed?
 4. **Symbolic Elements**: Are symbols and motifs used effectively?
 5. **Emotional Resonance**: Do the themes create emotional impact?`,
-    outputSchemaDescription: `{
-    "score": <0.0-1.0>,
-    "identified_themes": ["theme1", "theme2", ...],
-    "strengths": ["strength1", "strength2", ...],
-    "weaknesses": ["weakness1", "weakness2", ...],
-    "thematic_moments": [
-        {"chapter": <number>, "theme": "which theme", "effectiveness": "how well handled"}
-    ],
-    "summary": "2-3 sentence overall assessment"
-}`,
   },
   {
     key: "technical_consistency",
@@ -136,20 +129,6 @@ Analyze this manuscript for:
 3. **Factual Accuracy**: Are any factual claims accurate (historical, scientific, etc.)?
 4. **Continuity Errors**: Are there contradictions in descriptions, events, or character knowledge?
 5. **Setting Consistency**: Do locations and environments remain consistent?`,
-    outputSchemaDescription: `{
-    "score": <0.0-1.0>,
-    "timeline_valid": true|false,
-    "continuity_errors": [
-        {"chapters": [<number>, <number>], "error": "description", "fix": "suggested correction"}
-    ],
-    "world_building_issues": [
-        {"chapter": <number>, "issue": "description", "impact": "low|medium|high"}
-    ],
-    "factual_concerns": [
-        {"chapter": <number>, "claim": "what was stated", "concern": "why problematic"}
-    ],
-    "summary": "2-3 sentence overall assessment"
-}`,
   },
   {
     key: "reader_experience",
@@ -165,18 +144,6 @@ Analyze this manuscript for:
 4. **Target Audience Fit**: Is the content appropriate for its intended audience?
 5. **Readability**: Is the book easy to follow and enjoyable to read?
 6. **Recommendation**: Would you recommend this book? To whom?`,
-    outputSchemaDescription: `{
-    "score": <0.0-1.0>,
-    "engagement_level": "low|medium|high",
-    "emotional_moments": [
-        {"chapter": <number>, "moment": "description", "emotion": "what it evokes"}
-    ],
-    "strengths": ["strength1", "strength2", ...],
-    "weaknesses": ["weakness1", "weakness2", ...],
-    "target_audience": "description of ideal reader",
-    "recommendation": "overall recommendation with reasoning",
-    "summary": "2-3 sentence overall assessment"
-}`,
   },
 ];
 
@@ -197,15 +164,14 @@ export function continuityPhaseKeys(tier: "draft" | "standard" | "premium"): Rev
 }
 
 /**
- * Full system prompt for a review phase — the reviewer prompt followed by the
- * JSON output instruction, exactly as the original REVIEW_PROMPTS entries.
+ * Full prompt for a review phase — the reviewer checklist followed by the one
+ * result contract. Callers must not restate or override the contract.
  */
 export function buildReviewPhasePrompt(key: ReviewPhaseKey): string {
   const phase = REVIEW_PHASES_BY_KEY[key];
   return `${phase.prompt}
 
-Provide your analysis in JSON format:
-${phase.outputSchemaDescription}`;
+${REVIEW_PHASE_OUTPUT_CONTRACT}`;
 }
 
 /** User message that accompanies each review phase call. */

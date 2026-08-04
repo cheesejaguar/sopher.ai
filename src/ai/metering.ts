@@ -151,14 +151,113 @@ export class MeteredDeliveryReplayError extends Error {
   }
 }
 
+/**
+ * Finish reasons where the provider will answer the same way however many
+ * times it is asked, so a retry only bills the author again.
+ *
+ * `stop` is deliberately NOT in this set, even though the 2026-08-04 incident
+ * retried a `stop` failure four times and paid for all four. Nothing pins
+ * temperature, so a retry is a fresh sample that can validate; and the callers
+ * most exposed to a validation miss — outline, the entity bible, chapter
+ * drafting — produce the manuscript rather than polish it, so they have no
+ * degrade path to fall back on. Making `stop` fatal would trade four wasted
+ * calls for a dead run. The real defence is upstream: a permissive wire schema
+ * plus a normalizer, so validation stops rejecting answers a model can
+ * reasonably give.
+ */
+const DETERMINISTIC_FINISH_REASONS = new Set(["length", "content-filter"]);
+
+/** Bound on structure-only diagnostics so one bad response cannot flood a record. */
+const MAX_VALIDATION_ISSUES = 8;
+
+function issueArray(value: unknown): unknown[] | undefined {
+  // Zod and TypeValidationError carry `issues`; a standard-schema failure is
+  // wrapped with the raw issue array itself as the cause.
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return undefined;
+  const issues = (value as { issues?: unknown }).issues;
+  return Array.isArray(issues) ? issues : undefined;
+}
+
+function issuePathLabel(path: unknown): string {
+  if (!Array.isArray(path) || path.length === 0) return "(root)";
+  return path.reduce<string>((label, segment) => {
+    // Collapse indexes: ten rejected array entries are one contract miss.
+    if (typeof segment === "number") return `${label}[]`;
+    // Object keys are schema field names — except under a record schema, where
+    // the model chooses them. Mask anything that is not field-shaped.
+    const key =
+      typeof segment === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,31}$/.test(segment) ? segment : "*";
+    return label ? `${label}.${key}` : key;
+  }, "");
+}
+
+function issueCode(issue: object): string {
+  const code = (issue as { code?: unknown }).code;
+  // Codes are a closed lowercase vocabulary; a custom validator could put
+  // anything here, and anything else is not safe to record.
+  return typeof code === "string" && /^[a-z][a-z0-9_]{0,31}$/.test(code) ? code : "invalid";
+}
+
+function isJsonParseFailure(value: object): boolean {
+  const name = (value as { name?: unknown }).name;
+  return typeof name === "string" && name.includes("JSONParseError");
+}
+
+/**
+ * Structure-only account of why a paid structured output was rejected: issue
+ * paths and codes, never the offending values. Zod messages and
+ * TypeValidationError.value quote the data they rejected, which for this
+ * product is manuscript prose — this summary is meant to reach logs and the
+ * durable failure record, so it must carry no content at all.
+ */
+function validationIssueSummary(error: unknown, depth = 0): string[] {
+  if (!error || typeof error !== "object" || depth > 4) return [];
+  const issues = issueArray(error);
+  if (issues) {
+    const labels = [
+      ...new Set(
+        issues
+          .filter((issue): issue is object => Boolean(issue) && typeof issue === "object")
+          .map(
+            (issue) => `${issuePathLabel((issue as { path?: unknown }).path)}: ${issueCode(issue)}`,
+          ),
+      ),
+    ];
+    return labels.length > MAX_VALIDATION_ISSUES
+      ? [
+          ...labels.slice(0, MAX_VALIDATION_ISSUES),
+          `+${labels.length - MAX_VALIDATION_ISSUES} more`,
+        ]
+      : labels;
+  }
+  if (isJsonParseFailure(error)) return ["(root): invalid_json"];
+  return validationIssueSummary((error as { cause?: unknown }).cause, depth + 1);
+}
+
 export class MeteredOutputDeliveryError extends Error {
   readonly isRetryable: boolean;
+  /**
+   * Issue paths and codes from the rejected response, e.g. `issues: too_big`.
+   * Deliberately free of values and messages so it is safe to log and persist;
+   * this is what makes the next structured-output incident diagnosable.
+   */
+  readonly validationIssues: readonly string[];
+  /**
+   * Output the author already paid for, kept so a caller can attempt a free
+   * local repair instead of billing a second provider call. Private-with-getter
+   * on purpose: it can hold manuscript prose, so it must never appear in an
+   * inspected, serialized, or structured-cloned error. It therefore does not
+   * survive a Workflow step boundary — repair it in the same process or lose it.
+   */
+  readonly #rawText: string | undefined;
 
   constructor(
     readonly operation: string,
     readonly finishReason: string,
     readonly outputTokens: number,
     readonly reasoningTokens: number,
+    paidOutput?: { rawText?: string; validationCause?: unknown },
   ) {
     const usageDetail = [
       outputTokens > 0 ? `${outputTokens} output tokens` : null,
@@ -171,7 +270,13 @@ export class MeteredOutputDeliveryError extends Error {
         ` (finish reason: ${finishReason}${usageDetail ? `; ${usageDetail}` : ""}).`,
     );
     this.name = "MeteredOutputDeliveryError";
-    this.isRetryable = finishReason !== "length" && finishReason !== "content-filter";
+    this.isRetryable = !DETERMINISTIC_FINISH_REASONS.has(finishReason);
+    this.validationIssues = validationIssueSummary(paidOutput?.validationCause);
+    this.#rawText = paidOutput?.rawText;
+  }
+
+  get rawText(): string | undefined {
+    return this.#rawText;
   }
 }
 
@@ -541,11 +646,18 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
         "finishReason" in result && typeof result.finishReason === "string"
           ? result.finishReason
           : "unknown";
+      // The result's text is the paid, unparsed answer behind the failed getter
+      // (a truncated response leaves it partial but often repairable).
+      const rawText = (result as { text?: unknown }).text;
       throw new MeteredOutputDeliveryError(
         info.operation,
         finishReason,
         result.usage.outputTokens ?? 0,
         result.usage.outputTokenDetails?.reasoningTokens ?? 0,
+        {
+          ...(typeof rawText === "string" ? { rawText } : {}),
+          validationCause: outputDeliveryFailure,
+        },
       );
     }
 
@@ -555,9 +667,9 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
     if (NoObjectGeneratedError.isInstance(error) && error.usage) {
       // AI SDK rejects generateText(Output.object(...)) after the provider has
       // returned when its response cannot be parsed or validated. The usage
-      // attached to this error is authoritative: settle and compensate it so
-      // Workflow can safely retry the structured output instead of mistaking
-      // its own completed attempt for unresolved external billing.
+      // attached to this error is authoritative: settle and compensate it so a
+      // caller can repair, degrade, or redo the structured output instead of
+      // mistaking its own completed attempt for unresolved external billing.
       await settleProviderUsage({
         carrier: {
           usage: error.usage,
@@ -570,6 +682,12 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
         error.finishReason ?? "unknown",
         error.usage.outputTokens ?? 0,
         error.usage.outputTokenDetails?.reasoningTokens ?? 0,
+        // The rejected text was paid for; hand it to the caller for a free
+        // local repair rather than re-billing an identical request.
+        {
+          ...(typeof error.text === "string" ? { rawText: error.text } : {}),
+          validationCause: error,
+        },
       );
     }
     if (error instanceof MeteredInputLimitError && error.stepNumber === 0) {

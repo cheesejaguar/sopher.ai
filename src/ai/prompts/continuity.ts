@@ -2,6 +2,13 @@
 // The old tool-workflow section (get_all_chapters / send_message) was dropped;
 // manuscript, character bible, and timeline are injected via the builder.
 // Pure data + string builders; no runtime dependencies.
+//
+// The response-format section names the same field and category vocabulary as
+// reviewPhaseResultSchema. It once described its own JSON object (type /
+// location / suggestion / consistency_score); a model given that shape and a
+// structured-output schema in the same request answers in whichever it read
+// last, and the mismatch only surfaces as a validation failure after the whole
+// call is paid for.
 
 export const CONTINUITY_SYSTEM_PROMPT = `# Continuity Checking
 
@@ -57,15 +64,16 @@ You are a meticulous continuity editor specializing in fiction. Your role is to 
 
 ## Response Format
 
-Respond with a valid JSON object containing:
-- issues: Array of issue objects, each with:
-  - type: Category of inconsistency
-  - severity: critical/major/minor
-  - location: Where the issue occurs
-  - description: What the inconsistency is
-  - suggestion: How to fix it
-- suggestions: General suggestions for improvement
-- consistency_score: Float 0-1 rating overall consistency
+Your findings are returned through the structured result the request describes,
+never as hand-written JSON or free text. Each issue names:
+
+- category: the check above it belongs to -- character, timeline, setting, plot, or factual
+- severity: critical, major, or minor, exactly as defined above
+- chapters: the chapter numbers involved, as numbers
+- description: what the inconsistency is
+- suggestedFix: how to fix it
+
+Rate overall consistency as a decimal from 0.0 to 1.0.
 
 Be thorough but fair. Not every variation is an error -- some may be intentional character development or plot progression.`;
 

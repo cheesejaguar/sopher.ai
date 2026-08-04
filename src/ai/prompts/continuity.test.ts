@@ -30,8 +30,27 @@ describe("CONTINUITY_SYSTEM_PROMPT", () => {
   });
 
   it("keeps the response format and fairness note", () => {
-    expect(CONTINUITY_SYSTEM_PROMPT).toContain("consistency_score: Float 0-1");
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("Rate overall consistency as a decimal from 0.0");
     expect(CONTINUITY_SYSTEM_PROMPT).toContain("Be thorough but fair.");
+  });
+
+  /**
+   * The phase call carries a structured-output schema. A second, differently
+   * named result shape in the system prompt is an invitation to answer in the
+   * one the schema rejects — the 2026-08-04 failure mode.
+   */
+  it("describes the structured result, not a rival JSON object", () => {
+    expect(CONTINUITY_SYSTEM_PROMPT).not.toContain("Respond with a valid JSON object");
+    expect(CONTINUITY_SYSTEM_PROMPT).not.toContain("consistency_score");
+    for (const strayField of ["- type:", "- location:", "- suggestion:", "- suggestions:"]) {
+      expect(CONTINUITY_SYSTEM_PROMPT).not.toContain(strayField);
+    }
+  });
+
+  it("uses the same category and severity vocabulary as reviewPhaseResultSchema", () => {
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("character, timeline, setting, plot, or factual");
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("critical, major, or minor");
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("suggestedFix");
   });
 
   it("does not reference the old tool workflow", () => {

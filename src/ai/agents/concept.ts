@@ -16,7 +16,7 @@ import {
   conceptGenreFraming,
   CONCEPT_SYSTEM_PROMPT,
 } from "@/ai/prompts/concept";
-import { conceptSchema, type BookConcept } from "@/ai/schemas";
+import { conceptWireSchema, normalizeConcept, type BookConcept } from "@/ai/schemas";
 import { anthropicCachedSystem } from "@/ai/cache";
 
 export type ConceptCtx = {
@@ -103,11 +103,18 @@ export async function generateConcept(
             return options.stepNumber >= 2 ? { activeTools: [] } : {};
           },
           maxOutputTokens: meteredMaxOutputTokens("concept.expand"),
-          output: Output.object({ schema: conceptSchema }),
+          // Permissive on the wire, strict in the app. Anthropic's
+          // structured-output path strips `.max` from the schema it shows the
+          // model, so a seventh theme or an eleventh character is an answer the
+          // model had no way to know was over the cap — and re-validating it
+          // here would throw away the whole brief expansion the author paid
+          // for, deterministically, on every retry. normalizeConcept truncates
+          // instead and lands back on BookConcept.
+          output: Output.object({ schema: conceptWireSchema }),
           providerOptions: gatewayOptions(input.meter, "concept"),
         }),
     );
-    expanded = preserveTitle(result.output);
+    expanded = preserveTitle(normalizeConcept(result.output));
     await checkpoint.onExpanded?.(expanded);
   }
 
@@ -121,12 +128,14 @@ export async function generateConcept(
         prompt: refinePrompt(input, expanded),
         maxOutputTokens: meteredMaxOutputTokens("concept.refine"),
         prepareStep: meteredInputGuard("concept.refine"),
-        output: Output.object({ schema: conceptSchema }),
+        // Same reasoning as the expand call above, and the stake is higher: a
+        // refine rejection discards the expansion that already succeeded.
+        output: Output.object({ schema: conceptWireSchema }),
         providerOptions: gatewayOptions(input.meter, "concept"),
       }),
   );
 
-  const final = preserveTitle(refined.output);
+  const final = preserveTitle(normalizeConcept(refined.output));
   await checkpoint.onRefined?.(final);
   return final;
 }
