@@ -34,6 +34,11 @@ vi.mock("@/lib/generation-runs", async (importOriginal) => ({
   terminalizeAuthoringRun: callerMocks.terminalize,
 }));
 
+import {
+  DEGRADATION_CODES,
+  degradationNotice,
+  type DegradedPass,
+} from "@/lib/authoring-degradation";
 import { authoringFailureExplanation } from "@/lib/authoring-failures";
 import { reconcileAuthoringRun, type RunHealth } from "@/lib/run-health";
 import { notifyAuthoringFailureStep } from "@/workflows/notify-authoring-failure";
@@ -267,6 +272,42 @@ describe("transactional email safety", () => {
     expect(message.html).not.toContain("provider_output_invalid");
   });
 
+  it("gives the same next step the recovery card gives, for every recorded cause", async () => {
+    // Content filtering and the input limit are the two causes whose next step
+    // is the only actionable thing an author has: neither clears on a retry.
+    for (const errorCode of [
+      "provider_content_filtered",
+      "provider_input_limit",
+      "provider_output_invalid",
+      "provider_rate_limited",
+      undefined,
+    ]) {
+      sendMock.mockClear();
+      await sendAuthoringNeedsAttentionEmail({
+        userId: "user-1",
+        to: "author@example.com",
+        bookTitle: "The Crossing",
+        runId: `run-${errorCode ?? "unknown"}`,
+        savedChapterCount: 12,
+        creditsUsed: 10.74,
+        noWorkStarted: false,
+        supportReference: "SPH-NEXT-STEP",
+        nextActionHref: "/projects/project-1/write",
+        nextActionLabel: "Resume from saved work",
+        errorCode,
+        errorStage: "continuity",
+      });
+
+      const [message] = sendMock.mock.calls[0] as [{ html: string }];
+      const explanation = authoringFailureExplanation({
+        errorCode,
+        errorStage: "continuity",
+        savedChapterCount: 12,
+      });
+      expect(message.html).toContain(explanation.nextStep);
+    }
+  });
+
   it("tells an author to wait when the provider was the problem", async () => {
     await sendAuthoringNeedsAttentionEmail({
       userId: "user-1",
@@ -304,6 +345,88 @@ describe("transactional email safety", () => {
     const [message] = sendMock.mock.calls[0] as [{ html: string }];
     expect(message.html).toContain("Production stopped before the manuscript was finished.");
     expect(message.html).toContain("This is worth trying again.");
+  });
+
+  it("claims the book was edited only when the editing pass actually finished", async () => {
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-clean",
+      chapterCount: 12,
+      wordCount: 13919,
+    });
+    const [clean] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(clean.html).toContain("is written, edited, and waiting for you.");
+
+    sendMock.mockClear();
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-unedited",
+      chapterCount: 12,
+      wordCount: 13919,
+      degradations: [
+        {
+          stage: "editing",
+          code: DEGRADATION_CODES.editorial_pass_incomplete,
+          reason: "editor.chapter_pass exhausted its attempts",
+        },
+      ],
+    });
+    const [degraded] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(degraded.html).toContain("is written and waiting for you.");
+    expect(degraded.html).not.toContain("edited, and waiting");
+    expect(degraded.html).toContain(degradationNotice(DEGRADATION_CODES.editorial_pass_incomplete));
+    // The operator reason names a step and its attempts; it belongs in the run
+    // row, not in the author's inbox.
+    expect(degraded.html).not.toContain("editor.chapter_pass");
+  });
+
+  it("names a skipped finishing pass without unsaying the editing that did happen", async () => {
+    const degradations: readonly DegradedPass[] = [
+      {
+        stage: "continuity",
+        code: DEGRADATION_CODES.continuity_review_unavailable,
+        reason: "continuity.narrative_structure could not produce a report",
+      },
+    ];
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-no-continuity",
+      chapterCount: 12,
+      wordCount: 13919,
+      degradations,
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).toContain("is written, edited, and waiting for you.");
+    expect(message.html).toContain(
+      degradationNotice(DEGRADATION_CODES.continuity_review_unavailable),
+    );
+    expect(message.html).not.toContain("narrative_structure");
+  });
+
+  it("says nothing about skipped passes when the run was clean", async () => {
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-clean-2",
+      chapterCount: 12,
+      wordCount: 13919,
+      degradations: [],
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).not.toMatch(/couldn't|could not/i);
   });
 
   it("suppresses an optional notice before Resend and durably keeps its event decision", async () => {

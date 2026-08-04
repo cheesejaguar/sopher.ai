@@ -265,17 +265,97 @@ describe("normalizeBible", () => {
     expect(bible.relationships).toEqual([]);
   });
 
-  it("files an unrecognized kind under the least-committal kind", () => {
+  it("files an unrecognized kind whose attributes name no kind under the least-committal one", () => {
     const payload = strictlyRejected({
       entities: [
+        // `description` belongs to both location and object, so it points nowhere.
         { kind: "creature", name: "The Tidewatcher", attrs: { description: "Vast and patient." } },
-        { kind: "faction", name: "The Harbour Authority", attrs: { purpose: "Collects tolls." } },
+        // `facts` belongs to every kind, so it is evidence of none of them.
+        { kind: "presence", name: "The Undertow", attrs: { facts: ["It takes what it is owed."] } },
       ],
     });
     const bible = normalizeBible(payload);
     expect(bible.entities.map((e) => e.kind)).toEqual(["object", "object"]);
     // The claim it does make survives; "object" is a slot, not a description.
     expect(bible.entities[0].attrs?.description).toBe("Vast and patient.");
+    expect(bible.entities[1].attrs?.facts).toEqual(["It takes what it is owed."]);
+  });
+
+  it("infers the kind from the attribute group the model actually answered", () => {
+    const payload = strictlyRejected({
+      entities: [
+        { kind: "protagonist", name: "Coran Verran", attrs: characterAttrsFixture },
+        { kind: "setting", name: "The Salt Ledger", attrs: locationAttrsFixture },
+        {
+          kind: "faction",
+          name: "The Harbour Authority",
+          attrs: { purpose: "Collects the tide tolls.", structure: "A board of five wardens." },
+        },
+        {
+          kind: "incident",
+          name: "The Spring Audit",
+          attrs: { when: "The equinox after the flood", outcome: "The books are sealed." },
+        },
+      ],
+    });
+    expect(normalizeBible(payload).entities.map((e) => e.kind)).toEqual([
+      "character",
+      "location",
+      "organization",
+      "event",
+    ]);
+  });
+
+  it("keeps the whole profile of a character the model labelled with an off-enum kind", () => {
+    // Nobody by this name is in the concept cast, so the profile itself is the
+    // only evidence of what it is — and filing it as an object would drop every
+    // character field with the label.
+    const payload = strictlyRejected({
+      entities: [{ kind: "protagonist", name: "Coran Verran", attrs: characterAttrsFixture }],
+    });
+    const attrs = normalizeBible(payload).entities[0].attrs ?? {};
+    expect(attrs.eyes).toBe("Storm-gray, always moving");
+    expect(attrs.heritage).toBe("Harbour-born, of Verran stock");
+    expect(attrs.goals).toEqual(["Balance her father's last ledger"]);
+  });
+
+  it("is not pulled off a character profile by one stray attribute of another kind", () => {
+    const payload = strictlyRejected({
+      entities: [
+        {
+          kind: "protagonist",
+          name: "Coran Verran",
+          attrs: { ...characterAttrsFixture, owner: "The harbour authority" },
+        },
+      ],
+    });
+    expect(normalizeBible(payload).entities[0].kind).toBe("character");
+  });
+
+  it("prefers the concept cast over the attribute shape for an off-enum kind", () => {
+    const bible = normalizeBible(
+      { entities: [{ kind: "resident", name: "Mira Verran", attrs: locationAttrsFixture }] },
+      { characterNames: ["Mira Verran"] },
+    );
+    // The author named her. A bag of location attributes is not evidence against
+    // that, and filing her anywhere but "character" trips the completeness gate.
+    expect(bible.entities[0].kind).toBe("character");
+  });
+
+  it("still drops an unnamed entity, and its relationships, however rich its profile", () => {
+    const payload = strictlyRejected({
+      entities: [
+        character("Mira Verran"),
+        // A complete profile is not a name, and the bible is keyed by name.
+        { kind: "protagonist", name: "   ", attrs: characterAttrsFixture },
+      ],
+      relationships: [
+        { from: "Mira Verran", to: "Coran Verran", type: "sibling", description: "Estranged." },
+      ],
+    });
+    const bible = normalizeBible(payload);
+    expect(bible.entities.map((e) => e.name)).toEqual(["Mira Verran"]);
+    expect(bible.relationships).toEqual([]);
   });
 
   it("still recognizes a valid kind rather than falling back", () => {
@@ -475,6 +555,21 @@ describe("generateEntityBible", () => {
       }),
     );
     expect(bible.entities[0].kind).toBe("character");
+  });
+
+  it('keeps the profile of a supporting cast member answered as kind "antagonist"', async () => {
+    const bible = await generated(
+      strictlyRejected({
+        entities: [
+          character("Mira Verran"),
+          { kind: "antagonist", name: "Coran Verran", attrs: characterAttrsFixture },
+        ],
+      }),
+    );
+    expect(bible.entities[1].kind).toBe("character");
+    expect(bible.entities[1].attrs?.arc).toBe(
+      "Learns that a debt can be forgiven rather than paid",
+    );
   });
 
   it("survives a partial character profile the strict schema would have discarded", async () => {

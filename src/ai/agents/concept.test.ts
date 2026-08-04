@@ -73,6 +73,21 @@ const wellFormed = {
 
 const strictConcept: BookConcept = conceptSchema.parse(wellFormed);
 
+/**
+ * Every key present, nothing in any of them — the shape a half-answer takes
+ * once the provider's own validation has been satisfied. Bounds are stripped
+ * from the schema the model is shown, so blank is the one partial answer the
+ * wire schema cannot catch.
+ */
+const blankProse = {
+  ...wellFormed,
+  title: " ",
+  logline: "",
+  synopsis: "   ",
+  setting: "",
+  centralConflict: "",
+};
+
 /** A field the model simply did not answer — absent, not null. */
 function without(answer: Record<string, unknown>, key: string): Record<string, unknown> {
   const copy = { ...answer };
@@ -174,6 +189,60 @@ describe("generateConcept", () => {
     const result = await generateConcept(conceptInput({ workingTitle: "Saltwater Almanac" }));
     expect(result.title).toBe("Saltwater Almanac");
     expect(result.themes).toHaveLength(6);
+  });
+
+  /**
+   * The refine pass rewrites the concept wholesale, so a partial answer there
+   * replaces a complete one. Two mechanisms guard it, and they catch different
+   * halves of the same problem: the wire schema still requires the prose keys,
+   * which is the only constraint the provider enforces, and the viability floor
+   * catches the keys that arrive empty, which it cannot. Neither ever costs the
+   * expansion — a missing key retries the step from the checkpointed expansion,
+   * and an empty one keeps it, because re-asking buys the same answer.
+   */
+  it("keeps the checkpointed expansion when the refine pass answers with blanks", async () => {
+    const onRefined = vi.fn();
+    mocks.answers.push(blankProse);
+
+    const result = await generateConcept(conceptInput(), {
+      expanded: strictConcept,
+      onRefined,
+    });
+
+    expect(result).toEqual(strictConcept);
+    // The staged concept must be the one we return, or a resume would pick the
+    // blank answer back up.
+    expect(onRefined).toHaveBeenCalledWith(strictConcept);
+  });
+
+  it("keeps the expansion when the refine drops the cast the story bible is seeded from", async () => {
+    mocks.answers.push({ ...wellFormed, characters: [] });
+
+    const result = await generateConcept(conceptInput(), { expanded: strictConcept });
+
+    expect(result.characters).toEqual(strictConcept.characters);
+  });
+
+  it("retries rather than accepting a refine answer that omitted a prose field", async () => {
+    mocks.answers.push(without(wellFormed, "logline"));
+
+    await expect(generateConcept(conceptInput(), { expanded: strictConcept })).rejects.toThrow(
+      /did not match the requested schema/,
+    );
+  });
+
+  it("fails the expand pass rather than returning a concept with nothing in it", async () => {
+    mocks.answers.push(blankProse);
+
+    const thrown = (await generateConcept(conceptInput()).catch(
+      (error: unknown) => error,
+    )) as Error;
+
+    expect(thrown.message).toBe("Concept expansion returned no usable concept");
+    // The message crosses the step boundary into a persisted run failure, so it
+    // must carry no provider output.
+    expect(thrown.message).not.toContain(wellFormed.characters[0].name);
+    expect(mocks.calls).toHaveLength(1);
   });
 
   it("checkpoints the salvaged concept, not the raw answer", async () => {

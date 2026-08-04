@@ -801,6 +801,19 @@ export function RecoveryCard({
     errorStage: state.health.rootErrorStage ?? state.stage,
     savedChapterCount: saved,
   });
+  // A deterministic failure answers the same request the same way. When the
+  // copy says another attempt would end the same way, the retry must not also
+  // be the loudest control on the card: the strongest affordance has to agree
+  // with the sentence beside it, or the author pays to be refused twice. The
+  // retry stays available — demoted, not hidden — and support takes the lead.
+  const retryContradictsCopy =
+    !cancelled && !noWorkStarted && explanation.retry === "not_worth_retrying";
+  const primaryRestartsProduction =
+    primaryAction.kind === "recover" || Boolean(nextAction?.requiresMeteredAccess);
+  const demoteRetry = retryContradictsCopy && primaryRestartsProduction;
+  const supportHref = `mailto:support@sopher.ai?subject=${encodeURIComponent(
+    `Authoring help ${state.health.supportReference ?? runId}`,
+  )}`;
   const diagnostic = [
     "sopher.ai authoring diagnostic",
     `Run: ${runId}`,
@@ -881,8 +894,14 @@ export function RecoveryCard({
       </p>
 
       <div className="mt-5 flex flex-wrap gap-2">
+        {demoteRetry ? (
+          <Button render={<a href={supportHref} />} nativeButton={false}>
+            Get help
+          </Button>
+        ) : null}
         {primaryAction.kind === "recover" && onRecover ? (
           <Button
+            variant={demoteRetry ? "outline" : "default"}
             onClick={() => {
               if (!pending) onRecover();
             }}
@@ -894,6 +913,7 @@ export function RecoveryCard({
           </Button>
         ) : (
           <Button
+            variant={demoteRetry ? "outline" : "default"}
             render={
               primaryAction.kind === "link" && primaryAction.href.startsWith("/") ? (
                 <Link href={primaryAction.href as Route} />
@@ -921,18 +941,8 @@ export function RecoveryCard({
           {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           {copied ? "Diagnostics copied" : "Copy diagnostics"}
         </Button>
-        {nextAction?.kind !== "contact_support" ? (
-          <Button
-            variant="ghost"
-            render={
-              <a
-                href={`mailto:support@sopher.ai?subject=${encodeURIComponent(
-                  `Authoring help ${state.health.supportReference ?? runId}`,
-                )}`}
-              />
-            }
-            nativeButton={false}
-          >
+        {!demoteRetry && nextAction?.kind !== "contact_support" ? (
+          <Button variant="ghost" render={<a href={supportHref} />} nativeButton={false}>
             Get help
           </Button>
         ) : null}

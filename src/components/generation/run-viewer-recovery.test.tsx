@@ -1,13 +1,24 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RecoveryCard } from "./run-viewer";
 import type { RunStreamState } from "@/hooks/use-run-stream";
+import type { AuthoringNextAction } from "@/lib/authoring-journey";
 
 const RUN_ID = "22222222-2222-4222-8222-222222222222";
 const PROJECT_ID = "11111111-1111-4111-8111-111111111111";
+
+/** The journey's paid restart: a new run, charged again, from saved chapters. */
+const RECOVER_SAVED_WORK: AuthoringNextAction = {
+  kind: "recover_saved_work",
+  href: `/projects/${PROJECT_ID}/write#authoring-recovery`,
+  label: "Resume from saved work",
+  description: "12 saved chapters are ready to reuse.",
+  requiresMeteredAccess: true,
+};
 
 /** The 2026-08-04 run: every chapter written and edited, then continuity failed. */
 function failedState(health: Partial<RunStreamState["health"]> = {}): RunStreamState {
@@ -40,7 +51,10 @@ function failedState(health: Partial<RunStreamState["health"]> = {}): RunStreamS
   };
 }
 
-function renderCard(state: RunStreamState) {
+function renderCard(
+  state: RunStreamState,
+  overrides: Partial<ComponentProps<typeof RecoveryCard>> = {},
+) {
   return render(
     <RecoveryCard
       runId={RUN_ID}
@@ -51,8 +65,14 @@ function renderCard(state: RunStreamState) {
       nextAction={null}
       pending={false}
       error={null}
+      {...overrides}
     />,
   );
+}
+
+/** `bg-primary` is the one filled variant: the card's loudest affordance. */
+function promoted(element: HTMLElement): boolean {
+  return element.className.split(/\s+/).includes("bg-primary");
 }
 
 afterEach(cleanup);
@@ -87,6 +107,38 @@ describe("RecoveryCard", () => {
     cleanup();
     renderCard(failedState({ supportReference: undefined }));
     expect(screen.getByText(`Support reference: ${RUN_ID}`)).toBeVisible();
+  });
+
+  it("does not make a paid retry the loudest control when retrying is futile", () => {
+    renderCard(failedState(), { nextAction: RECOVER_SAVED_WORK, onRecover: () => {} });
+
+    // The card says another attempt would end the same way; the filled button
+    // must not be the one that charges for that attempt.
+    expect(screen.getByText(/would end the same way/i)).toBeVisible();
+    const retry = screen.getByRole("button", { name: "Resume from saved work" });
+    const help = screen.getByRole("button", { name: "Get help" });
+    expect(promoted(retry)).toBe(false);
+    expect(promoted(help)).toBe(true);
+    // Demoted, never hidden: an author who disagrees can still restart.
+    expect(retry).toBeVisible();
+    expect(help.compareDocumentPosition(retry) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("offers exactly one way to reach support when the retry is demoted", () => {
+    renderCard(failedState(), { nextAction: RECOVER_SAVED_WORK, onRecover: () => {} });
+
+    expect(screen.getAllByRole("button", { name: "Get help" })).toHaveLength(1);
+  });
+
+  it("leads with the retry when the copy says another attempt is worth it", () => {
+    renderCard(failedState({ rootErrorCode: "provider_unavailable", rootErrorStage: "chapters" }), {
+      nextAction: RECOVER_SAVED_WORK,
+      onRecover: () => {},
+    });
+
+    const retry = screen.getByRole("button", { name: "Resume from saved work" });
+    expect(promoted(retry)).toBe(true);
+    expect(promoted(screen.getByRole("button", { name: "Get help" }))).toBe(false);
   });
 
   it("keeps a transient provider failure pointed at saved work", () => {

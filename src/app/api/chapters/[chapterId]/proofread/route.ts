@@ -230,15 +230,30 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     status: "pending",
   }));
 
-  if (proofread.corrections.length > 0 && values.length === 0) {
-    await refundMeteredDelivery(
-      meter,
-      "Chapter proofread returned unusable corrections — refunded",
-    );
-    return Response.json(
-      { error: "The proofread could not be anchored to the current chapter. Please try again." },
-      { status: 502 },
-    );
+  // A paid pass that hands the author nothing to accept is refunded, however it
+  // got there. The two ways it gets there are told apart in the refund
+  // description because they mean different things to an operator, and only one
+  // of them is a failure the author should be asked to retry.
+  if (values.length === 0) {
+    if (proofread.corrections.length > 0) {
+      await refundMeteredDelivery(
+        meter,
+        "Chapter proofread returned unusable corrections — refunded",
+      );
+      return Response.json(
+        { error: "The proofread could not be anchored to the current chapter. Please try again." },
+        { status: 502 },
+      );
+    }
+    // Nothing reached the anchoring stage at all. Before normalization existed
+    // this only happened on a genuinely clean chapter; now it also happens when
+    // normalizeProofreadSuggestionList drops every entry the model returned,
+    // and proofreadChapter hands back the normalized list alone, so this layer
+    // cannot separate the two. Refund either way — neither delivered a
+    // correction — but keep going: the empty result is still committed below,
+    // because a clean chapter is a real answer and has to stay replayable
+    // under the same idempotency key (see persistChapterProofreadDelivery).
+    await refundMeteredDelivery(meter, "Chapter proofread produced no corrections — refunded");
   }
 
   let delivery: Awaited<ReturnType<typeof persistChapterProofreadDelivery>>;

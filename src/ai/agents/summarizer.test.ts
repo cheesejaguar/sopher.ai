@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { chapterSummarySchema, chapterSummaryWireSchema } from "@/ai/schemas";
+import { chapterSummarySchema, chapterSummaryWireSchema, type ChapterSummary } from "@/ai/schemas";
+import type { DbTransaction } from "@/db";
 
 const mocks = vi.hoisted(() => ({
   outputs: [] as unknown[],
@@ -22,7 +23,14 @@ vi.mock("@/ai/metering", () => ({
   ),
 }));
 
-import { generateChapterSummary, type ChapterSummaryInput } from "./summarizer";
+vi.mock("@/db/queries/entities", () => ({ applyEntityDeltas: vi.fn() }));
+
+import { applyEntityDeltas } from "@/db/queries/entities";
+import {
+  generateChapterSummary,
+  persistChapterSummary,
+  type ChapterSummaryInput,
+} from "./summarizer";
 
 const summaryInput: ChapterSummaryInput = {
   meter: { userId: "user_1", projectId: "proj_1", runId: "run_1" },
@@ -89,8 +97,9 @@ describe("generateChapterSummary", () => {
 
   it("survives a summary past the 2,000-character cap", async () => {
     const result = await summarize({ ...wellFormed, summary: "word ".repeat(600) });
-    expect(result.summary.length).toBeLessThanOrEqual(2_000);
-    expect(result.summary.length).toBeGreaterThan(0);
+    expect(result.summary).not.toBeNull();
+    expect(result.summary?.length).toBeLessThanOrEqual(2_000);
+    expect(result.summary?.length).toBeGreaterThan(0);
   });
 
   it("survives 17 entities when the cap is 16", async () => {
@@ -207,7 +216,71 @@ describe("generateChapterSummary", () => {
 
   it("survives an answer that is not an object at all", async () => {
     const result = await summarize("The chapter went well.");
-    expect(result.summary).toBe("");
+    expect(result.summary).toBeNull();
     expect(result.newFacts).toEqual([]);
+  });
+
+  /**
+   * The outline writes a summary for every chapter before it is drafted, so a
+   * summarizer answer that carries none is a thinner answer about a chapter
+   * that already has one — never a reason to blank it.
+   */
+  it("reports a summary the model did not write as null, keeping the deltas", async () => {
+    const result = await summarize({ ...wellFormed, summary: undefined });
+    expect(result.summary).toBeNull();
+    expect(result.newFacts).toHaveLength(2);
+    expect(result.relationships).toHaveLength(1);
+  });
+
+  it("reports a whitespace-only summary as null too", async () => {
+    expect((await summarize({ ...wellFormed, summary: "   " })).summary).toBeNull();
+  });
+});
+
+/** Records what the persist tail would have written, without a database. */
+function recordingTransaction() {
+  const updates: Record<string, unknown>[] = [];
+  const transaction = {
+    update: () => ({
+      set: (values: Record<string, unknown>) => {
+        updates.push(values);
+        return { where: async () => undefined };
+      },
+    }),
+  };
+  return { updates, transaction: transaction as unknown as DbTransaction };
+}
+
+const strictSummary = (over: Partial<ChapterSummary> = {}): ChapterSummary => ({
+  summary: "Mira reaches the harbor and finds the ledger short by one hull.",
+  newFacts: [{ kind: "character", name: "Mira", facts: ["Keeps the harbor ledger"] }],
+  relationships: [{ from: "Mira", to: "Kel", type: "sister_of" }],
+  moderation: { flagged: false },
+  ...over,
+});
+
+describe("persistChapterSummary", () => {
+  beforeEach(() => {
+    vi.mocked(applyEntityDeltas).mockClear();
+  });
+
+  it("leaves the stored summary alone when the model returned none", async () => {
+    const { updates, transaction } = recordingTransaction();
+
+    await persistChapterSummary(summaryInput, strictSummary({ summary: null }), transaction);
+
+    expect(updates).toEqual([]);
+    // The entity deltas are a separate part of the same answer and still apply.
+    expect(applyEntityDeltas).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(applyEntityDeltas).mock.calls[0][0].newFacts).toHaveLength(1);
+  });
+
+  it("writes the summary the model did return", async () => {
+    const { updates, transaction } = recordingTransaction();
+
+    await persistChapterSummary(summaryInput, strictSummary(), transaction);
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0].summary).toBe(strictSummary().summary);
   });
 });

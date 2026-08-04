@@ -226,12 +226,27 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     });
   }
 
-  if (reviewed.suggestions.length > 0 && values.length === 0) {
-    await refundMeteredDelivery(meter, "Chapter review returned unusable anchors — refunded");
-    return Response.json(
-      { error: "The review could not be anchored to the current chapter. Please try again." },
-      { status: 502 },
-    );
+  // A paid pass that hands the author nothing to accept is refunded, however it
+  // got there. The two ways it gets there are told apart in the refund
+  // description because they mean different things to an operator, and only one
+  // of them is a failure the author should be asked to retry.
+  if (values.length === 0) {
+    if (reviewed.suggestions.length > 0) {
+      await refundMeteredDelivery(meter, "Chapter review returned unusable anchors — refunded");
+      return Response.json(
+        { error: "The review could not be anchored to the current chapter. Please try again." },
+        { status: 502 },
+      );
+    }
+    // Nothing reached the anchoring stage at all. Before normalization existed
+    // this only happened when the reviewer had nothing to raise; now it also
+    // happens when normalizeEditSuggestionList drops every entry the model
+    // returned, and reviewChapter hands back the normalized list alone, so this
+    // layer cannot separate the two. Refund either way — neither delivered a
+    // suggestion — but keep going: the empty result is still committed below,
+    // because a chapter the reviewer had no notes on is a real answer and has
+    // to stay replayable under the same idempotency key.
+    await refundMeteredDelivery(meter, "Chapter review produced no suggestions — refunded");
   }
 
   let delivery: Awaited<ReturnType<typeof persistChapterReviewDelivery>>;

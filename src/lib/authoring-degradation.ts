@@ -2,6 +2,7 @@ import {
   AUTHORING_CANCELLATION_MESSAGE,
   AUTHORING_RUN_INACTIVE_MESSAGE,
 } from "@/lib/authoring-cancellation";
+import { authoringFailureMessage, classifyAuthoringFailure } from "@/lib/authoring-failures";
 import type { Stage } from "@/lib/run-events";
 
 /**
@@ -22,8 +23,10 @@ export const DEGRADATION_CODES = {
   creative_question_unavailable: "creative_question_unavailable",
   /** One or more chapters could not be run through the editorial pass. */
   editorial_pass_incomplete: "editorial_pass_incomplete",
-  /** The cross-chapter consistency review could not produce a report. */
+  /** The cross-chapter consistency review could not produce a report at all. */
   continuity_review_unavailable: "continuity_review_unavailable",
+  /** Some review phases ran; the findings are real but the score is not. */
+  continuity_review_partial: "continuity_review_partial",
   /** Continuity found issues but the targeted rewrite could not be applied. */
   continuity_revision_skipped: "continuity_revision_skipped",
 } as const;
@@ -49,6 +52,8 @@ const AUTHOR_NOTICE: Record<DegradationCode, string> = {
     "We couldn't finish the editing pass on every chapter. Your full manuscript is saved, and you can run editing again on any chapter from the editor.",
   continuity_review_unavailable:
     "We couldn't complete the consistency review, so your book was finished without it. Every chapter is written and saved — only the review report is missing.",
+  continuity_review_partial:
+    "Only part of the consistency review finished. The notes it did produce are in the editor, but there is no overall score for this draft.",
   continuity_revision_skipped:
     "We found some consistency notes but couldn't apply the suggested rewrites. Your chapters are saved exactly as they were written, and the notes are in the editor.",
 };
@@ -58,12 +63,32 @@ export function degradationNotice(code: DegradationCode): string {
 }
 
 /**
- * A run that the author stopped, or that another writer already terminalized,
- * must never be quietly "degraded" into a completed book. Those two messages
- * are control flow, not failures, and have to keep propagating.
+ * Whether a failure may be absorbed so the book can still be delivered.
+ *
+ * Two families must always keep propagating, for different reasons:
+ *
+ * Cancellation and "another writer owns this run" are control flow, not
+ * failures. Absorbing either would tell an author who pressed stop that their
+ * book finished, or let a superseded run terminalize the live one.
+ *
+ * Unresolved metering is subtler and cost a review pass to spot. When a
+ * provider call is rejected after dispatch, `metered` deliberately leaves the
+ * intent and its credit hold open for operator reconciliation, and the next
+ * attempt refuses to repeat the call. Absorbing that would mark the run
+ * `completed` — and completion is exactly the state the reconciliation
+ * machinery cannot see: the unresolved-metering sweep only considers failed and
+ * cancelled runs, the incident row is only written on the failed transition,
+ * and the admin reconcile action is only offered for a failed run. The hold
+ * would stay against the author's balance with the run reading as a success,
+ * and the start-safety gate would let the next run reuse a billing key whose
+ * charge is still ambiguous. A billing question mark has to stay loud.
  */
-export function isDegradableFailure(message: string): boolean {
-  return message !== AUTHORING_CANCELLATION_MESSAGE && message !== AUTHORING_RUN_INACTIVE_MESSAGE;
+export function isDegradableFailure(error: unknown): boolean {
+  const message = authoringFailureMessage(error);
+  if (message === AUTHORING_CANCELLATION_MESSAGE || message === AUTHORING_RUN_INACTIVE_MESSAGE) {
+    return false;
+  }
+  return classifyAuthoringFailure(error).incidentCategory === undefined;
 }
 
 /**

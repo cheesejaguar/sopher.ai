@@ -62,6 +62,21 @@ function refinePrompt(ctx: ConceptCtx, draft: BookConcept): string {
 }
 
 /**
+ * A refined concept only replaces the expansion when it did not come back
+ * thinner. The refine prompt asks for the complete concept, so an answer that
+ * clears the viability floor but drops the cast is a partial answer rather
+ * than an editorial choice — and taking it would throw away the story-bible
+ * seed `persistConcept` builds from those names.
+ */
+function refineReplacesExpansion(
+  refined: BookConcept | null,
+  expanded: BookConcept,
+): refined is BookConcept {
+  if (!refined) return false;
+  return refined.characters.length > 0 || expanded.characters.length === 0;
+}
+
+/**
  * Expands an author brief into a full book concept, then critiques and refines
  * it in a second pass. The expand step may consult genre conventions via tools.
  */
@@ -114,7 +129,12 @@ export async function generateConcept(
           providerOptions: gatewayOptions(input.meter, "concept"),
         }),
     );
-    expanded = preserveTitle(normalizeConcept(result.output));
+    const salvaged = normalizeConcept(result.output);
+    // Nothing to fall back to on the first pass, and a concept with no logline
+    // or synopsis cannot be outlined — better to fail the step than to hand
+    // every later phase a blank brief. The message carries no provider text.
+    if (!salvaged) throw new Error("Concept expansion returned no usable concept");
+    expanded = preserveTitle(salvaged);
     await checkpoint.onExpanded?.(expanded);
   }
 
@@ -128,14 +148,20 @@ export async function generateConcept(
         prompt: refinePrompt(input, expanded),
         maxOutputTokens: meteredMaxOutputTokens("concept.refine"),
         prepareStep: meteredInputGuard("concept.refine"),
-        // Same reasoning as the expand call above, and the stake is higher: a
-        // refine rejection discards the expansion that already succeeded.
+        // Same reasoning as the expand call above, and the stake is higher.
+        // A rejection here no longer loses the expansion — `onExpanded` has
+        // checkpointed it and the retry resumes from there — but it does buy
+        // the same over-cap answer again, at the price of the whole pass.
         output: Output.object({ schema: conceptWireSchema }),
         providerOptions: gatewayOptions(input.meter, "concept"),
       }),
   );
 
-  const final = preserveTitle(normalizeConcept(refined.output));
+  // A refine that answers half the concept must not replace the expansion the
+  // author already paid for: the checkpointed expansion is a complete concept,
+  // and re-asking would buy the same half-answer at full price.
+  const salvaged = normalizeConcept(refined.output);
+  const final = refineReplacesExpansion(salvaged, expanded) ? preserveTitle(salvaged) : expanded;
   await checkpoint.onRefined?.(final);
   return final;
 }

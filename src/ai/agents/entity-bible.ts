@@ -99,10 +99,11 @@ const ATTR_LIST_CAPS: Record<string, number> = {
 };
 
 /**
- * Where an unrecognized `kind` lands. Of the five it claims the least: a
- * "creature" or a "faction" filed as an object asserts only that the thing
- * exists and matters, where filing it as a character would put it in the cast
- * every chapter writer reads from and hand it a person's profile fields.
+ * Where an unrecognized `kind` lands when neither the concept cast nor the
+ * attributes identify it. Of the five it claims the least: a "creature" filed as
+ * an object asserts only that the thing exists and matters, where filing it as a
+ * character would put it in the cast every chapter writer reads from and hand it
+ * a person's profile fields.
  */
 const FALLBACK_ENTITY_KIND: EntityKind = "object";
 
@@ -252,9 +253,74 @@ function normalizeBibleAttrs(kind: EntityKind, wire: unknown): Record<string, un
 /** Reserved sentinel: `oneOfOr` cannot otherwise report that it fell back. */
 const UNKNOWN_ENTITY_KIND = "unknown" as const;
 
+/**
+ * Which kinds declare each attribute name, read off the schemas rather than
+ * hand-listed so an attribute added to `src/ai/schemas/entities.ts` counts here
+ * the day it is added.
+ */
+const ATTR_KIND_OWNERS: ReadonlyMap<string, readonly EntityKind[]> = (() => {
+  const owners = new Map<string, EntityKind[]>();
+  for (const kind of ENTITY_KINDS) {
+    for (const key of Object.keys(attrsSchemaFor(kind).shape)) {
+      const kinds = owners.get(key);
+      if (kinds) kinds.push(kind);
+      else owners.set(key, [kind]);
+    }
+  }
+  return owners;
+})();
+
+/**
+ * Votes are integers so a tie is exact rather than a float comparison: 60
+ * divides evenly by every number of kinds an attribute can belong to.
+ */
+const ATTR_VOTE_SCALE = 60;
+
+/**
+ * Reads the kind back off the attributes the model actually filled in.
+ *
+ * The attribute groups are keyed by kind, so a wrong kind does not merely
+ * mislabel an entity — `normalizeBibleAttrs` then drops every field belonging to
+ * the kind it really was, and a character answered as "protagonist" arrives with
+ * a full profile and leaves with nothing. Which group the model answered is the
+ * evidence of which group it meant, so the populated fields vote: a field only
+ * one kind declares is a whole vote, one two kinds share is half a vote each,
+ * and `facts` — carried by every kind — is evidence of none of them. A tie is
+ * genuine ambiguity and is left to the caller's fallback.
+ */
+function inferEntityKindFromAttrs(wire: unknown): EntityKind | null {
+  const source = asRecord(wire);
+  const votes = new Map<EntityKind, number>();
+
+  for (const [key, value] of Object.entries(source)) {
+    const owners = ATTR_KIND_OWNERS.get(key);
+    if (!owners || owners.length === ENTITY_KINDS.length) continue;
+    // Only a value `normalizeBibleAttrs` would keep is an answer; a blank or a
+    // non-string is the model declining the field, not choosing the kind.
+    if (!coerceNonEmptyString(value) && coerceStringArray(value).length === 0) continue;
+    const vote = ATTR_VOTE_SCALE / owners.length;
+    for (const kind of owners) votes.set(kind, (votes.get(kind) ?? 0) + vote);
+  }
+
+  let winner: EntityKind | null = null;
+  let best = 0;
+  let tied = false;
+  for (const [kind, score] of votes) {
+    if (score > best) {
+      best = score;
+      winner = kind;
+      tied = false;
+    } else if (score === best) {
+      tied = true;
+    }
+  }
+  return tied ? null : winner;
+}
+
 function normalizeEntityKind(
   wire: unknown,
   name: string,
+  attrs: unknown,
   castNames: ReadonlySet<string>,
 ): EntityKind {
   const kind = oneOfOr<EntityKind | typeof UNKNOWN_ENTITY_KIND>(
@@ -266,9 +332,11 @@ function normalizeEntityKind(
   // The label meant nothing, but the name may still be one the author supplied.
   // Reading the concept's own cast is not a guess, and it matters: a main
   // character filed anywhere but "character" trips the completeness gate below
-  // and kills the run this normalizer exists to keep alive.
+  // and kills the run this normalizer exists to keep alive. It outranks the
+  // profile below because the author's cast list is fact and the profile is
+  // model output.
   if (castNames.has(name.trim().toLocaleLowerCase())) return "character";
-  return FALLBACK_ENTITY_KIND;
+  return inferEntityKindFromAttrs(attrs) ?? FALLBACK_ENTITY_KIND;
 }
 
 function normalizeBibleEntity(wire: unknown, castNames: ReadonlySet<string>): EntitySeed | null {
@@ -280,7 +348,7 @@ function normalizeBibleEntity(wire: unknown, castNames: ReadonlySet<string>): En
   if (!name) return null;
 
   const trimmed = truncateString(name, MAX_ENTITY_NAME_CHARS);
-  const kind = normalizeEntityKind(entity.kind, trimmed, castNames);
+  const kind = normalizeEntityKind(entity.kind, trimmed, entity.attrs, castNames);
   return {
     kind,
     name: trimmed,

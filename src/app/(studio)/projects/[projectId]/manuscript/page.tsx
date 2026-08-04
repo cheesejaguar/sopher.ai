@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { and, desc, eq } from "drizzle-orm";
 
 import { ChapterPager } from "@/components/manuscript/chapter-pager";
 import Image from "next/image";
@@ -22,6 +23,34 @@ import { manuscriptStats } from "@/lib/manuscript-stats";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
+import { getDb, schema } from "@/db";
+import { skippedPassNotices, SkippedPassesNotice } from "./skipped-passes";
+import type { GenerationConfig } from "@/lib/run-events";
+
+/**
+ * The finishing passes the run that produced this manuscript had to skip.
+ *
+ * Only the newest completed full-book run is consulted: once a clean run has
+ * rewritten the book, an older run's caveat is no longer true of what is on
+ * screen.
+ */
+async function skippedFinishingPasses(userId: string, projectId: string): Promise<string[]> {
+  const [run] = await getDb()
+    .select({ config: schema.generationRuns.config })
+    .from(schema.generationRuns)
+    .where(
+      and(
+        eq(schema.generationRuns.projectId, projectId),
+        eq(schema.generationRuns.userId, userId),
+        eq(schema.generationRuns.kind, "full_book"),
+        eq(schema.generationRuns.status, "completed"),
+      ),
+    )
+    .orderBy(desc(schema.generationRuns.createdAt))
+    .limit(1);
+
+  return skippedPassNotices((run?.config as GenerationConfig | undefined)?.completion?.degraded);
+}
 
 function EmptyManuscript() {
   return (
@@ -84,7 +113,10 @@ export default async function ManuscriptPage({
   if (!chapter) notFound();
 
   // Cached diagram renders, so mermaid fences read as diagrams rather than source.
-  const figures = await loadFigures(projectId);
+  const [figures, skippedPasses] = await Promise.all([
+    loadFigures(projectId),
+    skippedFinishingPasses(userId, projectId),
+  ]);
 
   const previous = activeIndex > 0 ? readable[activeIndex - 1] : null;
   const next = activeIndex < readable.length - 1 ? readable[activeIndex + 1] : null;
@@ -100,6 +132,7 @@ export default async function ManuscriptPage({
     <div className="space-y-4">
       <h2 className="sr-only">Manuscript</h2>
       {journey ? <IncompleteProductionNotice journey={journey} /> : null}
+      <SkippedPassesNotice notices={skippedPasses} />
 
       <HashFocusTarget
         as="header"

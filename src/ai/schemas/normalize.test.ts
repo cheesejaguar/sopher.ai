@@ -219,6 +219,34 @@ describe("normalizeChapterSummary", () => {
     expect(result.relationships).toHaveLength(1);
   });
 
+  /**
+   * The outline writes a summary for every chapter before it is drafted, so
+   * "the model said nothing" has to stay distinguishable from "the summary is
+   * empty" — otherwise the persist step writes the blank over the outline's.
+   */
+  it("reports a missing summary as null instead of an empty one", () => {
+    expect(
+      normalizeChapterSummary({ newFacts: [{ name: "Mira", facts: ["a"] }] }).summary,
+    ).toBeNull();
+    expect(normalizeChapterSummary({ summary: "   " }).summary).toBeNull();
+    expect(normalizeChapterSummary({ summary: null }).summary).toBeNull();
+    expect(normalizeChapterSummary({ summary: 7 }).summary).toBeNull();
+    expect(normalizeChapterSummary({ summary: "Mira reaches the harbor." }).summary).toBe(
+      "Mira reaches the harbor.",
+    );
+  });
+
+  it("keeps the entity deltas of an answer that carried no summary", () => {
+    const result = normalizeChapterSummary({
+      newFacts: [{ kind: "character", name: "Mira", facts: ["Keeps the ledger"] }],
+      relationships: [{ from: "Mira", to: "Kel", type: "sister_of" }],
+    });
+    expect(result.summary).toBeNull();
+    expect(result.newFacts).toHaveLength(1);
+    expect(result.relationships).toHaveLength(1);
+    expect(chapterSummarySchema.safeParse(result).success).toBe(true);
+  });
+
   it("reads a stringified moderation flag and an off-enum category", () => {
     const result = normalizeModerationVerdict({ flagged: "true", category: "gore", reason: "r" });
     expect(result).toEqual({ flagged: true, category: "other", reason: "r" });
@@ -325,26 +353,59 @@ describe("normalizeEditSuggestionList", () => {
 });
 
 describe("normalizeConcept", () => {
+  const conceptAnswer = (over: Record<string, unknown> = {}) => ({
+    title: "The Salt Road",
+    logline: "A courier crosses a dying sea.",
+    synopsis: "…",
+    themes: Array.from({ length: 9 }, (_, index) => `theme ${index}`),
+    setting: "A drained ocean basin",
+    centralConflict: "Water against memory",
+    uniqueElements: Array.from({ length: 8 }, (_, index) => `element ${index}`),
+    characters: [{ role: "protagonist" }, { name: "Iyen", role: "courier" }],
+    ...over,
+  });
+
   it("caps the lists and drops nameless characters", () => {
-    const answer = {
-      title: "The Salt Road",
-      logline: "A courier crosses a dying sea.",
-      synopsis: "…",
-      themes: Array.from({ length: 9 }, (_, index) => `theme ${index}`),
-      setting: "A drained ocean basin",
-      centralConflict: "Water against memory",
-      uniqueElements: Array.from({ length: 8 }, (_, index) => `element ${index}`),
-      characters: [{ role: "protagonist" }, { name: "Iyen", role: "courier" }],
-    };
+    const answer = conceptAnswer();
     expect(conceptSchema.safeParse(answer).success).toBe(false);
     expect(conceptWireSchema.safeParse(answer).success).toBe(true);
     const result = normalizeConcept(answer);
-    expect(result.themes).toHaveLength(6);
-    expect(result.uniqueElements).toHaveLength(5);
-    expect(result.characters).toEqual([
+    expect(result?.themes).toHaveLength(6);
+    expect(result?.uniqueElements).toHaveLength(5);
+    expect(result?.characters).toEqual([
       { name: "Iyen", role: "courier", description: "", arc: "" },
     ]);
-    expect(result.moderation).toEqual({ flagged: false });
+    expect(result?.moderation).toEqual({ flagged: false });
+  });
+
+  /**
+   * The concept the author paid for is on a checkpoint by the time the refine
+   * pass answers. A normalizer that turned a half-answer into a well-formed
+   * concept with nothing in it would let that half-answer replace it.
+   */
+  it("returns null rather than a concept whose load-bearing prose is blank", () => {
+    for (const field of ["title", "logline", "synopsis", "setting", "centralConflict"]) {
+      expect(normalizeConcept(conceptAnswer({ [field]: "   " }))).toBeNull();
+      expect(normalizeConcept(conceptAnswer({ [field]: null }))).toBeNull();
+      expect(normalizeConcept(conceptAnswer({ [field]: 7 }))).toBeNull();
+    }
+    expect(normalizeConcept({})).toBeNull();
+    expect(normalizeConcept(conceptAnswer())).not.toBeNull();
+  });
+
+  it("keeps the wire schema strict about presence, since bounds do not survive", () => {
+    // Bounds are stripped from the schema the model is shown; required keys are
+    // not, so an omitted logline is the one failure the provider still catches.
+    for (const field of ["title", "logline", "synopsis", "setting", "centralConflict"]) {
+      const partial = conceptAnswer();
+      delete (partial as Record<string, unknown>)[field];
+      expect(conceptWireSchema.safeParse(partial).success).toBe(false);
+    }
+    // Lists stay salvageable entry by entry, so they stay optional.
+    const withoutLists = conceptAnswer();
+    delete (withoutLists as Record<string, unknown>).themes;
+    delete (withoutLists as Record<string, unknown>).characters;
+    expect(conceptWireSchema.safeParse(withoutLists).success).toBe(true);
   });
 });
 
@@ -491,8 +552,18 @@ const TOTAL_NORMALIZERS: [string, (wire: unknown) => unknown, z.ZodType][] = [
   ["critique", normalizeCritique, critiqueSchema],
   ["revision", normalizeRevision, revisionSchema],
   ["editSuggestionList", normalizeEditSuggestionList, editSuggestionListSchema],
-  ["concept", normalizeConcept, conceptSchema],
   ["moderationVerdict", normalizeModerationVerdict, moderationVerdictSchema],
+];
+
+/**
+ * The two answers that cannot be salvaged into something usable — a creative
+ * question with no options, a concept with no prose — are total in the same
+ * way, but their honest result is null. A caller that receives null keeps what
+ * it already has; it never receives a hollow value it would then persist.
+ */
+const NULLABLE_NORMALIZERS: [string, (wire: unknown) => unknown, z.ZodType][] = [
+  ["concept", normalizeConcept, conceptSchema],
+  ["creativeQuestion", normalizeCreativeQuestion, creativeQuestionSchema],
 ];
 
 const looseText = fc.oneof(fc.string(), fc.integer(), fc.constant(null), fc.constant(undefined));
@@ -575,13 +646,16 @@ describe("normalizers are total", () => {
     );
   });
 
-  it("normalizeCreativeQuestion returns a usable question or an honest null", () => {
-    fc.assert(
-      fc.property(fc.anything(), (input) => {
-        const result = normalizeCreativeQuestion(input);
-        expect(result === null || creativeQuestionSchema.safeParse(result).success).toBe(true);
-      }),
-      { numRuns: 500 },
-    );
-  });
+  it.each(NULLABLE_NORMALIZERS)(
+    "%s returns a usable value or an honest null",
+    (_name, normalize, schema) => {
+      fc.assert(
+        fc.property(fc.anything(), (input) => {
+          const result = normalize(input);
+          expect(result === null || schema.safeParse(result).success).toBe(true);
+        }),
+        { numRuns: 500 },
+      );
+    },
+  );
 });

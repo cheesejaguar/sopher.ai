@@ -4,7 +4,11 @@ import {
   AUTHORING_RUN_INACTIVE_MESSAGE,
 } from "@/lib/authoring-cancellation";
 import { withPreservedPrimaryError } from "@/lib/async-cleanup";
-import { authoringFailureMessage, classifyAuthoringFailure } from "@/lib/authoring-failures";
+import {
+  authoringFailureMessage,
+  classifyAuthoringFailure,
+  DETERMINISTIC_AUTHORING_FAILURE_CODES,
+} from "@/lib/authoring-failures";
 import {
   DEGRADATION_CODES,
   degradationNotice,
@@ -193,23 +197,60 @@ export async function generateBook(
    * control flow, not failures, and must not be laundered into a completed book.
    */
   const degradations: DegradedPass[] = [];
+
+  /**
+   * Reservation wrapper for enhancement passes only.
+   *
+   * withReservation rethrows a release failure that happens after successful
+   * work, which is right for a load-bearing step: the caller should retry it.
+   * Inside an enhancement it is actively harmful — the pass already succeeded,
+   * so the failure would be recorded as "editing did not finish" and would
+   * abandon every later wave. A hold left behind here is swept by
+   * cleanup-reservations; a book discarded over it is not recoverable.
+   */
+  const withEnhancementReservation = async <T>(
+    reservationRef: string | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      return await operation();
+    } finally {
+      try {
+        await releaseCreditsStep(ref, reservationRef);
+      } catch (cleanupError) {
+        console.error("Reservation release failed after an enhancement pass", {
+          runId: ref.dbRunId,
+          cleanupError,
+        });
+      }
+    }
+  };
+
   const runEnhancement = async <T>(
     stage: Stage,
     code: DegradationCode,
     operation: () => Promise<T>,
-  ): Promise<{ ok: true; value: T } | { ok: false }> => {
+  ): Promise<{ ok: true; value: T } | { ok: false; deterministic: boolean }> => {
     try {
       return { ok: true, value: await operation() };
     } catch (error) {
+      if (!isDegradableFailure(error)) throw error;
       const reason = authoringFailureMessage(error);
-      if (!isDegradableFailure(reason)) throw error;
+      // A deterministic failure returns the same answer however often it is
+      // asked, so the next wave is not worth the author's money. A transient
+      // one is just a blip, and abandoning the whole pass over it is its own
+      // small version of the bug this boundary exists to fix.
+      const { errorCode } = classifyAuthoringFailure(error);
+      const deterministic = errorCode
+        ? DETERMINISTIC_AUTHORING_FAILURE_CODES.has(errorCode)
+        : false;
       // One notice per pass: a three-wave editorial failure is one skipped
       // pass to the author, not three.
       if (!degradations.some((pass) => pass.code === code)) {
         degradations.push({ stage, code, reason });
         await emitProgress(ref, { type: "notice", code, message: degradationNotice(code), stage });
       }
-      return { ok: false };
+      return { ok: false, deterministic };
     }
   };
 
@@ -554,7 +595,7 @@ export async function generateBook(
           "editing",
           DEGRADATION_CODES.editorial_pass_incomplete,
           () =>
-            withReservation(editAuthorization.reservationRef, async () => {
+            withEnhancementReservation(editAuthorization.reservationRef, async () => {
               await Promise.all(
                 wave.map((n) =>
                   editChapterStep(ref, config, n, undefined, editAuthorization.reservationRef),
@@ -562,9 +603,10 @@ export async function generateBook(
               );
             }),
         );
-        // A broken editor will break on the next wave too; stop rather than
-        // spend the author's credits proving it three more times.
-        if (!edited.ok) break;
+        // A deterministically broken editor will break on the next wave too;
+        // stop rather than spend the author's credits proving it three more
+        // times. A transient blip does not justify abandoning the rest.
+        if (!edited.ok && edited.deterministic) break;
       }
       await emitCost(ref);
     }
@@ -576,7 +618,8 @@ export async function generateBook(
       message: "Reading the manuscript for consistency",
     });
     const outcomes: ContinuityOutcome[] = [];
-    for (const phaseKey of continuityPhaseKeys(config.tier)) {
+    const plannedPhases = continuityPhaseKeys(config.tier);
+    for (const phaseKey of plannedPhases) {
       const continuityAuthorization = await requireCreditGate(
         await continuityCreditCheckStep(ref, config, phaseKey),
         () => continuityCreditCheckStep(ref, config, phaseKey),
@@ -587,9 +630,11 @@ export async function generateBook(
       );
       const phase = await runEnhancement(
         "continuity",
-        DEGRADATION_CODES.continuity_review_unavailable,
+        outcomes.length > 0
+          ? DEGRADATION_CODES.continuity_review_partial
+          : DEGRADATION_CODES.continuity_review_unavailable,
         () =>
-          withReservation(continuityAuthorization.reservationRef, async () => {
+          withEnhancementReservation(continuityAuthorization.reservationRef, async () => {
             outcomes.push(
               await continuityPhaseStep(
                 ref,
@@ -600,23 +645,35 @@ export async function generateBook(
             );
           }),
       );
-      if (!phase.ok) break;
+      if (!phase.ok && phase.deterministic) break;
     }
-    // Phases that did finish still make a real report; only a review with
-    // nothing at all behind it is dropped, so the author never sees a
-    // manufactured score standing in for a review that did not happen.
+    // Phases that did finish still carry real findings worth keeping, but a
+    // partial review is not a verdict on the book. aggregateContinuityOutcomes
+    // renormalizes over the phases it was given, so one phase out of six would
+    // otherwise become the whole-manuscript score — presented next to a notice
+    // saying the review did not run, and used to spend the author's credits on
+    // a rewrite. Below full coverage the issues are kept and the score is not.
+    const complete = outcomes.length === plannedPhases.length;
     let report: ContinuityReport | null = null;
     if (outcomes.length > 0) {
       const finalized = await runEnhancement(
         "continuity",
-        DEGRADATION_CODES.continuity_review_unavailable,
-        () => continuityFinalizeStep(ref, outcomes),
+        complete
+          ? DEGRADATION_CODES.continuity_review_unavailable
+          : DEGRADATION_CODES.continuity_review_partial,
+        () => continuityFinalizeStep(ref, outcomes, complete),
       );
       if (finalized.ok) report = finalized.value;
     }
     await emitCost(ref);
 
-    if (config.tier !== "draft" && report && report.score < 0.7 && report.worstChapters.length > 0) {
+    if (
+      config.tier !== "draft" &&
+      complete &&
+      report &&
+      report.score < 0.7 &&
+      report.worstChapters.length > 0
+    ) {
       await emitProgress(ref, { type: "stage", stage: "revising", pct: 92 });
       const issueNotes = report.issues
         .map(
@@ -636,7 +693,7 @@ export async function generateBook(
       // it costs the polish and nothing else. The continuity notes stay in the
       // editor for the author to apply by hand.
       await runEnhancement("revising", DEGRADATION_CODES.continuity_revision_skipped, () =>
-        withReservation(revisionAuthorization.reservationRef, async () => {
+        withEnhancementReservation(revisionAuthorization.reservationRef, async () => {
           await Promise.all(
             revisionTargets.map((n) =>
               editChapterStep(ref, config, n, issueNotes, revisionAuthorization.reservationRef),

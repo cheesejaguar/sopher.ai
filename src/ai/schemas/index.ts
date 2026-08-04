@@ -30,14 +30,22 @@ import {
  *
  * So the fragile calls send a `…WireSchema` instead and pass the answer
  * through the matching `normalize…` to land back on the strict type. Wire
- * schemas carry no bounds, no enums for model-chosen labels, and every field
- * is optional and nullable — JSON-schema validation is all-or-nothing, so one
- * missing field would otherwise throw away an entire review that the
- * normalizer could have salvaged entry by entry. The caps live in
- * `.describe()` text instead, which does survive into the provider's schema.
+ * schemas carry no bounds and no enums for model-chosen labels, and a field is
+ * optional and nullable wherever the normalizer can still salvage something
+ * without it — JSON-schema validation is all-or-nothing, so one missing field
+ * would otherwise throw away an entire review that the normalizer could have
+ * salvaged entry by entry. The caps live in `.describe()` text instead, which
+ * does survive into the provider's schema.
+ *
+ * Presence is the one constraint the provider *does* enforce, so fields whose
+ * absence leaves nothing to salvage stay required (the concept's prose). That
+ * turns a half-answer into a rejected call while the answer is still cheap to
+ * re-ask, instead of an empty object the app would have to treat as a concept.
  *
  * Normalizers take `unknown` on purpose: a provider that ignores the wire
- * schema outright must still not be able to throw here.
+ * schema outright must still not be able to throw here. A normalizer that
+ * cannot reach a usable value returns `null` rather than a hollow one — see
+ * `normalizeConcept` and `normalizeCreativeQuestion`.
  */
 const wireText = z.string().nullish();
 const wireNumber = z.union([z.number(), z.string()]).nullish();
@@ -121,12 +129,19 @@ export const conceptSchema = z.object({
 export type BookConcept = z.infer<typeof conceptSchema>;
 
 export const conceptWireSchema = z.object({
-  title: wireText,
-  logline: wireText,
-  synopsis: wireText,
+  // The five load-bearing prose fields stay required, unlike the salvageable
+  // lists below. Every later phase reads them — the outline is written from
+  // the logline, synopsis, setting and conflict, and the title and synopsis
+  // are what the author sees — so an answer missing one is a partial answer,
+  // not a thinner concept. Rejecting it costs one re-ask; accepting it costs
+  // whatever concept it would have replaced. Bounds are still stripped, which
+  // is why `normalizeConcept` re-checks these for blankness.
+  title: z.string(),
+  logline: z.string(),
+  synopsis: z.string(),
   themes: wireTextArray.describe(`At most ${MAX_CONCEPT_THEMES} themes`),
-  setting: wireText,
-  centralConflict: wireText,
+  setting: z.string(),
+  centralConflict: z.string(),
   uniqueElements: wireTextArray.describe(`At most ${MAX_CONCEPT_UNIQUE_ELEMENTS} elements`),
   characters: z
     .array(
@@ -156,15 +171,33 @@ function normalizeConceptCharacter(wire: unknown): BookConcept["characters"][num
   };
 }
 
-export function normalizeConcept(wire: unknown): BookConcept {
+/**
+ * Returns null when the concept's load-bearing prose is blank. It is the same
+ * viability floor `normalizeCreativeQuestion` gets from its strict schema;
+ * `conceptSchema` cannot supply one, because a `.min(1)` there would also be
+ * applied to concepts already stored by earlier runs.
+ *
+ * The wire schema rejects a *missing* prose field. This catches the answer that
+ * sends those keys and empties them, which normalizing would otherwise turn
+ * into a well-formed concept that says nothing. Callers keep whatever concept
+ * they already have instead: a retry buys the same answer, and an emptier
+ * concept must never replace the one the author paid for.
+ */
+export function normalizeConcept(wire: unknown): BookConcept | null {
   const value = asRecord(wire);
+  const title = coerceNonEmptyString(value.title);
+  const logline = coerceNonEmptyString(value.logline);
+  const synopsis = coerceNonEmptyString(value.synopsis);
+  const setting = coerceNonEmptyString(value.setting);
+  const centralConflict = coerceNonEmptyString(value.centralConflict);
+  if (!title || !logline || !synopsis || !setting || !centralConflict) return null;
   return {
-    title: coerceString(value.title),
-    logline: coerceString(value.logline),
-    synopsis: coerceString(value.synopsis),
+    title,
+    logline,
+    synopsis,
     themes: truncateArray(coerceStringArray(value.themes), MAX_CONCEPT_THEMES),
-    setting: coerceString(value.setting),
-    centralConflict: coerceString(value.centralConflict),
+    setting,
+    centralConflict,
     uniqueElements: truncateArray(
       coerceStringArray(value.uniqueElements),
       MAX_CONCEPT_UNIQUE_ELEMENTS,
@@ -472,7 +505,13 @@ const MAX_RELATIONSHIPS = 10;
 const MAX_RELATIONSHIP_DESCRIPTION_CHARS = 300;
 
 export const chapterSummarySchema = z.object({
-  summary: z.string().max(MAX_CHAPTER_SUMMARY_CHARS),
+  /**
+   * Null means the model returned no summary for this chapter — not that the
+   * chapter has none. The outline already wrote a summary for every chapter,
+   * so the persist step has to be able to tell "nothing came back" from "the
+   * summary is empty" and leave the stored row alone in the first case.
+   */
+  summary: z.string().max(MAX_CHAPTER_SUMMARY_CHARS).nullable(),
   /**
    * Entity deltas ride along on the summarizer call that already runs after
    * every chapter, so per-chapter bible upkeep costs a few hundred output
@@ -568,8 +607,12 @@ function normalizeRelationship(wire: unknown): ChapterSummary["relationships"][n
 export function normalizeChapterSummary(wire: unknown): ChapterSummary {
   const value = asRecord(wire);
   const timelineNote = coerceNonEmptyString(value.timelineNote);
+  const summary = coerceNonEmptyString(value.summary);
   return {
-    summary: truncateString(coerceString(value.summary), MAX_CHAPTER_SUMMARY_CHARS),
+    // A blank or absent summary stays null so the persist step can skip the
+    // write. Defaulting it to "" would let one thin answer erase the summary
+    // the outline produced for a chapter that is already written.
+    summary: summary === null ? null : truncateString(summary, MAX_CHAPTER_SUMMARY_CHARS),
     newFacts: truncateArray(
       compact(coerceArray(value.newFacts).map(normalizeEntityDelta)),
       MAX_NEW_FACTS,

@@ -2506,9 +2506,20 @@ export async function continuityPhaseStep(
   }
 }
 
+/**
+ * Aggregates the review phases that ran.
+ *
+ * `complete` says whether every phase the tier asks for produced an outcome.
+ * When it does not, the findings are still persisted — they are real — but no
+ * `review` event is published, because `aggregateContinuityOutcomes`
+ * renormalizes over whatever it is handed: one phase out of six would become
+ * the whole-manuscript score, and the author would be shown a confident number
+ * derived from a sixth of the work.
+ */
 export async function continuityFinalizeStep(
   ref: RunRef,
   outcomes: ContinuityOutcome[],
+  complete = true,
 ): Promise<ContinuityReport> {
   "use step";
   const { book } = await loadRunContext(ref);
@@ -2554,16 +2565,18 @@ export async function continuityFinalizeStep(
       },
     }));
   });
-  await persistAndPublishProgress(
-    ref,
-    {
-      type: "review",
-      score: report.score,
-      recommendation: report.recommendation,
-      issueCount: report.issues.length,
-    },
-    "review",
-  );
+  if (complete) {
+    await persistAndPublishProgress(
+      ref,
+      {
+        type: "review",
+        score: report.score,
+        recommendation: report.recommendation,
+        issueCount: report.issues.length,
+      },
+      "review",
+    );
+  }
   return report;
 }
 
@@ -2801,6 +2814,9 @@ export async function finalizeStep(
         chapterCount: row.chapters,
         wordCount: row.words,
         runId: ref.dbRunId,
+        // Celebrating a finished book while quietly omitting that it never got
+        // edited is how a graceful degradation becomes a dishonest one.
+        ...(degradations.length > 0 ? { degradations } : {}),
       });
     }
   } catch (error) {

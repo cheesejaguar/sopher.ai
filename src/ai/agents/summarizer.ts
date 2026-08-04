@@ -73,15 +73,21 @@ export async function persistChapterSummary(
   transaction?: DbTransaction,
 ): Promise<void> {
   const persist = async (db: DbTransaction) => {
-    await db
-      .update(schema.chapters)
-      .set({ summary: summary.summary, updatedAt: new Date() })
-      .where(
-        and(
-          eq(schema.chapters.bookId, input.bookId),
-          eq(schema.chapters.chapterNumber, input.chapterNumber),
-        ),
-      );
+    // No summary in the answer means the model returned none, not that the
+    // chapter has none: the outline already wrote one for every chapter, and
+    // overwriting it with a blank would lose work this call never redid. The
+    // entity deltas below still apply — they are a separate part of the answer.
+    if (summary.summary !== null) {
+      await db
+        .update(schema.chapters)
+        .set({ summary: summary.summary, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.chapters.bookId, input.bookId),
+            eq(schema.chapters.chapterNumber, input.chapterNumber),
+          ),
+        );
+    }
 
     await applyEntityDeltas(
       {
