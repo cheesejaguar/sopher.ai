@@ -107,6 +107,12 @@ describe("genre data completeness", () => {
     expect(getGenreTemplate("middle-grade")?.genre).toBe("Middle Grade");
     expect(getGenreTemplate("historical")?.genre).toBe("Historical Fiction");
     expect(getGenreTemplate("autobiography")?.genre).toBe("Memoir");
+    // "nonfiction" is deliberately NOT aliased: routing every free-text
+    // non-fiction book through memoir would apply memoir's real-people rules
+    // to a cookbook or a how-to.
+    expect(getGenreTemplate("nonfiction")).toBeUndefined();
+    expect(isNonFictionGenre("nonfiction")).toBe(false);
+    expect(isNonFictionGenre("a practical guide to beekeeping")).toBe(false);
   });
 
   it.each(GENRE_IDS.map((id) => [id] as const))("%s template is fully populated", (id) => {

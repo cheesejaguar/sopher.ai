@@ -429,7 +429,12 @@ export async function splitChapter(
   if (!halves) throw new Error("Pick a split point with text on both sides");
 
   const insertAt = chapter.chapterNumber + 1;
-  const [, , allowedRows, , , , , appliedRows] = await getSqlClient().transaction((tx) => [
+  // Same ordering rule as the merge: the content write runs first and bumps the
+  // version, then history, park, insert and unpark all hang off that one bump.
+  // Guards that merely repeat the same predicates can still diverge, because
+  // each statement takes its own snapshot of the active-run check.
+  const bumped = chapter.version + 1;
+  const [, , allowedRows, appliedRows] = await getSqlClient().transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
     )`,
@@ -442,30 +447,13 @@ export async function splitChapter(
           and kind <> 'export'
       ) as allowed
     `,
-    // History inside the transaction, so a split whose guards fail leaves no
-    // "before the split" snapshot of a chapter that was never split.
+    // History and the shortened first half commit together, so no "before the
+    // split" snapshot can survive a split that did not happen.
     tx`
-      insert into chapter_revisions (chapter_id, content, source)
-      select ${chapterId}, ${chapter.content}, 'pre-split'
-      where exists (
-        select 1 from chapters as source
-        where source.id = ${chapterId}
-          and source.version = ${chapter.version}
-          and source.chapter_number = ${chapter.chapterNumber}
-      )
-      and not exists (
-        select 1 from generation_runs
-        where project_id = ${ownership.projectId}
-          and status in ('queued', 'running', 'awaiting_input')
-          and kind <> 'export'
-      )
-    `,
-    tx`
-      update chapters
-      set chapter_number = chapter_number + 100000
-      where book_id = ${ownership.bookId}
-        and chapter_number >= ${insertAt}
-        and exists (
+      with history as (
+        insert into chapter_revisions (chapter_id, content, source)
+        select ${chapterId}, ${chapter.content}, 'pre-split'
+        where exists (
           select 1 from chapters as source
           where source.id = ${chapterId}
             and source.version = ${chapter.version}
@@ -477,44 +465,8 @@ export async function splitChapter(
             and status in ('queued', 'running', 'awaiting_input')
             and kind <> 'export'
         )
-    `,
-    tx`
-      update chapters
-      set chapter_number = chapter_number - 99999
-      where book_id = ${ownership.bookId}
-        and chapter_number > 100000
-        and exists (
-          select 1 from chapters as source
-          where source.id = ${chapterId}
-            and source.version = ${chapter.version}
-            and source.chapter_number = ${chapter.chapterNumber}
-        )
-        and not exists (
-          select 1 from generation_runs
-          where project_id = ${ownership.projectId}
-            and status in ('queued', 'running', 'awaiting_input')
-            and kind <> 'export'
-        )
-    `,
-    tx`
-      insert into chapters (book_id, chapter_number, status, content, word_count)
-      select ${ownership.bookId}, ${insertAt}, 'drafted', ${halves.after}, ${countWords(halves.after)}
-      where exists (
-        select 1 from chapters as source
-        where source.id = ${chapterId}
-            and source.version = ${chapter.version}
-            and source.chapter_number = ${chapter.chapterNumber}
+        returning id
       )
-      and not exists (
-        select 1 from generation_runs
-        where project_id = ${ownership.projectId}
-          and status in ('queued', 'running', 'awaiting_input')
-          and kind <> 'export'
-      )
-    `,
-    // Last, because this is the statement that moves the version the guards
-    // above are keyed to.
-    tx`
       update chapters
       set content = ${halves.before},
           word_count = ${countWords(halves.before)},
@@ -523,13 +475,37 @@ export async function splitChapter(
       where id = ${chapterId}
         and version = ${chapter.version}
         and chapter_number = ${chapter.chapterNumber}
-        and not exists (
-          select 1 from generation_runs
-          where project_id = ${ownership.projectId}
-            and status in ('queued', 'running', 'awaiting_input')
-            and kind <> 'export'
-        )
+        and exists (select 1 from history)
       returning id
+    `,
+    // Park, insert and unpark all key off the bumped version above.
+    tx`
+      update chapters
+      set chapter_number = chapter_number + 100000
+      where book_id = ${ownership.bookId}
+        and chapter_number >= ${insertAt}
+        and exists (
+          select 1 from chapters as source
+          where source.id = ${chapterId} and source.version = ${bumped}
+        )
+    `,
+    tx`
+      insert into chapters (book_id, chapter_number, status, content, word_count)
+      select ${ownership.bookId}, ${insertAt}, 'drafted', ${halves.after}, ${countWords(halves.after)}
+      where exists (
+        select 1 from chapters as source
+        where source.id = ${chapterId} and source.version = ${bumped}
+      )
+    `,
+    tx`
+      update chapters
+      set chapter_number = chapter_number - 99999
+      where book_id = ${ownership.bookId}
+        and chapter_number > 100000
+        and exists (
+          select 1 from chapters as source
+          where source.id = ${chapterId} and source.version = ${bumped}
+        )
     `,
   ]);
   if (!(allowedRows as Array<{ allowed: boolean }>)[0]?.allowed) {
@@ -588,7 +564,14 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
   // and moveChapter renumber without bumping `version`, so a version-only guard
   // cannot see a renumber that happened between the read above and this
   // transaction taking the project lock.
-  const [, , allowedRows, , , appliedRows] = await getSqlClient().transaction((tx) => [
+  // Ordering matters more than the guards here. The delete+content write runs
+  // FIRST and bumps the keeper's version; the gap-closing park and unpark then
+  // hang off that single bump as proof the merge actually happened. With the
+  // park running first and the unpark unguarded, a delete blocked by a run that
+  // appeared mid-transaction left the park applied and the unpark still
+  // shifting every later chapter down by one — duplicate numbers, committed.
+  const bumped = current.version + 1;
+  const [, , allowedRows, , appliedRows] = await getSqlClient().transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
     )`,
@@ -601,68 +584,8 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
           and kind <> 'export'
       ) as allowed
     `,
-    // History inside the transaction. Written outside it, a merge whose guards
-    // failed still left the absorbed chapter's entire text stored as a
-    // restorable revision of a chapter that was never merged — restoring it
-    // then duplicated prose that still existed next door.
-    tx`
-      insert into chapter_revisions (chapter_id, content, source)
-      select * from (values
-        (${chapterId}::uuid, ${current.content}::text, 'pre-merge'::text),
-        (${chapterId}::uuid, ${next.content}::text, 'pre-merge-absorbed'::text)
-      ) as rows(chapter_id, content, source)
-      where exists (
-        select 1 from chapters as keeper
-        where keeper.id = ${chapterId}
-          and keeper.version = ${current.version}
-          and keeper.chapter_number = ${current.chapterNumber}
-      )
-      and exists (
-        select 1 from chapters as absorbed
-        where absorbed.id = ${next.id}
-          and absorbed.version = ${next.version}
-          and absorbed.chapter_number = ${next.chapterNumber}
-      )
-      and not exists (
-        select 1 from generation_runs
-        where project_id = ${ownership.projectId}
-          and status in ('queued', 'running', 'awaiting_input')
-          and kind <> 'export'
-      )
-    `,
-    // Park before the delete, exactly as deleteChapter does: the gap-closing
-    // subquery needs the absorbed chapter's number while the row still exists.
-    tx`
-      update chapters
-      set chapter_number = chapter_number + 100000
-      where book_id = ${ownership.bookId}
-        and chapter_number > (
-          select chapter_number from chapters as absorbed where absorbed.id = ${next.id}
-        )
-        and exists (
-          select 1 from chapters as keeper
-          where keeper.id = ${chapterId}
-            and keeper.version = ${current.version}
-            and keeper.chapter_number = ${current.chapterNumber}
-        )
-        and exists (
-          select 1 from chapters as absorbed
-          where absorbed.id = ${next.id}
-            and absorbed.version = ${next.version}
-            and absorbed.chapter_number = ${next.chapterNumber}
-        )
-        and not exists (
-          select 1 from generation_runs
-          where project_id = ${ownership.projectId}
-            and status in ('queued', 'running', 'awaiting_input')
-            and kind <> 'export'
-        )
-    `,
-    // The delete and the merged write are ONE statement so the write can be
-    // gated on `removed` — proof that *this* transaction removed the absorbed
-    // chapter. Testing `not exists (absorbed)` instead would also pass when
-    // somebody else had already deleted it, which silently resurrected that
-    // chapter's prose inside this one.
+    // History and the merge are one statement, so a snapshot can never outlive
+    // a merge that did not happen.
     tx`
       with removed as (
         delete from chapters
@@ -682,6 +605,15 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
               and kind <> 'export'
           )
         returning id
+      ),
+      history as (
+        insert into chapter_revisions (chapter_id, content, source)
+        select * from (values
+          (${chapterId}::uuid, ${current.content}::text, 'pre-merge'::text),
+          (${chapterId}::uuid, ${next.content}::text, 'pre-merge-absorbed'::text)
+        ) as rows(chapter_id, content, source)
+        where exists (select 1 from removed)
+        returning id
       )
       update chapters
       set content = ${merged},
@@ -694,13 +626,28 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
         and exists (select 1 from removed)
       returning id
     `,
-    // Only rows this transaction parked can be here, and they are parked only
-    // when the delete's guards also held, so closing the gap by one is safe.
+    // Park and unpark share one condition: the keeper carries the bumped
+    // version, which only the statement above can produce. Either both apply
+    // or neither does, so numbering cannot be left half-shifted.
+    tx`
+      update chapters
+      set chapter_number = chapter_number + 100000
+      where book_id = ${ownership.bookId}
+        and chapter_number > ${next.chapterNumber}
+        and exists (
+          select 1 from chapters as keeper
+          where keeper.id = ${chapterId} and keeper.version = ${bumped}
+        )
+    `,
     tx`
       update chapters
       set chapter_number = chapter_number - 100001
       where book_id = ${ownership.bookId}
         and chapter_number > 100000
+        and exists (
+          select 1 from chapters as keeper
+          where keeper.id = ${chapterId} and keeper.version = ${bumped}
+        )
     `,
   ]);
   if (!(allowedRows as Array<{ allowed: boolean }>)[0]?.allowed) {

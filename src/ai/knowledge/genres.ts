@@ -1060,7 +1060,12 @@ export const GENRE_ALIASES: Readonly<Record<string, GenreId>> = {
   chapter_book: "childrens",
   autobiography: "memoir",
   personal_essay: "memoir",
-  nonfiction: "memoir",
+  // Deliberately no `nonfiction` alias. It would route every free-text
+  // non-fiction book — a how-to, a cookbook, a history — through the memoir
+  // template, and `isNonFictionGenre` would then apply memoir's "these are real
+  // people whose names are fixed" rules to a book that has no cast at all.
+  // Those books are better served by the generic path until they have templates
+  // of their own.
 };
 
 /** The audience a genre is written for. Unknown genres are treated as adult. */

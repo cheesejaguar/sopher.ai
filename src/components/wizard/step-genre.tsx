@@ -33,6 +33,29 @@ export function StepGenre({
    * children's book does not start life at twelve 3,000-word chapters. The
    * included story has a server-enforced shape, so it is left alone.
    */
+  /**
+   * Clearing the genre has to re-clamp too. Coming from a children's book, the
+   * shape step would otherwise render min=1,000 over a state still holding 500
+   * — a slider whose value sits outside its own range.
+   */
+  function clearGenre() {
+    if (experience !== "full_book") {
+      dispatch({ type: "patch", patch: { genre: null, subgenre: null } });
+      return;
+    }
+    dispatch({
+      type: "patch",
+      patch: {
+        genre: null,
+        subgenre: null,
+        wordsPerChapter: Math.min(
+          Math.max(state.wordsPerChapter, minWordsForGenre(null)),
+          MAX_WORDS_PER_CHAPTER,
+        ),
+      },
+    });
+  }
+
   function selectGenre(genre: WizardGenre) {
     if (experience !== "full_book") {
       dispatch({ type: "patch", patch: { genre, subgenre: null } });
@@ -80,11 +103,7 @@ export function StepGenre({
               <button
                 type="button"
                 aria-pressed={selected}
-                onClick={() =>
-                  selected
-                    ? dispatch({ type: "patch", patch: { genre: null, subgenre: null } })
-                    : selectGenre(genre.id)
-                }
+                onClick={() => (selected ? clearGenre() : selectGenre(genre.id))}
                 className="flex min-h-11 w-full flex-col gap-1.5 rounded-sm p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <span className="flex items-center justify-between gap-2">
@@ -155,11 +174,7 @@ export function StepGenre({
           <button
             type="button"
             aria-pressed={customSelected}
-            onClick={() =>
-              customSelected
-                ? dispatch({ type: "patch", patch: { genre: null, subgenre: null } })
-                : selectGenre(CUSTOM_GENRE)
-            }
+            onClick={() => (customSelected ? clearGenre() : selectGenre(CUSTOM_GENRE))}
             className="flex min-h-11 w-full flex-col gap-1.5 rounded-sm p-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <span className="flex items-center justify-between gap-2">
