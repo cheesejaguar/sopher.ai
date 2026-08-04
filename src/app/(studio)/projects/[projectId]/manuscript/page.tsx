@@ -162,7 +162,7 @@ export default async function ManuscriptPage({
 
       <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (
-          <header className="mx-auto max-w-2xl py-6 text-center sm:py-16 [content-visibility:auto]">
+          <header className="defer-offscreen mx-auto max-w-2xl py-6 text-center sm:py-16">
             {matter.coverUrl ? (
               <Image
                 src={matter.coverUrl}
@@ -250,7 +250,7 @@ export default async function ManuscriptPage({
             ))
           : null}
 
-        <section className="prose-manuscript prose-manuscript--book mx-auto border-t border-paper-edge pt-12 [content-visibility:auto] sm:pt-16">
+        <section className="prose-manuscript prose-manuscript--book defer-offscreen mx-auto border-t border-paper-edge pt-12 sm:pt-16">
           <h2>
             Chapter {chapter.chapterNumber}
             {chapterTitle !== `Chapter ${chapter.chapterNumber}` ? (
