@@ -37,9 +37,21 @@ async function main() {
   // 1. The emitted JSON Schema must actually reach the provider without the
   //    bounds we know it strips, and without tripping schema validation.
   const emitted = JSON.stringify(z.toJSONSchema(reviewPhaseResultWireSchema, { io: "input" }));
-  const boundKeys = ["minimum", "maximum", "minItems", "maxItems", "minLength", "maxLength", "enum"];
+  const boundKeys = [
+    "minimum",
+    "maximum",
+    "minItems",
+    "maxItems",
+    "minLength",
+    "maxLength",
+    "enum",
+  ];
   const leaked = boundKeys.filter((key) => emitted.includes(`"${key}"`));
-  report("wire schema emits no bound the provider would silently drop", leaked.length === 0, leaked.join(", "));
+  report(
+    "wire schema emits no bound the provider would silently drop",
+    leaked.length === 0,
+    leaked.join(", "),
+  );
 
   // 2. Ask for precisely the answer that failed in production.
   const result = await generateText({
@@ -65,7 +77,10 @@ async function main() {
   });
 
   const wire = result.output;
-  report("provider accepted the permissive wire schema and returned a parsed object", Boolean(wire));
+  report(
+    "provider accepted the permissive wire schema and returned a parsed object",
+    Boolean(wire),
+  );
   console.log(
     `      model gave: score=${JSON.stringify(wire.score)} issues=${wire.issues?.length ?? 0} strengths=${wire.strengths?.length ?? 0}`,
   );

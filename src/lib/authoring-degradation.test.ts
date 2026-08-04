@@ -48,15 +48,18 @@ describe("isDegradableFailure", () => {
 });
 
 describe("degradationNotice", () => {
-  it.each(ALL_CODES.map((code) => [code] as const))("%s reads as plain author-facing copy", (code) => {
-    const notice = degradationNotice(code);
-    expect(notice.length).toBeGreaterThan(20);
-    // The author never sees an error code, an agent name, a step name, or a
-    // model. They see what did not happen and what they still have.
-    expect(notice).not.toMatch(/continuity\.|_|Error|step|model|schema|token|null|undefined/i);
-    expect(notice).toMatch(/^[A-Z]/);
-    expect(notice.trim()).toBe(notice);
-  });
+  it.each(ALL_CODES.map((code) => [code] as const))(
+    "%s reads as plain author-facing copy",
+    (code) => {
+      const notice = degradationNotice(code);
+      expect(notice.length).toBeGreaterThan(20);
+      // The author never sees an error code, an agent name, a step name, or a
+      // model. They see what did not happen and what they still have.
+      expect(notice).not.toMatch(/continuity\.|_|Error|step|model|schema|token|null|undefined/i);
+      expect(notice).toMatch(/^[A-Z]/);
+      expect(notice.trim()).toBe(notice);
+    },
+  );
 
   it("tells the author their manuscript survived a skipped review", () => {
     const notice = degradationNotice(DEGRADATION_CODES.continuity_review_unavailable);
