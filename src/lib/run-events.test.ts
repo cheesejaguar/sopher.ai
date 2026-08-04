@@ -532,3 +532,58 @@ describe("generation preparation checkpoints", () => {
     ).toBe(false);
   });
 });
+
+describe("notice events", () => {
+  it("carries a skipped quality pass without terminalizing the run", () => {
+    // Deliberately not an `error` event: persistRunEvent forces
+    // current_stage='failed' for every error and ignores its `fatal` flag, so
+    // reusing `error` here would fail the very run that is about to complete.
+    const parsed = runEventSchema.safeParse({
+      type: "notice",
+      code: "continuity_review_unavailable",
+      message: "We couldn't complete the consistency review, so your book was finished without it.",
+      stage: "continuity",
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("accepts a notice with no stage", () => {
+    expect(
+      runEventSchema.safeParse({
+        type: "notice",
+        code: "editorial_pass_incomplete",
+        message: "We couldn't finish the editing pass on every chapter.",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("bounds the message so provider or manuscript text cannot ride along", () => {
+    // The whole point of the cap: an unbounded message is how raw model output
+    // reaches the author's screen and the durable event log.
+    expect(
+      runEventSchema.safeParse({
+        type: "notice",
+        code: "continuity_review_unavailable",
+        message: "x".repeat(301),
+      }).success,
+    ).toBe(false);
+    expect(
+      runEventSchema.safeParse({
+        type: "notice",
+        code: "y".repeat(65),
+        message: "short",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects an unknown stage", () => {
+    expect(
+      runEventSchema.safeParse({
+        type: "notice",
+        code: "continuity_review_unavailable",
+        message: "short",
+        stage: "not_a_stage",
+      }).success,
+    ).toBe(false);
+  });
+});

@@ -109,6 +109,12 @@ export type RunStreamState = {
   totalCredits: number;
   review?: { score: number; recommendation: string; issueCount: number };
   error?: { message: string; fatal: boolean };
+  /**
+   * Quality passes that were skipped so the manuscript could still be
+   * delivered. Non-empty means the book is finished but less polished than the
+   * tier promises — not that anything was lost.
+   */
+  notices: { code: string; message: string; stage?: Stage }[];
   connection: RunConnection;
   health: RunHealth;
   connectionAttempt: number;
@@ -208,6 +214,8 @@ type Acc = {
   totalCredits: number;
   review?: { score: number; recommendation: string; issueCount: number };
   error?: { message: string; fatal: boolean };
+  /** Quality passes skipped so the manuscript could still be delivered. */
+  notices: { code: string; message: string; stage?: Stage }[];
 };
 
 type HealthAcc = RunHealth & {
@@ -282,6 +290,17 @@ function applyEvent(acc: Acc, event: RunEvent): void {
     }
     case "error": {
       acc.error = { message: event.message, fatal: event.fatal };
+      break;
+    }
+    case "notice": {
+      // Replay re-delivers events; a skipped pass is reported once.
+      if (!acc.notices.some((notice) => notice.code === event.code)) {
+        acc.notices.push({
+          code: event.code,
+          message: event.message,
+          ...(event.stage ? { stage: event.stage } : {}),
+        });
+      }
       break;
     }
   }
@@ -706,6 +725,7 @@ function initFromSnapshot(snapshot: RunSnapshot): Acc {
     feedSeq: 0,
     totalUsd: snapshot.totalUsd ?? 0,
     totalCredits: snapshot.totalCredits ?? creditsForUsd(snapshot.totalUsd ?? 0),
+    notices: [],
   };
   const terminalIsConfirmed = TERMINAL_STATUSES.has(
     snapshot.health?.effectiveStatus ?? snapshot.run.status,
@@ -807,6 +827,7 @@ function materialize(acc: Acc, connection: RunConnection, health: HealthAcc): Ru
     totalCredits: acc.totalCredits,
     review: acc.review,
     error: acc.error,
+    notices: [...acc.notices],
     connection,
     health: {
       ...healthState,

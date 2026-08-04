@@ -83,6 +83,20 @@ export const runEventSchema = z.discriminatedUnion("type", [
     message: z.string(),
     fatal: z.boolean(),
   }),
+  /**
+   * A quality pass was skipped so the book could still be delivered.
+   *
+   * Deliberately NOT an `error` event: persistRunEvent forces
+   * `current_stage='failed'` for every error regardless of its `fatal` flag,
+   * which would terminalize a run that is in fact about to complete.
+   */
+  z.object({
+    type: z.literal("notice"),
+    code: z.string().max(64),
+    /** Author-facing, plain language. Never provider or manuscript text. */
+    message: z.string().max(300),
+    stage: stageSchema.optional(),
+  }),
 ]);
 export type RunEvent = z.infer<typeof runEventSchema>;
 
@@ -192,6 +206,18 @@ export type GenerationCompletionState = {
     report: StoredContinuityReport;
   };
   finalized?: { sourceRunId: string; manuscriptDigest: string };
+  /**
+   * Quality passes that failed and were skipped so the manuscript could still
+   * be delivered. Present on runs that completed with less polish than the
+   * tier promises; absent on a clean run. `reason` is an operator-safe
+   * message, never provider or manuscript text.
+   */
+  degraded?: {
+    stage: Stage;
+    code: string;
+    reason: string;
+    at: string;
+  }[];
 };
 
 export type GenerationWorkState = {

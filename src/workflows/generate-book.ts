@@ -5,10 +5,17 @@ import {
 } from "@/lib/authoring-cancellation";
 import { withPreservedPrimaryError } from "@/lib/async-cleanup";
 import { authoringFailureMessage, classifyAuthoringFailure } from "@/lib/authoring-failures";
+import {
+  DEGRADATION_CODES,
+  degradationNotice,
+  isDegradableFailure,
+  type DegradationCode,
+  type DegradedPass,
+} from "@/lib/authoring-degradation";
 import { notifyAuthoringFailureStep } from "./notify-authoring-failure";
 import { OUTLINE_REVISION_RESERVATION_KEY, type GenerationConfig } from "@/lib/run-events";
 import type { Stage } from "@/lib/run-events";
-import type { ContinuityOutcome } from "@/ai/agents/continuity";
+import type { ContinuityOutcome, ContinuityReport } from "@/ai/agents/continuity";
 import type { BookConcept, BookOutline } from "@/ai/schemas";
 import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 import {
@@ -175,6 +182,37 @@ export async function generateBook(
       },
     );
 
+  /**
+   * Boundary around a pass that improves the manuscript rather than producing
+   * it. Every one of these runs against prose that is already committed to the
+   * database, so losing the pass costs polish while losing the run costs the
+   * whole book — which is precisely what happened on 2026-08-04, when a review
+   * pass that could not parse its own output discarded twelve finished chapters.
+   *
+   * Cancellation and "another writer owns this run" stay fatal: they are
+   * control flow, not failures, and must not be laundered into a completed book.
+   */
+  const degradations: DegradedPass[] = [];
+  const runEnhancement = async <T>(
+    stage: Stage,
+    code: DegradationCode,
+    operation: () => Promise<T>,
+  ): Promise<{ ok: true; value: T } | { ok: false }> => {
+    try {
+      return { ok: true, value: await operation() };
+    } catch (error) {
+      const reason = authoringFailureMessage(error);
+      if (!isDegradableFailure(reason)) throw error;
+      // One notice per pass: a three-wave editorial failure is one skipped
+      // pass to the author, not three.
+      if (!degradations.some((pass) => pass.code === code)) {
+        degradations.push({ stage, code, reason });
+        await emitProgress(ref, { type: "notice", code, message: degradationNotice(code), stage });
+      }
+      return { ok: false };
+    }
+  };
+
   // A response-loss retry may dispatch the same durable DB run more than
   // once. Exactly one Workflow owns it; a linkage loser exits before the
   // failure handler can terminalize the winner's row.
@@ -212,14 +250,22 @@ export async function generateBook(
             config,
             conceptAuthorization.reservationRef,
           );
-          const question = await prepareCreativeQuestionStep(
-            ref,
-            config,
-            developedConcept,
-            conceptAuthorization.reservationRef,
+          // A null question already means "proceed without asking" further
+          // down, so a failure here degrades to the supported path instead of
+          // discarding the concept the author has already paid for.
+          const prepared = await runEnhancement(
+            "concept",
+            DEGRADATION_CODES.creative_question_unavailable,
+            () =>
+              prepareCreativeQuestionStep(
+                ref,
+                config,
+                developedConcept,
+                conceptAuthorization.reservationRef,
+              ),
           );
           await emitCost(ref);
-          return { concept: developedConcept, question };
+          return { concept: developedConcept, question: prepared.ok ? prepared.value : null };
         },
       );
       concept = creativeOpening.concept;
@@ -494,6 +540,8 @@ export async function generateBook(
       await emitProgress(ref, { type: "stage", stage: "editing", pct: 72 });
       const gateList = config.tier === "premium" ? chapterNumbers : await readQualityGate(ref, 0.7);
       for (const wave of chunk(gateList, config.waveSize)) {
+        // Credit gating stays outside the boundary: an author who declines to
+        // top up has made a decision, and that is not a pass to skip past.
         const editAuthorization = await requireCreditGate(
           await editorialWaveCreditCheckStep(ref, config, wave, "editorial"),
           () => editorialWaveCreditCheckStep(ref, config, wave, "editorial"),
@@ -502,13 +550,21 @@ export async function generateBook(
           "editing",
           `editorial-wave:${wave.join(",")}`,
         );
-        await withReservation(editAuthorization.reservationRef, async () => {
-          await Promise.all(
-            wave.map((n) =>
-              editChapterStep(ref, config, n, undefined, editAuthorization.reservationRef),
-            ),
-          );
-        });
+        const edited = await runEnhancement(
+          "editing",
+          DEGRADATION_CODES.editorial_pass_incomplete,
+          () =>
+            withReservation(editAuthorization.reservationRef, async () => {
+              await Promise.all(
+                wave.map((n) =>
+                  editChapterStep(ref, config, n, undefined, editAuthorization.reservationRef),
+                ),
+              );
+            }),
+        );
+        // A broken editor will break on the next wave too; stop rather than
+        // spend the author's credits proving it three more times.
+        if (!edited.ok) break;
       }
       await emitCost(ref);
     }
@@ -529,16 +585,38 @@ export async function generateBook(
         "continuity",
         `continuity:${phaseKey}`,
       );
-      await withReservation(continuityAuthorization.reservationRef, async () => {
-        outcomes.push(
-          await continuityPhaseStep(ref, config, phaseKey, continuityAuthorization.reservationRef),
-        );
-      });
+      const phase = await runEnhancement(
+        "continuity",
+        DEGRADATION_CODES.continuity_review_unavailable,
+        () =>
+          withReservation(continuityAuthorization.reservationRef, async () => {
+            outcomes.push(
+              await continuityPhaseStep(
+                ref,
+                config,
+                phaseKey,
+                continuityAuthorization.reservationRef,
+              ),
+            );
+          }),
+      );
+      if (!phase.ok) break;
     }
-    const report = await continuityFinalizeStep(ref, outcomes);
+    // Phases that did finish still make a real report; only a review with
+    // nothing at all behind it is dropped, so the author never sees a
+    // manufactured score standing in for a review that did not happen.
+    let report: ContinuityReport | null = null;
+    if (outcomes.length > 0) {
+      const finalized = await runEnhancement(
+        "continuity",
+        DEGRADATION_CODES.continuity_review_unavailable,
+        () => continuityFinalizeStep(ref, outcomes),
+      );
+      if (finalized.ok) report = finalized.value;
+    }
     await emitCost(ref);
 
-    if (config.tier !== "draft" && report.score < 0.7 && report.worstChapters.length > 0) {
+    if (config.tier !== "draft" && report && report.score < 0.7 && report.worstChapters.length > 0) {
       await emitProgress(ref, { type: "stage", stage: "revising", pct: 92 });
       const issueNotes = report.issues
         .map(
@@ -554,19 +632,28 @@ export async function generateBook(
         "revising",
         `continuity-revision:${revisionTargets.join(",")}`,
       );
-      await withReservation(revisionAuthorization.reservationRef, async () => {
-        await Promise.all(
-          revisionTargets.map((n) =>
-            editChapterStep(ref, config, n, issueNotes, revisionAuthorization.reservationRef),
-          ),
-        );
-      });
+      // A failed rewrite leaves the pre-revision prose untouched, so skipping
+      // it costs the polish and nothing else. The continuity notes stay in the
+      // editor for the author to apply by hand.
+      await runEnhancement("revising", DEGRADATION_CODES.continuity_revision_skipped, () =>
+        withReservation(revisionAuthorization.reservationRef, async () => {
+          await Promise.all(
+            revisionTargets.map((n) =>
+              editChapterStep(ref, config, n, issueNotes, revisionAuthorization.reservationRef),
+            ),
+          );
+        }),
+      );
       await emitCost(ref);
     }
 
     await emitProgress(ref, { type: "stage", stage: "finalizing", pct: 97 });
-    await finalizeStep(ref, report.recommendation);
-    return { score: report.score, recommendation: report.recommendation };
+    await finalizeStep(ref, report?.recommendation, degradations);
+    return {
+      score: report?.score ?? null,
+      recommendation: report?.recommendation ?? null,
+      degraded: degradations.map((pass) => pass.code),
+    };
   } catch (error) {
     const message = authoringFailureMessage(error);
     const failure = classifyAuthoringFailure(error);
