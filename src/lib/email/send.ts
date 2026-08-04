@@ -2,6 +2,7 @@ import "server-only";
 
 import { Resend } from "resend";
 
+import { authoringFailureExplanation } from "@/lib/authoring-failures";
 import {
   claimAuthoringNotificationDelivery,
   settleAuthoringNotificationDelivery,
@@ -309,6 +310,9 @@ export async function sendAuthoringNeedsAttentionEmail(input: {
   supportReference: string;
   nextActionHref: string;
   nextActionLabel: string;
+  /** Recorded initiating cause; decides the cause line and the retry advice. */
+  errorCode?: string | null;
+  errorStage?: string | null;
 }): Promise<void> {
   const url = input.nextActionHref.startsWith("/")
     ? `https://sopher.ai${input.nextActionHref}`
@@ -321,12 +325,21 @@ export async function sendAuthoringNeedsAttentionEmail(input: {
       } ${input.savedChapterCount === 1 ? "is" : "are"} saved. ${input.creditsUsed.toFixed(
         1,
       )} credits were used for completed work.`;
+  // An author who is told only that something "needs attention" cannot decide
+  // whether to click the button or wait. Both sentences come from a fixed
+  // table keyed by the error code — never from provider text.
+  const explanation = authoringFailureExplanation({
+    errorCode: input.errorCode,
+    errorStage: input.errorStage,
+    savedChapterCount: input.savedChapterCount,
+  });
   await deliver(
     input.to,
     sanitizeEmailSubject(`Writing needs attention on “${input.bookTitle}”`),
     shell(
       "Your book needs a quick check.",
       p(`<em>${title}</em> stopped before production completed. ${savedWork}`) +
+        p(`${explanation.cause} ${explanation.retryStatement}`) +
         p(`Support reference: <strong>${escapeEmailHtml(input.supportReference)}</strong>`) +
         cta(escapeEmailHtml(url), escapeEmailHtml(input.nextActionLabel)),
       true,

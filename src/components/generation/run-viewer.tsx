@@ -25,6 +25,7 @@ import {
 import { ResponsiveInspector } from "@/components/studio/product-primitives";
 import { useHashTargetFocus } from "@/components/studio/hash-focus-target";
 import type { Stage } from "@/lib/run-events";
+import { authoringFailureExplanation } from "@/lib/authoring-failures";
 import type { QualityTier } from "@/ai/models";
 import { PRODUCTION_STAGE_LABELS } from "@/lib/project-progress";
 import type { ProjectExperience } from "@/lib/trial-story";
@@ -759,7 +760,7 @@ export function isRecoveryActionAuthorized(
   );
 }
 
-function RecoveryCard({
+export function RecoveryCard({
   runId,
   projectId,
   state,
@@ -790,6 +791,14 @@ function RecoveryCard({
     savedChapterCount: saved,
     nextAction,
     canRecover: Boolean(onRecover),
+  });
+  // The persisted failure message is operator phrasing ("finish reason: stop").
+  // An author gets the same fact in their own terms; the raw message and the
+  // error code stay in the diagnostics they can hand to support.
+  const explanation = authoringFailureExplanation({
+    errorCode: state.health.rootErrorCode,
+    errorStage: state.health.rootErrorStage ?? state.stage,
+    savedChapterCount: saved,
   });
   const diagnostic = [
     "sopher.ai authoring diagnostic",
@@ -829,9 +838,13 @@ function RecoveryCard({
           ? "No new model calls or manuscript commits will begin for this run."
           : noWorkStarted
             ? `No credits were used. ${state.error?.message ?? "The Studio could not start production."}`
-            : (state.error?.message ??
-              "The current run could not finish, but every successfully committed chapter remains saved.")}
+            : explanation.cause}
       </p>
+      {!cancelled && !noWorkStarted ? (
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          {explanation.preserved} {explanation.retryStatement} {explanation.nextStep}
+        </p>
+      ) : null}
 
       <dl className="mt-5 grid gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-3">
         {[
@@ -847,9 +860,11 @@ function RecoveryCard({
             value:
               nextAction?.kind === "contact_support"
                 ? "Support safely rechecks the durable evidence"
-                : saved > 0
-                  ? "Reuse compatible checkpoints"
-                  : primaryAction.label,
+                : cancelled || explanation.retry !== "not_worth_retrying"
+                  ? saved > 0
+                    ? "Reuse compatible checkpoints"
+                    : primaryAction.label
+                  : "Support checks the failed step first",
           },
         ].map((fact) => (
           <div key={fact.label} className="bg-card px-4 py-3">
@@ -859,11 +874,10 @@ function RecoveryCard({
         ))}
       </dl>
 
-      {state.health.supportReference ? (
-        <p className="mt-4 font-mono text-xs text-muted-foreground">
-          Support reference: {state.health.supportReference}
-        </p>
-      ) : null}
+      {/* Always shown: without it an author has nothing to quote to support. */}
+      <p className="mt-4 font-mono text-xs text-muted-foreground">
+        Support reference: {state.health.supportReference ?? runId}
+      </p>
 
       <div className="mt-5 flex flex-wrap gap-2">
         {primaryAction.kind === "recover" && onRecover ? (

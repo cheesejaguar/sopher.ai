@@ -1,3 +1,8 @@
+import {
+  DETERMINISTIC_AUTHORING_FAILURE_CODES,
+  TRANSIENT_AUTHORING_FAILURE_CODES,
+  UNRECONCILED_AUTHORING_FAILURE_CODES,
+} from "@/lib/authoring-failures";
 import type { GenerationConfig } from "@/lib/run-events";
 import type { RunHealth } from "@/lib/run-health";
 
@@ -64,6 +69,8 @@ export type AdminRunRecommendedActionKind =
   | "recheck"
   | "investigate_completion"
   | "confirm_cancellation"
+  | "reconcile_metering"
+  | "investigate_provider_fault"
   | "support_recovery";
 
 export type AdminRunRecommendedAction = {
@@ -166,6 +173,36 @@ export function recommendAdminRunAction(input: {
       kind: "none",
       label: "No action required",
       description: "Workflow, database state, and required completion artifacts agree.",
+    };
+  }
+
+  // The recorded initiating cause decides whether a retry can ever succeed. A
+  // generic saved-work offer on a deterministic failure sends the author back
+  // into the same request, and bills them for it again.
+  const failureCode =
+    health.effectiveStatus === "failed" ? (health.rootErrorCode?.trim().toLowerCase() ?? "") : "";
+  if (UNRECONCILED_AUTHORING_FAILURE_CODES.has(failureCode)) {
+    return {
+      kind: "reconcile_metering",
+      label: "Reconcile provider metering first",
+      description:
+        "Paid provider work is unaccounted for. Reconcile the metering evidence before any recovery, and never offer the author a restart while it is open.",
+    };
+  }
+  if (DETERMINISTIC_AUTHORING_FAILURE_CODES.has(failureCode)) {
+    return {
+      kind: "investigate_provider_fault",
+      label: "Fix the failing step before any retry",
+      description:
+        "This failure repeats identically for the same request, so retrying only bills the author again. Saved manuscript work is durable; repair the step, then let the author resume.",
+    };
+  }
+  if (TRANSIENT_AUTHORING_FAILURE_CODES.has(failureCode)) {
+    return {
+      kind: "support_recovery",
+      label: "Author may retry once the provider recovers",
+      description:
+        "The initiating cause was a transient provider fault. Saved work is durable and the author may resume; do not restart it for them.",
     };
   }
 

@@ -1217,6 +1217,11 @@ async function notifyRunNeedsAttention(run: RunForHealth, health: RunHealth): Pr
       supportReference: health.supportReference,
       nextActionHref: nextAction.href,
       nextActionLabel: nextAction.label,
+      // Same two fields the in-app recovery card reads off this health object,
+      // resolved the same way. Omitting them made the email say "worth trying
+      // again" for failures the card correctly tells the author not to retry.
+      errorCode: health.rootErrorCode,
+      errorStage: health.rootErrorStage ?? health.stage,
     });
   } catch (error) {
     console.warn("[email] authoring attention notification failed:", error);
