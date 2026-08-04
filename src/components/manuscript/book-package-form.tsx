@@ -633,7 +633,7 @@ export function BookPackageForm({
               placeholder="A quotation or line that opens the work"
             />
             <Input
-              key={drafts.epigraph?.accepted?.seq ?? 0}
+              key={`attribution-${drafts.epigraph?.accepted?.seq ?? 0}`}
               name="epigraphAttribution"
               aria-label="Epigraph attribution"
               defaultValue={

@@ -89,6 +89,8 @@ export function ChapterMenu({
   /** null while the chapter's paragraph breaks are still being fetched. */
   const [splitPoints, setSplitPoints] = useState<ChapterSplitPoint[] | null>(null);
   const [splitOffset, setSplitOffset] = useState<string | null>(null);
+  /** The chapter version the offsets above were computed against. */
+  const [splitVersion, setSplitVersion] = useState<number | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -113,11 +115,13 @@ export function ChapterMenu({
     setError(null);
     setSplitPoints(null);
     setSplitOffset(null);
+    setSplitVersion(null);
     setSplitOpen(true);
     startTransition(async () => {
       try {
-        const points = await getChapterSplitPoints(chapterId);
+        const { version, points } = await getChapterSplitPoints(chapterId);
         setSplitPoints(points);
+        setSplitVersion(version);
         setSplitOffset(points[0] ? String(points[0].offset) : null);
       } catch {
         setError("Couldn't read this chapter — try again.");
@@ -295,11 +299,11 @@ export function ChapterMenu({
               Cancel
             </Button>
             <Button
-              disabled={pending || splitOffset === null}
+              disabled={pending || splitOffset === null || splitVersion === null}
               onClick={() => {
-                if (splitOffset === null) return;
+                if (splitOffset === null || splitVersion === null) return;
                 run(
-                  () => splitChapter(chapterId, Number(splitOffset)),
+                  () => splitChapter(chapterId, Number(splitOffset), splitVersion),
                   () => setSplitOpen(false),
                 );
               }}

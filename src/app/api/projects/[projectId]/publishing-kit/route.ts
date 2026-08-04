@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -192,10 +192,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   const spendDenied = await authorizeProjectSpend({ userId, projectId, operationKind: "optional" });
   if (spendDenied) return spendDenied;
 
+  // Filter before the LIMIT, not after: an imported manuscript writes chapters
+  // with no summary at all, so taking the first N rows and *then* dropping the
+  // empty ones sent nothing and billed for a blurb written from the title alone.
+  const summarised = sql`coalesce(trim(${schema.chapters.summary}), '') <> ''`;
+  const [summaryTotal] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(schema.chapters)
+    .where(and(eq(schema.chapters.bookId, row.bookId), summarised));
   const summaries = await db
     .select({ summary: schema.chapters.summary })
     .from(schema.chapters)
-    .where(eq(schema.chapters.bookId, row.bookId))
+    .where(and(eq(schema.chapters.bookId, row.bookId), summarised))
     .orderBy(asc(schema.chapters.chapterNumber))
     .limit(MAX_SUMMARIES_SENT);
   const matter = (row.frontMatter ?? {}) as Record<string, unknown>;
@@ -208,6 +216,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     ...(row.synopsis ? { synopsis: row.synopsis } : {}),
     totalChapters: row.targetChapters,
     chapterSummaries: summaries.flatMap((chapter) => (chapter.summary ? [chapter.summary] : [])),
+    summarisedChapters: summaryTotal?.count ?? 0,
     ...conceptFacts(row.concept),
   };
 

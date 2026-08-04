@@ -19,6 +19,7 @@ import {
   type ImportCommitResponse,
   type ImportPreviewResponse,
 } from "@/lib/import";
+import { MAX_CHAPTER_CONTENT_CHARS } from "@/lib/chapter-split";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { getStudioAccess } from "@/lib/studio-access";
 import { projectGenreSchema, projectTitleSchema } from "@/lib/validation/project";
@@ -169,6 +170,20 @@ export async function POST(req: Request) {
         error: `That draft splits into ${detected.chapters.length} chapters; a book can hold ${MAX_IMPORT_CHAPTERS}. Import it in parts.`,
         code: "too_many_chapters",
         chapters: detected.chapters.length,
+      },
+      { status: 422 },
+    );
+  }
+  const oversized = detected.chapters.find(
+    (chapter) => chapter.markdown.length > MAX_CHAPTER_CONTENT_CHARS,
+  );
+  if (oversized) {
+    // A file with no headings splits into one chapter, which can sail under the
+    // word ceiling and still exceed what saveChapter accepts.
+    return Response.json(
+      {
+        error: `One detected chapter is ${oversized.markdown.length.toLocaleString()} characters; the editor can hold ${MAX_CHAPTER_CONTENT_CHARS.toLocaleString()}. Add chapter headings, or split the file before importing.`,
+        code: "chapter_too_large",
       },
       { status: 422 },
     );

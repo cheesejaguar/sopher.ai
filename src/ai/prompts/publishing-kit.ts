@@ -102,6 +102,11 @@ export type PublishingBookFacts = {
   totalChapters?: number;
   /** Chapter summaries in order. Only the opening ones are ever sent. */
   chapterSummaries?: string[];
+  /**
+   * How many chapters have a summary at all, which is not the same as how many
+   * were sent — the route caps what it queries.
+   */
+  summarisedChapters?: number;
 };
 
 /**
@@ -175,7 +180,13 @@ export function buildBookFactsSection(facts: PublishingBookFacts): string {
     .filter(Boolean)
     .slice(0, MAX_SUMMARIES_SENT);
   if (summaries.length > 0) {
-    const withheld = (facts.chapterSummaries ?? []).filter((summary) => summary.trim()).length;
+    // The route already caps its query at MAX_SUMMARIES_SENT, so counting the
+    // array it passed can never exceed the slice — the notice was unreachable
+    // and a 60-chapter book was told the first 30 were the whole story.
+    const withheld = Math.max(
+      facts.summarisedChapters ?? 0,
+      (facts.chapterSummaries ?? []).filter((summary) => summary.trim()).length,
+    );
     parts.push(
       [
         `## Opening chapters (chapter summaries)`,

@@ -8,6 +8,15 @@
  * thing.
  */
 
+/**
+ * Largest chapter `saveChapter` will accept.
+ *
+ * Import must respect it too: a chapter written past this ceiling opens in the
+ * editor and can never be saved again, which is a read-only book with no way
+ * to fix it in product.
+ */
+export const MAX_CHAPTER_CONTENT_CHARS = 400_000;
+
 export type ChapterSplitHalves = { before: string; after: string };
 
 /** A cut the author can pick from a menu, with the prose that would follow it. */

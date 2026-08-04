@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { chapterSplitPoints, mergeChapterContent, splitChapterContent } from "./chapter-split";
+import {
+  MAX_CHAPTER_CONTENT_CHARS,
+  chapterSplitPoints,
+  mergeChapterContent,
+  splitChapterContent,
+} from "./chapter-split";
 
 const chapter = [
   "The ferry came in low and late.",
@@ -106,5 +111,13 @@ describe("mergeChapterContent", () => {
   it("round-trips a split", () => {
     const halves = splitChapterContent(chapter, chapter.indexOf("By dusk"));
     expect(mergeChapterContent(halves!.before, halves!.after)).toBe(chapter);
+  });
+});
+
+describe("MAX_CHAPTER_CONTENT_CHARS", () => {
+  it("is the ceiling import must respect so an imported chapter stays saveable", () => {
+    // Shared with saveChapter. A chapter written past this opens in the editor
+    // and can never be saved again — a read-only book with no in-product fix.
+    expect(MAX_CHAPTER_CONTENT_CHARS).toBe(400_000);
   });
 });

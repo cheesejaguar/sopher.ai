@@ -13,6 +13,7 @@ import {
   mergeChapterContent,
   splitChapterContent,
   type ChapterSplitPoint,
+  MAX_CHAPTER_CONTENT_CHARS,
 } from "@/lib/chapter-split";
 import { countWords } from "@/lib/editor/anchors";
 import { generationResetMetadata, isGenerationResetSource } from "@/lib/generation-archive";
@@ -32,7 +33,7 @@ export type SaveChapterResult =
 const REVISION_EVERY_N_VERSIONS = 10;
 const REVISION_CHAR_DELTA = 2000;
 
-const MAX_CONTENT_CHARS = 400_000;
+const MAX_CONTENT_CHARS = MAX_CHAPTER_CONTENT_CHARS;
 
 /**
  * Persist the editor's markdown with optimistic concurrency: the write only
@@ -359,7 +360,9 @@ const MAX_SPLIT_POINTS = 200;
  * does not care whether a run is in flight — the author may look before the
  * manuscript is theirs to change.
  */
-export async function getChapterSplitPoints(chapterId: string): Promise<ChapterSplitPoint[]> {
+export async function getChapterSplitPoints(
+  chapterId: string,
+): Promise<{ version: number; points: ChapterSplitPoint[] }> {
   const { userId } = await requireUser();
   if (!z.uuid().safeParse(chapterId).success) throw new Error("Chapter not found");
 
@@ -367,12 +370,18 @@ export async function getChapterSplitPoints(chapterId: string): Promise<ChapterS
   if (!ownership || ownership.userId !== userId) throw new Error("Chapter not found");
 
   const [chapter] = await getDb()
-    .select({ content: schema.chapters.content })
+    .select({ content: schema.chapters.content, version: schema.chapters.version })
     .from(schema.chapters)
     .where(eq(schema.chapters.id, chapterId))
     .limit(1);
   if (!chapter) throw new Error("Chapter not found");
-  return chapterSplitPoints(chapter.content, MAX_SPLIT_POINTS);
+  // The version travels with the offsets. A character offset is meaningless
+  // against different text, and an autosave from the open editor lands between
+  // this read and the split.
+  return {
+    version: chapter.version,
+    points: chapterSplitPoints(chapter.content, MAX_SPLIT_POINTS),
+  };
 }
 
 /**
@@ -389,6 +398,8 @@ export async function getChapterSplitPoints(chapterId: string): Promise<ChapterS
 export async function splitChapter(
   chapterId: string,
   offset: number,
+  /** The version the offsets were computed against, from getChapterSplitPoints. */
+  expectedVersion: number,
 ): Promise<{ chapterNumber: number }> {
   const { userId } = await requireUser();
   if (!z.uuid().safeParse(chapterId).success) throw new Error("Chapter not found");
@@ -408,17 +419,17 @@ export async function splitChapter(
     .where(eq(schema.chapters.id, chapterId))
     .limit(1);
   if (!chapter) throw new Error("Chapter not found");
+  if (chapter.version !== expectedVersion) {
+    throw new Error(
+      "This chapter changed while the split dialog was open — reopen it and pick the point again",
+    );
+  }
 
   const halves = splitChapterContent(chapter.content, offset);
   if (!halves) throw new Error("Pick a split point with text on both sides");
 
-  // History first: the undivided chapter stops existing when this commits.
-  await db
-    .insert(schema.chapterRevisions)
-    .values({ chapterId, content: chapter.content, source: "pre-split" });
-
   const insertAt = chapter.chapterNumber + 1;
-  const [, , allowedRows, , , , appliedRows] = await getSqlClient().transaction((tx) => [
+  const [, , allowedRows, , , , , appliedRows] = await getSqlClient().transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
     )`,
@@ -430,6 +441,24 @@ export async function splitChapter(
           and status in ('queued', 'running', 'awaiting_input')
           and kind <> 'export'
       ) as allowed
+    `,
+    // History inside the transaction, so a split whose guards fail leaves no
+    // "before the split" snapshot of a chapter that was never split.
+    tx`
+      insert into chapter_revisions (chapter_id, content, source)
+      select ${chapterId}, ${chapter.content}, 'pre-split'
+      where exists (
+        select 1 from chapters as source
+        where source.id = ${chapterId}
+          and source.version = ${chapter.version}
+          and source.chapter_number = ${chapter.chapterNumber}
+      )
+      and not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      )
     `,
     tx`
       update chapters
@@ -554,16 +583,12 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
   if (!next) throw new Error("There is no chapter after this one to merge in");
 
   const merged = mergeChapterContent(current.content, next.content, next.title);
-  await db.insert(schema.chapterRevisions).values([
-    { chapterId, content: current.content, source: "pre-merge" },
-    { chapterId, content: next.content, source: "pre-merge-absorbed" },
-  ]);
 
   // Identity is pinned on both rows in every guard. addChapter, deleteChapter
   // and moveChapter renumber without bumping `version`, so a version-only guard
   // cannot see a renumber that happened between the read above and this
   // transaction taking the project lock.
-  const [, , allowedRows, , appliedRows] = await getSqlClient().transaction((tx) => [
+  const [, , allowedRows, , , appliedRows] = await getSqlClient().transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${ownership.projectId}, 0)
     )`,
@@ -575,6 +600,35 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
           and status in ('queued', 'running', 'awaiting_input')
           and kind <> 'export'
       ) as allowed
+    `,
+    // History inside the transaction. Written outside it, a merge whose guards
+    // failed still left the absorbed chapter's entire text stored as a
+    // restorable revision of a chapter that was never merged — restoring it
+    // then duplicated prose that still existed next door.
+    tx`
+      insert into chapter_revisions (chapter_id, content, source)
+      select * from (values
+        (${chapterId}::uuid, ${current.content}::text, 'pre-merge'::text),
+        (${chapterId}::uuid, ${next.content}::text, 'pre-merge-absorbed'::text)
+      ) as rows(chapter_id, content, source)
+      where exists (
+        select 1 from chapters as keeper
+        where keeper.id = ${chapterId}
+          and keeper.version = ${current.version}
+          and keeper.chapter_number = ${current.chapterNumber}
+      )
+      and exists (
+        select 1 from chapters as absorbed
+        where absorbed.id = ${next.id}
+          and absorbed.version = ${next.version}
+          and absorbed.chapter_number = ${next.chapterNumber}
+      )
+      and not exists (
+        select 1 from generation_runs
+        where project_id = ${ownership.projectId}
+          and status in ('queued', 'running', 'awaiting_input')
+          and kind <> 'export'
+      )
     `,
     // Park before the delete, exactly as deleteChapter does: the gap-closing
     // subquery needs the absorbed chapter's number while the row still exists.
