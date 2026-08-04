@@ -11,13 +11,24 @@ import path from "node:path";
  * React and browser-facing files ever touch one.
  *
  * The split rule is structural rather than a hand-maintained file list, so it
- * cannot silently rot: everything under `src/components/` or `src/hooks/` is UI
- * and gets jsdom, as does every `.tsx` file anywhere. A DOM-touching test placed
- * outside those directories fails loudly with "document is not defined" instead
- * of degrading quietly, and `// @vitest-environment jsdom` stays available as a
- * per-file override — three `.ts` files already use it.
+ * cannot silently rot: everything under `src/components/`, `src/hooks/` or
+ * `src/lib/client/` is browser code and gets jsdom, as does every `.tsx` file
+ * anywhere. `// @vitest-environment jsdom` stays available as a per-file
+ * override — three `.ts` files already use it.
+ *
+ * "It fails loudly if you get it wrong" holds for `document` and `window`, but
+ * NOT for every browser global. Node now ships its own `sessionStorage`, so
+ * `src/lib/client/idempotent-paid-fetch.test.ts` passed on a developer's Node 26
+ * and failed on CI's Node 24 — green locally, red in CI, which is the worst
+ * possible way to learn a file was in the wrong project. Hence the directory
+ * rule: `src/lib/client/` is client-side by definition, so it does not depend on
+ * spotting which globals a given Node version happens to polyfill.
  */
-const UI_TEST_FILES = ["src/components/**/*.test.ts", "src/hooks/**/*.test.ts"];
+const UI_TEST_FILES = [
+  "src/components/**/*.test.ts",
+  "src/hooks/**/*.test.ts",
+  "src/lib/client/**/*.test.ts",
+];
 
 const SHARED_EXCLUDE = ["**/*.integration.test.ts", "**/node_modules/**"];
 

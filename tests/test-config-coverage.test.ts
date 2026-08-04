@@ -203,3 +203,46 @@ describe("integration runner coverage", () => {
     expect(unclaimed).toEqual([]);
   });
 });
+
+describe("browser globals live in the jsdom project", () => {
+  /**
+   * Globals a `jsdom` test may use that some Node versions also happen to
+   * provide. `document` and `window` are deliberately absent: those already
+   * fail loudly under `environment: "node"` on every Node version, so the
+   * environment split cannot get them wrong.
+   *
+   * These can. Node ships its own `sessionStorage`, which is why
+   * src/lib/client/idempotent-paid-fetch.test.ts passed on a developer's
+   * Node 26 and failed on CI's Node 24 — the split had put a browser test in
+   * the node project and nothing local said so.
+   */
+  const NODE_POLYFILLED_BROWSER_GLOBALS = [
+    "sessionStorage",
+    "localStorage",
+    "navigator",
+    "crypto.subtle",
+  ];
+
+  const nodeProject = unitProjects.find((project) => project.test.name === "node");
+
+  it.each(NODE_POLYFILLED_BROWSER_GLOBALS)(
+    "no node-project test relies on %s, whose presence varies by Node version",
+    (global) => {
+      // Anchored on a word boundary so "window.sessionStorage" in a string or a
+      // comment about the global still counts — a false positive here costs one
+      // directive, a false negative costs a green local run and a red CI.
+      const escaped = global.split(".").join("\\.");
+      const pattern = new RegExp("(^|[^.\\w])" + escaped + "\\s*[.([]", "m");
+      const offenders = unitTestFiles
+        .filter((file) => nodeProject && claims(nodeProject, file))
+        // The directive string is split deliberately. Vitest scans a test
+        // file's SOURCE for this comment, so spelling it out here would switch
+        // this file to jsdom — whose TextEncoder then breaks the esbuild
+        // invariant that @vitejs/plugin-react trips on import, and the file
+        // fails to load at all.
+        .filter((file) => !readRepoFile(file).includes(`@vitest-${"environment"} jsdom`))
+        .filter((file) => pattern.test(readRepoFile(file)));
+      expect(offenders).toEqual([]);
+    },
+  );
+});
