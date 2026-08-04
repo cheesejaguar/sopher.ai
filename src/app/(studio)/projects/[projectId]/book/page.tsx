@@ -1,17 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, BookOpenText, Check } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import { BookPackageForm } from "@/components/manuscript/book-package-form";
+import { BookMatterPreview } from "@/components/manuscript/book-matter-preview";
 import { Button } from "@/components/ui/button";
 import { getProjectWithBook } from "@/db/queries/books";
 import { requireUser } from "@/lib/auth";
-import {
-  bookMatterPageCount,
-  closingBookMatter,
-  openingBookMatter,
-  readBookMatter,
-} from "@/lib/book-package";
+import { readBookMatter } from "@/lib/book-package";
 
 export const metadata = { title: "Book setup" };
 
@@ -44,18 +40,6 @@ export default async function BookSetupPage({
   }
 
   const matter = readBookMatter(data.book.frontMatter);
-  const opening = openingBookMatter(matter);
-  const closing = closingBookMatter(matter);
-  const orderedPages = [
-    "Title page",
-    ...(matter.copyrightHolder || matter.publisher || matter.isbn ? ["Copyright"] : []),
-    ...(matter.dedication ? ["Dedication"] : []),
-    ...(matter.epigraphText ? ["Epigraph"] : []),
-    ...opening.map((section) => section.title),
-    "Contents",
-    `${data.project.targetChapters} chapters`,
-    ...closing.map((section) => section.title),
-  ];
 
   return (
     <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,1fr)_17rem]">
@@ -75,33 +59,11 @@ export default async function BookSetupPage({
         />
       </div>
 
-      <aside
+      <BookMatterPreview
+        matter={matter}
+        chapterCount={data.project.targetChapters}
         className="min-w-0 xl:sticky xl:top-24 xl:self-start"
-        aria-labelledby="book-order-title"
-      >
-        <div className="instrument-surface overflow-hidden rounded-sm">
-          <div className="border-b border-border p-4">
-            <BookOpenText aria-hidden="true" className="size-4 text-primary" />
-            <h3 id="book-order-title" className="mt-3 text-sm font-semibold">
-              Reader order
-            </h3>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              {bookMatterPageCount(matter)} prepared matter pages, plus contents and chapters.
-            </p>
-          </div>
-          <ol className="divide-y divide-border">
-            {orderedPages.map((label, index) => (
-              <li key={`${label}-${index}`} className="flex min-h-10 items-center gap-3 px-4 py-2">
-                <span className="font-mono text-[0.6875rem] text-muted-foreground tabular-nums">
-                  {String(index + 1).padStart(2, "0")}
-                </span>
-                <span className="min-w-0 flex-1 text-xs font-medium break-words">{label}</span>
-                <Check aria-hidden="true" className="size-3.5 shrink-0 text-success" />
-              </li>
-            ))}
-          </ol>
-        </div>
-      </aside>
+      />
     </div>
   );
 }

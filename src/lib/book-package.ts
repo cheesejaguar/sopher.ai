@@ -7,6 +7,59 @@ import { z } from "zod";
  * historical books keep working, cover metadata remains intact, and adding a
  * new optional page never requires rewriting a manuscript document.
  */
+/**
+ * The copy that sells the finished book. It is generated from material the
+ * author already owns (title, synopsis, concept, chapter summaries) and stored
+ * beside the matter pages rather than in a column of its own, so an older book
+ * simply has no kit yet.
+ */
+export const publishingKitSchema = z.object({
+  blurb: z
+    .string()
+    .max(1_200)
+    .describe("Back-cover blurb: 100-150 words, present tense, ending on a hook. No spoilers."),
+  storeDescription: z
+    .string()
+    .max(4_000)
+    .describe(
+      "Longer store description for a retailer listing: 200-350 words, plain paragraphs, no markdown headings.",
+    ),
+  keywords: z
+    .array(z.string().max(60))
+    .max(10)
+    .describe("Around seven search phrases a reader would actually type. No hashtags."),
+  categories: z
+    .array(z.string().max(120))
+    .max(5)
+    .describe("Two or three retailer category paths, e.g. 'Fiction > Fantasy > Epic'."),
+  authorBio: z
+    .string()
+    .max(1_200)
+    .describe("Third-person author bio of 40-70 words, written to be edited by the author."),
+});
+
+export type PublishingKit = z.infer<typeof publishingKitSchema>;
+
+/** Matter pages a one-click draft can propose. Never written without consent. */
+export const BOOK_MATTER_DRAFT_FIELDS = [
+  "dedication",
+  "epigraph",
+  "acknowledgments",
+  "authorNote",
+  "aboutAuthor",
+] as const;
+
+export type BookMatterDraftField = (typeof BOOK_MATTER_DRAFT_FIELDS)[number];
+
+/** Draft requests are named for the page; matter stores the epigraph's text. */
+export const BOOK_MATTER_DRAFT_TARGET: Record<BookMatterDraftField, keyof BookMatter> = {
+  dedication: "dedication",
+  epigraph: "epigraphText",
+  acknowledgments: "acknowledgments",
+  authorNote: "authorNote",
+  aboutAuthor: "aboutAuthor",
+};
+
 export const bookMatterSchema = z.object({
   subtitle: z.string().max(300).optional(),
   author: z.string().max(200).optional(),
@@ -25,6 +78,11 @@ export const bookMatterSchema = z.object({
   acknowledgments: z.string().max(20_000).optional(),
   authorNote: z.string().max(20_000).optional(),
   aboutAuthor: z.string().max(20_000).optional(),
+  /**
+   * Generated selling copy. Partial because a historical kit may predate a
+   * field, and because the author is free to keep only the parts they like.
+   */
+  publishingKit: publishingKitSchema.partial().optional(),
   /** Existing generated-cover metadata. It is preserved by book-matter saves. */
   coverUrl: z.string().url().optional(),
 });
@@ -67,6 +125,33 @@ function clean(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function cleanList(value: unknown, limit: number): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.flatMap((entry) => {
+    const text = clean(entry);
+    return text ? [text] : [];
+  });
+  return items.length > 0 ? items.slice(0, limit) : undefined;
+}
+
+/** Tolerant reader for a stored kit; an empty or absent kit reads as undefined. */
+export function readPublishingKit(value: unknown): Partial<PublishingKit> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const kit: Partial<PublishingKit> = {};
+  const blurb = clean(raw.blurb);
+  if (blurb) kit.blurb = blurb;
+  const storeDescription = clean(raw.storeDescription);
+  if (storeDescription) kit.storeDescription = storeDescription;
+  const keywords = cleanList(raw.keywords, 10);
+  if (keywords) kit.keywords = keywords;
+  const categories = cleanList(raw.categories, 5);
+  if (categories) kit.categories = categories;
+  const authorBio = clean(raw.authorBio);
+  if (authorBio) kit.authorBio = authorBio;
+  return Object.keys(kit).length > 0 ? kit : undefined;
+}
+
 /** Tolerant reader for historical JSON and partial saves. */
 export function readBookMatter(value: unknown): BookMatter {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -92,6 +177,7 @@ export function readBookMatter(value: unknown): BookMatter {
     acknowledgments: clean(raw.acknowledgments),
     authorNote: clean(raw.authorNote),
     aboutAuthor: clean(raw.aboutAuthor),
+    publishingKit: readPublishingKit(raw.publishingKit),
     coverUrl: clean(raw.coverUrl),
   };
   const complete = bookMatterSchema.partial().safeParse(candidate);

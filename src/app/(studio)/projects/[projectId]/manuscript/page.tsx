@@ -16,6 +16,9 @@ import { loadFigures } from "@/lib/export/figures";
 import { requireUser } from "@/lib/auth";
 import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book-package";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
+import { ManuscriptSearch } from "@/components/editor/manuscript-search";
+import { ManuscriptStatsPanel } from "@/components/manuscript/manuscript-stats-panel";
+import { manuscriptStats } from "@/lib/manuscript-stats";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
@@ -141,9 +144,25 @@ export default async function ManuscriptPage({
         </div>
       </HashFocusTarget>
 
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <ManuscriptStatsPanel
+          stats={manuscriptStats({
+            chapters: chapterRows.map((chapter) => ({
+              number: chapter.chapterNumber,
+              title: chapter.title,
+              words: chapter.wordCount,
+            })),
+            targetChapters: project.targetChapters,
+            targetWordsPerChapter: project.targetWordsPerChapter,
+            matter,
+          })}
+        />
+        <ManuscriptSearch projectId={projectId} />
+      </div>
+
       <div className="manuscript-sheet min-w-0 px-4 py-8 sm:px-12 sm:py-16">
         {isOpening ? (
-          <header className="mx-auto max-w-2xl py-6 text-center sm:py-16 [content-visibility:auto]">
+          <header className="defer-offscreen mx-auto max-w-2xl py-6 text-center sm:py-16">
             {matter.coverUrl ? (
               <Image
                 src={matter.coverUrl}
@@ -231,7 +250,7 @@ export default async function ManuscriptPage({
             ))
           : null}
 
-        <section className="prose-manuscript prose-manuscript--book mx-auto border-t border-paper-edge pt-12 [content-visibility:auto] sm:pt-16">
+        <section className="prose-manuscript prose-manuscript--book defer-offscreen mx-auto border-t border-paper-edge pt-12 sm:pt-16">
           <h2>
             Chapter {chapter.chapterNumber}
             {chapterTitle !== `Chapter ${chapter.chapterNumber}` ? (

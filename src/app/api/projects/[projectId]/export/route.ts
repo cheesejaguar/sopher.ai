@@ -9,7 +9,13 @@ import {
   reconcileActiveExportRuns,
   reconcileExportDispatch,
 } from "@/lib/export-dispatch";
-import { EXPORT_FORMATS, FORMAT_META, type ExportFormat } from "@/lib/export/types";
+import {
+  DEFAULT_PRINT_OPTIONS,
+  EXPORT_FORMATS,
+  FORMAT_META,
+  type ExportFormat,
+} from "@/lib/export/types";
+import { printOptionsSchema } from "@/lib/export/print-layout";
 import {
   exportFormat,
   type ExportHistoryAsset,
@@ -20,6 +26,10 @@ export const maxDuration = 60;
 
 const bodySchema = z.object({
   format: z.enum(EXPORT_FORMATS),
+  // Print layout rides along as data in the run's config, next to the snapshot,
+  // so the Workflow keeps its signature and its redispatch path. Every field
+  // defaults, so a client that sends nothing gets the geometry it always got.
+  print: printOptionsSchema.default(DEFAULT_PRINT_OPTIONS),
 });
 
 /** Kick off an export run for the project's current manuscript. 202 {runId}. */
@@ -93,7 +103,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         userId,
         kind: "export",
         status: "queued",
-        config: { format, snapshot },
+        config: { format, snapshot, print: parsed.data.print },
         dispatchAttempts: 1,
         acceptanceDispatchClaimedAt: new Date(),
       })

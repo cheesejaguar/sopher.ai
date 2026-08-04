@@ -177,6 +177,7 @@ describe("NewBookWizard", () => {
       <NewBookWizard
         userId="user-carried"
         access={fullBookAccess}
+        carriedFromIncludedStory
         initialSetup={{
           title: "The River Door",
           genre: "fantasy",
@@ -205,6 +206,26 @@ describe("NewBookWizard", () => {
     expect(screen.getByLabelText("Your brief")).toHaveValue(
       "A cartographer finds a river that remembers every traveler it has carried.",
     );
+  });
+
+  it("uses neutral carry-forward copy when the source is an ordinary book", async () => {
+    render(
+      <NewBookWizard
+        userId="user-carried"
+        access={fullBookAccess}
+        initialSetup={{
+          title: "The River Door",
+          genre: "fantasy",
+          brief: "A cartographer finds a river that remembers every traveler it has carried.",
+        }}
+      />,
+    );
+
+    // Any owned book can seed the next one, so the included-story wording must
+    // not leak onto a duplicate of a full-length book.
+    expect(await screen.findByText("Your earlier book's setup is carried forward.")).toBeVisible();
+    expect(screen.queryByText("Your included story is carried forward.")).toBeNull();
+    expect(screen.queryByText(/completed short story/i)).toBeNull();
   });
 
   it("submits the carried title and brief as a fresh full-book production", async () => {

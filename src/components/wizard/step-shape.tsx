@@ -15,7 +15,7 @@ import {
   MAX_CHAPTERS,
   MAX_WORDS_PER_CHAPTER,
   MIN_CHAPTERS,
-  MIN_WORDS_PER_CHAPTER,
+  minWordsForGenre,
   WORDS_PER_PAGE,
   type HeatLevel,
   type Pov,
@@ -119,6 +119,9 @@ export function StepShape({
   dispatch: React.Dispatch<WizardActionEvent>;
   experience?: "trial_short_story" | "full_book";
 }) {
+  // A children's chapter can be far shorter than an adult one, so the floor
+  // follows the genre's reader rather than being fixed at the adult minimum.
+  const minWords = minWordsForGenre(state.genre);
   const totalWords = state.chapters * state.wordsPerChapter;
   const pages = Math.round(totalWords / WORDS_PER_PAGE);
   const spineWidth = Math.min(96, Math.max(12, Math.round(6 + pages * 0.09)));
@@ -176,7 +179,7 @@ export function StepShape({
                 </div>
                 <Slider
                   aria-labelledby="wizard-words-label"
-                  min={MIN_WORDS_PER_CHAPTER}
+                  min={minWords}
                   max={MAX_WORDS_PER_CHAPTER}
                   step={250}
                   value={[state.wordsPerChapter]}

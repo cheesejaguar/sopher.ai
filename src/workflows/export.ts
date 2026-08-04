@@ -14,6 +14,7 @@ import {
   type ExportSnapshot,
 } from "@/lib/export/assemble";
 import { renderExport } from "@/lib/export";
+import { parsePrintOptions } from "@/lib/export/print-layout";
 import { FORMAT_META, type ExportFormat } from "@/lib/export/types";
 import { PROGRESS_NS, type RunEvent } from "@/lib/run-events";
 import { persistRunEvent } from "@/lib/run-event-store";
@@ -120,6 +121,12 @@ async function mintExportToken(): Promise<string> {
 }
 
 /**
+ * `renderExport` is deliberately format-neutral, so the one format that carries
+ * layout options reaches its renderer directly. The PDF toolchain is imported
+ * lazily, the way dispatch imports the Workflow entrypoint, so only the runs
+ * that need it pay to load it.
+ */
+/**
  * Assemble + render + upload in a single step: the rendered buffer must never
  * cross a step boundary as an argument, so the whole byte-producing path lives
  * here and only small identifiers leave.
@@ -142,7 +149,7 @@ async function assembleAndUploadStep(
       ),
     )
     .limit(1);
-  const config = (run?.config ?? {}) as { snapshot?: ExportSnapshot };
+  const config = (run?.config ?? {}) as { snapshot?: ExportSnapshot; print?: unknown };
   const storedSnapshot = config.snapshot;
   const manuscript: AssembledManuscript | null =
     storedSnapshot?.manuscript &&
@@ -155,7 +162,13 @@ async function assembleAndUploadStep(
     throw new FatalError("No chapters have been written yet — nothing to export");
   }
 
-  const result = await renderExport(format, manuscript);
+  // Print options travel with the run's config rather than as a Workflow
+  // argument, so `exportBook`'s signature — and every redispatch that replays
+  // it — is unchanged. An older run without them renders today's geometry.
+  const result =
+    format === "pdf"
+      ? await renderExport(format, manuscript, parsePrintOptions(config.print))
+      : await renderExport(format, manuscript);
   const meta = FORMAT_META[format];
   const findExistingAsset = async () => {
     const [existing] = await db

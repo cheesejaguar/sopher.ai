@@ -48,6 +48,7 @@
     "epub-gen-memory": "^1.1.2",
     "isomorphic-dompurify": "^3.20.0",
     "lucide-react": "^1.27.0",
+    "mammoth": "^1.12.0",
     "marked": "^18.0.7",
     "mermaid": "^11.16.0",
     "next": "16.2.12",
@@ -101,14 +102,17 @@
       "@lhci/cli>chrome-launcher": "1.2.1",
       "@lhci/cli>tmp": "0.2.7",
       "@lhci/cli>uuid": "11.1.1",
+      "@modelcontextprotocol/sdk>hono": "4.12.34",
       "@swc/cli>minimatch": "10.2.6",
+      "ajv>fast-uri": "3.1.5",
       "ejs>jake": "12.10.1",
       "external-editor>tmp": "0.2.7",
       "jayson>uuid": "11.1.1",
-      "minimatch@3.1.5>brace-expansion": "1.1.18",
       "minimatch@10.2.6>brace-expansion": "5.0.9",
+      "minimatch@3.1.5>brace-expansion": "1.1.18",
       "next>postcss": "8.5.23",
-      "next>sharp": "0.35.0"
+      "next>sharp": "0.35.0",
+      "undici@>=7.0.0 <7.29.0": "7.29.0"
     }
   }
 }

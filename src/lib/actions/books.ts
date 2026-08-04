@@ -94,7 +94,17 @@ export async function updateBookPackage(projectId: string, input: unknown): Prom
 
     const nextMatter = { ...(book.frontMatter as Record<string, unknown>) };
     for (const [key, value] of Object.entries(data)) {
-      if (key === "title" || key === "synopsis" || key === "copyrightYear") continue;
+      // publishingKit is structured data owned by the publishing-kit route, not
+      // a text field on this form. Without this skip, the string branch below
+      // would delete it the moment anything posted the key.
+      if (
+        key === "title" ||
+        key === "synopsis" ||
+        key === "copyrightYear" ||
+        key === "publishingKit"
+      ) {
+        continue;
+      }
       if (typeof value === "string" && value.trim()) nextMatter[key] = value.trim();
       else delete nextMatter[key];
     }

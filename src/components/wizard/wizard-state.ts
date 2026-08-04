@@ -1,7 +1,26 @@
-import type { GenreId } from "@/ai/knowledge/genres";
+import {
+  GENRE_TEMPLATES,
+  genreAudience,
+  type GenreAudience,
+  type GenreId,
+} from "@/ai/knowledge/genres";
 import type { VoiceProfileId } from "@/ai/knowledge/voice-profiles";
 import type { QualityTier } from "@/ai/models";
 import { TRIAL_STORY_CONFIG, type ProjectExperience } from "@/lib/trial-story";
+
+/**
+ * Sentinel for "my book is not one of these". The catalog covers the common
+ * cases, but an author arriving with a western, a cookbook, or a book of
+ * verse used to hit a wall here — there was no way past the genre step at all.
+ * The value is never persisted; `resolvedGenre` swaps in the author's own words.
+ */
+export const CUSTOM_GENRE = "custom" as const;
+
+export type WizardGenre = GenreId | typeof CUSTOM_GENRE;
+
+/** Short enough to type, long enough to mean something to the concept agent. */
+export const MIN_CUSTOM_GENRE_LENGTH = 3;
+export const MAX_CUSTOM_GENRE_LENGTH = 60;
 
 export type Pov = "first" | "third_limited" | "third_omniscient";
 export type Tense = "past" | "present";
@@ -26,6 +45,50 @@ export const MAX_WORDS_PER_CHAPTER = 6_000;
 export const MIN_BRIEF_LENGTH = 20;
 export const MIN_TITLE_LENGTH = 1;
 
+/**
+ * The shortest chapter each audience can be asked for.
+ *
+ * A children's chapter is meant to be about five minutes read aloud. Holding
+ * every genre to the adult 1,000-word floor produced children's books no child
+ * could sit through, so the floor follows the reader rather than the product.
+ */
+const AUDIENCE_MIN_WORDS: Record<GenreAudience, number> = {
+  // Kept on the slider's 250-word step grid so every draggable position is a
+  // round number and each genre's default sits exactly on one.
+  children: 500,
+  middle_grade: 750,
+  young_adult: MIN_WORDS_PER_CHAPTER,
+  adult: MIN_WORDS_PER_CHAPTER,
+};
+
+/** Lowest words-per-chapter the shape step will offer for this genre. */
+export function minWordsForGenre(genre: WizardGenre | null): number {
+  if (!genre || genre === CUSTOM_GENRE) return MIN_WORDS_PER_CHAPTER;
+  return AUDIENCE_MIN_WORDS[genreAudience(genre)];
+}
+
+/**
+ * Chapter count and length a genre should start at.
+ *
+ * Only the genres that carry explicit defaults move the sliders; the original
+ * seven have none, so choosing Romance leaves an author's existing numbers
+ * exactly where they were.
+ */
+export function shapeDefaultsForGenre(
+  genre: WizardGenre | null,
+): { chapters: number; wordsPerChapter: number } | null {
+  if (!genre || genre === CUSTOM_GENRE) return null;
+  const template = GENRE_TEMPLATES[genre];
+  if (!template?.defaultChapters || !template.defaultWordsPerChapter) return null;
+  return {
+    chapters: Math.min(Math.max(template.defaultChapters, MIN_CHAPTERS), MAX_CHAPTERS),
+    wordsPerChapter: Math.min(
+      Math.max(template.defaultWordsPerChapter, minWordsForGenre(genre)),
+      MAX_WORDS_PER_CHAPTER,
+    ),
+  };
+}
+
 /** Paperback pages per word — used for the page-count readout on the shape step. */
 export const WORDS_PER_PAGE = 275;
 
@@ -42,7 +105,9 @@ export const DEFAULT_TIER_KEY = "sopher.default-tier.v1";
 
 export interface WizardState {
   step: number;
-  genre: GenreId | null;
+  genre: WizardGenre | null;
+  /** The author's own words, used only when `genre` is CUSTOM_GENRE. */
+  customGenre: string;
   subgenre: string | null;
   brief: string;
   title: string;
@@ -64,6 +129,7 @@ export interface WizardState {
 export const initialWizardState: WizardState = {
   step: 0,
   genre: null,
+  customGenre: "",
   subgenre: null,
   brief: "",
   title: "",
@@ -93,11 +159,27 @@ function clampStep(step: number): number {
   return Math.min(Math.max(step, 0), WIZARD_STEPS.length - 1);
 }
 
+/**
+ * The genre string the API and the agents actually receive.
+ *
+ * A canonical id for a catalog genre, or the author's own words for a custom
+ * one. `projectGenreSchema` accepts any string up to 60 characters and
+ * `getGenreTemplate` returns undefined for anything unrecognized, which the
+ * prompt builders already treat as "no genre-specific guidance" — so a custom
+ * genre degrades to a plain, well-written book rather than an error.
+ */
+export function resolvedGenre(state: WizardState): string | null {
+  if (state.genre === null) return null;
+  if (state.genre !== CUSTOM_GENRE) return state.genre;
+  const custom = state.customGenre.trim();
+  return custom.length >= MIN_CUSTOM_GENRE_LENGTH ? custom.slice(0, MAX_CUSTOM_GENRE_LENGTH) : null;
+}
+
 /** Whether the given step has everything it needs to move forward. */
 export function stepComplete(state: WizardState, step: number): boolean {
   switch (WIZARD_STEPS[step]?.id) {
     case "genre":
-      return state.genre !== null;
+      return resolvedGenre(state) !== null;
     case "brief":
       return (
         state.title.trim().length >= MIN_TITLE_LENGTH &&
@@ -184,8 +266,10 @@ export function restoreDraft(
     // so the author can confirm the setup before moving forward.
     merged.step = 0;
     merged.chapters = Math.min(Math.max(merged.chapters, MIN_CHAPTERS), MAX_CHAPTERS);
+    // Clamp against the floor for the *restored* genre — a saved children's
+    // draft at 700 words must not be silently raised to the adult minimum.
     merged.wordsPerChapter = Math.min(
-      Math.max(merged.wordsPerChapter, MIN_WORDS_PER_CHAPTER),
+      Math.max(merged.wordsPerChapter, minWordsForGenre(merged.genre)),
       MAX_WORDS_PER_CHAPTER,
     );
     return merged;

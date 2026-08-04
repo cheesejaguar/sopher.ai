@@ -27,7 +27,10 @@ export const createProjectSchema = z.object({
   brief: projectBriefSchema,
   genre: projectGenreSchema,
   targetChapters: z.number().int().min(3).max(60).default(10),
-  targetWordsPerChapter: z.number().int().min(800).max(8_000).default(3_000),
+  // Floor lowered from 800 for children's books, whose chapters are meant to be
+  // about five minutes read aloud. The wizard applies a tighter, genre-aware
+  // floor on top of this (see `minWordsForGenre`).
+  targetWordsPerChapter: z.number().int().min(400).max(8_000).default(3_000),
   styleGuide: z.string().max(10_000).optional(),
   settings: projectSettingsSchema.default({}),
 });
@@ -44,7 +47,9 @@ export const estimateRequestSchema = z.object({
    */
   tier: qualityTierSchema.optional(),
   chapters: z.number().int().min(3).max(60),
-  wordsPerChapter: z.number().int().min(800).max(8_000),
+  // Must track `createProjectSchema`'s floor exactly: a shape the wizard can
+  // submit but cannot get a quote for would leave the estimate step stuck.
+  wordsPerChapter: z.number().int().min(400).max(8_000),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;

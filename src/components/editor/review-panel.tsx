@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { BookOpenCheck, Check, ScanText, SlidersHorizontal, Unlink, X } from "lucide-react";
+import {
+  BookOpenCheck,
+  Check,
+  ScanText,
+  SlidersHorizontal,
+  SpellCheck,
+  Unlink,
+  X,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -36,7 +44,21 @@ const severityDotClasses: Record<SuggestionDTO["severity"], string> = {
   error: "bg-destructive",
 };
 
-const GROUP_ORDER = ["structure", "continuity", "line", "style", "selection"];
+const GROUP_ORDER = [
+  "structure",
+  "continuity",
+  "line",
+  "style",
+  // Mechanical corrections sort below craft notes: an author skims what the
+  // editor thinks, then sweeps the typos.
+  "grammar",
+  "punctuation",
+  "spelling",
+  "usage",
+  "duplication",
+  "formatting",
+  "selection",
+];
 
 function groupSuggestions(suggestions: SuggestionDTO[]): [string, SuggestionDTO[]][] {
   const groups = new Map<string, SuggestionDTO[]>();
@@ -64,12 +86,20 @@ function groupSuggestions(suggestions: SuggestionDTO[]): [string, SuggestionDTO[
  * the same moment as its content so nothing would be announced anyway — the
  * editor shell owns the polite announcement for review start and completion.
  */
-function ReviewingState({ chapterNumber }: { chapterNumber: number }) {
+function ReviewingState({
+  chapterNumber,
+  proofreading = false,
+}: {
+  chapterNumber: number;
+  proofreading?: boolean;
+}) {
   return (
     <div className="space-y-3 p-4" aria-busy="true">
       <p className="flex items-center gap-2 text-xs text-ai">
         <span aria-hidden="true" className="size-1.5 rounded-full bg-ai" />
-        The editor is reading chapter {chapterNumber}…
+        {proofreading
+          ? `Proofreading chapter ${chapterNumber}…`
+          : `The editor is reading chapter ${chapterNumber}…`}
       </p>
       {Array.from({ length: 3 }).map((_, i) => (
         <div
@@ -198,8 +228,10 @@ export function ReviewPanel({
   unanchored,
   activeId,
   reviewing,
+  proofreading,
   busy,
   onReview,
+  onProofread,
   onSelect,
   onHover,
   onAccept,
@@ -213,8 +245,10 @@ export function ReviewPanel({
   unanchored: Set<string>;
   activeId: string | null;
   reviewing: boolean;
+  proofreading: boolean;
   busy: boolean;
   onReview: (instruction?: string) => void;
+  onProofread: () => void;
   onSelect: (id: string) => void;
   onHover: (id: string | null) => void;
   onAccept: (id: string) => void;
@@ -309,11 +343,22 @@ export function ReviewPanel({
             variant="outline"
             size="sm"
             className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
-            disabled={reviewing || busy || suspended}
+            disabled={reviewing || proofreading || busy || suspended}
             onClick={() => onReview(instruction.trim() || undefined)}
           >
             <BookOpenCheck aria-hidden="true" className="text-ai" />
             Review chapter
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className={cn(touchFriendly && "min-h-11 flex-1 rounded-sm")}
+            disabled={reviewing || proofreading || busy || suspended}
+            onClick={onProofread}
+            title="Spelling, grammar, and punctuation only — never style or voice"
+          >
+            <SpellCheck aria-hidden="true" className="text-ai" />
+            Proofread
           </Button>
         </div>
       </div>
@@ -332,8 +377,8 @@ export function ReviewPanel({
         aria-label="Suggestion list"
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        {reviewing ? (
-          <ReviewingState chapterNumber={chapterNumber} />
+        {reviewing || proofreading ? (
+          <ReviewingState chapterNumber={chapterNumber} proofreading={proofreading} />
         ) : count === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
             <ScanText aria-hidden="true" className="size-5 text-ai/60" />
@@ -371,7 +416,7 @@ export function ReviewPanel({
         )}
       </div>
 
-      {count > 0 && !reviewing ? (
+      {count > 0 && !reviewing && !proofreading ? (
         <div className="flex gap-1.5 border-t border-border p-3">
           <AlertDialog>
             <AlertDialogTrigger

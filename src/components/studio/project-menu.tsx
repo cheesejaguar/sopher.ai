@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useTransition, type FormEvent } from "react";
-import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import type { Route } from "next";
+import Link from "next/link";
+import { Archive, ArchiveRestore, BookPlus, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -115,6 +117,11 @@ export function ProjectMenu({
             }}
           >
             <Pencil aria-hidden="true" className="size-3.5" /> Rename
+          </DropdownMenuItem>
+          {/* Opens the wizard pre-filled from this book. Nothing is created
+              here — the new book only exists once the author finishes setup. */}
+          <DropdownMenuItem render={<Link href={`/studio/new?from=${projectId}` as Route} />}>
+            <BookPlus aria-hidden="true" className="size-3.5" /> Start another book from this
           </DropdownMenuItem>
           {archived ? (
             <DropdownMenuItem onClick={() => setArchived(false)}>

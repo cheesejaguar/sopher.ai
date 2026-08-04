@@ -119,9 +119,29 @@ const OPERATION_BUDGETS: Record<string, MeteredOperationBudget> = {
     maxProviderSteps: 1,
     imageCount: 0,
   },
+  // Proofreading reads a whole chapter and returns only short corrections, so
+  // it needs review's input ceiling but a fraction of its output.
+  "editor.proofread": {
+    maxInputTokensPerStep: 96_000,
+    maxOutputTokensPerStep: 8_000,
+    maxProviderSteps: 1,
+    imageCount: 0,
+  },
   "editor.selection": {
     maxInputTokensPerStep: 32_000,
     maxOutputTokensPerStep: 8_000,
+    maxProviderSteps: 1,
+    imageCount: 0,
+  },
+  "publishing.kit": {
+    maxInputTokensPerStep: 32_000,
+    maxOutputTokensPerStep: 3_000,
+    maxProviderSteps: 1,
+    imageCount: 0,
+  },
+  "publishing.matter": {
+    maxInputTokensPerStep: 32_000,
+    maxOutputTokensPerStep: 1_200,
     maxProviderSteps: 1,
     imageCount: 0,
   },

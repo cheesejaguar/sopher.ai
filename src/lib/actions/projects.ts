@@ -110,7 +110,10 @@ const startBookSchema = z.object({
   protagonist: z.string().max(300).optional(),
   setting: z.string().max(300).optional(),
   targetChapters: z.number().int().min(3).max(60),
-  targetWordsPerChapter: z.number().int().min(800).max(8_000),
+  // Must track createProjectSchema and estimateRequestSchema: the wizard can
+  // quote a 750-word children's chapter, and a start that rejects what was
+  // quoted fails after the author has already approved the cost.
+  targetWordsPerChapter: z.number().int().min(400).max(8_000),
   settings: projectSettingsSchema.default({}),
 });
 

@@ -6,7 +6,12 @@ import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import type { ToolCtx } from "@/ai/tools";
-import { buildOutlineUserPrompt, OUTLINE_SYSTEM_PROMPT } from "@/ai/prompts/outline";
+import {
+  buildOutlineUserPrompt,
+  outlineGenreFraming,
+  OUTLINE_SYSTEM_PROMPT,
+} from "@/ai/prompts/outline";
+import { isNonFictionGenre } from "@/ai/knowledge/genres";
 import {
   bookOutlineSchema,
   chapterOutlineSchema,
@@ -141,6 +146,7 @@ function structurePlanPrompt(input: OutlineInput): string {
   const canonicalIds = PLOT_STRUCTURE_IDS.filter((id) => id !== "freytags_pyramid");
   const requested = input.plotStructure ? getTemplateSummary(input.plotStructure) : undefined;
   const genreNotes = input.genre ? outlinePromptAdditions(input.genre) : undefined;
+  const genreFraming = outlineGenreFraming(input.genre);
   const optionList = canonicalIds
     .map((id) => {
       const t = getPlotTemplate(id);
@@ -162,6 +168,7 @@ function structurePlanPrompt(input: OutlineInput): string {
       ? `## Authoring constraints\n${input.contentGuidelines}\nThe structure must make these constraints feasible.`
       : "",
     genreNotes ? genreNotes.trim() : "",
+    ...genreFraming,
     requested
       ? [
           `## Requested structure`,
@@ -185,6 +192,7 @@ function resolveStructureId(chosen: string, requested?: string): string {
 }
 
 function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: string): string {
+  const nonFiction = isNonFictionGenre(input.genre);
   const base = buildOutlineUserPrompt({
     concept: conceptText(input.concept),
     workingTitle: input.workingTitle,
@@ -217,9 +225,18 @@ function outlinePrompt(input: OutlineInput, plan: StructurePlan, structureId: st
         : []),
       `- Every chapter's targetWords within 20% of ${input.targetWordsPerChapter}.`,
       `- Set plotStructure to "${structureId}".`,
-      `- Place structure beats according to the act plan above.`,
+      nonFiction
+        ? `- Each chapter is a unit of meaning that advances the driving question. Do not place plot beats and do not build to a climax.`
+        : `- Place structure beats according to the act plan above.`,
       `- Hook chaining: each chapter's closingHook must raise the question that the next chapter's openingHook picks up.`,
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    // Re-stated last, after the hard requirements. `buildOutlineUserPrompt`
+    // places this framing at the end of `base` precisely so it survives a
+    // conflict — and then `base` becomes the *first* section here, putting the
+    // act-plan imperatives after the instruction that cancels them.
+    ...(nonFiction ? outlineGenreFraming(input.genre) : []),
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -262,6 +279,8 @@ function codeCheckIssues(
   targetWordsPerChapter: number,
   acts: StructurePlan["acts"],
   template: PlotTemplate | undefined,
+  /** Non-fiction is organized by meaning, not by beats, so climax placement is not a defect. */
+  nonFiction: boolean,
 ): string[] {
   const issues = productionShapeIssues(outline, chapterCount, targetWordsPerChapter);
   const sorted = [...acts].sort((a, b) => a.startChapter - b.startChapter);
@@ -277,7 +296,7 @@ function codeCheckIssues(
   if (!contiguous || cursor !== chapterCount + 1) {
     issues.push(`Act boundaries must cover chapters 1..${chapterCount} contiguously.`);
   }
-  if (template && chapterCount >= 5) {
+  if (template && chapterCount >= 5 && !nonFiction) {
     const climaxBeats = template.beats.filter((b) => b.typicalEmotionalArc === "climax");
     const finale = climaxBeats[climaxBeats.length - 1];
     if (finale) {
@@ -305,8 +324,10 @@ function selfCheckPrompt(
   template: PlotTemplate | undefined,
   issues: string[],
   contentGuidelines?: string,
+  genre?: string,
 ): string {
-  const summary = template ? getTemplateSummary(template.structureType) : undefined;
+  const nonFiction = isNonFictionGenre(genre);
+  const summary = template && !nonFiction ? getTemplateSummary(template.structureType) : undefined;
   const beatsSection = summary
     ? `## ${summary.name} beat positions (fraction of the story where each beat belongs)\n${JSON.stringify(
         summary.beats.map((b) => ({ name: b.name, percentage: b.percentage })),
@@ -322,11 +343,14 @@ function selfCheckPrompt(
     contentGuidelines
       ? `## Frozen authoring contract (must remain true after repairs)\n${contentGuidelines}`
       : "",
+    ...outlineGenreFraming(genre),
     [
       `## Verify`,
       `- Exactly ${chapterCount} chapters numbered 1..${chapterCount}.`,
       `- Every chapter's targetWords is within 20% of ${targetWordsPerChapter}.`,
-      `- Each beat lands in the chapter nearest its percentage of ${chapterCount} chapters, with a matching emotionalArc.`,
+      nonFiction
+        ? `- Each chapter is a unit of meaning that advances the driving question; do not impose plot beats or a climax.`
+        : `- Each beat lands in the chapter nearest its percentage of ${chapterCount} chapters, with a matching emotionalArc.`,
       `- Hook chaining: chapter N's closingHook must set up chapter N+1's openingHook; rewrite any hooks that do not chain.`,
     ].join("\n"),
     `Change only what these checks require; keep everything else exactly as written.`,
@@ -415,6 +439,7 @@ export async function generateOutline(
           input.targetWordsPerChapter,
           plan.acts,
           template,
+          isNonFictionGenre(input.genre),
         );
 
   // Production-shape errors are repaired at every tier. Draft skips the
@@ -435,6 +460,7 @@ export async function generateOutline(
             template,
             issues,
             input.contentGuidelines,
+            input.genre,
           ),
           maxOutputTokens: meteredMaxOutputTokens("outliner.selfCheck"),
           prepareStep: meteredInputGuard("outliner.selfCheck"),

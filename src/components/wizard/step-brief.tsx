@@ -4,6 +4,7 @@ import { genreLabel, type GenreId } from "@/lib/genres";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  CUSTOM_GENRE,
   MIN_BRIEF_LENGTH,
   type WizardActionEvent,
   type WizardState,
@@ -24,6 +25,16 @@ const BRIEF_PLACEHOLDERS: Record<GenreId, string> = {
     "A 'what if' worth following to its end. What's the technology or discovery, how has it changed daily life, and whose story shows it best?",
   horror:
     "The thing in the dark and the person who has to face it. Where does the dread live, and how much should the ending resolve?",
+  historical_fiction:
+    "A real time and place, and someone ordinary living inside it. When and where exactly, who are they, and what does their world forbid them?",
+  young_adult:
+    "Someone figuring out who they are, and the choice that forces it. What do they believe about themselves, and what proves it wrong?",
+  middle_grade:
+    "A kid, a problem too big for them, and the friends who help. What are they trying to do, and what do they learn they can do alone?",
+  childrens:
+    "Who is the story for, and who is the hero? Describe the one problem, the funny parts, and how you want a child to feel at the end.",
+  memoir:
+    "The true story you want to tell — the period it covers, the people in it, and the question you're still trying to answer about it.",
 };
 
 const DEFAULT_PLACEHOLDER =
@@ -37,7 +48,12 @@ export function StepBrief({
   dispatch: React.Dispatch<WizardActionEvent>;
 }) {
   const briefLength = state.brief.trim().length;
-  const placeholder = state.genre ? BRIEF_PLACEHOLDERS[state.genre] : DEFAULT_PLACEHOLDER;
+  // A custom genre has no template and therefore no tailored prompt; the
+  // generic one is the right thing to show rather than a blank field.
+  const placeholder =
+    state.genre && state.genre !== CUSTOM_GENRE
+      ? BRIEF_PLACEHOLDERS[state.genre]
+      : DEFAULT_PLACEHOLDER;
 
   return (
     <div className="space-y-4">

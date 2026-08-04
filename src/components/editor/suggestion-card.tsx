@@ -5,8 +5,10 @@ import { Check, Pencil, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { wordDiff } from "@/lib/editor/word-diff";
+import { suggestionGlossaryEntry, suggestionTypeLabel } from "@/lib/editor/suggestion-glossary";
 import type { SuggestionDTO } from "@/lib/editor/types";
 
 const severityDotClasses: Record<SuggestionDTO["severity"], string> = {
@@ -22,16 +24,36 @@ export const severityLabels: Record<SuggestionDTO["severity"], string> = {
   error: "Needs attention",
 };
 
-const typeLabels: Record<string, string> = {
-  line: "Line edit",
-  structure: "Structure",
-  continuity: "Continuity",
-  style: "Style",
-  selection: "Your request",
-};
+// Re-exported so the review panel keeps a single import for suggestion labels.
+export { suggestionTypeLabel };
 
-export function suggestionTypeLabel(type: string): string {
-  return typeLabels[type] ?? type;
+/**
+ * The suggestion type in plain words, with its glossary sentence attached.
+ *
+ * "Line edit" and "Word mix-up" are our vocabulary, not the author's, so the
+ * label is a definition control: hover or focus for the explanation. The
+ * tooltip is only wired as a description while it is open, so the sentence
+ * also sits in the accessible name — a screen reader gets it either way.
+ */
+function SuggestionTypeLabel({ type, touchFriendly }: { type: string; touchFriendly: boolean }) {
+  const { title, meaning } = suggestionGlossaryEntry(type);
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          type="button"
+          className={cn(
+            "rounded-sm text-xs font-medium text-ai underline decoration-ai/40 decoration-dotted underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            touchFriendly && "min-h-11",
+          )}
+        >
+          {title}
+          <span className="sr-only">. {meaning}</span>
+        </TooltipTrigger>
+        <TooltipContent side="top">{meaning}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 /**
@@ -109,9 +131,7 @@ export function SuggestionCard({
         <span className={cn("size-1.5 rounded-full", severityDotClasses[suggestion.severity])}>
           <span className="sr-only">{severityLabels[suggestion.severity]}.</span>
         </span>
-        <span className="text-xs font-medium text-ai">
-          {suggestionTypeLabel(suggestion.suggestionType)}
-        </span>
+        <SuggestionTypeLabel type={suggestion.suggestionType} touchFriendly={touchFriendly} />
         <span className="text-[10px] text-muted-foreground uppercase">
           {suggestion.passType === "selection" ? "selection edit" : `${suggestion.passType} pass`}
         </span>

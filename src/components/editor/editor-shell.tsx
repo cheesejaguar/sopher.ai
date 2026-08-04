@@ -102,7 +102,7 @@ function markdownStorage(editor: Editor): MarkdownEditorStorage {
   return (editor.storage as unknown as { markdown: MarkdownEditorStorage }).markdown;
 }
 
-type Busy = null | "edit" | "review" | "tool" | "apply";
+type Busy = null | "edit" | "review" | "proofread" | "tool" | "apply";
 
 const CARD_WIDTH = 384;
 const EMPTY_ITEMS: SuggestionItem[] = [];
@@ -745,6 +745,60 @@ export function EditorShell({
     [chapterId, chapterNumber],
   );
 
+  /**
+   * The mechanical pass: typos, agreement, punctuation. Deliberately separate
+   * from the editorial review — an author fixing spelling should not have to
+   * pay for, or wade through, structural notes.
+   */
+  const runProofread = useCallback(async () => {
+    setBusy("proofread");
+    setAnnouncement(`Proofreading chapter ${chapterNumber}…`);
+    try {
+      if (!(await autosaveRef.current.flush())) {
+        const message = "Couldn't save the chapter first — resolve the conflict.";
+        toast.error(message);
+        setAnnouncement(message);
+        return;
+      }
+      const { status, data, acknowledge } = await postJson<ReviewResponse & { error?: unknown }>(
+        `/api/chapters/${chapterId}/proofread`,
+        {},
+        true,
+      );
+      if (status !== 200 || !data.suggestions) {
+        const message =
+          status === 402
+            ? String(data.error ?? "Monthly budget reached.")
+            : "The proofread didn't complete — try again.";
+        toast.error(message);
+        setAnnouncement(message);
+        return;
+      }
+      setSuggestions((prev) => {
+        const seen = new Set(prev.map((s) => s.id));
+        return [...prev, ...data.suggestions.filter((s) => !seen.has(s.id))];
+      });
+      setAnnouncement(
+        data.suggestions.length === 0
+          ? "Proofread complete. Nothing to correct."
+          : `Proofread complete. ${data.suggestions.length} correction${
+              data.suggestions.length === 1 ? "" : "s"
+            } in the suggestions panel.`,
+      );
+      if (data.skipped > 0) {
+        toast.info(
+          `${data.skipped} correction${data.skipped === 1 ? "" : "s"} couldn't be anchored and were skipped.`,
+        );
+      }
+      if (data.suggestions.length === 0) {
+        toast.success("Proofread complete — no spelling or grammar problems found.");
+      }
+      acknowledge();
+    } finally {
+      setBusy(null);
+    }
+  }, [chapterId, chapterNumber]);
+
   const selectSuggestion = useCallback((id: string) => {
     setActiveId(id);
     setReviewOpen(false);
@@ -981,6 +1035,8 @@ export function EditorShell({
       reviewing={busy === "review"}
       busy={busy === "apply"}
       onReview={(instruction) => void runReview(instruction)}
+      proofreading={busy === "proofread"}
+      onProofread={() => void runProofread()}
       onSelect={selectSuggestion}
       onHover={setHoverId}
       onAccept={(id) => void acceptSuggestion(id)}
@@ -1028,7 +1084,14 @@ export function EditorShell({
 
   const findBar =
     findOpen && editor && isWideWorkbench ? (
-      <FindReplace editor={editor} onClose={() => setFindOpen(false)} />
+      <FindReplace
+        editor={editor}
+        onClose={() => setFindOpen(false)}
+        projectId={projectId}
+        chapterId={chapterId}
+        flushChapter={() => autosaveRef.current.flush()}
+        onCurrentChapterReplaced={(chapter) => applyServerChapter(chapter, suggestions)}
+      />
     ) : null;
 
   const mobileToolbar = (
@@ -1176,7 +1239,15 @@ export function EditorShell({
               <SheetTitle>Find and replace</SheetTitle>
               <SheetDescription>Search within chapter {chapterNumber}.</SheetDescription>
             </SheetHeader>
-            <FindReplace editor={editor} onClose={() => setFindOpen(false)} touchLayout />
+            <FindReplace
+              editor={editor}
+              onClose={() => setFindOpen(false)}
+              touchLayout
+              projectId={projectId}
+              chapterId={chapterId}
+              flushChapter={() => autosaveRef.current.flush()}
+              onCurrentChapterReplaced={(chapter) => applyServerChapter(chapter, suggestions)}
+            />
           </SheetContent>
         </Sheet>
       ) : null}

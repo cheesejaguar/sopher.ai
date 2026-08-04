@@ -306,6 +306,10 @@ export const chapters = pgTable(
       "gin",
       sql`to_tsvector('english', coalesce(${t.summary}, ''))`,
     ),
+    // Manuscript-wide search reads prose, not summaries. `content` is NOT NULL
+    // with a '' default, so the expression needs no coalesce — and it must stay
+    // byte-identical to the one in searchManuscript or the planner ignores it.
+    index("idx_chapters_content_fts").using("gin", sql`to_tsvector('english', ${t.content})`),
   ],
 );
 

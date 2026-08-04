@@ -2,7 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Download,
+  Merge,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Scissors,
+  Trash2,
+} from "lucide-react";
 
 import {
   AlertDialog,
@@ -16,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -25,17 +37,32 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { addChapter, deleteChapter, moveChapter, renameChapter } from "@/lib/actions/chapters";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  addChapter,
+  deleteChapter,
+  getChapterSplitPoints,
+  mergeChapterWithNext,
+  moveChapter,
+  renameChapter,
+  splitChapter,
+} from "@/lib/actions/chapters";
+import type { ChapterSplitPoint } from "@/lib/chapter-split";
 import { acknowledgePaidResponse, idempotentPaidFetch } from "@/lib/client/idempotent-paid-fetch";
+import { EXPORT_FORMATS, FORMAT_META } from "@/lib/export/types";
 import { useStudioSuspension } from "@/components/studio/studio-access-context";
 
 /**
- * Structural chapter actions: rename, reorder, insert, delete. Content is the
- * editor's job; this menu only rearranges the shelf.
+ * Structural chapter actions: rename, reorder, insert, split, merge, delete,
+ * and a single-chapter download. Content is the editor's job; this menu only
+ * rearranges the shelf and hands one chapter out of it.
  */
 export function ChapterMenu({
   projectId,
@@ -57,6 +84,13 @@ export function ChapterMenu({
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [regenOpen, setRegenOpen] = useState(false);
+  const [splitOpen, setSplitOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  /** null while the chapter's paragraph breaks are still being fetched. */
+  const [splitPoints, setSplitPoints] = useState<ChapterSplitPoint[] | null>(null);
+  const [splitOffset, setSplitOffset] = useState<string | null>(null);
+  /** The chapter version the offsets above were computed against. */
+  const [splitVersion, setSplitVersion] = useState<number | null>(null);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -71,6 +105,26 @@ export function ChapterMenu({
         router.refresh();
       } catch {
         setError("That didn't work — try again.");
+      }
+    });
+  }
+
+  // The menu lives in the sidebar and never sees the chapter text, so the split
+  // points are fetched when the dialog opens rather than pushed down as a prop.
+  function openSplit() {
+    setError(null);
+    setSplitPoints(null);
+    setSplitOffset(null);
+    setSplitVersion(null);
+    setSplitOpen(true);
+    startTransition(async () => {
+      try {
+        const { version, points } = await getChapterSplitPoints(chapterId);
+        setSplitPoints(points);
+        setSplitVersion(version);
+        setSplitOffset(points[0] ? String(points[0].offset) : null);
+      } catch {
+        setError("Couldn't read this chapter — try again.");
       }
     });
   }
@@ -112,6 +166,33 @@ export function ChapterMenu({
           >
             <Plus aria-hidden="true" className="size-3.5" /> Insert chapter after
           </DropdownMenuItem>
+          <DropdownMenuItem disabled={pending} onClick={openSplit}>
+            <Scissors aria-hidden="true" className="size-3.5" /> Split…
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={isLast || pending} onClick={() => setMergeOpen(true)}>
+            <Merge aria-hidden="true" className="size-3.5" /> Merge with next…
+          </DropdownMenuItem>
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <Download aria-hidden="true" className="size-3.5" /> Export chapter
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent>
+              {EXPORT_FORMATS.map((format) => (
+                <DropdownMenuItem
+                  key={format}
+                  render={
+                    <a
+                      href={`/api/chapters/${chapterId}/export?format=${format}`}
+                      download
+                      aria-label={`Download ${label} as ${FORMAT_META[format].label}`}
+                    />
+                  }
+                >
+                  {FORMAT_META[format].label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
           <DropdownMenuItem disabled={pending || suspended} onClick={() => setRegenOpen(true)}>
             <RefreshCw aria-hidden="true" className="size-3.5" />
             {suspended ? "Regenerate unavailable · account suspended" : "Regenerate…"}
@@ -166,6 +247,112 @@ export function ChapterMenu({
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={splitOpen} onOpenChange={setSplitOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Split {label}</DialogTitle>
+            <DialogDescription>
+              The paragraph you choose starts a new chapter {chapterNumber + 1}. Everything before
+              it stays here, and every chapter after it moves one number later. Today&rsquo;s text
+              is saved to the revision history first.
+            </DialogDescription>
+          </DialogHeader>
+          {splitPoints === null ? (
+            <p className="text-sm text-muted-foreground">Reading the chapter…</p>
+          ) : splitPoints.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              This chapter is one unbroken block of text. Add a paragraph break where the new
+              chapter should start, save, then split.
+            </p>
+          ) : (
+            <fieldset className="min-w-0" disabled={pending}>
+              <legend className="mb-1.5 text-sm font-medium">Start the new chapter at</legend>
+              <RadioGroup
+                value={splitOffset ?? ""}
+                onValueChange={(value) => setSplitOffset(String(value))}
+                className="max-h-64 gap-0 overflow-y-auto rounded-sm border border-border"
+              >
+                {splitPoints.map((point) => {
+                  const id = `ch-split-${chapterId}-${point.offset}`;
+                  return (
+                    <label
+                      key={point.offset}
+                      htmlFor={id}
+                      className="flex min-h-11 cursor-pointer items-start gap-3 border-b border-border p-3 text-sm leading-relaxed transition-colors last:border-b-0 hover:bg-accent/60"
+                    >
+                      <RadioGroupItem id={id} value={String(point.offset)} className="mt-1" />
+                      <span className="min-w-0 text-muted-foreground">{point.preview}</span>
+                    </label>
+                  );
+                })}
+              </RadioGroup>
+            </fieldset>
+          )}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setSplitOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pending || splitOffset === null || splitVersion === null}
+              onClick={() => {
+                if (splitOffset === null || splitVersion === null) return;
+                run(
+                  () => splitChapter(chapterId, Number(splitOffset), splitVersion),
+                  () => setSplitOpen(false),
+                );
+              }}
+            >
+              {pending ? "Splitting…" : "Split chapter"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={mergeOpen} onOpenChange={setMergeOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Merge chapter {chapterNumber + 1} into {label}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Chapter {chapterNumber + 1}&rsquo;s text is appended here and its slot closes, so
+              every chapter after it moves one number earlier. If it had a title, that title becomes
+              a heading in the merged prose. Both chapters are saved to this chapter&rsquo;s
+              revision history first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {error ? (
+            <p role="alert" className="px-6 text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={() => setMergeOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button
+              disabled={pending}
+              onClick={() =>
+                run(
+                  () => mergeChapterWithNext(chapterId),
+                  () => {
+                    setMergeOpen(false);
+                    router.push(`/projects/${projectId}/editor/${chapterNumber}`);
+                  },
+                )
+              }
+            >
+              {pending ? "Merging…" : "Merge chapters"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={regenOpen} onOpenChange={setRegenOpen}>
         <AlertDialogContent size="sm">

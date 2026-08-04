@@ -1,0 +1,12 @@
+-- Manuscript-wide search. Chapters have only ever been indexed on `summary`,
+-- so searching prose meant a sequential read of every chapter in the book.
+--
+-- Plain CREATE INDEX, not CONCURRENTLY: drizzle runs each migration inside a
+-- transaction, where CONCURRENTLY is not allowed. The write lock this takes is
+-- brief at current table size, and chapter writes are already serialized behind
+-- the project authoring lock.
+--
+-- The expression must stay byte-identical to the one in searchManuscript
+-- (src/lib/actions/manuscript-search.ts) — an expression index only applies to
+-- an exactly matching expression.
+CREATE INDEX "idx_chapters_content_fts" ON "chapters" USING gin (to_tsvector('english', "content"));

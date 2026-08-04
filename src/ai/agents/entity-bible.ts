@@ -5,6 +5,7 @@ import { withDbTransaction, type DbTransaction } from "@/db";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
+import { isNonFictionGenre } from "@/ai/knowledge/genres";
 import { bibleEntitySchema, RELATIONSHIP_TYPES } from "@/ai/schemas/entities";
 import type { BookConcept, BookOutline } from "@/ai/schemas";
 import { applyEntityDeltas, enrichEntities, type EntitySeed } from "@/db/queries/entities";
@@ -18,6 +19,11 @@ import { applyEntityDeltas, enrichEntities, type EntitySeed } from "@/db/queries
  * they to the story, what do they do, what do they look like, what heritage do
  * they come from — and, crucially, names are *derived* from the entities they
  * are related to rather than picked in isolation.
+ *
+ * Non-fiction inverts that last part. In a memoir the people are real and their
+ * names are facts the author supplied, so derivation becomes fabrication. The
+ * override rides in the user prompt, never the instructions, because the
+ * instructions are a prompt-cache prefix that must not vary per book.
  */
 
 const bibleSchema = z.object({
@@ -65,6 +71,18 @@ function bibleInstructions(): string {
   ].join("\n");
 }
 
+/** Cancels the name-derivation and gap-filling mandates for a true account. */
+const NON_FICTION_BIBLE_OVERRIDE = [
+  `## This Is A True Account — Names And Facts Are Given, Not Derived`,
+  `Everyone and everywhere in this book is real. Where your instructions describe deriving names and establishing canon, the following replaces that:`,
+  `- Use exactly the names the concept and outline supply. Never derive, complete, regularize, or "improve" a name, and never coin one from heritage, family ties, or region.`,
+  `- Someone who appears without a full name keeps the name they were given — a first name, a role, "my grandmother". An incomplete real name is correct; an invented surname is an error.`,
+  `- Record only the relationships the source states. Do not infer a shared surname from a stated family tie, or a tie from a shared surname.`,
+  `- nameRationale records where the name came from in the author's material, not how it was constructed.`,
+  `- Do not add people, places, objects, organizations, or events the concept and outline do not contain.`,
+  `- Attributes come from the material. Where appearance, background, or heritage is not established, say so plainly instead of filling it in — a plausible invention here becomes false canon every later chapter repeats.`,
+].join("\n");
+
 /**
  * Derives the initial cast and world. Runs once, after the outline, before any
  * chapter is drafted.
@@ -111,6 +129,10 @@ export async function generateEntityBible(input: {
           input.existingNames?.length
             ? `## Established names\nUse these exact names when they refer to the same entity; do not invent near-duplicates. Return and fully enrich every established main character from the concept cast.\n${input.existingNames.join(", ")}`
             : "",
+          ``,
+          // Last before the instruction, so it wins any conflict with the
+          // fiction-shaped guidance above it.
+          isNonFictionGenre(input.genre) ? NON_FICTION_BIBLE_OVERRIDE : "",
           ``,
           `Produce the story bible: every character named in the outline, every location the story visits, every object that carries weight, plus any organizations and named events. Then the relationships between them.`,
         ]

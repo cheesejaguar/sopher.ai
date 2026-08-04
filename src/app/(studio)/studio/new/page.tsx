@@ -3,33 +3,19 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { NewBookWizard } from "@/components/wizard/new-book-wizard";
+import { ImportDialog } from "@/components/studio/import-dialog";
 import type { WizardState } from "@/components/wizard/wizard-state";
 import { GENRE_IDS, type GenreId } from "@/ai/knowledge/genres";
 import { getDb, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
+import { projectCarryForwardSetup } from "@/lib/project-carry-forward";
 import { getStudioAccess } from "@/lib/studio-access";
 import { clerkEnabled } from "@/lib/clerk";
 
 export const metadata: Metadata = {
   title: "A new book",
 };
-
-function editableBrief(source: {
-  brief: string | null;
-  subgenre: string | null;
-  protagonist: string | null;
-  setting: string | null;
-}): string {
-  const brief = source.brief?.trim() ?? "";
-  const extras: string[] = [];
-  if (source.subgenre) extras.push(`Subgenre: ${source.subgenre}.`);
-  if (source.protagonist?.trim()) extras.push(`Protagonist: ${source.protagonist.trim()}.`);
-  if (source.setting?.trim()) extras.push(`Setting: ${source.setting.trim()}.`);
-  if (extras.length === 0) return brief;
-  const suffix = `\n\n${extras.join("\n")}`;
-  return brief.endsWith(suffix) ? brief.slice(0, -suffix.length).trimEnd() : brief;
-}
 
 /**
  * The genre landing pages link here with ?genre=, so someone who arrived from a
@@ -65,6 +51,10 @@ export default async function NewBookPage({
   const { userId } = await requireUser();
   const access = await getStudioAccess(userId);
   const sourceProjectId = z.uuid().safeParse(from).success ? from : undefined;
+  // Any book the author owns can seed the next one — the included story was
+  // only ever the first case of that. Ownership is matched in the query rather
+  // than checked afterwards, so guessing an id reads nothing at all, and the
+  // full-book entitlement still decides whether a second book may be started.
   const [sourceProject] =
     access.fullBookUnlocked && sourceProjectId
       ? await getDb()
@@ -75,38 +65,32 @@ export default async function NewBookPage({
             subgenre: schema.projects.subgenre,
             protagonist: schema.projects.protagonist,
             setting: schema.projects.setting,
+            experience: schema.projects.experience,
+            targetChapters: schema.projects.targetChapters,
+            targetWordsPerChapter: schema.projects.targetWordsPerChapter,
+            settings: schema.projects.settings,
           })
           .from(schema.projects)
-          .where(
-            and(
-              eq(schema.projects.id, sourceProjectId),
-              eq(schema.projects.userId, userId),
-              eq(schema.projects.experience, "trial_short_story"),
-            ),
-          )
+          .where(and(eq(schema.projects.id, sourceProjectId), eq(schema.projects.userId, userId)))
           .limit(1)
       : [];
-  const carriedGenre =
-    sourceProject && (GENRE_IDS as readonly string[]).includes(sourceProject.genre ?? "")
-      ? (sourceProject.genre as GenreId)
-      : null;
   const initialSetup: Partial<WizardState> | undefined = sourceProject
-    ? {
-        title: sourceProject.title,
-        brief: editableBrief(sourceProject),
-        genre: carriedGenre,
-        subgenre: sourceProject.subgenre,
-        protagonist: sourceProject.protagonist ?? "",
-        setting: sourceProject.setting ?? "",
-      }
+    ? projectCarryForwardSetup(sourceProject)
     : undefined;
+  const carriedFromIncludedStory = sourceProject?.experience === "trial_short_story";
+  const carriedTitle = carriedFromIncludedStory
+    ? "Take your story to full length"
+    : "Start another book from this one";
+  const carriedDescription = carriedFromIncludedStory
+    ? "Your title, genre, and brief are carried forward. Confirm the genre on Step 1, review the title and brief on Step 2, then choose the full-length shape and quality."
+    : "Its title, genre, brief, and writing settings are carried forward. The book you started from is untouched — its chapters and history stay exactly where they are.";
   const includedStory = access.creationExperience === "trial_short_story";
   const existingIncludedStory = access.reason === "trial_exists";
   const verificationRequired = access.reason === "verify_email";
   const pageTitle = includedStory
     ? "Your included short story"
     : initialSetup
-      ? "Take your story to full length"
+      ? carriedTitle
       : existingIncludedStory
         ? "Your next story"
         : verificationRequired
@@ -115,7 +99,7 @@ export default async function NewBookPage({
   const pageDescription = includedStory
     ? "Four short steps from an idea to a complete story. Nothing runs until you review the production plan."
     : initialSetup
-      ? "Your title, genre, and brief are carried forward. Confirm the genre on Step 1, review the title and brief on Step 2, then choose the full-length shape and quality."
+      ? carriedDescription
       : existingIncludedStory
         ? access.trialProjectCompleted
           ? "Your included story is complete. Keep reading or editing it, or carry it into a full-length production."
@@ -131,6 +115,14 @@ export default async function NewBookPage({
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
           {pageDescription}
         </p>
+        {/* An author who already has a draft should not have to describe it to
+            us in a brief. Offered here rather than buried, because the wizard
+            below assumes a book that does not exist yet. */}
+        {access.fullBookUnlocked ? (
+          <div className="mt-5">
+            <ImportDialog />
+          </div>
+        ) : null}
       </header>
 
       <NewBookWizard
@@ -140,6 +132,7 @@ export default async function NewBookPage({
         access={access}
         accountManagementEnabled={clerkEnabled}
         resumeAfterCheckout={resumeAfterCheckout}
+        carriedFromIncludedStory={carriedFromIncludedStory}
         e2eStartMode={e2eStartMode}
       />
     </div>
