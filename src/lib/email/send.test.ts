@@ -5,6 +5,11 @@ const notificationMocks = vi.hoisted(() => ({
   claim: vi.fn().mockResolvedValue("claim-token"),
   settle: vi.fn().mockResolvedValue(undefined),
 }));
+const callerMocks = vi.hoisted(() => ({
+  select: vi.fn(),
+  resolveAction: vi.fn(),
+  terminalize: vi.fn(),
+}));
 
 vi.mock("resend", () => ({
   Resend: class {
@@ -15,6 +20,28 @@ vi.mock("@/lib/notification-preferences", () => ({
   claimAuthoringNotificationDelivery: notificationMocks.claim,
   settleAuthoringNotificationDelivery: notificationMocks.settle,
 }));
+// The two production callers below are exercised for real; only their edges —
+// the database, the journey lookup and the terminal transition — are stubbed.
+vi.mock("@/db", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/db")>()),
+  getDb: () => ({ select: callerMocks.select }),
+}));
+vi.mock("@/lib/authoring-email-action", () => ({
+  resolveAuthoringEmailAction: callerMocks.resolveAction,
+}));
+vi.mock("@/lib/generation-runs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/generation-runs")>()),
+  terminalizeAuthoringRun: callerMocks.terminalize,
+}));
+
+import {
+  DEGRADATION_CODES,
+  degradationNotice,
+  type DegradedPass,
+} from "@/lib/authoring-degradation";
+import { authoringFailureExplanation } from "@/lib/authoring-failures";
+import { reconcileAuthoringRun, type RunHealth } from "@/lib/run-health";
+import { notifyAuthoringFailureStep } from "@/workflows/notify-authoring-failure";
 
 import {
   escapeEmailHtml,
@@ -220,6 +247,188 @@ describe("transactional email safety", () => {
     expect(message.html).not.toContain("/editor");
   });
 
+  it("names the cause and rules out a pointless retry for a deterministic failure", async () => {
+    await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      runId: "run-continuity",
+      savedChapterCount: 12,
+      creditsUsed: 10.74,
+      noWorkStarted: false,
+      supportReference: "SPH-CONTINUITY",
+      nextActionHref: "/projects/project-1/write",
+      nextActionLabel: "Resume from saved work",
+      errorCode: "provider_output_invalid",
+      errorStage: "continuity",
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).toContain(
+      "The Studio could not read the answer it got back during the final read-through for continuity.",
+    );
+    expect(message.html).toContain("Trying again right now would end the same way");
+    expect(message.html).not.toContain("finish reason");
+    expect(message.html).not.toContain("provider_output_invalid");
+  });
+
+  it("gives the same next step the recovery card gives, for every recorded cause", async () => {
+    // Content filtering and the input limit are the two causes whose next step
+    // is the only actionable thing an author has: neither clears on a retry.
+    for (const errorCode of [
+      "provider_content_filtered",
+      "provider_input_limit",
+      "provider_output_invalid",
+      "provider_rate_limited",
+      undefined,
+    ]) {
+      sendMock.mockClear();
+      await sendAuthoringNeedsAttentionEmail({
+        userId: "user-1",
+        to: "author@example.com",
+        bookTitle: "The Crossing",
+        runId: `run-${errorCode ?? "unknown"}`,
+        savedChapterCount: 12,
+        creditsUsed: 10.74,
+        noWorkStarted: false,
+        supportReference: "SPH-NEXT-STEP",
+        nextActionHref: "/projects/project-1/write",
+        nextActionLabel: "Resume from saved work",
+        errorCode,
+        errorStage: "continuity",
+      });
+
+      const [message] = sendMock.mock.calls[0] as [{ html: string }];
+      const explanation = authoringFailureExplanation({
+        errorCode,
+        errorStage: "continuity",
+        savedChapterCount: 12,
+      });
+      expect(message.html).toContain(explanation.nextStep);
+    }
+  });
+
+  it("tells an author to wait when the provider was the problem", async () => {
+    await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      runId: "run-busy",
+      savedChapterCount: 4,
+      creditsUsed: 2,
+      noWorkStarted: false,
+      supportReference: "SPH-BUSY",
+      nextActionHref: "/projects/project-1/write",
+      nextActionLabel: "Resume from saved work",
+      errorCode: "provider_rate_limited",
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).toContain("The writing service was too busy to take the request.");
+    expect(message.html).toContain("wait a few minutes, then try again");
+  });
+
+  it("still says something useful when no cause was recorded", async () => {
+    await sendAuthoringNeedsAttentionEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      runId: "run-unknown",
+      savedChapterCount: 2,
+      creditsUsed: 1,
+      noWorkStarted: false,
+      supportReference: "SPH-UNKNOWN",
+      nextActionHref: "/projects/project-1/write",
+      nextActionLabel: "Resume from saved work",
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).toContain("Production stopped before the manuscript was finished.");
+    expect(message.html).toContain("This is worth trying again.");
+  });
+
+  it("claims the book was edited only when the editing pass actually finished", async () => {
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-clean",
+      chapterCount: 12,
+      wordCount: 13919,
+    });
+    const [clean] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(clean.html).toContain("is written, edited, and waiting for you.");
+
+    sendMock.mockClear();
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-unedited",
+      chapterCount: 12,
+      wordCount: 13919,
+      degradations: [
+        {
+          stage: "editing",
+          code: DEGRADATION_CODES.editorial_pass_incomplete,
+          reason: "editor.chapter_pass exhausted its attempts",
+        },
+      ],
+    });
+    const [degraded] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(degraded.html).toContain("is written and waiting for you.");
+    expect(degraded.html).not.toContain("edited, and waiting");
+    expect(degraded.html).toContain(degradationNotice(DEGRADATION_CODES.editorial_pass_incomplete));
+    // The operator reason names a step and its attempts; it belongs in the run
+    // row, not in the author's inbox.
+    expect(degraded.html).not.toContain("editor.chapter_pass");
+  });
+
+  it("names a skipped finishing pass without unsaying the editing that did happen", async () => {
+    const degradations: readonly DegradedPass[] = [
+      {
+        stage: "continuity",
+        code: DEGRADATION_CODES.continuity_review_unavailable,
+        reason: "continuity.narrative_structure could not produce a report",
+      },
+    ];
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-no-continuity",
+      chapterCount: 12,
+      wordCount: 13919,
+      degradations,
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).toContain("is written, edited, and waiting for you.");
+    expect(message.html).toContain(
+      degradationNotice(DEGRADATION_CODES.continuity_review_unavailable),
+    );
+    expect(message.html).not.toContain("narrative_structure");
+  });
+
+  it("says nothing about skipped passes when the run was clean", async () => {
+    await sendBookFinishedEmail({
+      userId: "user-1",
+      to: "author@example.com",
+      bookTitle: "The Crossing",
+      projectId: "project-1",
+      runId: "run-clean-2",
+      chapterCount: 12,
+      wordCount: 13919,
+      degradations: [],
+    });
+
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).not.toMatch(/couldn't|could not/i);
+  });
+
   it("suppresses an optional notice before Resend and durably keeps its event decision", async () => {
     notificationMocks.claim.mockResolvedValue(null);
 
@@ -290,3 +499,183 @@ describe("transactional email safety", () => {
     expect(sendMock.mock.calls[0]?.[1]).toEqual({ idempotencyKey: "receipt-1" });
   });
 });
+
+/**
+ * Every test above calls `sendAuthoringNeedsAttentionEmail` directly, so all of
+ * them passed while both production callers silently omitted `errorCode` — and
+ * every real "needs attention" email told the author to try again, including
+ * for `provider_output_invalid`, where the in-app recovery card says the exact
+ * opposite. These drive the callers instead, and assert against the same
+ * `authoringFailureExplanation` call the card makes rather than against a
+ * hardcoded sentence, so the two surfaces cannot drift apart again.
+ */
+describe("the needs-attention email, driven by its real callers", () => {
+  /** A drizzle builder stub: every stage chains, and awaiting any stage yields. */
+  function queryStub(rows: Record<string, unknown>[]) {
+    const chain: Record<string, unknown> = {
+      then: (resolve: (value: Record<string, unknown>[]) => unknown) =>
+        Promise.resolve(rows).then(resolve),
+    };
+    for (const method of ["from", "innerJoin", "leftJoin", "where", "orderBy", "limit"]) {
+      chain[method] = () => chain;
+    }
+    return chain;
+  }
+
+  /** What the recovery card renders for the failure that killed the 08-04 run. */
+  const cardExplanation = authoringFailureExplanation({
+    errorCode: "provider_output_invalid",
+    errorStage: "continuity",
+    savedChapterCount: 12,
+  });
+
+  function expectMatchesRecoveryCard() {
+    expect(cardExplanation.retry).toBe("not_worth_retrying");
+    expect(sendMock).toHaveBeenCalledOnce();
+    const [message] = sendMock.mock.calls[0] as [{ html: string }];
+    expect(message.html).toContain(cardExplanation.cause);
+    expect(message.html).toContain(cardExplanation.retryStatement);
+    // The default the email fell back to while the callers passed nothing.
+    expect(message.html).not.toContain("This is worth trying again.");
+    expect(message.html).not.toContain(
+      "Production stopped before the manuscript was finished during the final read-through for continuity.",
+    );
+    // Diagnostics belong in the support handoff, never in author-facing copy.
+    expect(message.html).not.toContain("provider_output_invalid");
+  }
+
+  beforeEach(() => {
+    process.env.RESEND_API_KEY = "test-key";
+    sendMock.mockClear();
+    notificationMocks.claim.mockReset().mockResolvedValue("claim-token");
+    notificationMocks.settle.mockReset().mockResolvedValue(undefined);
+    callerMocks.select.mockReset();
+    callerMocks.terminalize.mockReset().mockResolvedValue(undefined);
+    callerMocks.resolveAction.mockReset().mockResolvedValue({
+      href: "/projects/project-1/write",
+      label: "Resume from saved work",
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.RESEND_API_KEY;
+  });
+
+  it("carries the workflow step's recorded cause into the email", async () => {
+    callerMocks.select
+      .mockReturnValueOnce(
+        queryStub([
+          {
+            email: "author@example.com",
+            title: "The Crossing",
+            supportReference: "SPH-STEP",
+            status: "failed",
+            savedChapterCount: 12,
+            rootErrorCode: "provider_output_invalid",
+            rootErrorStage: "continuity",
+          },
+        ]),
+      )
+      .mockReturnValueOnce(queryStub([{ creditsUsed: 10.74 }]));
+
+    await notifyAuthoringFailureStep({
+      dbRunId: "run-step",
+      projectId: "project-1",
+      userId: "user-1",
+    });
+
+    expectMatchesRecoveryCard();
+  });
+
+  it("carries the watchdog's recorded cause into the email", async () => {
+    callerMocks.select.mockReturnValueOnce(
+      queryStub([{ email: "author@example.com", title: "The Crossing" }]),
+    );
+
+    await reconcileAuthoringRun(
+      {
+        id: "run-watchdog",
+        projectId: "project-1",
+        userId: "user-1",
+        kind: "full_book",
+        // Not a v2/v3 protocol, so the input-redelivery probe stops before it
+        // would need the database.
+        config: { protocolVersion: 1 },
+      } as never,
+      {
+        getHealth: async () =>
+          failedHealth({
+            rootErrorCode: "provider_output_invalid",
+            rootErrorStage: "continuity",
+          }),
+      },
+    );
+
+    expect(callerMocks.terminalize).toHaveBeenCalledOnce();
+    expectMatchesRecoveryCard();
+  });
+
+  it("falls back to the live stage when only the code was recorded", async () => {
+    callerMocks.select.mockReturnValueOnce(
+      queryStub([{ email: "author@example.com", title: "The Crossing" }]),
+    );
+
+    await reconcileAuthoringRun(
+      {
+        id: "run-nostage",
+        projectId: "project-1",
+        userId: "user-1",
+        kind: "full_book",
+        config: {},
+      } as never,
+      {
+        getHealth: async () =>
+          failedHealth({ rootErrorCode: "provider_output_invalid", rootErrorStage: null }),
+      },
+    );
+
+    // `stage` is "continuity", so the card and the email name the same place.
+    expectMatchesRecoveryCard();
+  });
+});
+
+function failedHealth(overrides: Partial<RunHealth>): RunHealth {
+  return {
+    databaseStatus: "running",
+    workflowStatus: "failed",
+    effectiveStatus: "running",
+    acceptedAt: "2026-08-04T12:00:00.000Z",
+    startedAt: "2026-08-04T12:00:01.000Z",
+    completedAt: null,
+    workflowStartedAt: "2026-08-04T12:00:01.000Z",
+    workflowCompletedAt: null,
+    lastEventAt: "2026-08-04T12:40:00.000Z",
+    heartbeatAt: "2026-08-04T12:40:00.000Z",
+    lastUpdateAt: "2026-08-04T12:40:00.000Z",
+    elapsedMs: 2_400_000,
+    estimatedMinutes: null,
+    stage: "continuity",
+    progressPct: 96,
+    stageDescription: null,
+    chapters: { total: 12, planned: 0, drafting: 0, drafted: 0, edited: 12, final: 0 },
+    spend: { meteredUsd: 3.2, creditsUsed: 10.74 },
+    authoringBegan: true,
+    noWorkStarted: false,
+    acceptanceUncertain: false,
+    safeToRetry: false,
+    completionArtifactsReady: false,
+    completionEvidence: null,
+    health: "critical",
+    dispatchAttempts: 1,
+    workflowMissingCount: 0,
+    workflowMissingSince: null,
+    cancellation: null,
+    pause: null,
+    savedChapterCount: 12,
+    savedCheckpointCount: 12,
+    supportReference: "SPH-WATCHDOG",
+    rootErrorCode: null,
+    rootErrorStage: null,
+    ...overrides,
+  };
+}

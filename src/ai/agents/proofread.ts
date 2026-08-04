@@ -11,6 +11,15 @@ import {
   PROOFREAD_CATEGORIES,
   PROOFREAD_SYSTEM_PROMPT,
 } from "@/ai/prompts/proofread";
+import {
+  asRecord,
+  coerceArray,
+  coerceNonEmptyString,
+  coerceString,
+  compact,
+  oneOfOr,
+  truncateArray,
+} from "@/ai/schemas/normalize";
 
 export const PROOFREAD_OPERATION = "editor.proofread";
 
@@ -21,23 +30,27 @@ export type ProofreadChapterInput = {
   content: string;
 };
 
+const MIN_PROOFREAD_ANCHOR_CHARS = 12;
+const MAX_PROOFREAD_SENTENCE_CHARS = 1_000;
+export const PROOFREAD_SEVERITIES = ["info", "warning", "error"] as const;
+
 export const proofreadSuggestionListSchema = z.object({
   corrections: z
     .array(
       z.object({
         anchorText: z
           .string()
-          .min(12)
-          .max(1_000)
+          .min(MIN_PROOFREAD_ANCHOR_CHARS)
+          .max(MAX_PROOFREAD_SENTENCE_CHARS)
           .describe("One whole sentence copied character for character from the chapter"),
         replacement: z
           .string()
           .min(1)
-          .max(1_000)
+          .max(MAX_PROOFREAD_SENTENCE_CHARS)
           .describe("That same sentence with the error corrected"),
         rationale: z.string().describe("One line naming the error in plain words"),
         category: z.enum(PROOFREAD_CATEGORIES),
-        severity: z.enum(["info", "warning", "error"]),
+        severity: z.enum(PROOFREAD_SEVERITIES),
       }),
     )
     .max(MAX_PROOFREAD_SUGGESTIONS),
@@ -45,6 +58,96 @@ export const proofreadSuggestionListSchema = z.object({
 
 export type ProofreadSuggestionList = z.infer<typeof proofreadSuggestionListSchema>;
 export type ProofreadCorrection = ProofreadSuggestionList["corrections"][number];
+
+const wireText = z.string().nullish();
+
+/**
+ * Permissive twin of `proofreadSuggestionListSchema` for the provider call.
+ *
+ * Anthropic's structured-output path strips every `.min` / `.max` and does not
+ * enforce `z.enum` from the JSON schema it is handed, so the model never sees
+ * the caps it is being held to. Re-validating the strict schema on the way back
+ * is therefore the only enforcement, and it is deterministic: a twenty-sixth
+ * correction, or a severity spelled "critical", fails identically on every
+ * retry and bills the author for each one. The caps live in `.describe()` text
+ * — which does survive into the provider schema — and
+ * `normalizeProofreadSuggestionList` is what actually enforces them.
+ *
+ * Every field is optional and nullable because JSON-schema validation is
+ * all-or-nothing: one missing `rationale` would otherwise discard a whole page
+ * of usable corrections that the normalizer can salvage entry by entry.
+ *
+ * This lives here rather than in `@/ai/schemas` on purpose — the constants it
+ * describes come from `@/ai/prompts/proofread`, and pulling agent-side imports
+ * into that very broadly imported module would drag `ai`, metering and the db
+ * along with them.
+ */
+export const proofreadSuggestionListWireSchema = z.object({
+  corrections: z
+    .array(
+      z.object({
+        anchorText: wireText.describe(
+          "One whole sentence copied character for character from the chapter",
+        ),
+        replacement: wireText.describe("That same sentence with the error corrected"),
+        rationale: wireText.describe("One line naming the error in plain words"),
+        category: wireText.describe(`One of: ${PROOFREAD_CATEGORIES.join(", ")}`),
+        severity: wireText.describe(`One of: ${PROOFREAD_SEVERITIES.join(", ")}`),
+      }),
+    )
+    .nullish()
+    .describe(`At most ${MAX_PROOFREAD_SUGGESTIONS} corrections, in reading order`),
+});
+export type ProofreadSuggestionListWire = z.infer<typeof proofreadSuggestionListWireSchema>;
+
+function normalizeProofreadCorrection(wire: unknown): ProofreadCorrection | null {
+  const correction = asRecord(wire);
+  const anchorText = coerceNonEmptyString(correction.anchorText);
+  // Too short to locate a sentence in the chapter — resolveProofreadAnchors
+  // would claim the first stray match of a fragment and rewrite the wrong line.
+  if (!anchorText || anchorText.length < MIN_PROOFREAD_ANCHOR_CHARS) return null;
+  // A *missing* replacement must never be defaulted to "": that is the whole
+  // sentence deleted from the manuscript under a "typo" label. An empty or
+  // blank replacement means the same thing and is not a mechanical correction
+  // either, so both drop rather than being applied.
+  if (typeof correction.replacement !== "string") return null;
+  const replacement = correction.replacement;
+  if (!replacement.trim()) return null;
+  // Truncating either side would corrupt the edit rather than salvage it: a cut
+  // anchor is no longer the verbatim quote anchoring depends on, and a cut
+  // replacement would splice half a sentence into the author's prose. An
+  // over-long pair is also not the single sentence the prompt asked for.
+  if (
+    anchorText.length > MAX_PROOFREAD_SENTENCE_CHARS ||
+    replacement.length > MAX_PROOFREAD_SENTENCE_CHARS
+  ) {
+    return null;
+  }
+  return {
+    anchorText,
+    replacement,
+    rationale: coerceString(correction.rationale),
+    // Both labels are presentational, so an unreadable one costs the author a
+    // tidy heading, not a real correction. `grammar` is the broadest mechanical
+    // bucket; `warning` is defined as "almost certainly an error, but a
+    // deliberate choice is conceivable" — exactly what an unlabelled fix is,
+    // and it neither dismisses a "critical" nor cries error over an "info".
+    category: oneOfOr(correction.category, PROOFREAD_CATEGORIES, "grammar"),
+    severity: oneOfOr(correction.severity, PROOFREAD_SEVERITIES, "warning"),
+  };
+}
+
+export function normalizeProofreadSuggestionList(wire: unknown): ProofreadSuggestionList {
+  const value = asRecord(wire);
+  return {
+    // Unusable entries drop before the cap, so twenty-five *applicable*
+    // corrections survive a response that also carried a few malformed ones.
+    corrections: truncateArray(
+      compact(coerceArray(value.corrections).map(normalizeProofreadCorrection)),
+      MAX_PROOFREAD_SUGGESTIONS,
+    ),
+  };
+}
 
 export type ResolvedProofreadCorrection = {
   correction: ProofreadCorrection;
@@ -197,10 +300,10 @@ export async function proofreadChapter(
         }),
         maxOutputTokens: meteredMaxOutputTokens(PROOFREAD_OPERATION),
         prepareStep: meteredInputGuard(PROOFREAD_OPERATION),
-        output: Output.object({ schema: proofreadSuggestionListSchema }),
+        output: Output.object({ schema: proofreadSuggestionListWireSchema }),
         providerOptions: gatewayOptions(input.meter, "editor"),
       }),
   );
 
-  return result.output;
+  return normalizeProofreadSuggestionList(result.output);
 }

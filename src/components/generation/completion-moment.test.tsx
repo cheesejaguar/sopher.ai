@@ -153,3 +153,50 @@ describe("CompletionMoment", () => {
     );
   });
 });
+
+describe("skipped finishing steps", () => {
+  const props = { projectId: "p1", projectTitle: "The Lantern Coast", chapterCount: 12 };
+
+  it("says nothing when every pass ran", () => {
+    render(<CompletionMoment {...props} />);
+    expect(screen.queryByText(/finishing step/i)).not.toBeInTheDocument();
+  });
+
+  it("tells the author which step was skipped, without calling the book a failure", () => {
+    // The 2026-08-04 shape: the manuscript is finished, the consistency review
+    // is not. Silence here would be its own failure — the author would never
+    // learn their book skipped a pass they paid for.
+    render(
+      <CompletionMoment
+        {...props}
+        notices={[
+          {
+            code: "continuity_review_unavailable",
+            message:
+              "We couldn't complete the consistency review, so your book was finished without it.",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Your book is written.")).toBeInTheDocument();
+    expect(screen.getByText("One finishing step was skipped")).toBeInTheDocument();
+    expect(screen.getByText(/couldn't complete the consistency review/)).toBeInTheDocument();
+    // Still a completion, not a recovery screen.
+    expect(screen.getByRole("button", { name: "Open your manuscript" })).toBeInTheDocument();
+  });
+
+  it("counts several skipped steps and lists each one", () => {
+    render(
+      <CompletionMoment
+        {...props}
+        notices={[
+          { code: "editorial_pass_incomplete", message: "Editing did not finish." },
+          { code: "continuity_review_unavailable", message: "The review did not run." },
+        ]}
+      />,
+    );
+    expect(screen.getByText("2 finishing steps were skipped")).toBeInTheDocument();
+    expect(screen.getByText("Editing did not finish.")).toBeInTheDocument();
+    expect(screen.getByText("The review did not run.")).toBeInTheDocument();
+  });
+});

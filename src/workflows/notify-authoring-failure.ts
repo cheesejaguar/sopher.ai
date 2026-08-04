@@ -25,6 +25,11 @@ export async function notifyAuthoringFailureStep(ref: {
           title: schema.projects.title,
           supportReference: schema.generationRuns.supportReference,
           status: schema.generationRuns.status,
+          // The recorded initiating cause. Without it the email falls back to
+          // generic "worth trying again" wording, which contradicts the
+          // in-app recovery card on every deterministic failure.
+          rootErrorCode: schema.generationRuns.rootErrorCode,
+          rootErrorStage: schema.generationRuns.rootErrorStage,
           savedChapterCount: sql<number>`(
             select count(*)::int
             from ${schema.chapters}
@@ -69,6 +74,8 @@ export async function notifyAuthoringFailureStep(ref: {
       supportReference: facts.supportReference,
       nextActionHref: nextAction.href,
       nextActionLabel: nextAction.label,
+      errorCode: facts.rootErrorCode,
+      errorStage: facts.rootErrorStage,
     });
   } catch (error) {
     // Notification is action guidance, not part of the authoring transaction.

@@ -2,24 +2,24 @@ import path from "node:path";
 
 import { defineConfig } from "vitest/config";
 
+/**
+ * Real-Neon integration suite (CI job `e2e-db`).
+ *
+ * The include list used to be thirteen hardcoded paths, which meant a new
+ * `*.integration.test.ts` was never run — it was skipped silently, with a green
+ * CI, until someone noticed. Globbing instead makes new files run by default;
+ * the guard in tests/test-config-coverage.test.ts fails if a file ends up
+ * claimed by neither integration runner.
+ *
+ * `src/workflows/` is excluded because those specs drive the Workflow DevKit
+ * runtime (`workflow/api`) and need the `@workflow/vitest` plugin supplied by
+ * vitest.integration.config.ts — they are not database tests.
+ */
 export default defineConfig({
   test: {
     environment: "node",
-    include: [
-      "src/db/index.integration.test.ts",
-      "src/lib/run-health.integration.test.ts",
-      "src/lib/authoring-reliability.integration.test.ts",
-      "src/lib/authoring-fault-matrix.integration.test.ts",
-      "src/lib/authoring-tool-mutation.integration.test.ts",
-      "src/lib/authoring-stream-leases.integration.test.ts",
-      "src/lib/chapter-review-delivery.integration.test.ts",
-      "src/lib/publication-editions.integration.test.ts",
-      "src/lib/export-dispatch.integration.test.ts",
-      "src/lib/account-deletion.integration.test.ts",
-      "src/lib/clerk-deletion-finalizer.integration.test.ts",
-      "src/lib/actions/books.integration.test.ts",
-      "src/lib/notification-preferences.integration.test.ts",
-    ],
+    include: ["src/**/*.integration.test.ts"],
+    exclude: ["**/node_modules/**", "src/workflows/**"],
     testTimeout: 60_000,
     hookTimeout: 60_000,
   },

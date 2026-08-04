@@ -43,6 +43,7 @@ import {
   consumeAuthoringRunInput,
   markAuthoringPauseRegistered,
 } from "@/lib/authoring-inputs";
+import { DEGRADATION_CODES } from "@/lib/authoring-degradation";
 import { debitCredits, grantCredits, reserveCredits } from "@/lib/billing/credits";
 import {
   claimUncertainAuthoringRun,
@@ -939,6 +940,55 @@ describeIsolated.sequential("authoring fault matrix against isolated Neon", () =
           eq(schema.creditLedger.externalRef, `reservation-close-request:${completion.runId}`),
         ),
     ).toHaveLength(1);
+
+    const degraded = await createFixture("degraded-completion");
+    // The 2026-08-04 incident, reproduced: every chapter is written and edited,
+    // and the continuity review produced no report at all. Before graceful
+    // degradation this run was marked `failed` and the finished book was lost.
+    await getDb()
+      .insert(schema.chapters)
+      .values(
+        Array.from({ length: 3 }, (_, index) => ({
+          id: randomUUID(),
+          bookId: degraded.bookId,
+          chapterNumber: index + 1,
+          title: `Degraded chapter ${index + 1}`,
+          content: `Chapter ${index + 1} was written and edited before the review failed.`,
+          wordCount: 10,
+          status: "edited" as const,
+        })),
+      );
+
+    await finalizeStep(degraded.ref, undefined, [
+      {
+        stage: "continuity",
+        code: DEGRADATION_CODES.continuity_review_unavailable,
+        reason:
+          "continuity.narrative_structure ended before a complete result was available (finish reason: stop; 3742 output tokens).",
+      },
+    ]);
+
+    const [degradedRun] = await getDb()
+      .select({ status: schema.generationRuns.status, config: schema.generationRuns.config })
+      .from(schema.generationRuns)
+      .where(eq(schema.generationRuns.id, degraded.runId));
+    // The book is delivered, not discarded.
+    expect(degradedRun?.status).toBe("completed");
+    const degradedCompletion = (degradedRun?.config as GenerationConfig | undefined)?.completion;
+    expect(degradedCompletion?.finalized).toMatchObject({ sourceRunId: degraded.runId });
+    // ...and the run is honest about what the author did not get.
+    expect(degradedCompletion?.degraded).toEqual([
+      expect.objectContaining({
+        stage: "continuity",
+        code: DEGRADATION_CODES.continuity_review_unavailable,
+      }),
+    ]);
+    await expect(
+      getDb()
+        .select({ status: schema.chapters.status })
+        .from(schema.chapters)
+        .where(eq(schema.chapters.bookId, degraded.bookId)),
+    ).resolves.toEqual([{ status: "final" }, { status: "final" }, { status: "final" }]);
 
     const failed = await createFixture("failure-cleanup");
     const reservationRef = `generation-reservation:${failed.runId}:fault`;

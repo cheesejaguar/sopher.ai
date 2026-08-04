@@ -13,7 +13,11 @@ import {
   scoreToRecommendation,
   type ReviewPhaseKey,
 } from "@/ai/prompts/review-rubric";
-import { reviewPhaseResultSchema, type ReviewPhaseResult } from "@/ai/schemas";
+import {
+  normalizeReviewPhaseResult,
+  reviewPhaseResultWireSchema,
+  type ReviewPhaseResult,
+} from "@/ai/schemas";
 import { anthropicCachedSystem } from "@/ai/cache";
 
 export type ContinuityReport = {
@@ -22,6 +26,13 @@ export type ContinuityReport = {
   phases: { key: ReviewPhaseKey; score: number; summary: string }[];
   issues: ReviewPhaseResult["issues"];
   worstChapters: number[];
+  /**
+   * Set only when no phase produced a scoreable result — every phase was
+   * skipped or dropped. `score` is then a placeholder, not a judgement of the
+   * manuscript, and must never be shown to the author as one. Absent means the
+   * report is a real verdict.
+   */
+  unscored?: true;
 };
 
 export type ContinuityOutcome = {
@@ -54,6 +65,11 @@ function summariesCorpus(
     .join("\n");
 }
 
+/**
+ * The result contract belongs to buildReviewPhasePrompt alone. Restating it
+ * here — or contradicting it, as an earlier "ignore the JSON template above"
+ * note did — is what taught the model to answer in a shape the schema rejects.
+ */
 function phaseUserPrompt(key: ReviewPhaseKey, corpus: string): string {
   return [
     buildReviewPhasePrompt(key),
@@ -62,9 +78,7 @@ function phaseUserPrompt(key: ReviewPhaseKey, corpus: string): string {
       `The summaries above are your map, not your evidence: before flagging a specific issue,`,
       `spot-check the actual prose with chaptersGetText (and characterBibleGet or`,
       `storySoFarSearch as needed). Do not call continuityRecordIssue — issues are persisted`,
-      `separately from your answer. Ignore the JSON template above; return your analysis in`,
-      `the structured output format provided: score from 0 to 1, summary, strengths, and issues`,
-      `(each with chapters, category, severity, description, suggestedFix).`,
+      `separately from your answer.`,
     ].join(" "),
   ].join("\n\n");
 }
@@ -188,32 +202,74 @@ export async function runContinuityPhase(
           return options.stepNumber >= 3 ? { activeTools: [] } : {};
         },
         maxOutputTokens: meteredMaxOutputTokens(`continuity.${phaseKey}`),
-        output: Output.object({ schema: reviewPhaseResultSchema }),
+        // The wire schema carries no caps or enums, so a plausible answer
+        // cannot fail validation; normalizeReviewPhaseResult puts it back on
+        // the strict type below. The strict schema used to sit here, and a
+        // review that named eleven issues instead of ten threw
+        // NoObjectGeneratedError, retried identically four times, and failed a
+        // run whose manuscript was already written and edited.
+        output: Output.object({ schema: reviewPhaseResultWireSchema }),
         providerOptions: gatewayOptions(input.meter, "continuity"),
       }),
   );
   return {
     key: phaseKey,
     weight: REVIEW_PHASES_BY_KEY[phaseKey].weight,
-    result: result.output,
+    result: normalizeReviewPhaseResult(result.output),
   };
+}
+
+/**
+ * Recommendation for a report that has no score behind it. A book whose review
+ * could not run has not been judged, and the 0.0 end of the ladder ("requires
+ * substantial rework") is a verdict on the manuscript, not on the review.
+ */
+export const CONTINUITY_UNSCORED_RECOMMENDATION =
+  "The continuity review could not be completed, so this manuscript has no continuity verdict. Its chapters were written and edited normally.";
+
+/**
+ * True when a report carries no verdict. Accepts the stored checkpoint shape
+ * too, so callers reading a report persisted before `unscored` existed still
+ * get the right answer from its empty phase list.
+ */
+export function isContinuityReportUnscored(
+  report: Pick<ContinuityReport, "phases"> & { unscored?: boolean },
+): boolean {
+  return report.unscored === true || report.phases.length === 0;
 }
 
 /**
  * Pure aggregation of phase outcomes: weighted score (renormalized over the
  * phases actually run), recommendation ladder, deduped issues, worst chapters.
+ *
+ * With no outcomes there is nothing to renormalize over, so the report is
+ * marked unscored instead of reporting the failure as a zero-quality book.
  */
 export function aggregateContinuityOutcomes(outcomes: ContinuityOutcome[]): ContinuityReport {
   const totalWeight = outcomes.reduce((sum, o) => sum + o.weight, 0);
-  const score =
-    totalWeight > 0
-      ? outcomes.reduce((sum, o) => sum + o.result.score * o.weight, 0) / totalWeight
-      : 0;
   const issues = dedupeIssues(outcomes.flatMap((o) => o.result.issues));
+  const phases = outcomes.map((o) => ({
+    key: o.key,
+    score: o.result.score,
+    summary: o.result.summary,
+  }));
+  if (totalWeight <= 0) {
+    return {
+      // Placeholder for a required field, read only by callers that ignore
+      // `unscored`. The recommendation is what the author is actually shown.
+      score: 0,
+      recommendation: CONTINUITY_UNSCORED_RECOMMENDATION,
+      phases,
+      issues,
+      worstChapters: worstChapters(issues),
+      unscored: true,
+    };
+  }
+  const score = outcomes.reduce((sum, o) => sum + o.result.score * o.weight, 0) / totalWeight;
   return {
     score,
     recommendation: scoreToRecommendation(score),
-    phases: outcomes.map((o) => ({ key: o.key, score: o.result.score, summary: o.result.summary })),
+    phases,
     issues,
     worstChapters: worstChapters(issues),
   };

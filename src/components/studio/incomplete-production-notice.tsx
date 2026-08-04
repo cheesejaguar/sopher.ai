@@ -26,9 +26,17 @@ export function incompleteProductionStatus(
       : `${saved} ${saved === 1 ? "chapter is" : "chapters are"} saved`;
 
   if (interrupted) {
+    // A run can write and save every chapter and still fail on a later step —
+    // the editorial gate, continuity, finalization. Telling that author the
+    // manuscript is unfinished contradicts the chapters in front of them.
+    const everyChapterSaved = total > 0 && saved >= total;
     return {
-      label: "Production stopped early",
-      heading: "Production stopped before the manuscript was finished.",
+      label: everyChapterSaved ? "Production stopped late" : "Production stopped early",
+      heading: everyChapterSaved
+        ? "Every chapter is written. Production stopped during the final steps."
+        : saved === 0
+          ? "Production stopped before any chapter was written."
+          : "Production stopped before the manuscript was finished.",
       detail,
     };
   }

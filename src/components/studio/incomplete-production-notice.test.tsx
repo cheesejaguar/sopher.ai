@@ -114,6 +114,44 @@ describe("IncompleteProductionNotice", () => {
     expect(screen.queryByRole("link", { name: "Watch production" })).not.toBeInTheDocument();
   });
 
+  it("does not claim an unfinished manuscript when every chapter is saved", () => {
+    const everyChapterSaved = journey({
+      kind: "recover_saved_work",
+      href: `/projects/${PROJECT_ID}/write`,
+      label: "Resume from saved work",
+      description: "The final continuity check did not finish.",
+      requiresMeteredAccess: true,
+    });
+    everyChapterSaved.artifacts.savedChapters = 12;
+    everyChapterSaved.artifacts.totalChapters = 12;
+
+    render(<IncompleteProductionNotice journey={everyChapterSaved} />);
+
+    expect(
+      screen.getByRole("heading", {
+        name: "Every chapter is written. Production stopped during the final steps.",
+      }),
+    ).toBeVisible();
+    expect(screen.getByText(/12 of 12 chapters are saved/i)).toBeVisible();
+  });
+
+  it("says so plainly when the run stopped before any chapter existed", () => {
+    const noChapters = journey({
+      kind: "recover_saved_work",
+      href: `/projects/${PROJECT_ID}/write`,
+      label: "Try starting again",
+      description: "No credits were used.",
+      requiresMeteredAccess: true,
+    });
+    noChapters.artifacts.savedChapters = 0;
+
+    render(<IncompleteProductionNotice journey={noChapters} />);
+
+    expect(
+      screen.getByRole("heading", { name: "Production stopped before any chapter was written." }),
+    ).toBeVisible();
+  });
+
   it("trusts durable completion after the author restructures completed chapters", () => {
     const completed = journey({
       kind: "read_or_export",

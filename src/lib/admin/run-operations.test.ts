@@ -160,4 +160,44 @@ describe("admin run operations", () => {
 
     expect(result.kind).toBe("investigate_completion");
   });
+
+  function failedRun(rootErrorCode: string | null) {
+    return recommendAdminRunAction({
+      health: health({
+        databaseStatus: "failed",
+        workflowStatus: "failed",
+        effectiveStatus: "failed",
+        health: "critical",
+        completedAt: "2026-07-30T12:30:00.000Z",
+        savedChapterCount: 12,
+        rootErrorCode,
+        rootErrorStage: "continuity",
+      }),
+      acceptedInputCount: 0,
+      hasOpenCriticalIncident: false,
+    });
+  }
+
+  it("refuses a retry that would repeat a deterministic provider failure", () => {
+    const result = failedRun("provider_output_invalid");
+
+    expect(result.kind).toBe("investigate_provider_fault");
+    expect(result.description).toMatch(/repeats identically/i);
+  });
+
+  it("holds every recovery until unaccounted provider spend is reconciled", () => {
+    expect(failedRun("metering_reconciliation_required").kind).toBe("reconcile_metering");
+    expect(failedRun("metered_output_missing").kind).toBe("reconcile_metering");
+  });
+
+  it("lets the author resume after a transient provider fault", () => {
+    const result = failedRun("provider_unavailable");
+
+    expect(result.kind).toBe("support_recovery");
+    expect(result.label).toBe("Author may retry once the provider recovers");
+  });
+
+  it("falls back to the generic saved-work offer when no cause was recorded", () => {
+    expect(failedRun(null).label).toBe("Offer saved-work recovery");
+  });
 });

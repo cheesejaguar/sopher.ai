@@ -3,6 +3,12 @@ import "server-only";
 import { Resend } from "resend";
 
 import {
+  DEGRADATION_CODES,
+  degradationSummary,
+  type DegradedPass,
+} from "@/lib/authoring-degradation";
+import { authoringFailureExplanation } from "@/lib/authoring-failures";
+import {
   claimAuthoringNotificationDelivery,
   settleAuthoringNotificationDelivery,
 } from "@/lib/notification-preferences";
@@ -149,9 +155,24 @@ export async function sendBookFinishedEmail(input: {
   chapterCount: number;
   wordCount: number;
   runId: string;
+  /**
+   * Finishing passes that were skipped so the manuscript could still be
+   * delivered. Absent or empty on a clean run.
+   */
+  degradations?: readonly DegradedPass[];
 }): Promise<void> {
   const url = `https://sopher.ai/projects/${input.projectId}/manuscript`;
   const title = escapeEmailHtml(input.bookTitle);
+  const degradations = input.degradations ?? [];
+  // "edited" is a claim about work that was done. A run that could not finish
+  // the editorial pass did not do it, and this email is the one place an
+  // author who never reopens the tab would have been told otherwise.
+  const edited = !degradations.some(
+    (pass) => pass.code === DEGRADATION_CODES.editorial_pass_incomplete,
+  );
+  // Fixed author-facing copy keyed by degradation code. Never the operator
+  // `reason`, never provider or manuscript text.
+  const skipped = degradationSummary(degradations);
   await deliver(
     input.to,
     sanitizeEmailSubject(`“${input.bookTitle}” is finished`),
@@ -160,8 +181,10 @@ export async function sendBookFinishedEmail(input: {
       p(
         `<em>${title}</em> — ${input.chapterCount} chapters, ${input.wordCount.toLocaleString(
           "en-US",
-        )} words — is written, edited, and waiting for you.`,
-      ) + cta(url, "Open your manuscript"),
+        )} words — is ${edited ? "written, edited," : "written"} and waiting for you.`,
+      ) +
+        (skipped ? p(skipped) : "") +
+        cta(url, "Open your manuscript"),
       true,
     ),
     `run:${input.runId}:book-finished`,
@@ -309,6 +332,9 @@ export async function sendAuthoringNeedsAttentionEmail(input: {
   supportReference: string;
   nextActionHref: string;
   nextActionLabel: string;
+  /** Recorded initiating cause; decides the cause line and the retry advice. */
+  errorCode?: string | null;
+  errorStage?: string | null;
 }): Promise<void> {
   const url = input.nextActionHref.startsWith("/")
     ? `https://sopher.ai${input.nextActionHref}`
@@ -321,12 +347,25 @@ export async function sendAuthoringNeedsAttentionEmail(input: {
       } ${input.savedChapterCount === 1 ? "is" : "are"} saved. ${input.creditsUsed.toFixed(
         1,
       )} credits were used for completed work.`;
+  // An author who is told only that something "needs attention" cannot decide
+  // whether to click the button or wait. All three sentences come from a fixed
+  // table keyed by the error code — never from provider text.
+  const explanation = authoringFailureExplanation({
+    errorCode: input.errorCode,
+    errorStage: input.errorStage,
+    savedChapterCount: input.savedChapterCount,
+  });
   await deliver(
     input.to,
     sanitizeEmailSubject(`Writing needs attention on “${input.bookTitle}”`),
     shell(
       "Your book needs a quick check.",
       p(`<em>${title}</em> stopped before production completed. ${savedWork}`) +
+        p(`${explanation.cause} ${explanation.retryStatement}`) +
+        // The recovery card in Studio ends on this same sentence. Without it a
+        // content-filtered or input-limited author is told what went wrong and
+        // never told what to do about it.
+        p(explanation.nextStep) +
         p(`Support reference: <strong>${escapeEmailHtml(input.supportReference)}</strong>`) +
         cta(escapeEmailHtml(url), escapeEmailHtml(input.nextActionLabel)),
       true,

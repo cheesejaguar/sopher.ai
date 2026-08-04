@@ -25,6 +25,7 @@ import {
 import { ResponsiveInspector } from "@/components/studio/product-primitives";
 import { useHashTargetFocus } from "@/components/studio/hash-focus-target";
 import type { Stage } from "@/lib/run-events";
+import { authoringFailureExplanation } from "@/lib/authoring-failures";
 import type { QualityTier } from "@/ai/models";
 import { PRODUCTION_STAGE_LABELS } from "@/lib/project-progress";
 import type { ProjectExperience } from "@/lib/trial-story";
@@ -408,6 +409,7 @@ export function RunViewer({
             ? { score: state.review.score, issueCount: state.review.issueCount }
             : undefined
         }
+        notices={state.notices}
         onWriteAgain={runKind === "full_book" && experience === "full_book" ? onRestart : undefined}
         writeAgainPending={restartPending}
         writeAgainError={restartError}
@@ -759,7 +761,7 @@ export function isRecoveryActionAuthorized(
   );
 }
 
-function RecoveryCard({
+export function RecoveryCard({
   runId,
   projectId,
   state,
@@ -791,6 +793,27 @@ function RecoveryCard({
     nextAction,
     canRecover: Boolean(onRecover),
   });
+  // The persisted failure message is operator phrasing ("finish reason: stop").
+  // An author gets the same fact in their own terms; the raw message and the
+  // error code stay in the diagnostics they can hand to support.
+  const explanation = authoringFailureExplanation({
+    errorCode: state.health.rootErrorCode,
+    errorStage: state.health.rootErrorStage ?? state.stage,
+    savedChapterCount: saved,
+  });
+  // A deterministic failure answers the same request the same way. When the
+  // copy says another attempt would end the same way, the retry must not also
+  // be the loudest control on the card: the strongest affordance has to agree
+  // with the sentence beside it, or the author pays to be refused twice. The
+  // retry stays available — demoted, not hidden — and support takes the lead.
+  const retryContradictsCopy =
+    !cancelled && !noWorkStarted && explanation.retry === "not_worth_retrying";
+  const primaryRestartsProduction =
+    primaryAction.kind === "recover" || Boolean(nextAction?.requiresMeteredAccess);
+  const demoteRetry = retryContradictsCopy && primaryRestartsProduction;
+  const supportHref = `mailto:support@sopher.ai?subject=${encodeURIComponent(
+    `Authoring help ${state.health.supportReference ?? runId}`,
+  )}`;
   const diagnostic = [
     "sopher.ai authoring diagnostic",
     `Run: ${runId}`,
@@ -829,9 +852,13 @@ function RecoveryCard({
           ? "No new model calls or manuscript commits will begin for this run."
           : noWorkStarted
             ? `No credits were used. ${state.error?.message ?? "The Studio could not start production."}`
-            : (state.error?.message ??
-              "The current run could not finish, but every successfully committed chapter remains saved.")}
+            : explanation.cause}
       </p>
+      {!cancelled && !noWorkStarted ? (
+        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          {explanation.preserved} {explanation.retryStatement} {explanation.nextStep}
+        </p>
+      ) : null}
 
       <dl className="mt-5 grid gap-px overflow-hidden rounded-sm border border-border bg-border sm:grid-cols-3">
         {[
@@ -847,9 +874,11 @@ function RecoveryCard({
             value:
               nextAction?.kind === "contact_support"
                 ? "Support safely rechecks the durable evidence"
-                : saved > 0
-                  ? "Reuse compatible checkpoints"
-                  : primaryAction.label,
+                : cancelled || explanation.retry !== "not_worth_retrying"
+                  ? saved > 0
+                    ? "Reuse compatible checkpoints"
+                    : primaryAction.label
+                  : "Support checks the failed step first",
           },
         ].map((fact) => (
           <div key={fact.label} className="bg-card px-4 py-3">
@@ -859,15 +888,20 @@ function RecoveryCard({
         ))}
       </dl>
 
-      {state.health.supportReference ? (
-        <p className="mt-4 font-mono text-xs text-muted-foreground">
-          Support reference: {state.health.supportReference}
-        </p>
-      ) : null}
+      {/* Always shown: without it an author has nothing to quote to support. */}
+      <p className="mt-4 font-mono text-xs text-muted-foreground">
+        Support reference: {state.health.supportReference ?? runId}
+      </p>
 
       <div className="mt-5 flex flex-wrap gap-2">
+        {demoteRetry ? (
+          <Button render={<a href={supportHref} />} nativeButton={false}>
+            Get help
+          </Button>
+        ) : null}
         {primaryAction.kind === "recover" && onRecover ? (
           <Button
+            variant={demoteRetry ? "outline" : "default"}
             onClick={() => {
               if (!pending) onRecover();
             }}
@@ -879,6 +913,7 @@ function RecoveryCard({
           </Button>
         ) : (
           <Button
+            variant={demoteRetry ? "outline" : "default"}
             render={
               primaryAction.kind === "link" && primaryAction.href.startsWith("/") ? (
                 <Link href={primaryAction.href as Route} />
@@ -906,18 +941,8 @@ function RecoveryCard({
           {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           {copied ? "Diagnostics copied" : "Copy diagnostics"}
         </Button>
-        {nextAction?.kind !== "contact_support" ? (
-          <Button
-            variant="ghost"
-            render={
-              <a
-                href={`mailto:support@sopher.ai?subject=${encodeURIComponent(
-                  `Authoring help ${state.health.supportReference ?? runId}`,
-                )}`}
-              />
-            }
-            nativeButton={false}
-          >
+        {!demoteRetry && nextAction?.kind !== "contact_support" ? (
+          <Button variant="ghost" render={<a href={supportHref} />} nativeButton={false}>
             Get help
           </Button>
         ) : null}

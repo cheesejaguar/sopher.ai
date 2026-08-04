@@ -88,6 +88,7 @@ import { linkAuthoringRunWorkflow, transitionAuthoringRunState } from "@/lib/gen
 import { nextRunEventSequence, persistRunEvent } from "@/lib/run-event-store";
 import { recordAuthoringIncident, resolveAuthoringIncident } from "@/lib/authoring-incidents";
 import type { AuthoringFailureDetails } from "@/lib/authoring-failures";
+import type { DegradedPass } from "@/lib/authoring-degradation";
 import {
   AUTHORING_CANCELLATION_MESSAGE,
   AUTHORING_RUN_INACTIVE_MESSAGE,
@@ -1611,6 +1612,10 @@ export async function prepareCreativeQuestionStep(
       brief: config.inputSnapshot.brief,
       genre: config.inputSnapshot.genre ?? undefined,
     });
+    // No salvageable question. Every early return above is the same outcome —
+    // outline straight from the concept — so this joins them instead of
+    // throwing: a retry would buy the identical answer.
+    if (!question) return null;
     return persistCreativeQuestion({
       runId: ref.dbRunId,
       projectId: ref.projectId,
@@ -2501,9 +2506,20 @@ export async function continuityPhaseStep(
   }
 }
 
+/**
+ * Aggregates the review phases that ran.
+ *
+ * `complete` says whether every phase the tier asks for produced an outcome.
+ * When it does not, the findings are still persisted — they are real — but no
+ * `review` event is published, because `aggregateContinuityOutcomes`
+ * renormalizes over whatever it is handed: one phase out of six would become
+ * the whole-manuscript score, and the author would be shown a confident number
+ * derived from a sixth of the work.
+ */
 export async function continuityFinalizeStep(
   ref: RunRef,
   outcomes: ContinuityOutcome[],
+  complete = true,
 ): Promise<ContinuityReport> {
   "use step";
   const { book } = await loadRunContext(ref);
@@ -2549,20 +2565,34 @@ export async function continuityFinalizeStep(
       },
     }));
   });
-  await persistAndPublishProgress(
-    ref,
-    {
-      type: "review",
-      score: report.score,
-      recommendation: report.recommendation,
-      issueCount: report.issues.length,
-    },
-    "review",
-  );
+  if (complete) {
+    await persistAndPublishProgress(
+      ref,
+      {
+        type: "review",
+        score: report.score,
+        recommendation: report.recommendation,
+        issueCount: report.issues.length,
+      },
+      "review",
+    );
+  }
   return report;
 }
 
-export async function finalizeStep(ref: RunRef, detail?: string): Promise<void> {
+/**
+ * Terminal boundary for a full-book run.
+ *
+ * `detail` and `degradations` are both display/provenance inputs: finalization
+ * has never needed anything from the review passes, only the manuscript itself.
+ * A run whose quality passes were skipped still finalizes, and records which
+ * ones were skipped so the author and support can see what they did not get.
+ */
+export async function finalizeStep(
+  ref: RunRef,
+  detail?: string,
+  degradations: readonly DegradedPass[] = [],
+): Promise<void> {
   "use step";
   const { stepId } = getStepMetadata();
   const doneEvent: RunEvent = {
@@ -2660,14 +2690,26 @@ export async function finalizeStep(ref: RunRef, detail?: string): Promise<void> 
         : chapter,
     ) as ManuscriptStateRow[];
     const digest = manuscriptDigest(finalizedRows);
+    const now = new Date();
     const config: GenerationConfig = {
       ...stored,
       completion: {
         ...stored.completion,
         finalized: { sourceRunId: ref.dbRunId, manuscriptDigest: digest },
+        // Retries replay this step; keep the first record of what was skipped
+        // rather than restamping it with a later time.
+        ...(degradations.length > 0 && !stored.completion?.degraded
+          ? {
+              degraded: degradations.map((pass) => ({
+                stage: pass.stage,
+                code: pass.code,
+                reason: pass.reason,
+                at: now.toISOString(),
+              })),
+            }
+          : {}),
       },
     };
-    const now = new Date();
 
     const [existingDone] = await tx
       .select({ id: schema.generationEvents.id })
@@ -2772,6 +2814,9 @@ export async function finalizeStep(ref: RunRef, detail?: string): Promise<void> 
         chapterCount: row.chapters,
         wordCount: row.words,
         runId: ref.dbRunId,
+        // Celebrating a finished book while quietly omitting that it never got
+        // edited is how a graceful degradation becomes a dishonest one.
+        ...(degradations.length > 0 ? { degradations } : {}),
       });
     }
   } catch (error) {

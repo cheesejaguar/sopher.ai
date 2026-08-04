@@ -4,7 +4,11 @@ import { schema, withDbTransaction, type DbTransaction } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
-import { chapterSummarySchema, type ChapterSummary } from "@/ai/schemas";
+import {
+  chapterSummaryWireSchema,
+  normalizeChapterSummary,
+  type ChapterSummary,
+} from "@/ai/schemas";
 import { applyEntityDeltas } from "@/db/queries/entities";
 import { MODERATION_PROMPT, recordModerationFlag } from "@/lib/moderation";
 
@@ -46,12 +50,17 @@ export async function generateChapterSummary(input: ChapterSummaryInput): Promis
         ].join("\n\n"),
         maxOutputTokens: meteredMaxOutputTokens("summarizer.chapter"),
         prepareStep: meteredInputGuard("summarizer.chapter"),
-        output: Output.object({ schema: chapterSummarySchema }),
+        // Permissive wire schema plus normalizeChapterSummary, because the
+        // caps below (200-word summary, 16 entities, 8 facts each, the entity
+        // kind enum) are stripped from the schema the model is shown. This
+        // call runs after every chapter, so a rejection here strands a chapter
+        // that is already written — and takes the story bible with it.
+        output: Output.object({ schema: chapterSummaryWireSchema }),
         providerOptions: gatewayOptions(input.meter, "summarizer"),
       }),
   );
 
-  return result.output;
+  return normalizeChapterSummary(result.output);
 }
 
 /**
@@ -64,15 +73,21 @@ export async function persistChapterSummary(
   transaction?: DbTransaction,
 ): Promise<void> {
   const persist = async (db: DbTransaction) => {
-    await db
-      .update(schema.chapters)
-      .set({ summary: summary.summary, updatedAt: new Date() })
-      .where(
-        and(
-          eq(schema.chapters.bookId, input.bookId),
-          eq(schema.chapters.chapterNumber, input.chapterNumber),
-        ),
-      );
+    // No summary in the answer means the model returned none, not that the
+    // chapter has none: the outline already wrote one for every chapter, and
+    // overwriting it with a blank would lose work this call never redid. The
+    // entity deltas below still apply — they are a separate part of the answer.
+    if (summary.summary !== null) {
+      await db
+        .update(schema.chapters)
+        .set({ summary: summary.summary, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.chapters.bookId, input.bookId),
+            eq(schema.chapters.chapterNumber, input.chapterNumber),
+          ),
+        );
+    }
 
     await applyEntityDeltas(
       {

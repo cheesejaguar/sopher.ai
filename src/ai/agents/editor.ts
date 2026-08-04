@@ -5,7 +5,20 @@ import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import type { ToolCtx } from "@/ai/tools";
 import { buildEditUserPrompt, EDITOR_SYSTEM_PROMPT } from "@/ai/prompts/editor";
-import { editSuggestionListSchema, type EditSuggestionList } from "@/ai/schemas";
+import {
+  editSuggestionListWireSchema,
+  normalizeEditSuggestionList,
+  type EditSuggestionList,
+} from "@/ai/schemas";
+import {
+  asRecord,
+  coerceArray,
+  coerceNonEmptyString,
+  coerceString,
+  coerceStringArray,
+  compact,
+  truncateArray,
+} from "@/ai/schemas/normalize";
 import { analyzeQuality, getQualityRecommendations } from "@/ai/analysis/quality-metrics";
 import { analyzePacing } from "@/ai/analysis/pacing";
 import { anthropicCachedSystem } from "@/ai/cache";
@@ -38,8 +51,14 @@ export type ReviewChapterInput = {
 };
 
 const MAX_REPLACEMENTS = 15;
+const MAX_EDIT_NOTES = 10;
 
-const editReplacementsSchema = z.object({
+/**
+ * The strict contract `editChapter` consumes. It is no longer handed to the
+ * provider — see `editReplacementsWireSchema` — but it stays the definition of
+ * what a usable answer is, and `normalizeEditReplacements` is held to it.
+ */
+export const editReplacementsSchema = z.object({
   replacements: z
     .array(
       z.object({
@@ -49,8 +68,61 @@ const editReplacementsSchema = z.object({
       }),
     )
     .max(MAX_REPLACEMENTS),
-  notes: z.array(z.string()).max(10).describe("Short overall editorial notes"),
+  notes: z.array(z.string()).max(MAX_EDIT_NOTES).describe("Short overall editorial notes"),
 });
+type EditReplacements = z.infer<typeof editReplacementsSchema>;
+
+/**
+ * Permissive twin of `editReplacementsSchema` for the provider call.
+ *
+ * Anthropic's structured-output path strips `.max` before the model ever sees
+ * the schema, so a sixteenth replacement — an entirely reasonable answer to a
+ * cap nobody showed the model — used to fail zod on the way back and take the
+ * whole chapter's edit with it. The caps live in `.describe()` text, which does
+ * survive into the provider schema, and `normalizeEditReplacements` is what
+ * actually enforces them.
+ */
+export const editReplacementsWireSchema = z.object({
+  replacements: z
+    .array(
+      z.object({
+        original: z.string().nullish().describe("Exact verbatim span copied from the draft"),
+        revised: z.string().nullish().describe("The improved version of that span"),
+        reason: z.string().nullish().describe("One-line reason for the change"),
+      }),
+    )
+    .nullish()
+    .describe(`At most ${MAX_REPLACEMENTS} replacements`),
+  notes: z
+    .array(z.string().nullish())
+    .nullish()
+    .describe(`Short overall editorial notes, at most ${MAX_EDIT_NOTES}`),
+});
+
+function normalizeEditReplacement(wire: unknown): EditReplacements["replacements"][number] | null {
+  const replacement = asRecord(wire);
+  const original = coerceNonEmptyString(replacement.original);
+  // No anchor means nothing to replace. A *missing* `revised` must never be
+  // defaulted to "": applyReplacements would splice that in and delete the
+  // author's sentence — and before normalization it spliced in the literal
+  // string "undefined". An explicit "" is still a deliberate cut, so only the
+  // type is checked.
+  if (!original || typeof replacement.revised !== "string") return null;
+  return { original, revised: replacement.revised, reason: coerceString(replacement.reason) };
+}
+
+export function normalizeEditReplacements(wire: unknown): EditReplacements {
+  const value = asRecord(wire);
+  return {
+    // Unusable entries drop before the cap, so fifteen *applicable* edits
+    // survive a response that also carried a couple of malformed ones.
+    replacements: truncateArray(
+      compact(coerceArray(value.replacements).map(normalizeEditReplacement)),
+      MAX_REPLACEMENTS,
+    ),
+    notes: truncateArray(coerceStringArray(value.notes), MAX_EDIT_NOTES),
+  };
+}
 
 // FREE TRIAGE — non-LLM heuristics computed in code so the edit pass is
 // grounded in measurements instead of guesses.
@@ -141,12 +213,12 @@ export async function editChapter(input: EditChapterInput): Promise<EditChapterR
         prompt: editPrompt(input, metricsNote),
         maxOutputTokens: meteredMaxOutputTokens("editor.edit"),
         prepareStep: meteredInputGuard("editor.edit"),
-        output: Output.object({ schema: editReplacementsSchema }),
+        output: Output.object({ schema: editReplacementsWireSchema }),
         providerOptions: gatewayOptions(input.meter, "editor"),
       }),
   );
 
-  const { replacements, notes } = result.output;
+  const { replacements, notes } = normalizeEditReplacements(result.output);
   const applied = applyReplacements(input.content, replacements);
   const allNotes = [...notes];
   if (applied.skipped > 0) {
@@ -197,10 +269,16 @@ export async function reviewChapter(input: ReviewChapterInput): Promise<EditSugg
         prompt: reviewPrompt(input, metricsNote),
         maxOutputTokens: meteredMaxOutputTokens("editor.review"),
         prepareStep: meteredInputGuard("editor.review"),
-        output: Output.object({ schema: editSuggestionListSchema }),
+        // The wire schema carries no caps and no enums, so a plausible review
+        // cannot fail validation; normalizeEditSuggestionList puts it back on
+        // the strict type. The strict schema used to sit here, and a review
+        // that returned a twenty-first suggestion — or spelled a severity
+        // "critical" — threw NoObjectGeneratedError and cost the author a
+        // paid pass that produced nothing.
+        output: Output.object({ schema: editSuggestionListWireSchema }),
         providerOptions: gatewayOptions(input.meter, "editor"),
       }),
   );
 
-  return result.output;
+  return normalizeEditSuggestionList(result.output);
 }
