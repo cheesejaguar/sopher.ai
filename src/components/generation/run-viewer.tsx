@@ -409,6 +409,7 @@ export function RunViewer({
             ? { score: state.review.score, issueCount: state.review.issueCount }
             : undefined
         }
+        notices={state.notices}
         onWriteAgain={runKind === "full_book" && experience === "full_book" ? onRestart : undefined}
         writeAgainPending={restartPending}
         writeAgainError={restartError}

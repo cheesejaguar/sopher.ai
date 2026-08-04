@@ -47,6 +47,7 @@ export function CompletionMoment({
   experience = "full_book",
   fullBookUnlocked = false,
   review,
+  notices,
   onWriteAgain,
   writeAgainPending = false,
   writeAgainError,
@@ -58,6 +59,11 @@ export function CompletionMoment({
   experience?: ProjectExperience;
   fullBookUnlocked?: boolean;
   review?: { score: number; issueCount: number };
+  /**
+   * Finishing steps that were skipped so the manuscript could still be
+   * delivered. The book is done; this says what it did not get.
+   */
+  notices?: { code: string; message: string }[];
   onWriteAgain?: () => void;
   writeAgainPending?: boolean;
   writeAgainError?: string | null;
@@ -171,6 +177,29 @@ export function CompletionMoment({
           </p>
         ) : null}
       </div>
+
+      {notices && notices.length > 0 ? (
+        // The book is finished, so this is a caveat and not a failure: ember
+        // (the warning role) rather than a destructive treatment, and placed
+        // under the headline instead of replacing it.
+        <section
+          aria-labelledby="completion-notices-title"
+          className="mx-auto max-w-md rounded-sm border border-ember/40 bg-ember/8 px-4 py-3 text-left"
+        >
+          <h3 id="completion-notices-title" className="text-sm font-semibold">
+            {notices.length === 1
+              ? "One finishing step was skipped"
+              : `${notices.length} finishing steps were skipped`}
+          </h3>
+          <ul className="mt-1 space-y-1">
+            {notices.map((notice) => (
+              <li key={notice.code} className="text-xs leading-relaxed text-muted-foreground">
+                {notice.message}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-center gap-2">
         <Button render={<Link href={`/projects/${projectId}/manuscript`} />} nativeButton={false}>
