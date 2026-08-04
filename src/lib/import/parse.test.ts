@@ -105,6 +105,26 @@ describe("htmlToMarkdown", () => {
     ).toBe("| Year | Tide |\n| --- | --- |\n| 1974 | High |");
   });
 
+  it("escapes pipes in table cells without breaking the row", () => {
+    // Two different escaping conventions reach a cell: text nodes arrive with
+    // their backslashes already doubled, code spans arrive raw. Both must end
+    // up with the pipe escaped and the cell intact.
+    const html =
+      "<table><tr><th>Path</th><th>Note</th></tr>" +
+      "<tr><td>C:\\|drive</td><td><code>a\\|b</code></td></tr></table>";
+    const md = htmlToMarkdown(html);
+    const dataRow = md.split("\n").find((line) => line.includes("drive"));
+    expect(dataRow).toBeDefined();
+
+    // A GFM row is split on unescaped pipes only: an odd run of backslashes
+    // before a pipe escapes it, an even run leaves it live.
+    const liveDividers = [...dataRow!.matchAll(/(\\*)\|/g)].filter(
+      (match) => (match[1]?.length ?? 0) % 2 === 0,
+    ).length;
+    // Leading delimiter, one between the two cells, trailing delimiter.
+    expect(liveDividers).toBe(3);
+  });
+
   it("escapes prose that would otherwise read as a different block", () => {
     expect(htmlToMarkdown("<p>#1 on the list</p>")).toBe("#1 on the list");
     expect(htmlToMarkdown("<p># A hash opens this line</p>")).toBe("\\# A hash opens this line");

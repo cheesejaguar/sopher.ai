@@ -231,8 +231,28 @@ function paragraph(text: string): string {
     .replace(/\n+$/, "");
 }
 
+/**
+ * A table cell, with every pipe escaped so it cannot split the row.
+ *
+ * Escaping the pipe alone is not enough, because the string arriving here has
+ * mixed backslash conventions: `textOf` doubles backslashes in text nodes,
+ * while the `code` branch of `inlineOf` passes `textContent` through untouched.
+ * A blind `|` -> `\|` turns an already-doubled `\\|` into `\\\|`... and an
+ * already-escaped `` `\|` `` into `\\|`, which GFM reads as a literal backslash
+ * followed by a *live* pipe — splitting the cell and leaking the rest of it
+ * into the next column.
+ *
+ * So count the backslashes immediately before each pipe. An even run all pairs
+ * off into literal backslashes and leaves the pipe active, which needs one more;
+ * an odd run already ends in an escape, which must be left alone.
+ */
 function cellOf(element: Element): string {
-  return inlineOf(element).replace(/\n+/g, " ").replace(/\|/g, "\\|").trim();
+  return inlineOf(element)
+    .replace(/\n+/g, " ")
+    .replace(/(\\*)\|/g, (_match, slashes: string) =>
+      slashes.length % 2 === 0 ? `${slashes}\\|` : `${slashes}|`,
+    )
+    .trim();
 }
 
 function tableBlocks(table: Element): string[] {
