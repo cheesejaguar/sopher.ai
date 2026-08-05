@@ -26,7 +26,7 @@
 import { eq, sql } from "drizzle-orm";
 
 import { DEGRADATION_CODES, degradationNotice } from "../src/lib/authoring-degradation";
-import { getDb, schema, withDbTransaction } from "../src/db";
+import { getDb, schema, withDbTransaction, type Db, type DbTransaction } from "../src/db";
 import { manuscriptDigest, type ManuscriptStateRow } from "../src/lib/manuscript-state";
 import type { GenerationConfig } from "../src/lib/run-events";
 
@@ -59,39 +59,47 @@ async function main() {
   if (config.completion?.finalized)
     throw new Error("Run is already finalized; nothing to recover.");
 
-  const chapters = await db
-    .select({
-      id: schema.chapters.id,
-      chapterNumber: schema.chapters.chapterNumber,
-      title: schema.chapters.title,
-      summary: schema.chapters.summary,
-      content: schema.chapters.content,
-      status: schema.chapters.status,
-      wordCount: schema.chapters.wordCount,
-    })
-    .from(schema.chapters)
-    .where(eq(schema.chapters.bookId, book.id));
-
-  // The same completeness rule finalizeStep enforces. A run missing prose is a
-  // different problem and must not be quietly marked finished.
   const expected = config.targetChapters;
-  const complete = chapters.filter(
-    (chapter) =>
-      chapter.chapterNumber >= 1 &&
-      chapter.chapterNumber <= expected &&
-      chapter.wordCount > 0 &&
-      chapter.content.trim().length > 0,
-  );
-  console.log(`"${book.title}" — ${complete.length}/${expected} chapters complete`);
-  if (complete.length < expected) {
+
+  const readChapters = (executor: Db | DbTransaction) =>
+    executor
+      .select({
+        id: schema.chapters.id,
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+        content: schema.chapters.content,
+        status: schema.chapters.status,
+        wordCount: schema.chapters.wordCount,
+      })
+      .from(schema.chapters)
+      .where(eq(schema.chapters.bookId, book.id));
+
+  /** The completeness rule finalizeStep enforces, applied to one read. */
+  const completeCount = (rows: { chapterNumber: number; content: string; wordCount: number }[]) =>
+    rows.filter(
+      (chapter) =>
+        chapter.chapterNumber >= 1 &&
+        chapter.chapterNumber <= expected &&
+        chapter.wordCount > 0 &&
+        chapter.content.trim().length > 0,
+    ).length;
+
+  // Advisory only: a failed run is not active authoring, so the author may be
+  // editing this manuscript right now. This read is for the operator's report
+  // and for refusing obviously hopeless cases early — the authoritative check
+  // happens under the lock below.
+  const preview = completeCount(await readChapters(db));
+  console.log(`"${book.title}" — ${preview}/${expected} chapters complete`);
+  if (preview < expected) {
     throw new Error(
-      `Refusing to finalize: ${complete.length} of ${expected} chapters have prose. This run needs regeneration, not recovery.`,
+      `Refusing to finalize: ${preview} of ${expected} chapters have prose. This run needs regeneration, not recovery.`,
     );
   }
 
   if (!apply) {
     console.log("\nDRY RUN — nothing written. Would:");
-    console.log(`  flip ${complete.length} chapters to final, write completion.finalized,`);
+    console.log(`  flip ${preview} chapters to final, write completion.finalized,`);
     console.log("  record the skipped consistency review, mark the run completed,");
     console.log("  and set projects.completedAt. No model calls, no charge.");
     console.log("\nRe-run with --apply to perform it.");
@@ -104,13 +112,6 @@ async function main() {
   // different one. It also means recovery costs the author nothing and needs
   // no credit authorization — a metered call would be refused on a terminal
   // run anyway, correctly. The review can be re-run later from the editor.
-  const finalizedRows = chapters.map((chapter) =>
-    chapter.status === "drafted" || chapter.status === "edited"
-      ? { ...chapter, status: "final" }
-      : chapter,
-  ) as ManuscriptStateRow[];
-  const digest = manuscriptDigest(finalizedRows);
-
   try {
     await withDbTransaction(async (tx) => {
       await tx.execute(
@@ -118,6 +119,49 @@ async function main() {
         hashtextextended('sopher:project-authoring:' || ${run.projectId}, 0)
       )`,
       );
+
+      // Everything the write depends on is read again HERE, under the lock,
+      // exactly as finalizeStep does. A failed run is not active authoring, so
+      // nothing stopped the author from editing between the preview above and
+      // this transaction.
+      //
+      // The run row first: another operator or a retry could have finalized or
+      // restarted it since the read at the top, and its config is the base for
+      // the write below, so a stale copy would silently discard their work.
+      const [live] = await tx
+        .select({ status: schema.generationRuns.status, config: schema.generationRuns.config })
+        .from(schema.generationRuns)
+        .where(eq(schema.generationRuns.id, run.id))
+        .limit(1);
+      if (!live) throw new Error("Run disappeared while recovering. Nothing was written.");
+      const liveConfig = live.config as GenerationConfig;
+      if (live.status !== "failed" || liveConfig.completion?.finalized) {
+        throw new Error(
+          `Run changed while recovering: status is now "${live.status}"${
+            liveConfig.completion?.finalized ? " and it is already finalized" : ""
+          }. Nothing was written.`,
+        );
+      }
+
+      // Then the chapters. Finalizing on the earlier read could mark a run
+      // completed against prose that has since been emptied, and would stamp
+      // completion.finalized with a digest that no longer matches the stored
+      // manuscript — the one value the rest of the product trusts to prove
+      // this book is finished.
+      const current = await readChapters(tx);
+      const confirmed = completeCount(current);
+      if (confirmed < expected) {
+        throw new Error(
+          `Manuscript changed while recovering: ${confirmed} of ${expected} chapters now have prose. Nothing was written.`,
+        );
+      }
+      const finalizedRows = current.map((chapter) =>
+        chapter.status === "drafted" || chapter.status === "edited"
+          ? { ...chapter, status: "final" }
+          : chapter,
+      ) as ManuscriptStateRow[];
+      const digest = manuscriptDigest(finalizedRows);
+
       await tx
         .update(schema.chapters)
         .set({ status: "final" })
@@ -125,9 +169,9 @@ async function main() {
           sql`${schema.chapters.bookId} = ${book.id} and ${schema.chapters.status} in ('drafted', 'edited')`,
         );
       const nextConfig: GenerationConfig = {
-        ...config,
+        ...liveConfig,
         completion: {
-          ...config.completion,
+          ...liveConfig.completion,
           finalized: { sourceRunId: run.id, manuscriptDigest: digest },
           degraded: [
             {
