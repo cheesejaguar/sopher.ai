@@ -24,7 +24,7 @@ import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import { getDb, schema } from "@/db";
-import { skippedPassNotices, SkippedPassesNotice } from "./skipped-passes";
+import { skippedPassCodes, skippedPassNotices, SkippedPassesNotice } from "./skipped-passes";
 import type { GenerationConfig } from "@/lib/run-events";
 
 /**
@@ -34,7 +34,10 @@ import type { GenerationConfig } from "@/lib/run-events";
  * rewritten the book, an older run's caveat is no longer true of what is on
  * screen.
  */
-async function skippedFinishingPasses(userId: string, projectId: string): Promise<string[]> {
+async function skippedFinishingPasses(
+  userId: string,
+  projectId: string,
+): Promise<{ notices: string[]; codes: string[] }> {
   const [run] = await getDb()
     .select({ config: schema.generationRuns.config })
     .from(schema.generationRuns)
@@ -49,7 +52,8 @@ async function skippedFinishingPasses(userId: string, projectId: string): Promis
     .orderBy(desc(schema.generationRuns.createdAt))
     .limit(1);
 
-  return skippedPassNotices((run?.config as GenerationConfig | undefined)?.completion?.degraded);
+  const degraded = (run?.config as GenerationConfig | undefined)?.completion?.degraded;
+  return { notices: skippedPassNotices(degraded), codes: skippedPassCodes(degraded) };
 }
 
 function EmptyManuscript() {
@@ -132,7 +136,11 @@ export default async function ManuscriptPage({
     <div className="space-y-4">
       <h2 className="sr-only">Manuscript</h2>
       {journey ? <IncompleteProductionNotice journey={journey} /> : null}
-      <SkippedPassesNotice notices={skippedPasses} />
+      <SkippedPassesNotice
+        notices={skippedPasses.notices}
+        codes={skippedPasses.codes}
+        projectId={projectId}
+      />
 
       <HashFocusTarget
         as="header"

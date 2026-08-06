@@ -3,6 +3,11 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const mocks = vi.hoisted(() => ({ startConsistencyReview: vi.fn() }));
+vi.mock("@/lib/actions/continuity", () => ({
+  startConsistencyReview: mocks.startConsistencyReview,
+}));
+
 import { CompletionMoment } from "./completion-moment";
 
 beforeEach(() => {
@@ -11,6 +16,8 @@ beforeEach(() => {
     return 1;
   });
   vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  vi.stubGlobal("crypto", { randomUUID: () => "11111111-2222-4333-8444-555555555555" });
+  mocks.startConsistencyReview.mockReset();
 });
 
 afterEach(() => {
@@ -198,5 +205,94 @@ describe("skipped finishing steps", () => {
     expect(screen.getByText("2 finishing steps were skipped")).toBeInTheDocument();
     expect(screen.getByText("Editing did not finish.")).toBeInTheDocument();
     expect(screen.getByText("The review did not run.")).toBeInTheDocument();
+  });
+});
+
+describe("running the skipped consistency review", () => {
+  const props = { projectId: "p1", projectTitle: "The Lantern Coast", chapterCount: 12 };
+  const skippedReview = [
+    {
+      code: "continuity_review_unavailable",
+      message: "We couldn't complete the consistency review.",
+    },
+  ];
+
+  it("offers the review only for the pass that can actually be re-run", () => {
+    render(
+      <CompletionMoment
+        {...props}
+        notices={[{ code: "editorial_pass_incomplete", message: "Editing did not finish." }]}
+      />,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Run the consistency review" }),
+    ).not.toBeInTheDocument();
+
+    cleanup();
+    render(<CompletionMoment {...props} notices={skippedReview} />);
+    expect(screen.getByRole("button", { name: "Run the consistency review" })).toBeVisible();
+    // The author is told it costs money before they press it.
+    expect(screen.getByText(/uses credits/i)).toBeVisible();
+  });
+
+  it("offers the review after a partial one, too", () => {
+    render(
+      <CompletionMoment
+        {...props}
+        notices={[
+          { code: "continuity_review_partial", message: "Only part of the review finished." },
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Run the consistency review" })).toBeVisible();
+  });
+
+  it("starts the review and tells the author where the notes will land", async () => {
+    mocks.startConsistencyReview.mockResolvedValue({ status: "started", runId: "run-9" });
+    render(<CompletionMoment {...props} notices={skippedReview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Run the consistency review" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(/re-reading your book/i);
+    expect(screen.getByRole("link", { name: "story bible" })).toHaveAttribute(
+      "href",
+      "/projects/p1/bible",
+    );
+    expect(mocks.startConsistencyReview).toHaveBeenCalledWith({
+      projectId: "p1",
+      requestKey: "11111111-2222-4333-8444-555555555555",
+    });
+    // Nothing left to press: a second review would be refused anyway.
+    expect(
+      screen.queryByRole("button", { name: "Run the consistency review" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a refusal verbatim and leaves the author able to try again", async () => {
+    mocks.startConsistencyReview.mockResolvedValue({
+      status: "refused",
+      message: "Another writing task is still running for this project.",
+    });
+    render(<CompletionMoment {...props} notices={skippedReview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Run the consistency review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Another writing task is still running for this project.",
+    );
+    // findBy, not getBy: the transition can still be settling when the alert
+    // commits, and the button reads "Starting…" until it does.
+    expect(await screen.findByRole("button", { name: "Run the consistency review" })).toBeVisible();
+  });
+
+  it("does not leave a failed action silent", async () => {
+    mocks.startConsistencyReview.mockRejectedValue(new Error("boom"));
+    render(<CompletionMoment {...props} notices={skippedReview} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Run the consistency review" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn’t be started/i);
+    // The thrown message never reaches the author.
+    expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
 });
