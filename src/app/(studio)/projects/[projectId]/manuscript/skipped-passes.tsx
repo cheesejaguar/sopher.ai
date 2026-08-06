@@ -1,4 +1,8 @@
 import {
+  ConsistencyReviewAction,
+  isConsistencyReviewSkipped,
+} from "@/components/generation/consistency-review-action";
+import {
   DEGRADATION_CODES,
   degradationNotice,
   type DegradationCode,
@@ -6,6 +10,19 @@ import {
 import type { GenerationCompletionState } from "@/lib/run-events";
 
 type PersistedDegradedPass = NonNullable<GenerationCompletionState["degraded"]>[number];
+
+/**
+ * The recognized codes behind the rendered notices, so the page can offer to
+ * re-run the one pass that can be recovered. Kept separate from
+ * `skippedPassNotices` because that function deliberately narrows to copy.
+ */
+export function skippedPassCodes(
+  degraded: readonly Pick<PersistedDegradedPass, "code">[] | undefined,
+): string[] {
+  return (degraded ?? [])
+    .map((pass) => pass.code)
+    .filter((code) => Object.hasOwn(DEGRADATION_CODES, code));
+}
 
 /**
  * Author-facing copy for the finishing passes a completed run had to skip.
@@ -41,8 +58,18 @@ export function skippedPassNotices(
  * Ember, not destructive: the book is finished and readable. Dressing a missing
  * polish pass as damage would misrepresent what the author has.
  */
-export function SkippedPassesNotice({ notices }: { notices: string[] }) {
+export function SkippedPassesNotice({
+  notices,
+  projectId,
+  codes,
+}: {
+  notices: string[];
+  /** Omit both to render the caveat with no offer to act on it. */
+  projectId?: string;
+  codes?: readonly string[];
+}) {
   if (notices.length === 0) return null;
+  const canReview = Boolean(projectId) && isConsistencyReviewSkipped(codes);
 
   return (
     <section
@@ -60,6 +87,13 @@ export function SkippedPassesNotice({ notices }: { notices: string[] }) {
           <li key={notice}>{notice}</li>
         ))}
       </ul>
+      {/*
+        The consistency review is the only skipped pass an author can get back,
+        and this page — not the live completion moment — is where they read that
+        it was skipped. Telling them without offering the fix is the same silence
+        the caveat exists to break.
+      */}
+      {canReview && projectId ? <ConsistencyReviewAction projectId={projectId} /> : null}
     </section>
   );
 }
