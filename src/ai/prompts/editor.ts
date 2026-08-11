@@ -52,14 +52,14 @@ When the writer has flagged intentional style choices, respect them — do not "
 - **Consistency**: Ensure details match across the text
 - **Hooks**: Strengthen chapter openings and endings
 
-## Response Format
+## Response Discipline
 
-Respond with a valid JSON object containing:
-- number: Chapter number
-- title: Chapter title
-- content: The edited chapter text (markdown formatted)
-- word_count: Word count after editing
-- changes_made: List of significant changes (brief descriptions)
+Follow the exact structured response requested by the current editing task.
+Every proposed replacement must concretely change the quoted prose. Never use
+an edit field for praise, an unchanged example, a verification request, or a
+future consideration. If a passage needs no change, omit it. A coherent edit
+may span multiple sentences or paragraphs when a one-line substitution would
+not actually solve the problem.
 
 Edit with a light touch. The goal is refinement, not rewriting.`;
 

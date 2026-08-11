@@ -65,6 +65,9 @@ const issue = (
   severity: "major",
   description: "Mira's eye color changes between scenes",
   suggestedFix: "Pick storm-gray and keep it",
+  fixability: "auto_fixable",
+  confidence: 0.95,
+  repairChapters: [3],
   ...over,
 });
 
@@ -221,6 +224,12 @@ describe("runContinuityPhase", () => {
     expect(prompt.split("## Result format")).toHaveLength(2);
     expect(prompt).not.toContain("Ignore the JSON template above");
     expect(prompt).not.toContain("Provide your analysis in JSON format");
+  });
+
+  it("names only continuity tools that the agent actually receives", async () => {
+    await phaseResult(wellFormed);
+    expect(mocks.calls[0].prompt).toContain("entityGet");
+    expect(mocks.calls[0].prompt).not.toContain("characterBibleGet");
   });
 
   it("keeps a well-formed answer intact", async () => {

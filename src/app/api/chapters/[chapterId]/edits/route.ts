@@ -22,6 +22,7 @@ import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } fr
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { assertCreditsForUsd, InsufficientCreditsError } from "@/lib/billing/credits";
 import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 import { contextWindow } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
@@ -59,6 +60,7 @@ function selectionPrompt(input: {
     [
       `## Output rules`,
       `"replacement" must be a drop-in substitute for the selected passage: same tense, POV, and voice as the surrounding prose, valid markdown, and it must splice cleanly between the context passages (preserve leading/trailing punctuation and spacing implied by the context).`,
+      `"replacement" must make a concrete textual change to the selected passage. Never repeat the selection unchanged, praise it, or respond with a verification request. If the instruction would not improve the passage, still return your best direct implementation of the author's request rather than commentary.`,
       `Keep roughly the same length unless the instruction says otherwise. Give a one-line "rationale".`,
     ].join("\n"),
   ]
@@ -198,6 +200,17 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       return Response.json({ error: error.message }, { status: 402 });
     }
     throw error;
+  }
+
+  if (!isActionableReplacement(selection.text, output.replacement)) {
+    await refundMeteredDelivery(meter, "Selection edit produced no change — refunded");
+    return Response.json(
+      {
+        error: "The rewrite did not change the selected passage. Try a more specific instruction.",
+        code: "no_change",
+      },
+      { status: 422 },
+    );
   }
 
   // Ordinal of this passage among identical matches (0 = first), so the

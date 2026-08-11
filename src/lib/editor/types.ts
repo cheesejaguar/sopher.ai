@@ -12,6 +12,8 @@ export type SuggestionSeverity = "info" | "warning" | "error";
 export type SuggestionDTO = {
   id: string;
   chapterId: string;
+  /** Present for workflow-backed review sets; null for ad-hoc chapter tools. */
+  runId?: string | null;
   chapterVersion: number;
   passType: SuggestionPassType;
   suggestionType: string;
@@ -26,6 +28,7 @@ export type SuggestionDTO = {
 export function toSuggestionDTO(row: {
   id: string;
   chapterId: string;
+  runId?: string | null;
   chapterVersion: number;
   passType: SuggestionPassType;
   suggestionType: string;
@@ -38,6 +41,7 @@ export function toSuggestionDTO(row: {
   return {
     id: row.id,
     chapterId: row.chapterId,
+    runId: row.runId ?? null,
     chapterVersion: row.chapterVersion,
     passType: row.passType,
     suggestionType: row.suggestionType,
@@ -47,6 +51,25 @@ export function toSuggestionDTO(row: {
     explanation: row.explanation,
     status: row.status,
   };
+}
+
+/**
+ * Keep a manuscript review link pinned to the exact workflow-backed set that
+ * created it. Ad-hoc selection edits, proofread corrections, and older review
+ * runs remain available when the author leaves the scoped URL, but never leak
+ * into this decision queue.
+ */
+export function suggestionsForReviewRun(
+  suggestions: SuggestionDTO[],
+  reviewRunId: string | null | undefined,
+): SuggestionDTO[] {
+  if (!reviewRunId) return suggestions;
+  return suggestions.filter(
+    (suggestion) =>
+      suggestion.runId === reviewRunId &&
+      suggestion.passType === "review" &&
+      suggestion.status === "pending",
+  );
 }
 
 /** Response of POST /api/chapters/[chapterId]/edits */

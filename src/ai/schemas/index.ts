@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 import { ENTITY_KINDS } from "./entities";
 import {
   asRecord,
@@ -628,6 +629,7 @@ export function normalizeChapterSummary(wire: unknown): ChapterSummary {
 
 const REVIEW_ISSUE_CATEGORIES = ["character", "timeline", "setting", "plot", "factual"] as const;
 const REVIEW_ISSUE_SEVERITIES = ["critical", "major", "minor"] as const;
+const REVIEW_ISSUE_FIXABILITY = ["auto_fixable", "needs_author_choice", "informational"] as const;
 const MAX_REVIEW_STRENGTHS = 6;
 const MAX_REVIEW_ISSUES = 10;
 const MAX_ISSUE_CHAPTERS = 10;
@@ -644,6 +646,9 @@ export const reviewPhaseResultSchema = z.object({
         severity: z.enum(REVIEW_ISSUE_SEVERITIES),
         description: z.string(),
         suggestedFix: z.string(),
+        fixability: z.enum(REVIEW_ISSUE_FIXABILITY),
+        confidence: z.number().min(0).max(1),
+        repairChapters: z.array(z.number().int()).max(MAX_ISSUE_CHAPTERS),
       }),
     )
     .max(MAX_REVIEW_ISSUES),
@@ -665,6 +670,14 @@ export const reviewPhaseResultWireSchema = z.object({
         severity: wireText.describe(`One of: ${REVIEW_ISSUE_SEVERITIES.join(", ")}`),
         description: wireText,
         suggestedFix: wireText,
+        fixability: wireText.nullish().describe(`One of: ${REVIEW_ISSUE_FIXABILITY.join(", ")}`),
+        confidence: wireNumber.nullish().describe("Confidence from 0 to 1, e.g. 0.92"),
+        repairChapters: z
+          .array(wireNumber)
+          .nullish()
+          .describe(
+            `At most ${MAX_ISSUE_CHAPTERS} chapter numbers whose prose is actually incorrect`,
+          ),
       }),
     )
     .nullish()
@@ -675,6 +688,7 @@ export type ReviewPhaseResultWire = z.infer<typeof reviewPhaseResultWireSchema>;
 function normalizeReviewIssue(wire: unknown): ReviewPhaseResult["issues"][number] | null {
   const issue = asRecord(wire);
   const description = coerceNonEmptyString(issue.description);
+  const confidence = coerceNumber(issue.confidence);
   // Defaulting the description would manufacture a finding the model never
   // made, and the author would be asked to act on an empty line.
   if (!description) return null;
@@ -684,6 +698,12 @@ function normalizeReviewIssue(wire: unknown): ReviewPhaseResult["issues"][number
     severity: oneOfOr(issue.severity, REVIEW_ISSUE_SEVERITIES, "minor"),
     description,
     suggestedFix: coerceString(issue.suggestedFix),
+    // Historical checkpoints and malformed fresh answers must never acquire
+    // mutation authority by default. Only an explicit, well-formed contract
+    // can authorize an automatic continuity repair.
+    fixability: oneOfOr(issue.fixability, REVIEW_ISSUE_FIXABILITY, "informational"),
+    confidence: confidence === null ? 0 : rescaleUnitScore(confidence),
+    repairChapters: truncateArray(coerceIntArray(issue.repairChapters), MAX_ISSUE_CHAPTERS),
   };
 }
 
@@ -739,30 +759,68 @@ export const editSuggestionListWireSchema = z.object({
 });
 export type EditSuggestionListWire = z.infer<typeof editSuggestionListWireSchema>;
 
-function normalizeEditSuggestion(wire: unknown): EditSuggestionList["suggestions"][number] | null {
+type EditSuggestionNormalizationResult =
+  | { kind: "accepted"; suggestion: EditSuggestionList["suggestions"][number] }
+  | { kind: "no_op" }
+  | { kind: "invalid" };
+
+export type EditSuggestionNormalizationDiagnostics = {
+  receivedCount: number;
+  acceptedCount: number;
+  noOpCount: number;
+  invalidCount: number;
+  truncatedCount: number;
+};
+
+export type NormalizedEditSuggestionList = EditSuggestionList & {
+  normalization: EditSuggestionNormalizationDiagnostics;
+};
+
+function normalizeEditSuggestion(wire: unknown): EditSuggestionNormalizationResult {
   const suggestion = asRecord(wire);
   const anchorText = coerceNonEmptyString(suggestion.anchorText);
   // Too short to locate in the manuscript, or no replacement text at all —
   // defaulting the latter to "" would turn a suggestion into a silent deletion.
-  if (!anchorText || anchorText.length < MIN_EDIT_ANCHOR_CHARS) return null;
-  if (typeof suggestion.replacement !== "string") return null;
+  if (!anchorText || anchorText.length < MIN_EDIT_ANCHOR_CHARS) return { kind: "invalid" };
+  if (typeof suggestion.replacement !== "string") return { kind: "invalid" };
+  if (!isActionableReplacement(anchorText, suggestion.replacement)) return { kind: "no_op" };
   return {
-    anchorText,
-    replacement: suggestion.replacement,
-    rationale: coerceString(suggestion.rationale),
-    category: oneOfOr(suggestion.category, EDIT_SUGGESTION_CATEGORIES, "line"),
-    severity: oneOfOr(suggestion.severity, EDIT_SUGGESTION_SEVERITIES, "info"),
+    kind: "accepted",
+    suggestion: {
+      anchorText,
+      replacement: suggestion.replacement,
+      rationale: coerceString(suggestion.rationale),
+      category: oneOfOr(suggestion.category, EDIT_SUGGESTION_CATEGORIES, "line"),
+      severity: oneOfOr(suggestion.severity, EDIT_SUGGESTION_SEVERITIES, "info"),
+    },
+  };
+}
+
+export function normalizeEditSuggestionListWithDiagnostics(
+  wire: unknown,
+): NormalizedEditSuggestionList {
+  const value = asRecord(wire);
+  const received = coerceArray(value.suggestions);
+  const outcomes = received.map(normalizeEditSuggestion);
+  const accepted = outcomes.flatMap((outcome) =>
+    outcome.kind === "accepted" ? [outcome.suggestion] : [],
+  );
+  const suggestions = truncateArray(accepted, MAX_EDIT_SUGGESTIONS);
+  return {
+    suggestions,
+    normalization: {
+      receivedCount: received.length,
+      acceptedCount: suggestions.length,
+      noOpCount: outcomes.filter((outcome) => outcome.kind === "no_op").length,
+      invalidCount: outcomes.filter((outcome) => outcome.kind === "invalid").length,
+      truncatedCount: Math.max(0, accepted.length - suggestions.length),
+    },
   };
 }
 
 export function normalizeEditSuggestionList(wire: unknown): EditSuggestionList {
-  const value = asRecord(wire);
-  return {
-    suggestions: truncateArray(
-      compact(coerceArray(value.suggestions).map(normalizeEditSuggestion)),
-      MAX_EDIT_SUGGESTIONS,
-    ),
-  };
+  const normalized = normalizeEditSuggestionListWithDiagnostics(wire);
+  return { suggestions: normalized.suggestions };
 }
 
 export const selectionEditSchema = z.object({

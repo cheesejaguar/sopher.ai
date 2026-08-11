@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { ChapterPager } from "@/components/manuscript/chapter-pager";
 import Image from "next/image";
@@ -24,8 +24,14 @@ import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import { getDb, schema } from "@/db";
-import { skippedPassCodes, skippedPassNotices, SkippedPassesNotice } from "./skipped-passes";
+import {
+  remainingSkippedPasses,
+  skippedPassCodes,
+  skippedPassNotices,
+  SkippedPassesNotice,
+} from "./skipped-passes";
 import type { GenerationConfig } from "@/lib/run-events";
+import { completedRunIsLater, newestCompletedRunOrder } from "@/lib/generation-run-order";
 
 /**
  * The finishing passes the run that produced this manuscript had to skip.
@@ -38,21 +44,40 @@ async function skippedFinishingPasses(
   userId: string,
   projectId: string,
 ): Promise<{ notices: string[]; codes: string[] }> {
-  const [run] = await getDb()
-    .select({ config: schema.generationRuns.config })
-    .from(schema.generationRuns)
-    .where(
-      and(
-        eq(schema.generationRuns.projectId, projectId),
-        eq(schema.generationRuns.userId, userId),
-        eq(schema.generationRuns.kind, "full_book"),
-        eq(schema.generationRuns.status, "completed"),
-      ),
-    )
-    .orderBy(desc(schema.generationRuns.createdAt))
-    .limit(1);
+  const db = getDb();
+  const selectCompletedRun = (kind: "full_book" | "continuity") =>
+    db
+      .select({
+        id: schema.generationRuns.id,
+        config: schema.generationRuns.config,
+        completedAt: schema.generationRuns.completedAt,
+        createdAt: schema.generationRuns.createdAt,
+      })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.projectId, projectId),
+          eq(schema.generationRuns.userId, userId),
+          eq(schema.generationRuns.kind, kind),
+          eq(schema.generationRuns.status, "completed"),
+        ),
+      )
+      .orderBy(...newestCompletedRunOrder())
+      .limit(1);
+  const [[sourceRun], [continuityRun]] = await Promise.all([
+    selectCompletedRun("full_book"),
+    selectCompletedRun("continuity"),
+  ]);
 
-  const degraded = (run?.config as GenerationConfig | undefined)?.completion?.degraded;
+  const sourceConfig = sourceRun?.config as GenerationConfig | undefined;
+  const continuityConfig = continuityRun?.config as GenerationConfig | undefined;
+  const continuityRecovered = Boolean(
+    sourceRun &&
+    continuityRun &&
+    completedRunIsLater(continuityRun, sourceRun) &&
+    continuityConfig?.completion?.continuityReport?.sourceRunId === continuityRun.id,
+  );
+  const degraded = remainingSkippedPasses(sourceConfig?.completion?.degraded, continuityRecovered);
   return { notices: skippedPassNotices(degraded), codes: skippedPassCodes(degraded) };
 }
 

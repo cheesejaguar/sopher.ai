@@ -22,12 +22,14 @@ import type { Stage } from "@/lib/run-events";
 import type { ContinuityOutcome, ContinuityReport } from "@/ai/agents/continuity";
 import type { BookConcept, BookOutline } from "@/ai/schemas";
 import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
+import { continuityRepairProgress } from "./continuity-repairs";
 import {
   conceptStep,
   consumeCreativeDecisionStep,
   creativeOpeningCreditCheckStep,
   chapterNumbersNeedingWorkStep,
   continuityFinalizeStep,
+  continuityChapterRepairsStep,
   continuityPhaseStep,
   continuityCreditCheckStep,
   chapterWaveCreditCheckStep,
@@ -655,6 +657,7 @@ export async function generateBook(
     // a rewrite. Below full coverage the issues are kept and the score is not.
     const complete = outcomes.length === plannedPhases.length;
     let report: ContinuityReport | null = null;
+    let continuityRepairDetail: string | undefined;
     if (outcomes.length > 0) {
       const finalized = await runEnhancement(
         "continuity",
@@ -667,45 +670,78 @@ export async function generateBook(
     }
     await emitCost(ref);
 
-    if (
-      config.tier !== "draft" &&
-      complete &&
-      report &&
-      report.score < 0.7 &&
-      report.worstChapters.length > 0
-    ) {
-      await emitProgress(ref, { type: "stage", stage: "revising", pct: 92 });
-      const issueNotes = report.issues
-        .map(
-          (i) => `[${i.severity}] ch ${i.chapters.join(",")}: ${i.description} → ${i.suggestedFix}`,
-        )
-        .join("\n");
-      const revisionTargets = report.worstChapters.slice(0, 3);
-      const revisionAuthorization = await requireCreditGate(
-        await editorialWaveCreditCheckStep(ref, config, revisionTargets, "revision"),
-        () => editorialWaveCreditCheckStep(ref, config, revisionTargets, "revision"),
-        92,
-        "to apply continuity revisions",
-        "revising",
-        `continuity-revision:${revisionTargets.join(",")}`,
-      );
-      // A failed rewrite leaves the pre-revision prose untouched, so skipping
-      // it costs the polish and nothing else. The continuity notes stay in the
-      // editor for the author to apply by hand.
-      await runEnhancement("revising", DEGRADATION_CODES.continuity_revision_skipped, () =>
-        withEnhancementReservation(revisionAuthorization.reservationRef, async () => {
-          await Promise.all(
-            revisionTargets.map((n) =>
-              editChapterStep(ref, config, n, issueNotes, revisionAuthorization.reservationRef),
-            ),
+    if (complete && report) {
+      const chapterRepairs = await continuityChapterRepairsStep(ref, config, outcomes);
+      const revisionTotal = chapterRepairs.length;
+      let revisionProcessed = 0;
+      let revisionApplied = 0;
+      if (revisionTotal > 0) {
+        await emitProgress(ref, { type: "stage", stage: "revising", pct: 92 });
+        for (const wave of chunk(chapterRepairs, config.waveSize)) {
+          const revisionTargets = wave.map((repair) => repair.chapterNumber);
+          const revisionAuthorization = await requireCreditGate(
+            await editorialWaveCreditCheckStep(ref, config, revisionTargets, "revision"),
+            () => editorialWaveCreditCheckStep(ref, config, revisionTargets, "revision"),
+            92 + Math.round(4 * (revisionProcessed / revisionTotal)),
+            "to apply continuity corrections",
+            "revising",
+            `continuity-revision:${revisionTargets.join(",")}`,
           );
-        }),
-      );
+          // Each editor sees only findings that cite its chapter. Existing
+          // digest-bound edit checkpoints and revision archives make a retry
+          // reuse paid work without overwriting later prose.
+          const revised = await runEnhancement(
+            "revising",
+            DEGRADATION_CODES.continuity_revision_skipped,
+            () =>
+              withEnhancementReservation(revisionAuthorization.reservationRef, async () => {
+                const results = await Promise.allSettled(
+                  wave.map((repair) =>
+                    editChapterStep(
+                      ref,
+                      config,
+                      repair.chapterNumber,
+                      repair.issueNotes,
+                      revisionAuthorization.reservationRef,
+                    ),
+                  ),
+                );
+                for (const result of results) {
+                  if (result.status === "fulfilled" && result.value.changed) {
+                    revisionApplied += 1;
+                  }
+                }
+                const failed = results.find((result) => result.status === "rejected");
+                if (failed?.status === "rejected") throw failed.reason;
+              }),
+          );
+          revisionProcessed += wave.length;
+          continuityRepairDetail = continuityRepairProgress(
+            revisionProcessed,
+            revisionApplied,
+          ).detail;
+          await emitProgress(ref, {
+            type: "stage",
+            stage: "revising",
+            pct: 92 + Math.round(4 * (revisionProcessed / revisionTotal)),
+            detail: continuityRepairDetail,
+          });
+          if (!revised.ok && revised.deterministic) break;
+        }
+        // The final summary is about the whole repair plan, not only waves we
+        // reached. A deterministic break leaves every unattempted target
+        // unresolved and must not make those chapters disappear from the copy.
+        continuityRepairDetail = continuityRepairProgress(revisionTotal, revisionApplied).detail;
+      }
       await emitCost(ref);
     }
 
     await emitProgress(ref, { type: "stage", stage: "finalizing", pct: 97 });
-    await finalizeStep(ref, report?.recommendation, degradations);
+    await finalizeStep(
+      ref,
+      [report?.recommendation, continuityRepairDetail].filter(Boolean).join(" ") || undefined,
+      degradations,
+    );
     return {
       score: report?.score ?? null,
       recommendation: report?.recommendation ?? null,

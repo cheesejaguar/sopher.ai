@@ -225,12 +225,12 @@ describe("running the skipped consistency review", () => {
       />,
     );
     expect(
-      screen.queryByRole("button", { name: "Run the consistency review" }),
+      screen.queryByRole("button", { name: "Check and fix continuity" }),
     ).not.toBeInTheDocument();
 
     cleanup();
     render(<CompletionMoment {...props} notices={skippedReview} />);
-    expect(screen.getByRole("button", { name: "Run the consistency review" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Check and fix continuity" })).toBeVisible();
     // The author is told it costs money before they press it.
     expect(screen.getByText(/uses credits/i)).toBeVisible();
   });
@@ -244,16 +244,20 @@ describe("running the skipped consistency review", () => {
         ]}
       />,
     );
-    expect(screen.getByRole("button", { name: "Run the consistency review" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Check and fix continuity" })).toBeVisible();
   });
 
   it("starts the review and tells the author where the notes will land", async () => {
     mocks.startConsistencyReview.mockResolvedValue({ status: "started", runId: "run-9" });
     render(<CompletionMoment {...props} notices={skippedReview} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Run the consistency review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check and fix continuity" }));
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/re-reading your book/i);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /targeted corrections for confirmed continuity errors/i,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/earlier version in History/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/stay open for your verification/i);
     expect(screen.getByRole("link", { name: "story bible" })).toHaveAttribute(
       "href",
       "/projects/p1/bible",
@@ -264,7 +268,7 @@ describe("running the skipped consistency review", () => {
     });
     // Nothing left to press: a second review would be refused anyway.
     expect(
-      screen.queryByRole("button", { name: "Run the consistency review" }),
+      screen.queryByRole("button", { name: "Check and fix continuity" }),
     ).not.toBeInTheDocument();
   });
 
@@ -275,21 +279,21 @@ describe("running the skipped consistency review", () => {
     });
     render(<CompletionMoment {...props} notices={skippedReview} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Run the consistency review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check and fix continuity" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Another writing task is still running for this project.",
     );
     // findBy, not getBy: the transition can still be settling when the alert
     // commits, and the button reads "Starting…" until it does.
-    expect(await screen.findByRole("button", { name: "Run the consistency review" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Check and fix continuity" })).toBeVisible();
   });
 
   it("does not leave a failed action silent", async () => {
     mocks.startConsistencyReview.mockRejectedValue(new Error("boom"));
     render(<CompletionMoment {...props} notices={skippedReview} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Run the consistency review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check and fix continuity" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/couldn’t be started/i);
     // The thrown message never reaches the author.

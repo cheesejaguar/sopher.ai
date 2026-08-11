@@ -112,9 +112,23 @@ describe("REVIEW_PHASE_OUTPUT_CONTRACT", () => {
       "severity",
       "description",
       "suggestedFix",
+      "fixability",
+      "confidence",
+      "repairChapters",
     ]) {
       expect(REVIEW_PHASE_OUTPUT_CONTRACT).toContain(field);
     }
+  });
+
+  it("grants automatic repair authority only to established technical findings", () => {
+    const technical = buildReviewPhasePrompt("technical_consistency");
+    expect(technical).toContain("Use auto_fixable only when");
+    expect(technical).toContain("repairChapters lists only the subset whose prose is incorrect");
+    expect(technical).toContain("needs_author_choice");
+
+    const narrative = buildReviewPhasePrompt("narrative_structure");
+    expect(narrative).toContain("Mark every issue informational");
+    expect(narrative).toContain("empty repairChapters array");
   });
 
   it("states the enum vocabularies the wire schema no longer carries", () => {

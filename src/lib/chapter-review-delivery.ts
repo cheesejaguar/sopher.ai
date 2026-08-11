@@ -1,8 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { schema, type DbTransaction, withDbTransaction } from "@/db";
+import { recordMeteredDeliveryRefund, type MeteredDeliveryRefundRecord } from "@/lib/billing/meter";
 import { lockProjectAuthoring } from "@/db/transaction-operations";
 import { optionalDeliveryReceiptRef } from "@/lib/billing/optional-delivery";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 
 export const CHAPTER_REVIEW_RECEIPT_TOOL_ID = "chapter.review";
 
@@ -185,10 +187,24 @@ export async function persistChapterReviewDelivery(input: {
   skipped: number;
   meteredUsd: number;
   optionalLeaseRefs: string[];
+  refund?: MeteredDeliveryRefundRecord;
 }): Promise<ChapterReviewDelivery> {
+  if (input.refund && input.suggestions.length > 0) {
+    throw new Error("A chapter-review refund cannot accompany delivered suggestions");
+  }
+  if (
+    input.suggestions.some(
+      (suggestion) =>
+        !isActionableReplacement(suggestion.anchor.originalText, suggestion.suggestedText),
+    )
+  ) {
+    throw new Error("Chapter-review delivery contains an unchanged replacement");
+  }
   return withDbTransaction(async (tx) => {
     await lockProjectAuthoring(tx, input.projectId);
     const deliveryReceiptRef = chapterReviewDeliveryReceiptRef(input);
+
+    if (input.refund) await recordMeteredDeliveryRefund(tx, input.refund);
 
     const [ownedChapter] = await tx
       .select({ id: schema.chapters.id })

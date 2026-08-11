@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { reviewChapter } from "@/ai/agents/editor";
 import {
+  buildMeteredDeliveryRefund,
   healReplayedMeteredDelivery,
   MeteredDeliveryPendingError,
   MeteredDeliveryReplayError,
@@ -16,6 +17,7 @@ import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } fr
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { InsufficientCreditsError } from "@/lib/billing/credits";
 import { InvalidIdempotencyKeyError, requireIdempotencyKey } from "@/lib/billing/idempotency";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 import { resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 import { authorizeProjectSpend, projectSpendAccessErrorResponse } from "@/lib/project-spend-http";
@@ -195,6 +197,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   const values: (typeof schema.suggestions.$inferInsert)[] = [];
   let skipped = 0;
   for (const s of reviewed.suggestions) {
+    if (!isActionableReplacement(s.anchorText, s.replacement)) {
+      skipped += 1;
+      console.warn(`[review] chapter ${chapterId}: skipped a no-op replacement`);
+      continue;
+    }
     const range = resolveAnchor(chapter.content, s.anchorText);
     if (!range) {
       skipped += 1;
@@ -230,6 +237,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   // got there. The two ways it gets there are told apart in the refund
   // description because they mean different things to an operator, and only one
   // of them is a failure the author should be asked to retry.
+  let emptyDeliveryRefund: ReturnType<typeof buildMeteredDeliveryRefund> | undefined;
   if (values.length === 0) {
     if (reviewed.suggestions.length > 0) {
       await refundMeteredDelivery(meter, "Chapter review returned unusable anchors — refunded");
@@ -243,10 +251,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     // happens when normalizeEditSuggestionList drops every entry the model
     // returned, and reviewChapter hands back the normalized list alone, so this
     // layer cannot separate the two. Refund either way — neither delivered a
-    // suggestion — but keep going: the empty result is still committed below,
-    // because a chapter the reviewer had no notes on is a real answer and has
-    // to stay replayable under the same idempotency key.
-    await refundMeteredDelivery(meter, "Chapter review produced no suggestions — refunded");
+    // suggestion — but keep going: the refund and empty result are committed
+    // together below, because a chapter the reviewer had no notes on is a real
+    // answer and has to stay replayable under the same idempotency key.
+    emptyDeliveryRefund = buildMeteredDeliveryRefund(
+      meter,
+      "Chapter review produced no suggestions — refunded",
+    );
   }
 
   let delivery: Awaited<ReturnType<typeof persistChapterReviewDelivery>>;
@@ -260,6 +271,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       skipped,
       meteredUsd: meter.lastSettlement?.meteredUsd ?? 0,
       optionalLeaseRefs: meter.optionalOperationLeaseRefs ?? [],
+      refund: emptyDeliveryRefund,
     });
   } catch (persistenceError) {
     try {

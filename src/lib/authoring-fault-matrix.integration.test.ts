@@ -180,6 +180,9 @@ const continuityIssues = [
     severity: "major" as const,
     description: "The observatory door changes material between chapters.",
     suggestedFix: "Keep the door copper in both chapters.",
+    fixability: "auto_fixable" as const,
+    confidence: 0.95,
+    repairChapters: [2],
   },
 ];
 

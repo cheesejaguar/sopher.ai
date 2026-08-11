@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
@@ -12,6 +12,7 @@ import { buildBookGenerationConfig } from "@/lib/book-start";
 import { getBalance } from "@/lib/billing/credits";
 import { canonicalizeCreditRequirement, creditsForUsd } from "@/lib/billing/credits-shared";
 import {
+  ACTIVE_AUTHORING_RUN_STATUSES,
   insertQueuedAuthoringRun,
   linkAuthoringRunWorkflow,
   RunRequestKeyMismatchError,
@@ -23,7 +24,8 @@ import { isActiveRunConflict } from "@/lib/run-conflict";
 import type { GenerationConfig } from "@/lib/run-events";
 import { isActionRateLimited, LIMITS } from "@/lib/security/rate-limit";
 import { isChapterComplete } from "@/workflows/resume";
-import { continuityPhaseRequiredUsd } from "@/workflows/opening-credit-plan";
+import { standaloneContinuityRequiredUsd } from "@/workflows/opening-credit-plan";
+import { newestCompletedRunOrder } from "@/lib/generation-run-order";
 
 /**
  * Resolve or dismiss a continuity issue. Resolution is a human judgement —
@@ -111,7 +113,11 @@ export async function startConsistencyReview(
   // Replay before anything with a side effect: returning the run this key
   // already created cannot duplicate work, while a second insert can.
   const [replay] = await db
-    .select({ id: schema.generationRuns.id, kind: schema.generationRuns.kind })
+    .select({
+      id: schema.generationRuns.id,
+      kind: schema.generationRuns.kind,
+      status: schema.generationRuns.status,
+    })
     .from(schema.generationRuns)
     .where(
       and(
@@ -121,9 +127,21 @@ export async function startConsistencyReview(
     )
     .limit(1);
   if (replay) {
-    return replay.kind === "continuity"
-      ? { status: "reattached", runId: replay.id }
-      : refused("This request conflicts with a different production run.");
+    if (replay.kind !== "continuity") {
+      return refused("This request conflicts with a different production run.");
+    }
+    if (
+      ACTIVE_AUTHORING_RUN_STATUSES.includes(
+        replay.status as (typeof ACTIVE_AUTHORING_RUN_STATUSES)[number],
+      )
+    ) {
+      return { status: "reattached", runId: replay.id };
+    }
+    return refused(
+      replay.status === "completed"
+        ? "This consistency review has already finished. Refresh the manuscript to see its result."
+        : "The earlier consistency review ended before it finished. Start a new review to try again.",
+    );
   }
 
   if (await isActionRateLimited(LIMITS.bookStart, userId)) {
@@ -160,7 +178,7 @@ export async function startConsistencyReview(
         eq(schema.generationRuns.status, "completed"),
       ),
     )
-    .orderBy(desc(schema.generationRuns.completedAt))
+    .orderBy(...newestCompletedRunOrder())
     .limit(1);
   if (!sourceRun) {
     return refused("There is no finished book to review yet.");
@@ -201,14 +219,18 @@ export async function startConsistencyReview(
   }
 
   const phases = continuityPhaseKeys(sourceConfig.tier);
+  // The review discovers which chapters actually need correction, so the
+  // start screen cannot quote that subset yet. Authorize the conservative
+  // ceiling — one revision pass for every written chapter in this delivered
+  // book — and charge only the phases and chapter repairs that really run.
   const required = canonicalizeCreditRequirement(
-    creditsForUsd(continuityPhaseRequiredUsd(sourceConfig) * phases.length),
+    creditsForUsd(standaloneContinuityRequiredUsd(sourceConfig, phases.length, [...written])),
   );
   const balance = await getBalance(userId);
   if (balance < required) {
     return {
       status: "insufficient_credits",
-      message: `${balance.toFixed(0)} credits available; ${required.toFixed(0)} needed for the consistency review.`,
+      message: `${balance.toFixed(0)} credits available; up to ${required.toFixed(0)} needed to check and fix continuity. You are charged only for work performed.`,
       balance,
       required,
     };

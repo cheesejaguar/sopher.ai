@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { unresolvedMeteringCandidate } from "./unresolved-metering";
+import { projectMeteringCandidates, unresolvedMeteringCandidate } from "./unresolved-metering";
 
 const baseRun = {
   id: "11111111-1111-4111-8111-111111111111",
   projectId: "22222222-2222-4222-8222-222222222222",
   userId: "author-1",
+  kind: "full_book",
   config: {},
 };
 
@@ -36,5 +37,23 @@ describe("unresolvedMeteringCandidate", () => {
       lineageRunId,
       intentPrefix: `metering-intent:generation:${lineageRunId}:`,
     });
+  });
+});
+
+describe("projectMeteringCandidates", () => {
+  it("keeps the newest full book plus every terminal standalone continuity run", () => {
+    const runs = [
+      { ...baseRun, id: "full-new", status: "completed" },
+      { ...baseRun, id: "continuity-failed", kind: "continuity", status: "failed" },
+      { ...baseRun, id: "continuity-complete", kind: "continuity", status: "completed" },
+      { ...baseRun, id: "full-old", status: "failed" },
+      { ...baseRun, id: "continuity-cancelled", kind: "continuity", status: "cancelled" },
+    ];
+
+    expect(projectMeteringCandidates(runs).map((run) => run.id)).toEqual([
+      "full-new",
+      "continuity-failed",
+      "continuity-cancelled",
+    ]);
   });
 });

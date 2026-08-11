@@ -49,6 +49,7 @@ vi.mock("@/lib/project-spend-access", () => ({
 }));
 vi.mock("@/lib/billing/credits", () => ({ getBalance: mocks.getBalance }));
 vi.mock("@/lib/generation-runs", () => ({
+  ACTIVE_AUTHORING_RUN_STATUSES: ["queued", "running", "awaiting_input"],
   insertQueuedAuthoringRun: mocks.insertQueuedAuthoringRun,
   linkAuthoringRunWorkflow: mocks.linkAuthoringRunWorkflow,
   terminalizeAuthoringRun: mocks.terminalizeAuthoringRun,
@@ -59,6 +60,10 @@ vi.mock("workflow/api", () => ({ start: mocks.start }));
 vi.mock("@/workflows/review-continuity", () => ({ reviewManuscriptContinuity: () => {} }));
 
 import { startConsistencyReview } from "./continuity";
+import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
+import { canonicalizeCreditRequirement, creditsForUsd } from "@/lib/billing/credits-shared";
+import { continuityPhaseRequiredUsd } from "@/workflows/opening-credit-plan";
+import type { GenerationConfig } from "@/lib/run-events";
 
 const PROJECT_ID = "3f7d3a2e-0000-4000-8000-000000000001";
 const REQUEST_KEY = "3f7d3a2e-0000-4000-8000-000000000002";
@@ -217,8 +222,16 @@ describe("startConsistencyReview", () => {
     expect(result.status).toBe("insufficient_credits");
     if (result.status !== "insufficient_credits") throw new Error("unreachable");
     expect(result.balance).toBe(0);
-    // Six rubric phases at standard tier, so the quote covers all of them.
-    expect(result.required).toBeGreaterThan(0);
+    // The upper bound covers all six review phases plus a possible targeted
+    // repair for every written chapter. Actual billing still follows work run.
+    const sourceConfig = completedBookRun[0].config as GenerationConfig;
+    const reviewOnly = canonicalizeCreditRequirement(
+      creditsForUsd(
+        continuityPhaseRequiredUsd(sourceConfig) * continuityPhaseKeys(sourceConfig.tier).length,
+      ),
+    );
+    expect(result.required).toBeGreaterThan(reviewOnly);
+    expect(result.message).toMatch(/up to .*charged only for work performed/i);
     expect(mocks.insertQueuedAuthoringRun).not.toHaveBeenCalled();
   });
 
@@ -241,7 +254,7 @@ describe("startConsistencyReview", () => {
   });
 
   it("replays a request key instead of starting a second review", async () => {
-    queueQueries([[project], [{ id: "run-earlier", kind: "continuity" }]]);
+    queueQueries([[project], [{ id: "run-earlier", kind: "continuity", status: "running" }]]);
 
     const result = await startConsistencyReview({
       projectId: PROJECT_ID,
@@ -250,6 +263,23 @@ describe("startConsistencyReview", () => {
 
     expect(result).toEqual({ status: "reattached", runId: "run-earlier" });
     expect(mocks.isActionRateLimited).not.toHaveBeenCalled();
+    expect(mocks.insertQueuedAuthoringRun).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+
+  it("does not present a terminal replay as an active review", async () => {
+    queueQueries([[project], [{ id: "run-earlier", kind: "continuity", status: "failed" }]]);
+
+    const result = await startConsistencyReview({
+      projectId: PROJECT_ID,
+      requestKey: REQUEST_KEY,
+    });
+
+    expect(result).toEqual({
+      status: "refused",
+      message:
+        "The earlier consistency review ended before it finished. Start a new review to try again.",
+    });
     expect(mocks.insertQueuedAuthoringRun).not.toHaveBeenCalled();
     expect(mocks.start).not.toHaveBeenCalled();
   });

@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/actions/continuity", () => ({ startConsistencyReview: vi.fn() }));
 
-import { skippedPassCodes, skippedPassNotices, SkippedPassesNotice } from "./skipped-passes";
+import {
+  remainingSkippedPasses,
+  skippedPassCodes,
+  skippedPassNotices,
+  SkippedPassesNotice,
+} from "./skipped-passes";
 import { DEGRADATION_CODES, degradationNotice } from "@/lib/authoring-degradation";
 
 /** The shape `finalizeStep` writes to `config.completion.degraded`. */
@@ -53,6 +58,15 @@ describe("skippedPassNotices", () => {
       degradationNotice(DEGRADATION_CODES.editorial_pass_incomplete),
       degradationNotice(DEGRADATION_CODES.continuity_review_unavailable),
     ]);
+  });
+});
+
+describe("remainingSkippedPasses", () => {
+  it("retires only continuity caveats after a later standalone review completes", () => {
+    const editorial = persisted(DEGRADATION_CODES.editorial_pass_incomplete, "chapter 3");
+    const continuity = persisted(DEGRADATION_CODES.continuity_review_partial, "two phases");
+    expect(remainingSkippedPasses([editorial, continuity], true)).toEqual([editorial]);
+    expect(remainingSkippedPasses([editorial, continuity], false)).toEqual([editorial, continuity]);
   });
 });
 
@@ -136,8 +150,10 @@ describe("offering the review back", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Run the consistency review" })).toBeVisible();
-    expect(screen.getByText(/uses credits\. Your chapters are not changed/i)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Check and fix continuity" })).toBeVisible();
+    expect(screen.getByText(/charged only for work performed/i)).toBeVisible();
+    expect(screen.getByText(/recovered from Chapter history/i)).toBeVisible();
+    expect(screen.getByText(/findings remain open until you verify them/i)).toBeVisible();
   });
 
   it("does not offer it for a pass a re-review cannot fix", () => {
@@ -151,7 +167,7 @@ describe("offering the review back", () => {
     );
 
     expect(
-      screen.queryByRole("button", { name: "Run the consistency review" }),
+      screen.queryByRole("button", { name: "Check and fix continuity" }),
     ).not.toBeInTheDocument();
   });
 
@@ -161,7 +177,7 @@ describe("offering the review back", () => {
       screen.getByText("One finishing pass was skipped so your book could be delivered."),
     ).toBeVisible();
     expect(
-      screen.queryByRole("button", { name: "Run the consistency review" }),
+      screen.queryByRole("button", { name: "Check and fix continuity" }),
     ).not.toBeInTheDocument();
   });
 });

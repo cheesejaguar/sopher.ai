@@ -64,8 +64,9 @@ export function ConsistencyReviewAction({ projectId }: { projectId: string }) {
     <div className="mt-3 border-t border-ember/30 pt-3">
       {state.kind === "started" ? (
         <p role="status" className="text-xs leading-relaxed text-muted-foreground">
-          We’re re-reading your book for consistency. It takes a few minutes — the notes will appear
-          in your{" "}
+          We’re checking the whole book and applying targeted corrections for confirmed continuity
+          errors. It takes a few minutes. Every changed chapter keeps its earlier version in
+          History; findings stay open for your verification in the{" "}
           <Link href={`/projects/${projectId}/bible`} className="underline">
             story bible
           </Link>{" "}
@@ -81,10 +82,12 @@ export function ConsistencyReviewAction({ projectId }: { projectId: string }) {
             aria-disabled={pending}
           >
             {pending ? <Spinner aria-hidden="true" /> : null}
-            {pending ? "Starting…" : "Run the consistency review"}
+            {pending ? "Starting…" : "Check and fix continuity"}
           </Button>
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            This reads your whole manuscript again and uses credits. Your chapters are not changed.
+            This uses credits to review the manuscript and attempt targeted corrections across every
+            affected chapter. Findings remain open until you verify them. You’re charged only for
+            work performed, and every change can be recovered from Chapter history.
           </p>
         </>
       )}

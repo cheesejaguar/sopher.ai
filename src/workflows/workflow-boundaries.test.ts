@@ -63,6 +63,9 @@ describe("workflow sandbox boundaries", () => {
     expect(editorialCommit).toContain("await withActiveAuthoringMutation(ref, async (tx) =>");
     expect(editorialCommit).toContain("tx.insert(schema.chapterRevisions)");
     expect(editorialCommit).toContain(".update(schema.chapters)");
+    expect(editorialCommit).toContain("refundMeteredDelivery(");
+    expect(editorialCommit).toContain('mode === "revision" && !result.changed');
+    expect(editorialCommit).toContain('mode === "revision" ? { summary: null } : {}');
   });
 
   it("keeps all remaining generated-output persistence behind the same lock", () => {
@@ -127,6 +130,34 @@ describe("workflow sandbox boundaries", () => {
       "persistContinuityIssues(book.id, ref.dbRunId, report.issues, tx)",
     );
     expect(continuity).toContain("updateStoredGenerationConfigInTransaction(tx, ref");
+  });
+
+  it("holds one standalone continuity ceiling and reports only changed repairs as applied", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/workflows/review-continuity.ts"),
+      "utf8",
+    );
+    const quote = source.indexOf("standaloneContinuityCreditCheckStep(ref, config)");
+    const reserve = source.indexOf('"continuity-review:full-ceiling"', quote);
+    const firstPaidPhase = source.indexOf("continuityPhaseStep(", reserve);
+    expect(quote).toBeGreaterThanOrEqual(0);
+    expect(reserve).toBeGreaterThan(quote);
+    expect(firstPaidPhase).toBeGreaterThan(reserve);
+    expect(source).toContain("await releaseCreditsStep(ref, authorization.reservationRef)");
+    expect(source).toContain("await Promise.allSettled(");
+    expect(source).toContain('result.status === "fulfilled" && result.value.changed');
+    expect(source).toContain("unresolvedChapterCount: repairs.unresolvedChapterCount");
+  });
+
+  it("counts unattempted production repair targets as unresolved after a deterministic break", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/workflows/generate-book.ts"), "utf8");
+    const breakIndex = source.indexOf("if (!revised.ok && revised.deterministic) break;");
+    const finalSummary = source.indexOf(
+      "continuityRepairProgress(revisionTotal, revisionApplied)",
+      breakIndex,
+    );
+    expect(breakIndex).toBeGreaterThanOrEqual(0);
+    expect(finalSummary).toBeGreaterThan(breakIndex);
   });
 
   it("keeps each multi-table persistence helper on one transaction", () => {

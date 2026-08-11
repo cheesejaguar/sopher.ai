@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   rateLimit: vi.fn(),
   authorizeProjectSpend: vi.fn(),
   proofreadChapter: vi.fn(),
+  buildMeteredDeliveryRefund: vi.fn(),
   refundMeteredDelivery: vi.fn(),
+  healReplayedMeteredDelivery: vi.fn(),
   findDelivery: vi.fn(),
   persistDelivery: vi.fn(),
 }));
@@ -51,7 +53,12 @@ vi.mock("@/ai/agents/proofread", async (importOriginal) => {
 });
 vi.mock("@/ai/metering", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/ai/metering")>();
-  return { ...actual, refundMeteredDelivery: mocks.refundMeteredDelivery };
+  return {
+    ...actual,
+    buildMeteredDeliveryRefund: mocks.buildMeteredDeliveryRefund,
+    refundMeteredDelivery: mocks.refundMeteredDelivery,
+    healReplayedMeteredDelivery: mocks.healReplayedMeteredDelivery,
+  };
 });
 vi.mock("@/lib/chapter-proofread-delivery", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/chapter-proofread-delivery")>();
@@ -95,7 +102,14 @@ beforeEach(() => {
   mocks.rateLimit.mockResolvedValue({ limited: false });
   mocks.getChapterById.mockResolvedValue({ id: chapterId, content: CONTENT, version: 3 });
   mocks.authorizeProjectSpend.mockResolvedValue(null);
+  mocks.buildMeteredDeliveryRefund.mockReturnValue({
+    userId: "user-1",
+    credits: 0.1,
+    description: "Chapter proofread produced no corrections — refunded",
+    externalRefPrefix: "llm:proofread:attempt:1",
+  });
   mocks.refundMeteredDelivery.mockResolvedValue(true);
+  mocks.healReplayedMeteredDelivery.mockResolvedValue(undefined);
   mocks.persistDelivery.mockResolvedValue({ suggestions: [], skipped: 0, replayed: false });
   const chain = { from: vi.fn(), where: vi.fn(), limit: vi.fn().mockResolvedValue([]) };
   chain.from.mockReturnValue(chain);
@@ -112,12 +126,15 @@ describe("chapter proofread refunds an empty delivery", () => {
 
     const response = await post();
 
-    expect(mocks.refundMeteredDelivery).toHaveBeenCalledWith(
+    expect(mocks.buildMeteredDeliveryRefund).toHaveBeenCalledWith(
       expect.anything(),
       "Chapter proofread produced no corrections — refunded",
     );
+    expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
     // Still a durable delivery: the same idempotency key must replay it.
-    expect(mocks.persistDelivery).toHaveBeenCalledTimes(1);
+    expect(mocks.persistDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ refund: expect.objectContaining({ credits: 0.1 }) }),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ suggestions: [], skipped: 0 });
   });
@@ -163,5 +180,18 @@ describe("chapter proofread refunds an empty delivery", () => {
     expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
     expect(mocks.persistDelivery).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
+  });
+
+  it("replays a durable empty clean-or-no-op result without another provider call", async () => {
+    mocks.findDelivery.mockResolvedValue({ suggestions: [], skipped: 0, replayed: true });
+
+    const response = await post();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ suggestions: [], skipped: 0 });
+    expect(mocks.healReplayedMeteredDelivery).toHaveBeenCalledOnce();
+    expect(mocks.proofreadChapter).not.toHaveBeenCalled();
+    expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
+    expect(mocks.persistDelivery).not.toHaveBeenCalled();
   });
 });

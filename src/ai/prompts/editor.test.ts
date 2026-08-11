@@ -24,7 +24,9 @@ describe("EDITOR_SYSTEM_PROMPT", () => {
       expect(EDITOR_SYSTEM_PROMPT).toContain(item);
     }
     expect(EDITOR_SYSTEM_PROMPT).toContain("The goal is refinement, not rewriting.");
-    expect(EDITOR_SYSTEM_PROMPT).toContain("changes_made");
+    expect(EDITOR_SYSTEM_PROMPT).toContain("Every proposed replacement must concretely change");
+    expect(EDITOR_SYSTEM_PROMPT).toContain("multiple sentences or paragraphs");
+    expect(EDITOR_SYSTEM_PROMPT).not.toContain("changes_made");
   });
 
   it("respects writer intent without referencing old tools", () => {

@@ -113,6 +113,38 @@ export function continuityPhaseRequiredUsd(config: GenerationConfig): number {
   return operationCeiling(config, "continuity.phase");
 }
 
+/**
+ * Hard parent ceiling for a standalone consistency review. The repair subset
+ * is unknowable until the review has run, so the one durable reservation must
+ * cover every phase plus at most one targeted editor call per written chapter.
+ */
+export function standaloneContinuityRequiredUsd(
+  config: GenerationConfig,
+  phaseCount: number,
+  writtenChapterNumbers: readonly number[],
+): number {
+  const possibleRepairs: ResumeChapterMeteredWork[] = [
+    ...new Set(
+      writtenChapterNumbers.filter(
+        (chapterNumber) =>
+          Number.isSafeInteger(chapterNumber) &&
+          chapterNumber >= 1 &&
+          chapterNumber <= config.targetChapters,
+      ),
+    ),
+  ].map((chapterNumber) => ({
+    chapterNumber,
+    writer: "none",
+    summary: false,
+    editorial: "none",
+    revision: true,
+  }));
+  return (
+    continuityPhaseRequiredUsd(config) * Math.max(0, phaseCount) +
+    editorialWaveRequiredUsd(config, possibleRepairs, "revision")
+  );
+}
+
 /** Conservative gate for a user-requested outline regeneration. */
 export function outlineRevisionRequiredUsd(config: GenerationConfig): number {
   return [

@@ -11,6 +11,19 @@ import type { GenerationCompletionState } from "@/lib/run-events";
 
 type PersistedDegradedPass = NonNullable<GenerationCompletionState["degraded"]>[number];
 
+/** A later successful standalone review retires only the old continuity caveat. */
+export function remainingSkippedPasses(
+  degraded: readonly PersistedDegradedPass[] | undefined,
+  continuityRecovered: boolean,
+): PersistedDegradedPass[] {
+  if (!continuityRecovered) return [...(degraded ?? [])];
+  return (degraded ?? []).filter(
+    (pass) =>
+      pass.code !== DEGRADATION_CODES.continuity_review_unavailable &&
+      pass.code !== DEGRADATION_CODES.continuity_review_partial,
+  );
+}
+
 /**
  * The recognized codes behind the rendered notices, so the page can offer to
  * re-run the one pass that can be recovered. Kept separate from

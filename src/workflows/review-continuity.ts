@@ -1,6 +1,6 @@
 import { FatalError, getWorkflowMetadata } from "workflow";
 
-import type { ContinuityOutcome } from "@/ai/agents/continuity";
+import type { ContinuityOutcome, ContinuityReport } from "@/ai/agents/continuity";
 import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 import {
   AUTHORING_CANCELLATION_MESSAGE,
@@ -9,16 +9,27 @@ import {
 import { authoringFailureMessage, classifyAuthoringFailure } from "@/lib/authoring-failures";
 import type { GenerationConfig } from "@/lib/run-events";
 import {
-  continuityCreditCheckStep,
+  continuityChapterRepairsStep,
   continuityFinalizeStep,
   continuityPhaseStep,
+  editChapterStep,
   emitCost,
   emitProgress,
   linkWorkflowRunStep,
   markRunStatus,
   releaseCreditsStep,
   reserveCreditsStep,
+  standaloneContinuityCreditCheckStep,
 } from "./steps";
+import { continuityRepairProgress } from "./continuity-repairs";
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    out.push(items.slice(index, index + size));
+  }
+  return out;
+}
 
 /**
  * Author-triggered re-run of the cross-chapter consistency review.
@@ -37,13 +48,12 @@ import {
  *      be its own *active* generation run. A request that dies mid-flight would
  *      strand that run and its credit holds; a Workflow's step checkpoints plus
  *      the existing reservation sweep are what make that recoverable.
- *   3. Every phase is separately authorized and reserved. A retry replays the
- *      phases that already finished instead of re-billing the author for them.
+ *   3. One parent reservation holds the complete quoted ceiling, while phase
+ *      checkpoints keep retries from re-billing work that already finished.
  *
- * Unlike the book run, a failure here is not absorbed. There is no manuscript at
- * risk — the book was delivered before this started — so the honest outcome of a
- * review that cannot finish is a failed review, not a book with a partial score
- * presented as a verdict.
+ * A review-phase failure is not absorbed: a partial score is never presented
+ * as a verdict. After the complete report is durable, however, a failed or
+ * no-op repair stays an open finding instead of invalidating the paid review.
  */
 export async function reviewManuscriptContinuity(
   dbRunId: string,
@@ -70,54 +80,147 @@ export async function reviewManuscriptContinuity(
     });
 
     const plannedPhases = continuityPhaseKeys(config.tier);
-    const outcomes: ContinuityOutcome[] = [];
-    for (const [index, phaseKey] of plannedPhases.entries()) {
-      const quote = await continuityCreditCheckStep(ref, config, phaseKey);
-      // The read-only quote above is for the pause copy; this serialized hold is
-      // the authorization boundary. There is deliberately no top-up pause here:
-      // the author was quoted the whole review before it started, and a review
-      // that stalls halfway holding a lock on their project is worse than one
-      // that stops and can be asked for again.
-      const authorization = await reserveCreditsStep(
-        ref,
-        quote.required,
-        `continuity-review:${phaseKey}`,
+    // The start action quotes this same ceiling. Claim it once, before the
+    // first provider call, and use the parent hold for every review and repair
+    // settlement. Concurrent spend can no longer strand a paid partial review.
+    const quote = await standaloneContinuityCreditCheckStep(ref, config);
+    const authorization = await reserveCreditsStep(
+      ref,
+      quote.required,
+      "continuity-review:full-ceiling",
+    );
+    if (!authorization.sufficient) {
+      throw new FatalError(
+        `${authorization.balance.toFixed(0)} of ${authorization.required.toFixed(0)} credits needed to finish the consistency review`,
       );
-      if (!authorization.sufficient) {
-        throw new FatalError(
-          `${authorization.balance.toFixed(0)} of ${authorization.required.toFixed(0)} credits needed to finish the consistency review`,
-        );
-      }
-      try {
+    }
+
+    let report: ContinuityReport;
+    let revisionTotal = 0;
+    let revisionProcessed = 0;
+    let revisionApplied = 0;
+    let repairPlanningFailed = false;
+    try {
+      const outcomes: ContinuityOutcome[] = [];
+      for (const [index, phaseKey] of plannedPhases.entries()) {
         outcomes.push(
           await continuityPhaseStep(ref, config, phaseKey, authorization.reservationRef),
         );
-      } finally {
-        await releaseCreditsStep(ref, authorization.reservationRef);
+        await emitProgress(ref, {
+          type: "stage",
+          stage: "continuity",
+          pct: 5 + Math.round(85 * ((index + 1) / plannedPhases.length)),
+          detail: `${index + 1} of ${plannedPhases.length} review passes complete`,
+        });
       }
-      await emitProgress(ref, {
-        type: "stage",
-        stage: "continuity",
-        pct: 5 + Math.round(85 * ((index + 1) / plannedPhases.length)),
-        detail: `${index + 1} of ${plannedPhases.length} review passes complete`,
-      });
+
+      // Every planned phase produced an outcome or we never got here, so the score
+      // is renormalized over the full rubric and `review` is published. Once this
+      // durable report exists, an individual repair failure must not force the
+      // author to buy and run the entire review again.
+      report = await continuityFinalizeStep(ref, outcomes, true);
+      await emitCost(ref);
+
+      let chapterRepairs: Awaited<ReturnType<typeof continuityChapterRepairsStep>> = [];
+      try {
+        chapterRepairs = await continuityChapterRepairsStep(ref, config, outcomes);
+      } catch (error) {
+        const message = authoringFailureMessage(error);
+        if (
+          message === AUTHORING_CANCELLATION_MESSAGE ||
+          message === AUTHORING_RUN_INACTIVE_MESSAGE
+        ) {
+          throw error;
+        }
+        repairPlanningFailed = true;
+        console.warn("Continuity findings remain open because repair planning failed", {
+          runId: ref.dbRunId,
+        });
+      }
+      revisionTotal = chapterRepairs.length;
+      if (revisionTotal > 0) {
+        await emitProgress(ref, {
+          type: "stage",
+          stage: "revising",
+          pct: 92,
+          detail: `${revisionTotal} affected ${revisionTotal === 1 ? "chapter" : "chapters"} to process for targeted corrections`,
+        });
+        for (const wave of chunk(chapterRepairs, config.waveSize)) {
+          const results = await Promise.allSettled(
+            wave.map((repair) =>
+              editChapterStep(
+                ref,
+                config,
+                repair.chapterNumber,
+                repair.issueNotes,
+                authorization.reservationRef,
+              ),
+            ),
+          );
+          for (const [index, result] of results.entries()) {
+            if (result.status === "fulfilled" && result.value.changed) {
+              revisionApplied += 1;
+              continue;
+            }
+            if (result.status === "rejected") {
+              const message = authoringFailureMessage(result.reason);
+              if (
+                message === AUTHORING_CANCELLATION_MESSAGE ||
+                message === AUTHORING_RUN_INACTIVE_MESSAGE
+              ) {
+                throw result.reason;
+              }
+              console.warn("A continuity repair remains unresolved after step retries", {
+                runId: ref.dbRunId,
+                chapterNumber: wave[index]?.chapterNumber,
+              });
+            }
+          }
+          revisionProcessed += wave.length;
+          const progress = continuityRepairProgress(revisionProcessed, revisionApplied);
+          await emitProgress(ref, {
+            type: "stage",
+            stage: "revising",
+            pct: 92 + Math.round(6 * (revisionProcessed / revisionTotal)),
+            detail: progress.detail,
+          });
+          await emitCost(ref);
+        }
+      }
+      if (repairPlanningFailed) revisionProcessed = 0;
+    } finally {
+      try {
+        await releaseCreditsStep(ref, authorization.reservationRef);
+      } catch (cleanupError) {
+        // The terminal reservation sweep is the final backstop. A cleanup
+        // outage must not invalidate a durable paid report or hide the
+        // initiating review failure behind a secondary error.
+        console.error("Standalone continuity reservation release failed", {
+          runId: ref.dbRunId,
+          cleanupError,
+        });
+      }
     }
 
-    // Every planned phase produced an outcome or we never got here, so the score
-    // is renormalized over the full rubric and `review` is published.
-    const report = await continuityFinalizeStep(ref, outcomes, true);
-    await emitCost(ref);
+    const repairs = continuityRepairProgress(revisionProcessed, revisionApplied);
     await emitProgress(ref, {
       type: "stage",
       stage: "done",
       pct: 100,
-      detail: report.recommendation,
+      detail:
+        revisionTotal > 0
+          ? `${report.recommendation} ${repairs.detail}. Findings remain open until you verify them.`
+          : repairPlanningFailed
+            ? `${report.recommendation} Automatic correction planning could not complete; findings remain open for your review.`
+            : `${report.recommendation} No findings qualified for an automatic prose change; findings remain open for your review.`,
     });
     await markRunStatus(ref, "completed");
     return {
       score: report.score,
       recommendation: report.recommendation,
       issueCount: report.issues.length,
+      appliedChapterCount: repairs.appliedChapterCount,
+      unresolvedChapterCount: repairs.unresolvedChapterCount,
     };
   } catch (error) {
     const message = authoringFailureMessage(error);

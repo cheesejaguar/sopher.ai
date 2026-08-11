@@ -163,6 +163,15 @@ describe("editChapter", () => {
     expect(result.changed).toBe(true);
   });
 
+  it("drops an unchanged replacement instead of recording a fake edit", async () => {
+    const original = "Mira counted the boats twice and got a different number both times.";
+    const result = await edit({
+      replacements: [replacement({ revised: original, reason: "No change needed" })],
+      notes: [],
+    });
+    expect(result).toMatchObject({ content: DRAFT, changed: false });
+  });
+
   it("survives a missing reason without dropping the edit", async () => {
     const result = await edit({ replacements: [replacement({ reason: null })], notes: [] });
     expect(result.content).toContain("got two different numbers");
@@ -194,6 +203,19 @@ describe("normalizeEditReplacements", () => {
     });
     expect(result.replacements).toHaveLength(15);
     expect(result.replacements.map((r) => r.original)).not.toContain("orphan");
+  });
+
+  it("drops encoding-only no-ops but preserves meaningful whitespace changes", () => {
+    const result = normalizeEditReplacements({
+      replacements: [
+        { original: "Caf\u00e9", revised: "Cafe\u0301", reason: "No change" },
+        { original: "First\r\nSecond", revised: "First\nSecond", reason: "No change" },
+        { original: "First\nSecond", revised: "First\n\nSecond", reason: "New paragraph" },
+      ],
+    });
+    expect(result.replacements).toEqual([
+      { original: "First\nSecond", revised: "First\n\nSecond", reason: "New paragraph" },
+    ]);
   });
 
   it("lands every salvaged answer back on the strict schema", () => {
@@ -236,6 +258,17 @@ describe("reviewChapter", () => {
     expect(result.suggestions[0].replacement).toContain("wet rope");
   });
 
+  it("tells the reviewer to return only concrete changes at the scope they require", async () => {
+    await review({ suggestions: [] });
+    expect(mocks.calls[0].prompt).toContain(
+      'Every "replacement" must make an actual textual change',
+    );
+    expect(mocks.calls[0].prompt).toContain("Never return praise");
+    expect(mocks.calls[0].prompt).toContain("request to verify");
+    expect(mocks.calls[0].prompt).toContain("multiple sentences or paragraphs");
+    expect(mocks.calls[0].prompt).toContain("empty suggestions array");
+  });
+
   it("survives 21 suggestions when the cap is 20", async () => {
     const result = await review({
       suggestions: Array.from({ length: 21 }, (_, index) =>
@@ -266,5 +299,35 @@ describe("reviewChapter", () => {
   it("drops a suggestion with no replacement instead of proposing a deletion", async () => {
     const result = await review({ suggestions: [suggestion({ replacement: undefined })] });
     expect(result.suggestions).toEqual([]);
+  });
+
+  it("drops exact and encoding-only no-op suggestions", async () => {
+    const result = await review({
+      suggestions: [
+        suggestion({
+          replacement: "The harbor smelled of salt and rope.",
+          rationale: "Good line; no change needed",
+        }),
+        suggestion({
+          anchorText: "The Caf\u00e9 was quiet.",
+          replacement: "The Cafe\u0301 was quiet.",
+        }),
+      ],
+    });
+    expect(result.suggestions).toEqual([]);
+    expect(result.normalization).toMatchObject({
+      receivedCount: 2,
+      acceptedCount: 0,
+      noOpCount: 2,
+      invalidCount: 0,
+    });
+  });
+
+  it("keeps a concrete multi-paragraph replacement", async () => {
+    const anchorText = "The first beat ended.\n\nThe second beat began.";
+    const replacement = "The first beat broke off.\n\nWithout warning, the second beat began.";
+    const result = await review({ suggestions: [suggestion({ anchorText, replacement })] });
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0]).toMatchObject({ anchorText, replacement });
   });
 });

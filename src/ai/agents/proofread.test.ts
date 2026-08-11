@@ -145,6 +145,23 @@ describe("proofreadChapter", () => {
     }
   });
 
+  it("drops exact and canonically equivalent no-op corrections", async () => {
+    for (const noOp of [
+      correction({ replacement: "She new the answer before he asked." }),
+      correction({
+        anchorText: "The Caf\u00e9 stayed closed all day.",
+        replacement: "The Cafe\u0301 stayed closed all day.",
+      }),
+      correction({
+        anchorText: "First line.\r\nSecond line.",
+        replacement: "First line.\nSecond line.",
+      }),
+    ]) {
+      const result = await proofread({ corrections: [noOp] });
+      expect(result.corrections).toEqual([]);
+    }
+  });
+
   it("drops an anchor too short to be a sentence rather than failing the pass", async () => {
     const result = await proofread({
       corrections: [correction({ anchorText: "the the" }), correction()],

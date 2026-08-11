@@ -1,6 +1,6 @@
 import { getCache } from "@vercel/functions";
 import { and, eq, gte, sum } from "drizzle-orm";
-import { getDb, getSqlClient, schema } from "@/db";
+import { getDb, getSqlClient, schema, type DbTransaction } from "@/db";
 import { assertProjectSpendAccess } from "@/lib/project-spend-access";
 import { calculateUsd, type UsageTokens } from "./pricing";
 import { canonicalizeCreditRequirement, creditsForUsd } from "./credits-shared";
@@ -18,6 +18,35 @@ function monthStart(): Date {
 }
 
 const SPEND_CACHE_TTL_SECONDS = 60;
+
+export type MeteredDeliveryRefundRecord = {
+  userId: string;
+  credits: number;
+  description: string;
+  externalRefPrefix: string;
+};
+
+/**
+ * Writes a settled-call refund inside the caller's delivery transaction. This
+ * is the atomic counterpart to grantCredits(): optional output producers use it
+ * when an empty result, immutable replay receipt, and lease release must either
+ * all commit or all roll back.
+ */
+export async function recordMeteredDeliveryRefund(
+  tx: DbTransaction,
+  input: MeteredDeliveryRefundRecord,
+): Promise<void> {
+  await tx
+    .insert(schema.creditLedger)
+    .values({
+      userId: input.userId,
+      amount: String(input.credits),
+      kind: "adjustment",
+      description: input.description,
+      externalRef: `delivery-refund:${input.externalRefPrefix}`,
+    })
+    .onConflictDoNothing({ target: schema.creditLedger.externalRef });
+}
 
 function spendCacheKey(userId: string) {
   return `spend:${userId}`;

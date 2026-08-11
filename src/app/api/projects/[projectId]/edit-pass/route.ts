@@ -65,28 +65,45 @@ async function requireProject(userId: string, projectId: string) {
 }
 
 async function editPassResult(projectId: string, run: EditPassRun | null) {
-  if (!run) return { run: null, suggestionCount: 0, firstSuggestionChapter: null };
+  if (!run) {
+    return {
+      run: null,
+      suggestionCount: 0,
+      firstSuggestionChapter: null,
+      suggestionChapters: [],
+    };
+  }
   const db = getDb();
-  const [[suggestions], [first]] = await Promise.all([
-    db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(schema.suggestions)
-      .where(and(eq(schema.suggestions.runId, run.id), eq(schema.suggestions.status, "pending"))),
-    db
-      .select({ chapterNumber: schema.chapters.chapterNumber })
-      .from(schema.suggestions)
-      .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
-      .innerJoin(schema.books, eq(schema.books.id, schema.chapters.bookId))
-      .where(
-        and(
-          eq(schema.suggestions.runId, run.id),
-          eq(schema.suggestions.status, "pending"),
-          eq(schema.books.projectId, projectId),
-        ),
-      )
-      .orderBy(schema.chapters.chapterNumber)
-      .limit(1),
-  ]);
+  const suggestionChapterRows = await db
+    .select({
+      chapterNumber: schema.chapters.chapterNumber,
+      title: schema.chapters.title,
+      suggestionCount: sql<number>`count(*)::int`,
+    })
+    .from(schema.suggestions)
+    .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
+    .innerJoin(schema.books, eq(schema.books.id, schema.chapters.bookId))
+    .where(
+      and(
+        // A chapter may also have selection edits, proofread corrections, or
+        // suggestions from an older pass. This result is one review set only.
+        eq(schema.suggestions.runId, run.id),
+        eq(schema.suggestions.passType, "review"),
+        eq(schema.suggestions.status, "pending"),
+        eq(schema.books.projectId, projectId),
+      ),
+    )
+    .groupBy(schema.chapters.id, schema.chapters.chapterNumber, schema.chapters.title)
+    .orderBy(schema.chapters.chapterNumber);
+  const suggestionChapters = suggestionChapterRows.map((chapter) => ({
+    chapterNumber: chapter.chapterNumber,
+    title: chapter.title,
+    suggestionCount: Number(chapter.suggestionCount),
+  }));
+  const suggestionCount = suggestionChapters.reduce(
+    (total, chapter) => total + chapter.suggestionCount,
+    0,
+  );
   const config = run.config as Partial<ManuscriptEditPassConfig>;
   return {
     run: {
@@ -100,8 +117,9 @@ async function editPassResult(projectId: string, run: EditPassRun | null) {
       confirmationPending: Boolean(run.acceptanceUncertainAt && !run.workflowRunId),
       completion: readManuscriptEditPassCompletion(run.config),
     },
-    suggestionCount: Number(suggestions?.count ?? 0),
-    firstSuggestionChapter: first?.chapterNumber ?? null,
+    suggestionCount,
+    firstSuggestionChapter: suggestionChapters[0]?.chapterNumber ?? null,
+    suggestionChapters,
   };
 }
 
@@ -421,6 +439,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         },
         suggestionCount: 0,
         firstSuggestionChapter: null,
+        suggestionChapters: [],
         maximumCredits,
         stubbed: true,
       },

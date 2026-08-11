@@ -40,7 +40,7 @@ import type { GenerationConfig } from "../src/lib/run-events";
 /** Above this, an operator has to say so explicitly. */
 const DEFAULT_MAX_CREDITS = 5;
 
-type OpenIntent = { ref: string; held: number; createdAt: Date };
+type OpenIntent = { ref: string; held: number; createdAt: Date; runId: string | null };
 
 async function main() {
   const runId = process.argv[2];
@@ -48,6 +48,9 @@ async function main() {
   const maxIndex = process.argv.indexOf("--max-credits");
   const maxCredits = maxIndex >= 0 ? Number(process.argv[maxIndex + 1]) : DEFAULT_MAX_CREDITS;
   if (!runId) throw new Error("Usage: reconcile-metering.ts <runId> [--abort] [--max-credits N]");
+  if (!Number.isFinite(maxCredits) || maxCredits < 0) {
+    throw new Error("--max-credits must be followed by a non-negative number");
+  }
 
   const db = getDb();
   const [run] = await db
@@ -72,7 +75,7 @@ async function main() {
   const sql = getSqlClient();
   const rows = (await sql`
     select intent.external_ref as ref, (-claim.amount)::float8 as held,
-           intent.created_at as "createdAt"
+           intent.created_at as "createdAt", intent.run_id as "runId"
     from credit_ledger intent
     join credit_ledger claim
       on claim.external_ref = 'metering-claim:' || intent.external_ref
@@ -137,7 +140,10 @@ async function main() {
       // Deterministic: meter.ts derives the hold's ref the same way.
       reservationRef: `metering-claim:${row.ref}`,
       projectId: run.projectId,
-      runId: run.id,
+      // A retry can inherit another run's billing lineage. The intent and its
+      // claim remain keyed to the run that actually dispatched the provider
+      // call, so abort against that recorded run rather than the CLI target.
+      runId: row.runId,
     });
     console.log(`  aborted ${row.held.toFixed(4)}  ${row.ref.slice(prefix.length)}`);
   }

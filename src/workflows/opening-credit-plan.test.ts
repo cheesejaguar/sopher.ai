@@ -19,6 +19,7 @@ import {
   initialOutlineRequiredUsd,
   resumeOpeningRequiredUsd,
   singleChapterRequiredUsd,
+  standaloneContinuityRequiredUsd,
 } from "./opening-credit-plan";
 
 const config: GenerationConfig = {
@@ -259,5 +260,14 @@ describe("opening credit plan", () => {
         continuityPhasesTotal: 6,
       }),
     ).toBe(continuityPhaseRequiredUsd(config));
+  });
+
+  it("holds the full standalone review and worst-case repair ceiling together", () => {
+    const chapters = [1, 2, 3];
+    const total = standaloneContinuityRequiredUsd(config, 6, chapters);
+    expect(total).toBeGreaterThan(continuityPhaseRequiredUsd(config) * 6);
+    expect(standaloneContinuityRequiredUsd(config, 6, [1, 2, 2, 99])).toBe(
+      standaloneContinuityRequiredUsd(config, 6, [1, 2]),
+    );
   });
 });

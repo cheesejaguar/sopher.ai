@@ -62,6 +62,37 @@ function SuggestionTypeLabel({ type, touchFriendly }: { type: string; touchFrien
  * `no-underline` keeps the browser default off the design.
  */
 function DiffView({ before, after }: { before: string; after: string }) {
+  // Word-token diffs intentionally normalize whitespace. Once a suggestion
+  // spans paragraphs that would hide structural edits, so show exact, labeled
+  // passages with preserved line breaks instead.
+  if (/\r|\n/.test(before) || /\r|\n/.test(after)) {
+    return (
+      <div className="grid gap-3 font-serif text-sm leading-relaxed text-paper-foreground">
+        <div className="min-w-0">
+          <p className="mb-1 font-sans text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+            Original passage
+          </p>
+          <del className="block whitespace-pre-wrap break-words bg-destructive/10 px-2 py-1.5 text-destructive line-through decoration-destructive/50">
+            {before}
+          </del>
+        </div>
+        <div className="min-w-0">
+          <p className="mb-1 font-sans text-[10px] font-semibold tracking-wide text-muted-foreground uppercase">
+            Proposed passage
+          </p>
+          {after ? (
+            <ins className="block whitespace-pre-wrap break-words bg-ai-soft/80 px-2 py-1.5 text-ai no-underline">
+              {after}
+            </ins>
+          ) : (
+            <p className="border border-ai/25 bg-ai-soft/30 px-2 py-1.5 font-sans text-xs text-ai">
+              No replacement text — remove this passage.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
   const ops = wordDiff(before, after);
   return (
     <p className="font-serif text-sm leading-relaxed text-paper-foreground">
