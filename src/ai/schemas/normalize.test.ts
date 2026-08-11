@@ -18,6 +18,7 @@ import {
   normalizeCreativeQuestion,
   normalizeCritique,
   normalizeEditSuggestionList,
+  normalizeEditSuggestionListWithDiagnostics,
   normalizeModerationVerdict,
   normalizeReviewPhaseResult,
   normalizeRevision,
@@ -45,6 +46,9 @@ const issue = (over: Record<string, unknown> = {}) => ({
   severity: "major",
   description: "Mira's eye color changes between chapters",
   suggestedFix: "Pick storm-gray and keep it",
+  fixability: "auto_fixable",
+  confidence: 0.94,
+  repairChapters: [3],
   ...over,
 });
 
@@ -177,6 +181,32 @@ describe("normalizeReviewPhaseResult", () => {
     const result = normalizeReviewPhaseResult({});
     expect(reviewPhaseResultSchema.safeParse(result).success).toBe(true);
     expect(result).toEqual({ score: 0.5, summary: "", strengths: [], issues: [] });
+  });
+
+  it("defaults missing or invalid repair authority to non-automatic", () => {
+    const missing = normalizeReviewPhaseResult(
+      reviewPhase({
+        issues: [
+          issue({ fixability: undefined, confidence: undefined, repairChapters: undefined }),
+        ],
+      }),
+    ).issues[0];
+    expect(missing).toMatchObject({
+      fixability: "informational",
+      confidence: 0,
+      repairChapters: [],
+    });
+
+    const invalid = normalizeReviewPhaseResult(
+      reviewPhase({
+        issues: [issue({ fixability: "certain", confidence: "unknown", repairChapters: ["x"] })],
+      }),
+    ).issues[0];
+    expect(invalid).toMatchObject({
+      fixability: "informational",
+      confidence: 0,
+      repairChapters: [],
+    });
   });
 });
 
@@ -349,6 +379,43 @@ describe("normalizeEditSuggestionList", () => {
       })),
     });
     expect(result.suggestions).toHaveLength(20);
+  });
+
+  it("drops exact and canonically equivalent no-op suggestions", () => {
+    const result = normalizeEditSuggestionListWithDiagnostics({
+      suggestions: [
+        {
+          anchorText: "This passage stays exactly as it is.",
+          replacement: "This passage stays exactly as it is.",
+          rationale: "No change needed",
+          category: "structure",
+          severity: "info",
+        },
+        {
+          anchorText: "The Caf\u00e9 was quiet.",
+          replacement: "The Cafe\u0301 was quiet.",
+          rationale: "Encoding only",
+          category: "style",
+          severity: "info",
+        },
+        {
+          anchorText: "The room was quiet.",
+          replacement: "The room held its breath.",
+          rationale: "Concrete change",
+          category: "line",
+          severity: "info",
+        },
+      ],
+    });
+    expect(result.suggestions).toHaveLength(1);
+    expect(result.suggestions[0].replacement).toBe("The room held its breath.");
+    expect(result.normalization).toMatchObject({
+      receivedCount: 3,
+      acceptedCount: 1,
+      noOpCount: 2,
+      invalidCount: 0,
+      truncatedCount: 0,
+    });
   });
 });
 
@@ -586,6 +653,9 @@ const reviewPhaseLike = fc.record(
           severity: fc.oneof(fc.constantFrom("critical", "high", "Minor", "blocker"), looseText),
           description: looseText,
           suggestedFix: looseText,
+          fixability: looseText,
+          confidence: looseNumber,
+          repairChapters: fc.oneof(fc.array(looseNumber, { maxLength: 30 }), looseNumber),
         },
         { requiredKeys: [] },
       ),
@@ -609,6 +679,9 @@ const validReviewPhase = fc.record({
       severity: fc.constantFrom("critical", "major", "minor"),
       description: cleanText,
       suggestedFix: cleanText,
+      fixability: fc.constantFrom("auto_fixable", "needs_author_choice", "informational"),
+      confidence: fc.double({ min: 0, max: 1, noNaN: true }).map(Math.abs),
+      repairChapters: fc.array(fc.integer({ min: 1, max: 60 }), { maxLength: 10 }),
     }),
     { maxLength: 10 },
   ),

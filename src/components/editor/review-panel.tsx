@@ -289,8 +289,14 @@ export function ReviewPanel({
     <div className="flex h-full min-h-0 flex-col">
       <div
         className={cn(
-          "flex items-center gap-1.5 border-b border-border p-3",
-          touchFriendly && "flex-wrap pr-14",
+          // Wrapping is not a touch concern: this panel is a ResizablePanel the
+          // author can drag down to 260px, and "Suggestions" plus both action
+          // buttons never fit on one line there. Without it the header simply
+          // overflowed, and the only way to reach Proofread was a horizontal
+          // scrollbar. `pr-14` stays touch-only — it clears the sheet's close
+          // button, which does not exist on desktop.
+          "flex flex-wrap items-center gap-1.5 border-b border-border p-3",
+          touchFriendly && "pr-14",
         )}
       >
         <h2 className="text-sm font-semibold">Suggestions</h2>
@@ -300,7 +306,17 @@ export function ReviewPanel({
             <span className="sr-only"> pending</span>
           </span>
         ) : null}
-        <div className={cn("ml-auto flex items-center gap-1", touchFriendly && "mt-1 w-full")}>
+        {/*
+          The two action buttons together are wider than this panel's 260px
+          minimum, so the group has to be able to break internally as well —
+          wrapping the group onto its own line is not enough on its own.
+        */}
+        <div
+          className={cn(
+            "ml-auto flex flex-wrap items-center justify-end gap-1",
+            touchFriendly && "mt-1 w-full",
+          )}
+        >
           <Popover open={focusOpen} onOpenChange={setFocusOpen}>
             <PopoverTrigger
               render={

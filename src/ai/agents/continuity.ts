@@ -76,7 +76,7 @@ function phaseUserPrompt(key: ReviewPhaseKey, corpus: string): string {
     `## Manuscript (chapter summaries)\n${corpus}`,
     [
       `The summaries above are your map, not your evidence: before flagging a specific issue,`,
-      `spot-check the actual prose with chaptersGetText (and characterBibleGet or`,
+      `spot-check the actual prose with chaptersGetText (and entityGet or`,
       `storySoFarSearch as needed). Do not call continuityRecordIssue — issues are persisted`,
       `separately from your answer.`,
     ].join(" "),

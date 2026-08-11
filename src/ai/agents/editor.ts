@@ -7,8 +7,8 @@ import type { ToolCtx } from "@/ai/tools";
 import { buildEditUserPrompt, EDITOR_SYSTEM_PROMPT } from "@/ai/prompts/editor";
 import {
   editSuggestionListWireSchema,
-  normalizeEditSuggestionList,
-  type EditSuggestionList,
+  normalizeEditSuggestionListWithDiagnostics,
+  type NormalizedEditSuggestionList,
 } from "@/ai/schemas";
 import {
   asRecord,
@@ -22,6 +22,7 @@ import {
 import { analyzeQuality, getQualityRecommendations } from "@/ai/analysis/quality-metrics";
 import { analyzePacing } from "@/ai/analysis/pacing";
 import { anthropicCachedSystem } from "@/ai/cache";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 
 export type EditChapterInput = {
   meter: MeterCtx;
@@ -105,9 +106,10 @@ function normalizeEditReplacement(wire: unknown): EditReplacements["replacements
   // No anchor means nothing to replace. A *missing* `revised` must never be
   // defaulted to "": applyReplacements would splice that in and delete the
   // author's sentence — and before normalization it spliced in the literal
-  // string "undefined". An explicit "" is still a deliberate cut, so only the
-  // type is checked.
+  // string "undefined". An explicit "" is still a deliberate cut. A value
+  // identical to the anchor is commentary disguised as an edit, so it drops.
   if (!original || typeof replacement.revised !== "string") return null;
+  if (!isActionableReplacement(original, replacement.revised)) return null;
   return { original, revised: replacement.revised, reason: coerceString(replacement.reason) };
 }
 
@@ -166,7 +168,8 @@ function editPrompt(input: EditChapterInput, metricsNote: string): string {
     `## Measured heuristics (free analysis)\n${metricsNote}`,
     [
       `## Output format (this overrides the response format in your instructions)`,
-      `Return targeted replacements, not a rewritten chapter. For each replacement, "original" must be an exact verbatim span copied from the draft (roughly 10-60 words) and "revised" its improved version, with a one-line reason.`,
+      `Return targeted replacements, not a rewritten chapter. For each replacement, "original" must be an exact verbatim contiguous span copied from the draft and "revised" its improved version, with a one-line reason. A span is normally 10-60 words, but may cover multiple sentences or paragraphs when one coherent structural or continuity fix requires it.`,
+      `Every "revised" value must make a concrete textual change. Never repeat "original", praise an unchanged passage, ask the author to verify something, or return a consideration without implementing it. Omit an entry when no change is needed.`,
       `At most ${MAX_REPLACEMENTS} replacements — pick only the highest-impact fixes the measurements and your judgment support.`,
       `Respect the author's voice: light touch — refinement, not rewriting. Leave everything you do not flag untouched.`,
       `Put overall observations in "notes" as short strings.`,
@@ -242,7 +245,8 @@ function reviewPrompt(input: ReviewChapterInput, metricsNote: string): string {
     input.instruction ? `## Author's focus for this review\n${input.instruction}` : "",
     [
       `## Output format (this overrides the response format in your instructions)`,
-      `Return suggestions where "anchorText" is an exact verbatim quote copied from the chapter (at least 8 characters, unique enough to locate) and "replacement" is the proposed revised text for that quote.`,
+      `Return suggestions where "anchorText" is an exact verbatim contiguous quote copied from the chapter (at least 8 characters, unique enough to locate) and "replacement" is the concrete revised text for that quote. One suggestion may replace multiple sentences or paragraphs when the fix needs that scope.`,
+      `Every "replacement" must make an actual textual change to its "anchorText". Never return praise, an unchanged passage, "no change needed", a request to verify something, or a suggestion to consider a change elsewhere. Implement the change in the replacement itself; if no justified change exists, return an empty suggestions array.`,
       `Give a one-line rationale, a category (line, structure, continuity, style), and a severity (info, warning, error) for each.`,
       `Respect the author's voice: light touch — refinement, not rewriting. Only suggest changes the measurements or clear craft principles support.`,
     ].join("\n"),
@@ -255,7 +259,9 @@ function reviewPrompt(input: ReviewChapterInput, metricsNote: string): string {
  * Anchored-suggestions mode for the web editor UI: one structured call that
  * returns suggestions keyed to exact verbatim quotes in the chapter.
  */
-export async function reviewChapter(input: ReviewChapterInput): Promise<EditSuggestionList> {
+export async function reviewChapter(
+  input: ReviewChapterInput,
+): Promise<NormalizedEditSuggestionList> {
   const model = MODELS[input.tier].editor;
   const metricsNote = buildMetricsNote(input.content);
 
@@ -280,5 +286,5 @@ export async function reviewChapter(input: ReviewChapterInput): Promise<EditSugg
       }),
   );
 
-  return normalizeEditSuggestionList(result.output);
+  return normalizeEditSuggestionListWithDiagnostics(result.output);
 }

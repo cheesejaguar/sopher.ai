@@ -1,9 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { getChapterById, getChapterOwnership } from "@/db/queries/books";
 import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 import { countWords, resolveAnchor } from "@/lib/editor/anchors";
 import { toSuggestionDTO } from "@/lib/editor/types";
 import { hasActiveAuthoringRun, noActiveAuthoringRunSql } from "@/lib/generation-runs";
@@ -69,10 +71,33 @@ export async function POST(
       .where(and(eq(schema.suggestions.id, suggestionId), eq(schema.suggestions.status, "pending")))
       .returning();
     if (!updated) return Response.json({ error: "Suggestion already resolved" }, { status: 409 });
+    revalidatePath(`/projects/${ownership.projectId}/editor`);
     return Response.json({ suggestion: toSuggestionDTO(updated) });
   }
 
   // Accept.
+  // Rows written before no-op validation may still be pending. Retire them at
+  // the last mutation boundary instead of creating an identical chapter
+  // revision and incrementing its version for prose that did not change.
+  if (!isActionableReplacement(suggestion.anchor.originalText, suggestion.suggestedText)) {
+    const [retired] = await db
+      .update(schema.suggestions)
+      .set({ status: "rejected" })
+      .where(and(eq(schema.suggestions.id, suggestionId), eq(schema.suggestions.status, "pending")))
+      .returning();
+    if (!retired) {
+      return Response.json({ error: "Suggestion already resolved" }, { status: 409 });
+    }
+    revalidatePath(`/projects/${ownership.projectId}/editor`);
+    return Response.json(
+      {
+        error: "This suggestion did not change the chapter and was removed",
+        suggestion: toSuggestionDTO(retired),
+      },
+      { status: 409 },
+    );
+  }
+
   if (await hasActiveAuthoringRun(ownership.projectId)) {
     return Response.json(
       { error: "Finish or stop the current run before applying suggestions" },
@@ -103,6 +128,7 @@ export async function POST(
         .where(
           and(eq(schema.suggestions.id, suggestionId), eq(schema.suggestions.status, "pending")),
         );
+      revalidatePath(`/projects/${ownership.projectId}/editor`);
       return Response.json(
         {
           error: "The chapter has changed and this suggestion no longer matches",
@@ -203,6 +229,8 @@ export async function POST(
       and(eq(schema.suggestions.chapterId, chapterId), eq(schema.suggestions.status, "pending")),
     )
     .orderBy(schema.suggestions.createdAt);
+
+  revalidatePath(`/projects/${ownership.projectId}/editor`);
 
   return Response.json({
     suggestion: toSuggestionDTO(applied),

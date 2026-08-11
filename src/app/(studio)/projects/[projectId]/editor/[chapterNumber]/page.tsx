@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { Feather } from "lucide-react";
+import { z } from "zod";
 
 import { getDb, schema } from "@/db";
 import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
@@ -30,10 +31,13 @@ function NotDraftedState({ chapterNumber }: { chapterNumber: number }) {
 
 export default async function EditorChapterPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ projectId: string; chapterNumber: string }>;
+  searchParams: Promise<{ reviewRun?: string | string[] }>;
 }) {
   const { projectId, chapterNumber: chapterParam } = await params;
+  const { reviewRun: requestedReviewRun } = await searchParams;
   const number = Number(chapterParam);
   if (!Number.isInteger(number) || number < 1 || number > 10_000) notFound();
 
@@ -49,13 +53,39 @@ export default async function EditorChapterPage({
   }
 
   const db = getDb();
+  let reviewRunId: string | null = null;
+  if (requestedReviewRun !== undefined) {
+    if (typeof requestedReviewRun !== "string" || !z.uuid().safeParse(requestedReviewRun).success) {
+      notFound();
+    }
+    const [reviewRun] = await db
+      .select({ id: schema.generationRuns.id })
+      .from(schema.generationRuns)
+      .where(
+        and(
+          eq(schema.generationRuns.id, requestedReviewRun),
+          eq(schema.generationRuns.projectId, projectId),
+          eq(schema.generationRuns.userId, userId),
+          eq(schema.generationRuns.kind, "edit_pass"),
+        ),
+      )
+      .limit(1);
+    if (!reviewRun) notFound();
+    reviewRunId = reviewRun.id;
+  }
   const [chapters, pendingRows] = await Promise.all([
     getChapterList(book.id),
     db
       .select()
       .from(schema.suggestions)
       .where(
-        and(eq(schema.suggestions.chapterId, chapter.id), eq(schema.suggestions.status, "pending")),
+        and(
+          eq(schema.suggestions.chapterId, chapter.id),
+          eq(schema.suggestions.status, "pending"),
+          ...(reviewRunId
+            ? [eq(schema.suggestions.runId, reviewRunId), eq(schema.suggestions.passType, "review")]
+            : []),
+        ),
       )
       .orderBy(schema.suggestions.createdAt),
   ]);
@@ -71,7 +101,7 @@ export default async function EditorChapterPage({
   return (
     <Suspense fallback={<EditorSkeleton />}>
       <EditorShellLoader
-        key={chapter.id}
+        key={`${chapter.id}:${reviewRunId ?? "all"}`}
         projectId={projectId}
         chapterId={chapter.id}
         chapterNumber={chapter.chapterNumber}
@@ -88,6 +118,7 @@ export default async function EditorChapterPage({
           status: c.status,
         }))}
         initialSuggestions={initialSuggestions}
+        reviewRunId={reviewRunId}
         productionStatus={
           productionStatus
             ? { label: productionStatus.label, detail: productionStatus.detail }

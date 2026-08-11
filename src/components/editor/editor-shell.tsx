@@ -42,14 +42,15 @@ import {
 } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
-import type {
-  ChapterNavItem,
-  ContentToolResponse,
-  EditorProductionStatus,
-  ReviewResponse,
-  SelectionEditResponse,
-  SuggestionActionResponse,
-  SuggestionDTO,
+import {
+  suggestionsForReviewRun,
+  type ChapterNavItem,
+  type ContentToolResponse,
+  type EditorProductionStatus,
+  type ReviewResponse,
+  type SelectionEditResponse,
+  type SuggestionActionResponse,
+  type SuggestionDTO,
 } from "@/lib/editor/types";
 import { markdownSelection } from "@/lib/editor/markdown-offsets";
 
@@ -89,6 +90,7 @@ export type EditorShellProps = {
   targetWords: number;
   chapters: ChapterNavItem[];
   initialSuggestions: SuggestionDTO[];
+  reviewRunId?: string | null;
   productionStatus: EditorProductionStatus | null;
 };
 
@@ -203,6 +205,7 @@ export function EditorShell({
   targetWords,
   chapters,
   initialSuggestions,
+  reviewRunId = null,
   productionStatus,
 }: EditorShellProps) {
   const router = useRouter();
@@ -213,7 +216,10 @@ export function EditorShell({
   const isWideWorkbench = useMediaQuery("(min-width: 1280px)");
 
   const [suggestions, setSuggestions] = useState<SuggestionDTO[]>(() =>
-    initialSuggestions.filter((s) => s.status === "pending"),
+    suggestionsForReviewRun(
+      initialSuggestions.filter((s) => s.status === "pending"),
+      reviewRunId,
+    ),
   );
   const [activeId, setActiveId] = useState<string | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -354,10 +360,10 @@ export function EditorShell({
         suppressDirtyRef.current = false;
       }
       autosaveRef.current.markSynced(chapter.version);
-      setSuggestions(pending);
+      setSuggestions(suggestionsForReviewRun(pending, reviewRunId));
       setActiveId(null);
     },
-    [],
+    [reviewRunId],
   );
 
   const requestSelectionEdit = useCallback(
@@ -386,13 +392,25 @@ export function EditorShell({
           SelectionEditResponse & { error?: unknown }
         >(`/api/chapters/${chapterId}/edits`, { selection, instruction }, true);
         if (status === 201 && data.suggestion) {
-          setSuggestions((prev) => [...prev, data.suggestion]);
-          setActiveId(data.suggestion.id);
-          // The toolbar the user was standing on unmounts while busy; hand
-          // focus to the result instead of dropping it on the body.
-          focusCardRef.current = data.suggestion.id;
-          setAnnouncement("A suggestion is ready below the passage.");
+          const visible = suggestionsForReviewRun([data.suggestion], reviewRunId);
+          if (visible.length > 0) {
+            setSuggestions((prev) => [...prev, ...visible]);
+            setActiveId(data.suggestion.id);
+            // The toolbar the user was standing on unmounts while busy; hand
+            // focus to the result instead of dropping it on the body.
+            focusCardRef.current = data.suggestion.id;
+            setAnnouncement("A suggestion is ready below the passage.");
+          } else {
+            const message =
+              "The selection edit is saved outside this manuscript review set. Return through All chapters to review every pending suggestion.";
+            toast.info(message);
+            setAnnouncement(message);
+          }
           acknowledge();
+        } else if (status === 422 && data.error) {
+          const message = String(data.error);
+          toast.info(message);
+          setAnnouncement(message);
         } else if (status === 402) {
           const message = String(data.error ?? "Monthly budget reached.");
           toast.error(message);
@@ -410,7 +428,7 @@ export function EditorShell({
         setBusy(null);
       }
     },
-    [busy, chapterId, serializeDoc],
+    [busy, chapterId, reviewRunId, serializeDoc],
   );
 
   const runContentTool = useCallback(
@@ -601,6 +619,15 @@ export function EditorShell({
         if (status === 200 && data.chapter) {
           applyServerChapter(data.chapter, data.pending ?? []);
           setAnnouncement("Suggestion applied to the chapter.");
+        } else if (status === 409 && data.suggestion?.status === "rejected") {
+          setSuggestions((prev) => prev.filter((s) => s.id !== id));
+          setActiveId((cur) => (cur === id ? null : cur));
+          const message =
+            typeof data.error === "string"
+              ? data.error
+              : "This unchanged suggestion was removed without editing the chapter.";
+          toast.info(message);
+          setAnnouncement(message);
         } else if (status === 409) {
           toast.error("The passage changed — this suggestion no longer applies.");
           setSuggestions((prev) => prev.filter((s) => s.id !== id));
@@ -633,8 +660,9 @@ export function EditorShell({
       let pending: SuggestionDTO[] = [];
       let applied = 0;
       let skipped = 0;
+      const retiredNoOps = new Set<string>();
       for (const id of ids) {
-        const { status, data } = await postJson<SuggestionActionResponse>(
+        const { status, data } = await postJson<SuggestionActionResponse & { error?: unknown }>(
           `/api/chapters/${chapterId}/edits/${id}`,
           { action: "accept" },
         );
@@ -642,13 +670,32 @@ export function EditorShell({
           lastChapter = data.chapter;
           pending = data.pending ?? [];
           applied += 1;
+        } else if (status === 409 && data.suggestion?.status === "rejected") {
+          retiredNoOps.add(id);
         } else {
           skipped += 1;
         }
       }
-      if (lastChapter) applyServerChapter(lastChapter, pending);
-      if (skipped > 0) {
-        toast.warning(`Applied ${applied} suggestions — ${skipped} no longer matched.`);
+      if (lastChapter) {
+        applyServerChapter(
+          lastChapter,
+          pending.filter((suggestion) => !retiredNoOps.has(suggestion.id)),
+        );
+      } else if (retiredNoOps.size > 0) {
+        setSuggestions((prev) => prev.filter((suggestion) => !retiredNoOps.has(suggestion.id)));
+      }
+      if (skipped > 0 || retiredNoOps.size > 0) {
+        const details = [
+          applied > 0 ? `Applied ${applied}` : null,
+          retiredNoOps.size > 0
+            ? `removed ${retiredNoOps.size} unchanged suggestion${retiredNoOps.size === 1 ? "" : "s"}`
+            : null,
+          skipped > 0 ? `${skipped} no longer matched` : null,
+        ]
+          .filter(Boolean)
+          .join("; ");
+        toast.warning(`${details}.`);
+        setAnnouncement(`${details}.`);
       } else {
         toast.success(`Applied ${applied} suggestion${applied === 1 ? "" : "s"}.`);
       }
@@ -718,16 +765,19 @@ export function EditorShell({
           setAnnouncement(message);
           return;
         }
+        const visibleSuggestions = suggestionsForReviewRun(data.suggestions, reviewRunId);
         setSuggestions((prev) => {
           const seen = new Set(prev.map((s) => s.id));
-          return [...prev, ...data.suggestions.filter((s) => !seen.has(s.id))];
+          return [...prev, ...visibleSuggestions.filter((s) => !seen.has(s.id))];
         });
         setAnnouncement(
           data.suggestions.length === 0
             ? "Review complete. Nothing flagged."
-            : `Review complete. ${data.suggestions.length} suggestion${
-                data.suggestions.length === 1 ? "" : "s"
-              } in the suggestions panel.`,
+            : reviewRunId && visibleSuggestions.length === 0
+              ? "The chapter review is saved outside this manuscript review set. Return through All chapters to see it."
+              : `Review complete. ${data.suggestions.length} suggestion${
+                  data.suggestions.length === 1 ? "" : "s"
+                } in the suggestions panel.`,
         );
         if (data.skipped > 0) {
           toast.info(
@@ -742,7 +792,7 @@ export function EditorShell({
         setBusy(null);
       }
     },
-    [chapterId, chapterNumber],
+    [chapterId, chapterNumber, reviewRunId],
   );
 
   /**
@@ -774,16 +824,19 @@ export function EditorShell({
         setAnnouncement(message);
         return;
       }
+      const visibleSuggestions = suggestionsForReviewRun(data.suggestions, reviewRunId);
       setSuggestions((prev) => {
         const seen = new Set(prev.map((s) => s.id));
-        return [...prev, ...data.suggestions.filter((s) => !seen.has(s.id))];
+        return [...prev, ...visibleSuggestions.filter((s) => !seen.has(s.id))];
       });
       setAnnouncement(
         data.suggestions.length === 0
           ? "Proofread complete. Nothing to correct."
-          : `Proofread complete. ${data.suggestions.length} correction${
-              data.suggestions.length === 1 ? "" : "s"
-            } in the suggestions panel.`,
+          : reviewRunId && visibleSuggestions.length === 0
+            ? "The proofread is saved outside this manuscript review set. Return through All chapters to see it."
+            : `Proofread complete. ${data.suggestions.length} correction${
+                data.suggestions.length === 1 ? "" : "s"
+              } in the suggestions panel.`,
       );
       if (data.skipped > 0) {
         toast.info(
@@ -797,7 +850,7 @@ export function EditorShell({
     } finally {
       setBusy(null);
     }
-  }, [chapterId, chapterNumber]);
+  }, [chapterId, chapterNumber, reviewRunId]);
 
   const selectSuggestion = useCallback((id: string) => {
     setActiveId(id);
@@ -1151,6 +1204,7 @@ export function EditorShell({
                   bookTitle={bookTitle}
                   chapters={chapters}
                   activeChapterNumber={chapterNumber}
+                  reviewRunId={reviewRunId}
                 />
               </ResizablePanel>
               <ResizableHandle />
@@ -1222,6 +1276,7 @@ export function EditorShell({
               bookTitle={bookTitle}
               chapters={chapters}
               activeChapterNumber={chapterNumber}
+              reviewRunId={reviewRunId}
               touchFriendly
               onNavigate={() => setChaptersOpen(false)}
             />

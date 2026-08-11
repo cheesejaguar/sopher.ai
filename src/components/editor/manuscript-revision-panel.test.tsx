@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("ManuscriptRevisionPanel", () => {
-  it("starts one non-destructive review and opens the completed suggestion queue", async () => {
+  it("starts one non-destructive review and focuses its completed review-set summary", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith("/edit-pass") && init?.method === "POST") {
@@ -64,6 +64,9 @@ describe("ManuscriptRevisionPanel", () => {
             },
             suggestionCount: 2,
             firstSuggestionChapter: 2,
+            suggestionChapters: [
+              { chapterNumber: 2, title: "A Different Rhythm", suggestionCount: 2 },
+            ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -79,11 +82,14 @@ describe("ManuscriptRevisionPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Review the whole manuscript" }));
 
     expect(await screen.findByText("Review in progress")).toBeVisible();
-    await waitFor(() =>
-      expect(push).toHaveBeenCalledWith(
-        "/projects/project-1/editor/2?suggestions=1&reviewRun=run-1",
-      ),
-    );
+    const summary = await screen.findByRole("heading", {
+      name: "2 suggested changes across 1 chapter",
+    });
+    await waitFor(() => expect(summary).toHaveFocus());
+    expect(push).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("link", { name: "Chapter 2, A Different Rhythm: 2 suggested changes" }),
+    ).toHaveAttribute("href", "/projects/project-1/editor/2?suggestions=1&reviewRun=run-1");
     expect(refresh).toHaveBeenCalled();
     expect(screen.getByText(/never silently rewritten/i)).toBeVisible();
   });
@@ -106,6 +112,136 @@ describe("ManuscriptRevisionPanel", () => {
     expect(screen.getByText("Review complete")).toBeVisible();
     expect(screen.getByText(/zero-change result is saved/i)).toBeVisible();
     expect(screen.queryByRole("link", { name: /review .*suggestion/i })).not.toBeInTheDocument();
+  });
+
+  it("summarizes one run-linked review set and links every affected chapter", () => {
+    render(
+      <ManuscriptRevisionPanel
+        projectId="project-1"
+        chapterCount={5}
+        maximumCredits={4}
+        initialRun={{
+          id: "run-set",
+          status: "completed",
+          instruction: "Strengthen the ending",
+          completion: { reviewedChapterCount: 5, suggestionCount: 3 },
+        }}
+        initialSuggestionCount={3}
+        initialFirstSuggestionChapter={2}
+        initialSuggestionChapters={[
+          { chapterNumber: 2, title: "The Crossing", suggestionCount: 2 },
+          { chapterNumber: 5, title: "A Door Left Open", suggestionCount: 1 },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "3 suggested changes across 2 chapters" }),
+    ).toBeVisible();
+    expect(screen.getByText(/may replace a complete passage/i)).toBeVisible();
+    const chapterNav = screen.getByRole("navigation", {
+      name: "Chapters in this manuscript review",
+    });
+    expect(chapterNav).toBeVisible();
+    expect(
+      screen.getByRole("link", {
+        name: "Chapter 2, The Crossing: 2 suggested changes",
+      }),
+    ).toHaveAttribute("href", "/projects/project-1/editor/2?suggestions=1&reviewRun=run-set");
+    expect(
+      screen.getByRole("link", {
+        name: "Chapter 5, A Door Left Open: 1 suggested change",
+      }),
+    ).toHaveAttribute("href", "/projects/project-1/editor/5?suggestions=1&reviewRun=run-set");
+  });
+
+  it("rotates a terminal run key before retrying the same instruction", async () => {
+    const staleKey = "11111111-1111-4111-8111-111111111111";
+    window.sessionStorage.setItem("sopher:manuscript-edit-pass:project-1", staleKey);
+    let submittedKey = "";
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        submittedKey = (JSON.parse(String(init.body)) as { requestKey: string }).requestKey;
+        return new Response(JSON.stringify({ error: "Not started in this test" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      throw new Error("Unexpected request");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ManuscriptRevisionPanel
+        projectId="project-1"
+        chapterCount={3}
+        maximumCredits={2}
+        initialRun={{
+          id: "run-complete",
+          status: "completed",
+          instruction: "Raise the tension",
+          completion: { reviewedChapterCount: 3, suggestionCount: 0 },
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem("sopher:manuscript-edit-pass:project-1")).not.toBe(
+        staleKey,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Review the whole manuscript" }));
+    await waitFor(() => expect(submittedKey).not.toBe(""));
+    expect(submittedKey).not.toBe(staleKey);
+  });
+
+  it("refreshes completed pending counts when the window regains focus", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            run: {
+              id: "run-focus",
+              status: "completed",
+              instruction: "Tighten the ending",
+              completion: { reviewedChapterCount: 4, suggestionCount: 3 },
+            },
+            suggestionCount: 1,
+            firstSuggestionChapter: 4,
+            suggestionChapters: [{ chapterNumber: 4, title: "Home", suggestionCount: 1 }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ManuscriptRevisionPanel
+        projectId="project-1"
+        chapterCount={4}
+        maximumCredits={3}
+        initialRun={{
+          id: "run-focus",
+          status: "completed",
+          instruction: "Tighten the ending",
+          completion: { reviewedChapterCount: 4, suggestionCount: 3 },
+        }}
+        initialSuggestionCount={3}
+        initialFirstSuggestionChapter={2}
+        initialSuggestionChapters={[
+          { chapterNumber: 2, title: "Crossing", suggestionCount: 2 },
+          { chapterNumber: 4, title: "Home", suggestionCount: 1 },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "3 suggested changes across 2 chapters" }),
+    ).toBeVisible();
+    window.dispatchEvent(new Event("focus"));
+    expect(
+      await screen.findByRole("heading", { name: "1 suggested change across 1 chapter" }),
+    ).toBeVisible();
   });
 
   it("keeps polling when completed results are temporarily unavailable", async () => {
@@ -145,6 +281,7 @@ describe("ManuscriptRevisionPanel", () => {
             },
             suggestionCount: 2,
             firstSuggestionChapter: 1,
+            suggestionChapters: [{ chapterNumber: 1, title: "The Last Light", suggestionCount: 2 }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );
@@ -186,7 +323,9 @@ describe("ManuscriptRevisionPanel", () => {
     expect(healthAttempts).toBe(2);
     expect(latestAttempts).toBe(2);
     expect(screen.getByText("Review complete")).toBeVisible();
-    expect(screen.getByRole("link", { name: /review 2 suggestions/i })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "2 suggested changes across 1 chapter" }),
+    ).toBeVisible();
     expect(screen.queryByText(/no worthwhile changes/i)).not.toBeInTheDocument();
   });
 

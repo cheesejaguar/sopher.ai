@@ -14,6 +14,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  ConsistencyReviewAction,
+  isConsistencyReviewSkipped,
+} from "@/components/generation/consistency-review-action";
 import type { ProjectExperience } from "@/lib/trial-story";
 import {
   FULL_BOOK_UNLOCK_DESCRIPTION,
@@ -70,6 +74,9 @@ export function CompletionMoment({
 }) {
   const [closed, setClosed] = React.useState(false);
   const [confirmOpen, setConfirmOpen] = React.useState(false);
+  // The consistency review is the one skipped pass an author can get back, so
+  // the offer to re-run it belongs beside the notice that says it did not run.
+  const consistencyReviewSkipped = isConsistencyReviewSkipped(notices?.map((n) => n.code));
 
   React.useEffect(() => {
     // Double rAF so the open state paints before the transition begins.
@@ -198,6 +205,7 @@ export function CompletionMoment({
               </li>
             ))}
           </ul>
+          {consistencyReviewSkipped ? <ConsistencyReviewAction projectId={projectId} /> : null}
         </section>
       ) : null}
 

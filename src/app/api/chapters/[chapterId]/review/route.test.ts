@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   rateLimit: vi.fn(),
   authorizeProjectSpend: vi.fn(),
   reviewChapter: vi.fn(),
+  buildMeteredDeliveryRefund: vi.fn(),
   refundMeteredDelivery: vi.fn(),
   findDelivery: vi.fn(),
   persistDelivery: vi.fn(),
@@ -50,7 +51,11 @@ vi.mock("@/ai/agents/editor", async (importOriginal) => {
 });
 vi.mock("@/ai/metering", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/ai/metering")>();
-  return { ...actual, refundMeteredDelivery: mocks.refundMeteredDelivery };
+  return {
+    ...actual,
+    buildMeteredDeliveryRefund: mocks.buildMeteredDeliveryRefund,
+    refundMeteredDelivery: mocks.refundMeteredDelivery,
+  };
 });
 vi.mock("@/lib/chapter-review-delivery", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/chapter-review-delivery")>();
@@ -93,6 +98,12 @@ beforeEach(() => {
   mocks.rateLimit.mockResolvedValue({ limited: false });
   mocks.getChapterById.mockResolvedValue({ id: chapterId, content: CONTENT, version: 3 });
   mocks.authorizeProjectSpend.mockResolvedValue(null);
+  mocks.buildMeteredDeliveryRefund.mockReturnValue({
+    userId: "user-1",
+    credits: 0.1,
+    description: "Chapter review produced no suggestions — refunded",
+    externalRefPrefix: "llm:review:attempt:1",
+  });
   mocks.refundMeteredDelivery.mockResolvedValue(true);
   mocks.persistDelivery.mockResolvedValue({ suggestions: [], skipped: 0, replayed: false });
   const chain = { from: vi.fn(), where: vi.fn(), limit: vi.fn().mockResolvedValue([]) };
@@ -110,12 +121,15 @@ describe("chapter review refunds an empty delivery", () => {
 
     const response = await post();
 
-    expect(mocks.refundMeteredDelivery).toHaveBeenCalledWith(
+    expect(mocks.buildMeteredDeliveryRefund).toHaveBeenCalledWith(
       expect.anything(),
       "Chapter review produced no suggestions — refunded",
     );
+    expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
     // Still a durable delivery: the same idempotency key must replay it.
-    expect(mocks.persistDelivery).toHaveBeenCalledTimes(1);
+    expect(mocks.persistDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ refund: expect.objectContaining({ credits: 0.1 }) }),
+    );
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ suggestions: [], skipped: 0 });
   });
@@ -161,5 +175,58 @@ describe("chapter review refunds an empty delivery", () => {
     expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
     expect(mocks.persistDelivery).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
+  });
+
+  it("does not persist a no-op even when a mocked agent bypasses normalization", async () => {
+    mocks.reviewChapter.mockResolvedValue({
+      suggestions: [
+        {
+          anchorText: "The gate stood open all night.",
+          replacement: "The gate stood open all night.",
+          rationale: "Good line; no change needed",
+          category: "structure",
+          severity: "info",
+        },
+      ],
+    });
+
+    const response = await post();
+
+    expect(response.status).toBe(502);
+    expect(mocks.refundMeteredDelivery).toHaveBeenCalledOnce();
+    expect(mocks.persistDelivery).not.toHaveBeenCalled();
+  });
+
+  it("persists concrete changes while skipping a no-op from the same review", async () => {
+    mocks.reviewChapter.mockResolvedValue({
+      suggestions: [
+        {
+          anchorText: "The gate stood open all night.",
+          replacement: "The gate stood open all night.",
+          rationale: "No change needed",
+          category: "structure",
+          severity: "info",
+        },
+        {
+          anchorText: "Nobody came through it before dawn.",
+          replacement: "Nobody crossed the threshold before dawn.",
+          rationale: "More specific image",
+          category: "line",
+          severity: "info",
+        },
+      ],
+    });
+    const response = await post();
+
+    expect(response.status).toBe(200);
+    expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
+    expect(mocks.persistDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestions: [
+          expect.objectContaining({ suggestedText: "Nobody crossed the threshold before dawn." }),
+        ],
+        skipped: 1,
+      }),
+    );
   });
 });

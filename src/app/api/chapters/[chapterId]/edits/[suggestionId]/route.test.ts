@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   ownership: vi.fn(),
   chapter: vi.fn(),
   active: vi.fn(),
+  revalidatePath: vi.fn(),
 }));
+
+vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 
 vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
@@ -142,5 +145,36 @@ describe("suggestion acceptance mutation boundary", () => {
     expect(await response.json()).toEqual({
       error: "Finish or stop the current run before applying suggestions",
     });
+  });
+
+  it("retires a legacy no-op without touching the chapter or creating a revision", async () => {
+    const noOp = { ...suggestion, suggestedText: suggestion.anchor.originalText };
+    const retired = { ...noOp, status: "rejected" as const };
+    const returning = vi.fn().mockResolvedValue([retired]);
+    const updateChain = {
+      set: vi.fn(),
+      where: vi.fn(),
+      returning,
+    };
+    updateChain.set.mockReturnValue(updateChain);
+    updateChain.where.mockReturnValue(updateChain);
+    const execute = vi.fn();
+    mocks.getDb.mockReturnValue({
+      select: vi.fn().mockReturnValue(query([noOp])),
+      update: vi.fn().mockReturnValue(updateChain),
+      execute,
+    });
+
+    const response = await POST(request(), {
+      params: Promise.resolve({ chapterId, suggestionId }),
+    });
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("did not change");
+    expect(returning).toHaveBeenCalledOnce();
+    expect(mocks.chapter).not.toHaveBeenCalled();
+    expect(mocks.active).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/projects/project-1/editor");
   });
 });

@@ -134,6 +134,10 @@ describe("withinMechanicalScope", () => {
 
   it("rejects no-ops and deletions", () => {
     expect(withinMechanicalScope("Nothing changed here.", "Nothing changed here.")).toBe(false);
+    expect(withinMechanicalScope("The Caf\u00e9 stayed shut.", "The Cafe\u0301 stayed shut.")).toBe(
+      false,
+    );
+    expect(withinMechanicalScope("First.\r\nSecond.", "First.\nSecond.")).toBe(false);
     expect(withinMechanicalScope("Cut this line entirely.", "")).toBe(false);
     expect(withinMechanicalScope("Cut this line entirely.", "   ")).toBe(false);
   });

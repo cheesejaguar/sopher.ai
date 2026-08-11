@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
@@ -19,6 +20,7 @@ export function ChapterSidebar({
   bookTitle,
   chapters,
   activeChapterNumber,
+  reviewRunId = null,
   touchFriendly = false,
   onNavigate,
 }: {
@@ -26,11 +28,17 @@ export function ChapterSidebar({
   bookTitle: string;
   chapters: ChapterNavItem[];
   activeChapterNumber: number;
+  /** Keeps manuscript-review navigation pinned to one workflow-backed set. */
+  reviewRunId?: string | null;
   /** Uses 44px chapter controls when the sidebar is hosted in a touch sheet. */
   touchFriendly?: boolean;
   onNavigate?: () => void;
 }) {
   const router = useRouter();
+  const chapterHref = (chapterNumber: number): Route =>
+    `/projects/${projectId}/editor/${chapterNumber}${
+      reviewRunId ? `?suggestions=1&reviewRun=${encodeURIComponent(reviewRunId)}` : ""
+    }` as Route;
 
   return (
     <div
@@ -63,7 +71,7 @@ export function ChapterSidebar({
           orientation="vertical"
           onSelect={(n) => {
             onNavigate?.();
-            router.push(`/projects/${projectId}/editor/${n}`);
+            router.push(chapterHref(n));
           }}
           className={cn(
             "sticky top-0 shrink-0",
@@ -110,7 +118,7 @@ export function ChapterSidebar({
                 <li key={chapter.id} className="group/chapter relative">
                   {drafted ? (
                     <Link
-                      href={`/projects/${projectId}/editor/${chapter.chapterNumber}`}
+                      href={chapterHref(chapter.chapterNumber)}
                       aria-current={active ? "page" : undefined}
                       className={cn(itemClass, "pr-8 transition-colors hover:bg-accent/70")}
                       onClick={onNavigate}

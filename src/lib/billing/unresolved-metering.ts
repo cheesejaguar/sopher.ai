@@ -11,6 +11,7 @@ export type MeteringLineageRun = {
   id: string;
   projectId: string;
   userId: string;
+  kind: string;
   status: string;
   config: unknown;
 };
@@ -42,6 +43,19 @@ export function unresolvedMeteringCandidate(
     lineageRunId,
     intentPrefix: `metering-intent:generation:${lineageRunId}:`,
   };
+}
+
+/**
+ * Preserve the historical "newest full book only" rule while retaining every
+ * terminal standalone continuity attempt: each continuity run owns distinct
+ * provider intents that a later run cannot make safe by superseding it.
+ */
+export function projectMeteringCandidates(runsNewestFirst: MeteringLineageRun[]) {
+  const latestFullBook = runsNewestFirst.find((run) => run.kind === "full_book");
+  const terminalContinuity = runsNewestFirst.filter(
+    (run) => run.kind === "continuity" && (run.status === "failed" || run.status === "cancelled"),
+  );
+  return [...(latestFullBook ? [latestFullBook] : []), ...terminalContinuity];
 }
 
 /**
@@ -120,19 +134,20 @@ export async function findRunsWithUnresolvedMetering(
 }
 
 /**
- * Run-start preflight defense. Read the newest whole-book attempt regardless
- * of state so an older terminal lineage cannot supersede a currently active
- * or completed run. Only the terminal candidate rule above can block.
+ * Run-start preflight defense. The newest whole-book attempt preserves the
+ * replacement-run lineage rule, while every terminal standalone continuity
+ * attempt remains independently accountable for its own provider intents.
  */
 export async function projectHasUnresolvedMetering(input: {
   projectId: string;
   userId: string;
 }): Promise<boolean> {
-  const [latestRun] = await getDb()
+  const runs = await getDb()
     .select({
       id: schema.generationRuns.id,
       projectId: schema.generationRuns.projectId,
       userId: schema.generationRuns.userId,
+      kind: schema.generationRuns.kind,
       status: schema.generationRuns.status,
       config: schema.generationRuns.config,
     })
@@ -141,13 +156,23 @@ export async function projectHasUnresolvedMetering(input: {
       and(
         eq(schema.generationRuns.projectId, input.projectId),
         eq(schema.generationRuns.userId, input.userId),
-        eq(schema.generationRuns.kind, "full_book"),
+        or(
+          eq(schema.generationRuns.kind, "full_book"),
+          and(
+            eq(schema.generationRuns.kind, "continuity"),
+            or(
+              eq(schema.generationRuns.status, "failed"),
+              eq(schema.generationRuns.status, "cancelled"),
+            ),
+          ),
+        ),
       ),
     )
-    .orderBy(desc(schema.generationRuns.createdAt))
-    .limit(1);
-  if (!latestRun) return false;
-  return (await findRunsWithUnresolvedMetering([latestRun])).has(latestRun.id);
+    .orderBy(desc(schema.generationRuns.createdAt));
+  const candidates = projectMeteringCandidates(runs);
+  if (candidates.length === 0) return false;
+  const blocked = await findRunsWithUnresolvedMetering(candidates);
+  return candidates.some((run) => blocked.has(run.id));
 }
 
 const GENERATION_INTENT_LINEAGE = /^metering-intent:generation:([0-9a-f-]{36}):/i;
@@ -192,6 +217,7 @@ export async function resolveReconciledMeteringIncidents(intentRef: string): Pro
       id: schema.generationRuns.id,
       projectId: schema.generationRuns.projectId,
       userId: schema.generationRuns.userId,
+      kind: schema.generationRuns.kind,
       status: schema.generationRuns.status,
       config: schema.generationRuns.config,
     })

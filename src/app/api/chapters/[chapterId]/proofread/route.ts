@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { proofreadChapter, resolveProofreadAnchors } from "@/ai/agents/proofread";
 import {
+  buildMeteredDeliveryRefund,
   healReplayedMeteredDelivery,
   MeteredDeliveryPendingError,
   MeteredDeliveryReplayError,
@@ -234,6 +235,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   // got there. The two ways it gets there are told apart in the refund
   // description because they mean different things to an operator, and only one
   // of them is a failure the author should be asked to retry.
+  let emptyDeliveryRefund: ReturnType<typeof buildMeteredDeliveryRefund> | undefined;
   if (values.length === 0) {
     if (proofread.corrections.length > 0) {
       await refundMeteredDelivery(
@@ -250,10 +252,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
     // normalizeProofreadSuggestionList drops every entry the model returned,
     // and proofreadChapter hands back the normalized list alone, so this layer
     // cannot separate the two. Refund either way — neither delivered a
-    // correction — but keep going: the empty result is still committed below,
-    // because a clean chapter is a real answer and has to stay replayable
-    // under the same idempotency key (see persistChapterProofreadDelivery).
-    await refundMeteredDelivery(meter, "Chapter proofread produced no corrections — refunded");
+    // correction — but keep going: the refund and empty result are committed
+    // together below, because a clean chapter is a real answer and has to stay
+    // replayable under the same idempotency key.
+    emptyDeliveryRefund = buildMeteredDeliveryRefund(
+      meter,
+      "Chapter proofread produced no corrections — refunded",
+    );
   }
 
   let delivery: Awaited<ReturnType<typeof persistChapterProofreadDelivery>>;
@@ -267,6 +272,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       skipped,
       meteredUsd: meter.lastSettlement?.meteredUsd ?? 0,
       optionalLeaseRefs: meter.optionalOperationLeaseRefs ?? [],
+      refund: emptyDeliveryRefund,
     });
   } catch (persistenceError) {
     try {

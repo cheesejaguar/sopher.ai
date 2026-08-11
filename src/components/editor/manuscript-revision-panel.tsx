@@ -22,12 +22,19 @@ export type ManuscriptRevisionRun = {
   } | null;
 };
 
+export type ManuscriptRevisionSuggestionChapter = {
+  chapterNumber: number;
+  title: string | null;
+  suggestionCount: number;
+};
+
 type EditPassRun = ManuscriptRevisionRun;
 
 type EditPassResult = {
   run: EditPassRun | null;
   suggestionCount?: number;
   firstSuggestionChapter?: number | null;
+  suggestionChapters?: ManuscriptRevisionSuggestionChapter[];
   maximumCredits?: number;
   error?: unknown;
   code?: string;
@@ -74,6 +81,7 @@ export function ManuscriptRevisionPanel({
   initialRun = null,
   initialSuggestionCount = 0,
   initialFirstSuggestionChapter = null,
+  initialSuggestionChapters = [],
 }: {
   projectId: string;
   chapterCount: number;
@@ -81,6 +89,7 @@ export function ManuscriptRevisionPanel({
   initialRun?: ManuscriptRevisionRun | null;
   initialSuggestionCount?: number;
   initialFirstSuggestionChapter?: number | null;
+  initialSuggestionChapters?: ManuscriptRevisionSuggestionChapter[];
 }) {
   const router = useRouter();
   const suspended = useStudioSuspension();
@@ -92,6 +101,8 @@ export function ManuscriptRevisionPanel({
   const [firstSuggestionChapter, setFirstSuggestionChapter] = useState<number | null>(
     initialFirstSuggestionChapter,
   );
+  const [suggestionChapters, setSuggestionChapters] =
+    useState<ManuscriptRevisionSuggestionChapter[]>(initialSuggestionChapters);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creditsHref, setCreditsHref] = useState<string | null>(null);
@@ -102,6 +113,9 @@ export function ManuscriptRevisionPanel({
   const [resultPollNonce, setResultPollNonce] = useState(0);
   const requestKeyRef = useRef<string | null>(null);
   const startedHereRef = useRef(false);
+  const terminalKeyRunRef = useRef<string | null>(null);
+  const focusCompletedSummaryRef = useRef(false);
+  const summaryHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const storageKey = `sopher:manuscript-edit-pass:${projectId}`;
 
   const requestKey = useCallback(() => {
@@ -113,12 +127,25 @@ export function ManuscriptRevisionPanel({
     return key;
   }, [storageKey]);
 
-  const renewRequestKey = useCallback(() => {
-    if (active(run?.status)) return;
+  const rotateRequestKey = useCallback(() => {
     const key = crypto.randomUUID();
     requestKeyRef.current = key;
     window.sessionStorage.setItem(storageKey, key);
-  }, [run?.status, storageKey]);
+  }, [storageKey]);
+
+  const renewRequestKey = useCallback(() => {
+    if (active(run?.status)) return;
+    rotateRequestKey();
+  }, [rotateRequestKey, run?.status]);
+
+  // A terminal run has finished consuming its idempotency key. Rotating here
+  // lets an author intentionally run the same direction again while uncertain
+  // starts and active runs continue to reuse their original key safely.
+  useEffect(() => {
+    if (!run || active(run.status) || terminalKeyRunRef.current === run.id) return;
+    terminalKeyRunRef.current = run.id;
+    rotateRequestKey();
+  }, [rotateRequestKey, run]);
 
   const loadLatest = useCallback(async (): Promise<EditPassResult | null> => {
     try {
@@ -131,6 +158,41 @@ export function ManuscriptRevisionPanel({
       return null;
     }
   }, [projectId]);
+
+  // Completed review counts can change in another tab or after returning from
+  // a chapter mutation through the App Router cache. Reconcile on focus rather
+  // than polling forever when no authoring work is active.
+  useEffect(() => {
+    if (!run || active(run.status)) return;
+    let cancelled = false;
+    const refreshResult = async () => {
+      const latest = await loadLatest();
+      if (
+        cancelled ||
+        !latest?.run ||
+        typeof latest.suggestionCount !== "number" ||
+        latest.firstSuggestionChapter === undefined
+      ) {
+        return;
+      }
+      setRun(latest.run);
+      setSuggestionCount(latest.suggestionCount);
+      setFirstSuggestionChapter(latest.firstSuggestionChapter);
+      setSuggestionChapters(latest.suggestionChapters ?? []);
+      setTerminalResultPending(null);
+    };
+    const onFocus = () => void refreshResult();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshResult();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [loadLatest, run]);
 
   useEffect(() => {
     const runId = run?.id;
@@ -179,24 +241,18 @@ export function ManuscriptRevisionPanel({
           setRun({ ...latest.run, status });
           setSuggestionCount(latest.suggestionCount);
           setFirstSuggestionChapter(latest.firstSuggestionChapter);
+          setSuggestionChapters(latest.suggestionChapters ?? []);
           if (latest.run.instruction && !instruction) setInstruction(latest.run.instruction);
           router.refresh();
           if (status === "completed") {
             const count = latest.suggestionCount;
+            focusCompletedSummaryRef.current =
+              startedHereRef.current && latest.run.id === runId && count > 0;
             setAnnouncement(
               count === 0
                 ? "Manuscript review complete. No changes were suggested."
-                : `Manuscript review complete. ${count} suggestions are ready for your decision.`,
+                : `Manuscript review complete. ${count} suggested ${count === 1 ? "change is" : "changes are"} ready across ${latest.suggestionChapters?.length ?? 0} ${latest.suggestionChapters?.length === 1 ? "chapter" : "chapters"}.`,
             );
-            if (
-              startedHereRef.current &&
-              latest.run.id === runId &&
-              latest.firstSuggestionChapter
-            ) {
-              router.push(
-                `/projects/${projectId}/editor/${latest.firstSuggestionChapter}?suggestions=1&reviewRun=${runId}`,
-              );
-            }
           } else {
             setAnnouncement(
               status === "cancelled"
@@ -249,6 +305,9 @@ export function ManuscriptRevisionPanel({
         startedHereRef.current = true;
         setRun(result.run);
         setProgress(0);
+        setSuggestionCount(result.suggestionCount ?? 0);
+        setFirstSuggestionChapter(result.firstSuggestionChapter ?? null);
+        setSuggestionChapters(result.suggestionChapters ?? []);
         setDetail(
           result.run.confirmationPending
             ? "Confirming that the review reached the writing room"
@@ -325,6 +384,17 @@ export function ManuscriptRevisionPanel({
   const reviewHref = firstSuggestionChapter
     ? `/projects/${projectId}/editor/${firstSuggestionChapter}?suggestions=1${run?.id ? `&reviewRun=${run.id}` : ""}`
     : null;
+  const reviewSetReady = !isActive && suggestionCount > 0 && suggestionChapters.length > 0;
+
+  useEffect(() => {
+    if (!reviewSetReady || !focusCompletedSummaryRef.current) return;
+    focusCompletedSummaryRef.current = false;
+    requestAnimationFrame(() => summaryHeadingRef.current?.focus());
+  }, [reviewSetReady, run?.id]);
+
+  function chapterReviewHref(chapterNumber: number): string {
+    return `/projects/${projectId}/editor/${chapterNumber}?suggestions=1${run?.id ? `&reviewRun=${run.id}` : ""}`;
+  }
 
   return (
     <section
@@ -340,8 +410,8 @@ export function ManuscriptRevisionPanel({
             </h3>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               Every nonempty chapter is checked against your direction. Sopher creates anchored
-              suggestions for you to accept, edit, or reject—your manuscript is never silently
-              rewritten.
+              suggestions that can revise a full passage, not just one line. You accept, edit, or
+              reject each change—your manuscript is never silently rewritten.
             </p>
           </div>
           <span className="shrink-0 border border-ai/30 bg-ai-soft/20 px-2 py-1 font-mono text-[11px] text-ai">
@@ -349,6 +419,75 @@ export function ManuscriptRevisionPanel({
           </span>
         </div>
       </div>
+
+      {reviewSetReady ? (
+        <section
+          aria-labelledby="manuscript-review-set-heading"
+          className="border-b border-ai/25 bg-ai-soft/10 px-4 py-5 sm:px-5"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="folio-label text-ai">Review set ready</p>
+              <h4
+                ref={summaryHeadingRef}
+                id="manuscript-review-set-heading"
+                tabIndex={-1}
+                className="mt-1 text-base font-semibold text-balance focus-visible:outline-none"
+              >
+                {suggestionCount} suggested {suggestionCount === 1 ? "change" : "changes"} across{" "}
+                {suggestionChapters.length}{" "}
+                {suggestionChapters.length === 1 ? "chapter" : "chapters"}
+              </h4>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                A suggestion may replace a complete passage. Open any chapter below to compare the
+                original and proposed wording before deciding what belongs in your book.
+              </p>
+            </div>
+            {reviewHref ? (
+              <Link
+                href={reviewHref as Route}
+                className={buttonVariants({
+                  variant: "outline",
+                  className: "min-h-11 shrink-0 rounded-sm",
+                })}
+              >
+                Start reviewing <ArrowRight aria-hidden="true" />
+              </Link>
+            ) : null}
+          </div>
+
+          <nav aria-label="Chapters in this manuscript review" className="mt-4">
+            <ul className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {suggestionChapters.map((chapter) => (
+                <li key={chapter.chapterNumber} className="min-w-0">
+                  <Link
+                    href={chapterReviewHref(chapter.chapterNumber) as Route}
+                    aria-label={`Chapter ${chapter.chapterNumber}, ${chapter.title ?? "Untitled"}: ${chapter.suggestionCount} suggested ${chapter.suggestionCount === 1 ? "change" : "changes"}`}
+                    className="group flex min-h-14 w-full min-w-0 items-center gap-3 rounded-sm border border-border bg-background px-3 py-2.5 transition-colors hover:border-ai/50 hover:bg-ai-soft/15 focus-visible:border-ai"
+                  >
+                    <span className="folio-label shrink-0 text-ai tabular-nums">
+                      {String(chapter.chapterNumber).padStart(2, "0")}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block break-words text-sm font-semibold">
+                        {chapter.title ?? `Chapter ${chapter.chapterNumber}`}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {chapter.suggestionCount} suggested{" "}
+                        {chapter.suggestionCount === 1 ? "change" : "changes"}
+                      </span>
+                    </span>
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-ai"
+                    />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </section>
+      ) : null}
 
       <div className="grid min-w-0 gap-5 px-4 py-5 lg:grid-cols-[minmax(0,1fr)_16rem] sm:px-5">
         <div className="min-w-0">
@@ -420,7 +559,7 @@ export function ManuscriptRevisionPanel({
                 Add credits to review
               </Link>
             ) : null}
-            {reviewHref && suggestionCount > 0 && !isActive ? (
+            {reviewHref && suggestionCount > 0 && !isActive && !reviewSetReady ? (
               <Link
                 href={reviewHref as Route}
                 className={buttonVariants({ variant: "outline", className: "min-h-11 rounded-sm" })}

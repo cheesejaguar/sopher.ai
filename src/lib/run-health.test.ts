@@ -916,6 +916,37 @@ describe("runCompletionArtifactsAreReady", () => {
     ).toBe(true);
   });
 
+  it("keeps a standalone continuity run complete after its report drives chapter revisions", () => {
+    expect(
+      runCompletionArtifactsAreReady({
+        runId: "run-continuity",
+        kind: "continuity",
+        projectCompletedAt: null,
+        finalChapterCount: 0,
+        config: {
+          completion: {
+            // The report necessarily describes the pre-repair manuscript.
+            continuityReport: {
+              sourceRunId: "run-continuity",
+              manuscriptDigest: "sha256:before-repair",
+              report: {} as never,
+            },
+            // The chapter checkpoint proves the later mutation was applied and
+            // can differ without invalidating the run-owned report artifact.
+            revisionChapters: {
+              "2": {
+                sourceRunId: "run-continuity",
+                contentDigest: "sha256:after-repair",
+                reviewManuscriptDigest: "sha256:before-repair",
+                changed: true,
+              },
+            },
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("accepts a run-owned manuscript review even when it correctly produced zero suggestions", () => {
     const config = {
       tier: "standard" as const,

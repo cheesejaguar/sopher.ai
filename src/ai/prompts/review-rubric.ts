@@ -51,6 +51,9 @@ Return one structured result with exactly these fields:
   - severity: exactly one of critical, major, minor
   - description: what is wrong
   - suggestedFix: how to fix it
+  - fixability: exactly one of auto_fixable, needs_author_choice, informational
+  - confidence: a decimal between 0.0 and 1.0 measuring confidence in the finding and proposed resolution
+  - repairChapters: at most 10 chapter numbers whose prose is actually incorrect and should be changed
 
 Anything past those limits is discarded unread, so spend the room on the
 findings that matter most. If a finding does not fit a category or severity
@@ -169,7 +172,19 @@ export function continuityPhaseKeys(tier: "draft" | "standard" | "premium"): Rev
  */
 export function buildReviewPhasePrompt(key: ReviewPhaseKey): string {
   const phase = REVIEW_PHASES_BY_KEY[key];
+  const repairAuthority =
+    key === "technical_consistency"
+      ? `## Repair authority
+
+Use auto_fixable only when the actual prose and established canon prove one concrete resolution. The canon may come from repeated manuscript evidence or an authoritative entity/story record you verified with the available tools. Set confidence to at least 0.85 only when that evidence is decisive.
+
+For an auto_fixable issue, chapters lists every chapter used as evidence, while repairChapters lists only the subset whose prose is incorrect. Every repairChapters entry must also appear in chapters. Never list a chapter merely because it contains the correct canon. If the resolution depends on author intent, competing interpretations, or an unestablished fact, use needs_author_choice and an empty repairChapters array. Use informational with an empty repairChapters array when no prose change is warranted.`
+      : `## Repair authority
+
+This is a critical or developmental review phase, not mutation authority. Mark every issue informational and use an empty repairChapters array. Describe concrete editorial opportunities, but do not present them as automatic continuity repairs.`;
   return `${phase.prompt}
+
+${repairAuthority}
 
 ${REVIEW_PHASE_OUTPUT_CONTRACT}`;
 }

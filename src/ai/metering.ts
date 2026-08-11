@@ -3,6 +3,7 @@ import {
   abortMeteredCallIntent,
   attachGatewayGenerationIds,
   beginMeteredCallIntent,
+  type MeteredDeliveryRefundRecord,
   recordLlmCallsAndDebit,
   releaseOptionalOperationLeases,
   releaseReplayedOptionalOperationLeases,
@@ -350,17 +351,31 @@ export function meteredCallAuthorizationCredits(ctx: MeterCtx, info: MeteredCall
   });
 }
 
-/** Exact, idempotent refund when settled provider output cannot be delivered. */
-export async function refundMeteredDelivery(ctx: MeterCtx, description: string): Promise<boolean> {
+/** Describes the exact, idempotent refund for one settled provider delivery. */
+export function buildMeteredDeliveryRefund(
+  ctx: MeterCtx,
+  description: string,
+): MeteredDeliveryRefundRecord {
   const settlement = ctx.lastSettlement;
   if (!settlement) {
     throw new Error("Cannot refund provider work before its metered settlement commits");
   }
-  const refunded = await grantCredits({
+  return {
     userId: ctx.userId,
     credits: settlement.credits,
     description,
-    externalRef: `delivery-refund:${settlement.externalRefPrefix}`,
+    externalRefPrefix: settlement.externalRefPrefix,
+  };
+}
+
+/** Exact, idempotent refund when settled provider output cannot be delivered. */
+export async function refundMeteredDelivery(ctx: MeterCtx, description: string): Promise<boolean> {
+  const refund = buildMeteredDeliveryRefund(ctx, description);
+  const refunded = await grantCredits({
+    userId: refund.userId,
+    credits: refund.credits,
+    description: refund.description,
+    externalRef: `delivery-refund:${refund.externalRefPrefix}`,
     kind: "adjustment",
   });
   await completeMeteredDelivery(ctx);

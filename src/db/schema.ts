@@ -865,7 +865,16 @@ export const suggestions = pgTable(
       .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("idx_suggestions_chapter").on(t.chapterId, t.status)],
+  (t) => [
+    index("idx_suggestions_chapter").on(t.chapterId, t.status),
+    // Provider output is untrusted. Application normalization rejects Unicode-
+    // equivalent no-ops too; this canonical-text database invariant is the
+    // final backstop against a pending card whose Accept action cannot change prose.
+    check(
+      "ck_suggestions_pending_changes_text",
+      sql`${t.status} <> 'pending' or normalize(replace(replace(${t.suggestedText}, chr(13) || chr(10), chr(10)), chr(13), chr(10)), NFC) <> normalize(replace(replace((${t.anchor}->>'originalText'), chr(13) || chr(10), chr(10)), chr(13), chr(10)), NFC)`,
+    ),
+  ],
 );
 
 export const continuityIssues = pgTable(

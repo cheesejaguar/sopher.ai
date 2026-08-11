@@ -72,10 +72,13 @@ never as hand-written JSON or free text. Each issue names:
 - chapters: the chapter numbers involved, as numbers
 - description: what the inconsistency is
 - suggestedFix: how to fix it
+- fixability: auto_fixable only for an established, unambiguous canon; otherwise needs_author_choice or informational
+- confidence: confidence in both the finding and its proposed resolution, from 0.0 to 1.0
+- repairChapters: only chapters whose prose is incorrect, always a subset of chapters
 
 Rate overall consistency as a decimal from 0.0 to 1.0.
 
-Be thorough but fair. Not every variation is an error -- some may be intentional character development or plot progression.`;
+Be thorough but fair. Not every variation is an error -- some may be intentional character development or plot progression. Ambiguity never authorizes an automatic rewrite.`;
 
 /** Severity levels a continuity issue can carry, most severe first. */
 export type ContinuitySeverity = "critical" | "major" | "minor";

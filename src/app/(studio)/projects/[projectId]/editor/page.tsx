@@ -7,6 +7,7 @@ import { ArchivedChaptersPanel } from "@/components/editor/archived-chapters-pan
 import {
   ManuscriptRevisionPanel,
   type ManuscriptRevisionRun,
+  type ManuscriptRevisionSuggestionChapter,
 } from "@/components/editor/manuscript-revision-panel";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/lib/auth";
@@ -82,33 +83,37 @@ export default async function EditorIndexPage({
     )
     .orderBy(desc(schema.generationRuns.createdAt))
     .limit(1);
-  const [latestSuggestionFacts, firstLatestSuggestion] = latestEditRun
-    ? await Promise.all([
-        getDb()
-          .select({ count: sql<number>`count(*)::int` })
-          .from(schema.suggestions)
-          .where(
-            and(
-              eq(schema.suggestions.runId, latestEditRun.id),
-              eq(schema.suggestions.status, "pending"),
-            ),
-          )
-          .then((rows) => rows[0] ?? { count: 0 }),
-        getDb()
-          .select({ chapterNumber: schema.chapters.chapterNumber })
+  const latestSuggestionChapters: ManuscriptRevisionSuggestionChapter[] =
+    latestEditRun && data.book
+      ? await getDb()
+          .select({
+            chapterNumber: schema.chapters.chapterNumber,
+            title: schema.chapters.title,
+            suggestionCount: sql<number>`count(*)::int`,
+          })
           .from(schema.suggestions)
           .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
           .where(
             and(
               eq(schema.suggestions.runId, latestEditRun.id),
+              eq(schema.suggestions.passType, "review"),
               eq(schema.suggestions.status, "pending"),
+              eq(schema.chapters.bookId, data.book.id),
             ),
           )
+          .groupBy(schema.chapters.id, schema.chapters.chapterNumber, schema.chapters.title)
           .orderBy(schema.chapters.chapterNumber)
-          .limit(1)
-          .then((rows) => rows[0] ?? null),
-      ])
-    : [{ count: 0 }, null];
+          .then((rows) =>
+            rows.map((chapter) => ({
+              ...chapter,
+              suggestionCount: Number(chapter.suggestionCount),
+            })),
+          )
+      : [];
+  const latestSuggestionCount = latestSuggestionChapters.reduce(
+    (total, chapter) => total + chapter.suggestionCount,
+    0,
+  );
   const initialRevisionRun: ManuscriptRevisionRun | null = latestEditRun
     ? {
         id: latestEditRun.id,
@@ -153,8 +158,9 @@ export default async function EditorIndexPage({
               chapters.filter((chapter) => chapter.wordCount > 0).length,
             )}
             initialRun={initialRevisionRun}
-            initialSuggestionCount={Number(latestSuggestionFacts.count)}
-            initialFirstSuggestionChapter={firstLatestSuggestion?.chapterNumber ?? null}
+            initialSuggestionCount={latestSuggestionCount}
+            initialFirstSuggestionChapter={latestSuggestionChapters[0]?.chapterNumber ?? null}
+            initialSuggestionChapters={latestSuggestionChapters}
           />
         ) : null}
       </HashFocusTarget>

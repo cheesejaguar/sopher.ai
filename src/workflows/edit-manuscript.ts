@@ -12,6 +12,7 @@ import {
   throwIfAuthoringCancellationRequested,
 } from "@/lib/authoring-cancellation";
 import { withPreservedPrimaryError } from "@/lib/async-cleanup";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 import { resolveAnchor } from "@/lib/editor/anchors";
 import {
   MANUSCRIPT_EDIT_CHAPTER_MAX_CHARS,
@@ -19,6 +20,7 @@ import {
   type ManuscriptEditPassChapterCheckpoint,
   type ManuscriptEditPassConfig,
 } from "@/lib/manuscript-edit-pass";
+import { providerReviewProducedOnlyRejectedSuggestions } from "./manuscript-review-normalization";
 
 import { notifyAuthoringFailureStep } from "./notify-authoring-failure";
 import {
@@ -187,8 +189,12 @@ export async function reviewManuscriptChapterStep(
 
   const values: (typeof schema.suggestions.$inferInsert)[] = [];
   const usedRanges = new Set<string>();
-  let skippedCount = 0;
+  let skippedCount = reviewed.normalization.noOpCount;
   for (const suggestion of reviewed.suggestions) {
+    if (!isActionableReplacement(suggestion.anchorText, suggestion.replacement)) {
+      skippedCount += 1;
+      continue;
+    }
     const range = resolveAnchor(chapter.content, suggestion.anchorText);
     const rangeKey = range ? `${range.start}:${range.end}` : "";
     if (!range || usedRanges.has(rangeKey)) {
@@ -214,6 +220,16 @@ export async function reviewManuscriptChapterStep(
       instruction: config.editPass.instruction,
       status: "pending",
     });
+  }
+
+  if (providerReviewProducedOnlyRejectedSuggestions(reviewed.normalization, values.length)) {
+    await refundMeteredDelivery(
+      meter,
+      `Manuscript edit pass chapter ${chapter.chapterNumber} returned only unchanged or unusable suggestions — refunded`,
+    );
+    throw new FatalError(
+      `Chapter ${chapter.chapterNumber} returned only unchanged or unusable suggestions. Nothing was saved, and that chapter review was refunded.`,
+    );
   }
 
   if (reviewed.suggestions.length > 0 && values.length === 0) {
@@ -253,6 +269,14 @@ async function persistChapterReview(
   values: (typeof schema.suggestions.$inferInsert)[],
   checkpoint: ManuscriptEditPassChapterCheckpoint,
 ): Promise<void> {
+  if (
+    values.some(
+      (suggestion) =>
+        !isActionableReplacement(suggestion.anchor.originalText, suggestion.suggestedText),
+    )
+  ) {
+    throw new FatalError("The chapter review returned an unchanged replacement");
+  }
   await withDbTransaction(async (tx) => {
     await tx.execute(
       // Use the same project-authoring lock as cancellation and manual

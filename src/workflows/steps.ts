@@ -70,10 +70,16 @@ import {
   initialOutlineRequiredUsd,
   outlineRevisionRequiredUsd,
   resumeOpeningRequiredUsd,
+  standaloneContinuityRequiredUsd,
   type ResumeChapterMeteredWork,
 } from "./opening-credit-plan";
 import { isChapterComplete, isChapterProductionComplete, planFreshRunChapter } from "./resume";
 import { runCostEvent } from "./run-cost";
+import {
+  buildContinuityChapterRepairs,
+  continuityRevisionStatus,
+  type ContinuityChapterRepair,
+} from "./continuity-repairs";
 import {
   bookOutlineSchema,
   conceptSchema,
@@ -81,7 +87,7 @@ import {
   type BookOutline,
   type ChapterOutlinePlan,
 } from "@/ai/schemas";
-import type { MeterCtx } from "@/ai/metering";
+import { refundMeteredDelivery, type MeterCtx } from "@/ai/metering";
 import type { ToolCtx } from "@/ai/tools";
 import { buildFrozenAuthoringContract } from "@/ai/authoring-guidelines";
 import { linkAuthoringRunWorkflow, transitionAuthoringRunState } from "@/lib/generation-runs";
@@ -818,10 +824,22 @@ export async function openingCreditCheckStep(
       reportCheckpoint?.manuscriptDigest === currentManuscriptDigest
         ? reportCheckpoint.report
         : undefined;
-    const revisionTargets =
-      report && config.tier !== "draft" && report.score < 0.7
-        ? new Set(report.worstChapters.slice(0, 3))
-        : new Set<number>();
+    const currentContinuityOutcomes = Object.values(
+      source.completion?.continuityOutcomes ?? {},
+    ).flatMap((checkpoint) =>
+      checkpoint?.manuscriptDigest === currentManuscriptDigest ? [checkpoint.outcome] : [],
+    );
+    const revisionTargets = report
+      ? new Set(
+          buildContinuityChapterRepairs({
+            outcomes: currentContinuityOutcomes,
+            targetChapters: config.targetChapters,
+            writtenChapterNumbers: rows
+              .filter((chapter) => isChapterComplete(chapter))
+              .map((chapter) => chapter.chapterNumber),
+          }).map((repair) => repair.chapterNumber),
+        )
+      : new Set<number>();
 
     for (const outlineChapter of source.stagedOutline?.chapters ?? []) {
       const chapterNumber = outlineChapter.number;
@@ -1211,6 +1229,36 @@ export async function continuityCreditCheckStep(
   const complete =
     stored.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest === currentDigest;
   return checkWalletForUsd(ref, complete ? 0 : continuityPhaseRequiredUsd(config));
+}
+
+/**
+ * One parent authorization for a standalone review and every possible repair.
+ * Holding it before the first phase prevents concurrent spend from stranding a
+ * paid partial review after the author already passed the start quote.
+ */
+export async function standaloneContinuityCreditCheckStep(
+  ref: RunRef,
+  config: GenerationConfig,
+): Promise<CreditCheck> {
+  "use step";
+  const { book } = await loadRunContext(ref);
+  const chapters = await getDb()
+    .select({
+      chapterNumber: schema.chapters.chapterNumber,
+      status: schema.chapters.status,
+      content: schema.chapters.content,
+      wordCount: schema.chapters.wordCount,
+      qualityScore: schema.chapters.qualityScore,
+    })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.bookId, book.id));
+  const written = chapters
+    .filter((chapter) => isChapterComplete(chapter))
+    .map((chapter) => chapter.chapterNumber);
+  return checkWalletForUsd(
+    ref,
+    standaloneContinuityRequiredUsd(config, continuityPhaseKeys(config.tier).length, written),
+  );
 }
 
 export async function outlineRevisionCreditCheckStep(
@@ -2298,16 +2346,17 @@ export async function editChapterStep(
     let edited = stored.work?.edits?.[key];
     const cachedOutputAlreadyApplied = cachedEditOutputAlreadyApplied(chapter.content, edited);
     if (!cachedOutputAlreadyApplied && (!edited || edited.baseContentDigest !== beforeDigest)) {
+      const scopedMeter = await meteredScope(
+        meter,
+        ref,
+        config,
+        `chapter:${chapterNumber}:${mode}:${beforeDigest.slice(0, 16)}${
+          reviewManuscriptDigest ? `:${reviewManuscriptDigest.slice(0, 16)}` : ""
+        }`,
+        reservationRef,
+      );
       const result = await editChapter({
-        meter: await meteredScope(
-          meter,
-          ref,
-          config,
-          `chapter:${chapterNumber}:${mode}:${beforeDigest.slice(0, 16)}${
-            reviewManuscriptDigest ? `:${reviewManuscriptDigest.slice(0, 16)}` : ""
-          }`,
-          reservationRef,
-        ),
+        meter: scopedMeter,
         tools: {
           runId: ref.dbRunId,
           userId: ref.userId,
@@ -2321,6 +2370,12 @@ export async function editChapterStep(
         revisionNotes: issueNotes,
         styleGuide: buildFrozenAuthoringContract(config.inputSnapshot),
       });
+      if (mode === "revision" && !result.changed) {
+        await refundMeteredDelivery(
+          scopedMeter,
+          `Continuity revision for chapter ${chapterNumber} returned no actionable prose change — refunded`,
+        );
+      }
       const editResult = { baseContentDigest: beforeDigest, ...result };
       edited = editResult;
       stored = await updateStoredGenerationConfig(ref, (current) => ({
@@ -2337,6 +2392,8 @@ export async function editChapterStep(
     }
 
     let finalContent = chapter.content;
+    const persistedStatus =
+      mode === "revision" ? continuityRevisionStatus(chapter.status) : "edited";
     if (edited.changed && !cachedOutputAlreadyApplied) {
       const revisionSource = mode === "revision" ? "continuity-revision" : "writer";
       await withActiveAuthoringMutation(ref, async (tx) => {
@@ -2365,7 +2422,15 @@ export async function editChapterStep(
           .set({
             content: edited.content,
             wordCount: edited.content.split(/\s+/).filter(Boolean).length,
-            status: "edited",
+            // A prose change invalidates the old summary as a continuity and
+            // export aid. Entity canon is intentionally not rewritten here:
+            // findings stay open until the author verifies the correction.
+            ...(mode === "revision" ? { summary: null } : {}),
+            // A standalone continuity pass edits an already delivered book.
+            // Keep those chapters final so the repaired manuscript remains a
+            // valid read/export artifact; production-time revisions are still
+            // edited and become final at the normal finalization boundary.
+            status: persistedStatus,
             version: chapter.version + 1,
             updatedAt: new Date(),
           })
@@ -2418,7 +2483,7 @@ export async function editChapterStep(
       {
         type: "chapter",
         chapterNumber,
-        status: "edited",
+        status: persistedStatus,
       },
       `chapter:${chapterNumber}:edited`,
     );
@@ -2578,6 +2643,39 @@ export async function continuityFinalizeStep(
     );
   }
   return report;
+}
+
+/**
+ * Resolves the technical continuity findings against the chapters that still
+ * contain written prose. The result is chapter-local: no editor receives a
+ * book-wide grab bag of unrelated notes, and ambiguous/nontechnical findings
+ * remain report notes rather than mutation authority.
+ */
+export async function continuityChapterRepairsStep(
+  ref: RunRef,
+  config: GenerationConfig,
+  outcomes: ContinuityOutcome[],
+): Promise<ContinuityChapterRepair[]> {
+  "use step";
+  const { book } = await loadRunContext(ref);
+  const chapters = await getDb()
+    .select({
+      chapterNumber: schema.chapters.chapterNumber,
+      status: schema.chapters.status,
+      content: schema.chapters.content,
+      wordCount: schema.chapters.wordCount,
+      qualityScore: schema.chapters.qualityScore,
+    })
+    .from(schema.chapters)
+    .where(eq(schema.chapters.bookId, book.id));
+
+  return buildContinuityChapterRepairs({
+    outcomes,
+    targetChapters: config.targetChapters,
+    writtenChapterNumbers: chapters
+      .filter((chapter) => isChapterComplete(chapter))
+      .map((chapter) => chapter.chapterNumber),
+  });
 }
 
 /**

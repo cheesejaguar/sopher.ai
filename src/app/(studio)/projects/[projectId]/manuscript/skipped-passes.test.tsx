@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { skippedPassNotices, SkippedPassesNotice } from "./skipped-passes";
+vi.mock("@/lib/actions/continuity", () => ({ startConsistencyReview: vi.fn() }));
+
+import {
+  remainingSkippedPasses,
+  skippedPassCodes,
+  skippedPassNotices,
+  SkippedPassesNotice,
+} from "./skipped-passes";
 import { DEGRADATION_CODES, degradationNotice } from "@/lib/authoring-degradation";
 
 /** The shape `finalizeStep` writes to `config.completion.degraded`. */
@@ -51,6 +58,15 @@ describe("skippedPassNotices", () => {
       degradationNotice(DEGRADATION_CODES.editorial_pass_incomplete),
       degradationNotice(DEGRADATION_CODES.continuity_review_unavailable),
     ]);
+  });
+});
+
+describe("remainingSkippedPasses", () => {
+  it("retires only continuity caveats after a later standalone review completes", () => {
+    const editorial = persisted(DEGRADATION_CODES.editorial_pass_incomplete, "chapter 3");
+    const continuity = persisted(DEGRADATION_CODES.continuity_review_partial, "two phases");
+    expect(remainingSkippedPasses([editorial, continuity], true)).toEqual([editorial]);
+    expect(remainingSkippedPasses([editorial, continuity], false)).toEqual([editorial, continuity]);
   });
 });
 
@@ -106,5 +122,62 @@ describe("SkippedPassesNotice", () => {
     expect(strip?.className).toContain("border-ember/40");
     expect(strip?.className).toContain("bg-ember/8");
     expect(strip?.className).not.toMatch(/destructive/);
+  });
+});
+
+describe("offering the review back", () => {
+  const unavailable = persisted(
+    DEGRADATION_CODES.continuity_review_unavailable,
+    "continuity.narrative_structure could not produce a report",
+  );
+
+  it("keeps only codes it recognizes", () => {
+    expect(skippedPassCodes(undefined)).toEqual([]);
+    expect(skippedPassCodes([unavailable, persisted("invented_code", "x")])).toEqual([
+      DEGRADATION_CODES.continuity_review_unavailable,
+    ]);
+  });
+
+  it("offers to re-run the consistency review on the page the author returns to", () => {
+    // This page — not the live completion moment — is where an author who
+    // closed the tab reads that a pass was skipped. Telling them without
+    // offering the fix is the same silence the caveat exists to break.
+    render(
+      <SkippedPassesNotice
+        notices={skippedPassNotices([unavailable])}
+        codes={skippedPassCodes([unavailable])}
+        projectId="project-1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Check and fix continuity" })).toBeVisible();
+    expect(screen.getByText(/charged only for work performed/i)).toBeVisible();
+    expect(screen.getByText(/recovered from Chapter history/i)).toBeVisible();
+    expect(screen.getByText(/findings remain open until you verify them/i)).toBeVisible();
+  });
+
+  it("does not offer it for a pass a re-review cannot fix", () => {
+    const editorial = persisted(DEGRADATION_CODES.editorial_pass_incomplete, "chapter 3");
+    render(
+      <SkippedPassesNotice
+        notices={skippedPassNotices([editorial])}
+        codes={skippedPassCodes([editorial])}
+        projectId="project-1"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Check and fix continuity" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the caveat with no action when the caller supplies no project", () => {
+    render(<SkippedPassesNotice notices={skippedPassNotices([unavailable])} />);
+    expect(
+      screen.getByText("One finishing pass was skipped so your book could be delivered."),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Check and fix continuity" }),
+    ).not.toBeInTheDocument();
   });
 });

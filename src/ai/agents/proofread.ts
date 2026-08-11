@@ -20,6 +20,7 @@ import {
   oneOfOr,
   truncateArray,
 } from "@/ai/schemas/normalize";
+import { isActionableReplacement } from "@/lib/editor/actionable-replacement";
 
 export const PROOFREAD_OPERATION = "editor.proofread";
 
@@ -113,6 +114,7 @@ function normalizeProofreadCorrection(wire: unknown): ProofreadCorrection | null
   if (typeof correction.replacement !== "string") return null;
   const replacement = correction.replacement;
   if (!replacement.trim()) return null;
+  if (!isActionableReplacement(anchorText, replacement)) return null;
   // Truncating either side would corrupt the edit rather than salvage it: a cut
   // anchor is no longer the verbatim quote anchoring depends on, and a cut
   // replacement would splice half a sentence into the author's prose. An
@@ -206,7 +208,7 @@ function commonTokenCount(a: string[], b: string[]): number {
  */
 export function withinMechanicalScope(anchorText: string, replacement: string): boolean {
   if (!replacement.trim()) return false;
-  if (replacement === anchorText) return false;
+  if (!isActionableReplacement(anchorText, replacement)) return false;
 
   const before = tokenize(anchorText);
   const after = tokenize(replacement);

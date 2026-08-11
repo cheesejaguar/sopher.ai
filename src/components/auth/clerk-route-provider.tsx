@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { ClerkProvider } from "@clerk/nextjs";
-import { shadcn } from "@clerk/ui/themes";
-import "@clerk/ui/themes/shadcn.css";
+import { shadcn } from "@clerk/themes";
+import "@clerk/themes/shadcn.css";
 
 import { clerkEnabled } from "@/lib/clerk";
 

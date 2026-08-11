@@ -51,6 +51,9 @@ describe("CONTINUITY_SYSTEM_PROMPT", () => {
     expect(CONTINUITY_SYSTEM_PROMPT).toContain("character, timeline, setting, plot, or factual");
     expect(CONTINUITY_SYSTEM_PROMPT).toContain("critical, major, or minor");
     expect(CONTINUITY_SYSTEM_PROMPT).toContain("suggestedFix");
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("fixability");
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("confidence");
+    expect(CONTINUITY_SYSTEM_PROMPT).toContain("repairChapters");
   });
 
   it("does not reference the old tool workflow", () => {
