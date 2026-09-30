@@ -13,7 +13,11 @@ describe("analytics consent", () => {
     expect(browserHasAnalyticsConsent()).toBe(false);
   });
   it("requires the exact first-party preference rather than a similarly named cookie", () => {
-    for (const cookie of ["", "sopher_analytics_consent=rejected", "other_sopher_analytics_consent=accepted"]) {
+    for (const cookie of [
+      "",
+      "sopher_analytics_consent=rejected",
+      "other_sopher_analytics_consent=accepted",
+    ]) {
       vi.stubGlobal("document", { cookie });
       expect(browserHasAnalyticsConsent()).toBe(false);
     }
