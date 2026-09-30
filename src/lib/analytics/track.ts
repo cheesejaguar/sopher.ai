@@ -1,5 +1,7 @@
 "use client";
 
+import { browserHasAnalyticsConsent } from "./consent";
+
 import { track as vercelTrack } from "@vercel/analytics";
 
 import type { EventName, EventProps } from "./events";
@@ -24,7 +26,7 @@ declare global {
 }
 
 export function track(name: EventName, props: EventProps = {}): void {
-  if (typeof window === "undefined") return;
+  if (!browserHasAnalyticsConsent()) return;
 
   try {
     window.gtag?.("event", name, props);

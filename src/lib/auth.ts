@@ -1,3 +1,4 @@
+import { CONSENT_COOKIE, hasAnalyticsConsent } from "@/lib/analytics/consent";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { eq } from "drizzle-orm";
 import { connection } from "next/server";
@@ -126,7 +127,9 @@ function provisionDevFallbackOnce(): Promise<{ userId: string }> {
 async function firstTouch(): Promise<Acquisition | null> {
   try {
     const { cookies } = await import("next/headers");
-    const raw = (await cookies()).get(ATTRIBUTION_COOKIE)?.value;
+    const jar = await cookies();
+    if (!hasAnalyticsConsent(jar.get(CONSENT_COOKIE)?.value)) return null;
+    const raw = jar.get(ATTRIBUTION_COOKIE)?.value;
     return parseAttributionCookie(raw);
   } catch {
     return null;
