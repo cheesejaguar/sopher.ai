@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useSyncExternalStore } from "react";
 import { CONSENT_COOKIE } from "@/lib/analytics/consent";
 
@@ -39,9 +41,9 @@ export function CookieChoice() {
         {current === "accepted" ? "Optional analytics are enabled." : "Optional analytics are off."}{" "}
         We use optional measurement to understand visits and product use. Sign-in and payments work
         without it.{" "}
-        <a className="underline" href="/cookies">
+        <Link className="underline" href="/cookies">
           Cookie details
-        </a>
+        </Link>
       </p>
       <div className="mt-2 flex flex-wrap gap-3">
         <button type="button" className="rounded border px-4 py-2" onClick={() => save("accepted")}>

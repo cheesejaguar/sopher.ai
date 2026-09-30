@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 
 import { LegalPage } from "../legal-page";
@@ -83,7 +84,7 @@ export default function PrivacyPage() {
         stay off until you select Accept analytics. Use Reject analytics on any public page to
         withdraw consent. The preference cookie lasts six months; attribution cookies last up to 90
         days. Withdrawal stops future collection, but does not automatically delete historical
-        records. <a href="/cookies">Cookie details</a>.
+        records. <Link href="/cookies">Cookie details</Link>.
       </p>
       <p>
         We use cookies for sign-in sessions (set by Clerk), reader sessions opened from a deliberate

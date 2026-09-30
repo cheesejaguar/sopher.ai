@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { LegalPage } from "../legal-page";
 export const metadata = { title: "Cookies" };
 export default function Page() {
@@ -21,7 +22,7 @@ export default function Page() {
       </p>
       <p>
         For historical-data deletion, email <a href="mailto:support@sopher.ai">support@sopher.ai</a>
-        . See the <a href="/privacy">privacy policy</a> for retention and provider details.
+        . See the <Link href="/privacy">privacy policy</Link> for retention and provider details.
       </p>
     </LegalPage>
   );
