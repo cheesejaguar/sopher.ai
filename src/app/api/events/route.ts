@@ -1,3 +1,4 @@
+import { CONSENT_COOKIE, hasAnalyticsConsent } from "@/lib/analytics/consent";
 import { cookies } from "next/headers";
 
 import { getDb, schema } from "@/db";
@@ -21,6 +22,8 @@ export const maxDuration = 10;
  */
 export async function POST(req: Request) {
   const noContent = new Response(null, { status: 204 });
+
+  if (!hasAnalyticsConsent((await cookies()).get(CONSENT_COOKIE)?.value)) return noContent;
 
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") return noContent;

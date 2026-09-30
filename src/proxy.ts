@@ -1,3 +1,4 @@
+import { CONSENT_COOKIE, hasAnalyticsConsent } from "@/lib/analytics/consent";
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { devAuthAllowed } from "@/lib/clerk";
@@ -38,6 +39,12 @@ const hasClerkKeys = hasCompleteClerkConfiguration(
  */
 function stampAttribution(req: NextRequest, res: NextResponse): NextResponse {
   if (req.nextUrl.pathname.startsWith("/api/") || isReaderPath(req.nextUrl.pathname)) return res;
+
+  if (!hasAnalyticsConsent(req.cookies.get(CONSENT_COOKIE)?.value)) {
+    res.cookies.delete(ANON_COOKIE);
+    res.cookies.delete(ATTRIBUTION_COOKIE);
+    return res;
+  }
 
   if (!req.cookies.get(ANON_COOKIE)) {
     res.cookies.set(ANON_COOKIE, crypto.randomUUID(), {

@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import Script from "next/script";
 import { Analytics, type BeforeSendEvent } from "@vercel/analytics/next";
 
 import { isReaderPath } from "@/lib/analytics/attribution";
+
+import { browserHasAnalyticsConsent } from "@/lib/analytics/consent";
+
+const subscribe = () => () => {};
 
 type AnalyticsWindow = Window & {
   dataLayer?: unknown[][];
@@ -37,11 +41,12 @@ export function PublicAnalytics({
   gaId?: string;
   vercelEnabled: boolean;
 }) {
+  const consent = useSyncExternalStore(subscribe, browserHasAnalyticsConsent, () => false);
   const pathname = usePathname();
   const configured = useRef(false);
 
   useEffect(() => {
-    if (!gaId) return;
+    if (!gaId || !consent) return;
     const analyticsWindow = window as AnalyticsWindow;
     const disableKey = `ga-disable-${gaId}`;
     const flags = window as unknown as Record<string, unknown>;
@@ -63,22 +68,22 @@ export function PublicAnalytics({
       // measurement is enabled in GA.
       flags[disableKey] = true;
     };
-  }, [gaId]);
+  }, [gaId, consent]);
 
   useEffect(() => {
-    if (!gaId) return;
+    if (!gaId || !consent) return;
     const analyticsWindow = window as AnalyticsWindow;
     analyticsWindow.gtag?.("event", "page_view", {
       page_path: pathname,
       page_location: `${window.location.origin}${pathname}`,
       page_title: document.title,
     });
-  }, [gaId, pathname]);
+  }, [gaId, pathname, consent]);
 
   return (
     <>
-      {vercelEnabled ? <Analytics beforeSend={publicVercelEvent} /> : null}
-      {gaId ? (
+      {consent && vercelEnabled ? <Analytics beforeSend={publicVercelEvent} /> : null}
+      {consent && gaId ? (
         <Script
           src={`https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(gaId)}`}
           strategy="afterInteractive"

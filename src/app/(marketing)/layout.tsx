@@ -1,3 +1,4 @@
+import { CookieChoice } from "@/components/marketing/cookie-choice";
 import type { ReactNode } from "react";
 import Link from "next/link";
 
@@ -15,6 +16,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-col bg-background text-foreground [--font-serif:Georgia] [font-family:var(--font-archivo),Arial,sans-serif] [overflow-wrap:anywhere]">
+      <CookieChoice />
       <PublicAnalytics gaId={gaId} vercelEnabled={vercelAnalyticsEnabled} />
       {/* The skip link lives once, in the root layout; this layout supplies its
           target below so it resolves without JavaScript. */}
