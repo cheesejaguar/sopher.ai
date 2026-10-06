@@ -3,10 +3,12 @@ import type {
   BookConcept,
   BookOutline,
   ChapterSummary,
+  CreativeQuestion,
   Critique,
   ReviewPhaseResult,
   ScenePlan,
 } from "@/ai/schemas";
+import type { GeneratedEntityBible } from "@/ai/agents/entity-bible";
 import type { EntityKind } from "@/ai/schemas/entities";
 import type { ReviewPhaseKey } from "@/ai/prompts/review-rubric";
 
@@ -244,17 +246,35 @@ export type GenerationWorkState = {
         qualityScore: number;
         critique: Critique | null;
       };
+      /**
+       * Set once the chapter row holds this prose and its post-write
+       * checkpoint exists; every text-bearing field above is then dropped.
+       * Readers treat a pruned entry as "no writer checkpoint" and fall back
+       * to the chapter row. `checkpointCount` keeps the saved-checkpoint
+       * total from shrinking when the text is pruned.
+       */
+      persisted?: { contentDigest: string; checkpointCount: number };
     }
   >;
   edits?: Record<
     string,
     {
       baseContentDigest: string;
-      content: string;
+      /**
+       * Absent once the edit is applied to the chapter row and its completion
+       * checkpoint is written; `contentDigest` then identifies the output.
+       * Blobs written before pruning existed always carry `content`.
+       */
+      content?: string;
+      contentDigest?: string;
       changed: boolean;
       notes: string[];
     }
   >;
+  /** Paid bible output, held only until it is persisted with its completion checkpoint. */
+  entityBible?: GeneratedEntityBible;
+  /** Paid post-concept question, held until its authoring_questions row exists. */
+  creativeQuestion?: CreativeQuestion;
 };
 
 export type CreativeDecision = {

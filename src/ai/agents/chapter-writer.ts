@@ -209,7 +209,9 @@ export async function writeChapter(
     await options.onCheckpoint?.(checkpoint);
   };
 
-  if (checkpoint.result) return checkpoint.result;
+  // A result without its text (pruned work state) is not a result: returning
+  // it would persist an empty chapter.
+  if (typeof checkpoint.result?.content === "string") return checkpoint.result;
 
   let plan = checkpoint.scenePlan;
   if (!plan) {

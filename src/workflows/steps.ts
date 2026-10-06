@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { FatalError, RetryableError, getStepMetadata, getWritable } from "workflow";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
@@ -54,7 +53,6 @@ import {
 import { generationResetSource, shouldArchiveGenerationReset } from "@/lib/generation-archive";
 import {
   chapterTopologyFingerprint,
-  cachedEditOutputAlreadyApplied,
   manuscriptDigest,
   outlineStateFingerprint,
   type ManuscriptStateRow,
@@ -74,6 +72,14 @@ import {
   type ResumeChapterMeteredWork,
 } from "./opening-credit-plan";
 import { isChapterComplete, isChapterProductionComplete, planFreshRunChapter } from "./resume";
+import {
+  contentDigest,
+  dropCompletedRunWork,
+  editOutputAlreadyApplied,
+  pruneChapterWork,
+  pruneEditWork,
+  reusableEditWork,
+} from "./work-state";
 import { runCostEvent } from "./run-cost";
 import {
   buildContinuityChapterRepairs,
@@ -275,10 +281,6 @@ async function meteredScope(
     billingScope: generationBillingScope(stored, ref.dbRunId, scope),
     reservationRef: reservationRef ?? meter.reservationRef,
   };
-}
-
-function contentDigest(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
 }
 
 async function loadManuscriptState(bookId: string): Promise<ManuscriptStateRow[]> {
@@ -887,7 +889,8 @@ export async function openingCreditCheckStep(
 
       let editorial: ResumeChapterMeteredWork["editorial"] = "none";
       if (config.tier !== "draft" && !downstreamCheckpoint) {
-        const cachedEdit = source.work?.edits?.[`editorial:${chapterNumber}`];
+        // A pruned edit has no text left to apply, so it is not cached work.
+        const cachedEdit = reusableEditWork(source.work?.edits?.[`editorial:${chapterNumber}`]);
         const cachedEditMatches = digest !== null && cachedEdit?.baseContentDigest === digest;
         if (!cachedEditMatches) {
           if (!proseComplete) {
@@ -905,7 +908,7 @@ export async function openingCreditCheckStep(
 
       let revision = false;
       if (revisionTargets.has(chapterNumber)) {
-        const cachedRevision = source.work?.edits?.[`revision:${chapterNumber}`];
+        const cachedRevision = reusableEditWork(source.work?.edits?.[`revision:${chapterNumber}`]);
         revision =
           !(
             revisionCheckpoint?.contentDigest === digest &&
@@ -1181,9 +1184,8 @@ export async function editorialWaveCreditCheckStep(
 
     const cached = stored.work?.edits?.[`${mode}:${chapterNumber}`];
     if (
-      cached &&
-      (cached.baseContentDigest === digest ||
-        cachedEditOutputAlreadyApplied(chapter.content, cached))
+      reusableEditWork(cached)?.baseContentDigest === digest ||
+      editOutputAlreadyApplied(chapter.content, cached)
     ) {
       return [];
     }
@@ -1979,16 +1981,29 @@ async function ensureChapterPostWrite(
 
   await withActiveAuthoringMutation(ref, async (tx) => {
     await persistChapterSummary(summaryInput, summaryCheckpoint.result, tx);
-    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
-      ...current,
-      completion: {
-        ...current.completion,
-        chapterSummaries: {
-          ...current.completion?.chapterSummaries,
-          [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => {
+      // The chapter row holds this prose and the checkpoint below proves its
+      // upkeep ran, so the writer/summary text in work is now duplication.
+      const chapterWork = pruneChapterWork(current.work?.chapters?.[key], digest);
+      return {
+        ...current,
+        ...(chapterWork
+          ? {
+              work: {
+                ...current.work,
+                chapters: { ...current.work?.chapters, [key]: chapterWork },
+              },
+            }
+          : {}),
+        completion: {
+          ...current.completion,
+          chapterSummaries: {
+            ...current.completion?.chapterSummaries,
+            [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+          },
         },
-      },
-    }));
+      };
+    });
   });
 }
 
@@ -2348,8 +2363,14 @@ export async function editChapterStep(
   }
 
   try {
-    let edited = stored.work?.edits?.[key];
-    const cachedOutputAlreadyApplied = cachedEditOutputAlreadyApplied(chapter.content, edited);
+    const cachedOutputAlreadyApplied = editOutputAlreadyApplied(
+      chapter.content,
+      stored.work?.edits?.[key],
+    );
+    // A pruned checkpoint (text dropped after it was applied) is not
+    // reusable; reaching one here means the author restored the pre-edit
+    // prose, so the pass is genuinely bought again.
+    let edited = reusableEditWork(stored.work?.edits?.[key]);
     if (!cachedOutputAlreadyApplied && (!edited || edited.baseContentDigest !== beforeDigest)) {
       const scopedMeter = await meteredScope(
         meter,
@@ -2390,16 +2411,18 @@ export async function editChapterStep(
           edits: { ...current.work?.edits, [key]: editResult },
         },
       }));
-      edited = stored.work?.edits?.[key] ?? edited;
+      edited = reusableEditWork(stored.work?.edits?.[key]) ?? edited;
     }
-    if (!edited) {
+    if (!edited && !cachedOutputAlreadyApplied) {
       throw new RetryableError("Editorial output was not checkpointed", { retryAfter: "1s" });
     }
+    const changed = cachedOutputAlreadyApplied || edited?.changed === true;
 
     let finalContent = chapter.content;
     const persistedStatus =
       mode === "revision" ? continuityRevisionStatus(chapter.status) : "edited";
-    if (edited.changed && !cachedOutputAlreadyApplied) {
+    if (!cachedOutputAlreadyApplied && edited?.changed && edited.content !== undefined) {
+      const editedContent = edited.content;
       const revisionSource = mode === "revision" ? "continuity-revision" : "writer";
       await withActiveAuthoringMutation(ref, async (tx) => {
         const [archive] = await tx
@@ -2425,8 +2448,8 @@ export async function editChapterStep(
         const [updated] = await tx
           .update(schema.chapters)
           .set({
-            content: edited.content,
-            wordCount: edited.content.split(/\s+/).filter(Boolean).length,
+            content: editedContent,
+            wordCount: editedContent.split(/\s+/).filter(Boolean).length,
             // A prose change invalidates the old summary as a continuity and
             // export aid. Entity canon is intentionally not rewritten here:
             // findings stay open until the author verifies the correction.
@@ -2449,40 +2472,47 @@ export async function editChapterStep(
           .from(schema.chapters)
           .where(eq(schema.chapters.id, chapter.id))
           .limit(1);
-        if (current?.content !== edited.content) {
+        if (current?.content !== editedContent) {
           throw new RetryableError("Chapter changed while its editorial pass was applying", {
             retryAfter: "1s",
           });
         }
       });
-      finalContent = edited.content;
+      finalContent = editedContent;
     }
 
     const checkpoint = {
       sourceRunId: ref.dbRunId,
       contentDigest: contentDigest(finalContent),
-      changed: edited.changed,
+      changed,
       ...(mode === "revision" && reviewManuscriptDigest ? { reviewManuscriptDigest } : {}),
     };
-    await updateStoredGenerationConfig(ref, (current) => ({
-      ...current,
-      completion: {
-        ...current.completion,
-        ...(mode === "revision"
-          ? {
-              revisionChapters: {
-                ...current.completion?.revisionChapters,
-                [String(chapterNumber)]: checkpoint,
-              },
-            }
-          : {
-              editedChapters: {
-                ...current.completion?.editedChapters,
-                [String(chapterNumber)]: checkpoint,
-              },
-            }),
-      },
-    }));
+    await updateStoredGenerationConfig(ref, (current) => {
+      // The chapter row now holds the output; keep only the edit's digest.
+      const appliedEdit = pruneEditWork(current.work?.edits?.[key]);
+      return {
+        ...current,
+        ...(appliedEdit
+          ? { work: { ...current.work, edits: { ...current.work?.edits, [key]: appliedEdit } } }
+          : {}),
+        completion: {
+          ...current.completion,
+          ...(mode === "revision"
+            ? {
+                revisionChapters: {
+                  ...current.completion?.revisionChapters,
+                  [String(chapterNumber)]: checkpoint,
+                },
+              }
+            : {
+                editedChapters: {
+                  ...current.completion?.editedChapters,
+                  [String(chapterNumber)]: checkpoint,
+                },
+              }),
+        },
+      };
+    });
     await persistAndPublishProgress(
       ref,
       {
@@ -2492,7 +2522,7 @@ export async function editChapterStep(
       },
       `chapter:${chapterNumber}:edited`,
     );
-    return { chapterNumber, changed: edited.changed };
+    return { chapterNumber, changed };
   } catch (error) {
     toWorkflowError(error);
   }
@@ -2794,8 +2824,10 @@ export async function finalizeStep(
     ) as ManuscriptStateRow[];
     const digest = manuscriptDigest(finalizedRows);
     const now = new Date();
+    // A completed run is never a resume source, so its chapter/edit work is
+    // dropped here; the manuscript it produced is the chapter rows.
     const config: GenerationConfig = {
-      ...stored,
+      ...dropCompletedRunWork(stored),
       completion: {
         ...stored.completion,
         finalized: { sourceRunId: ref.dbRunId, manuscriptDigest: digest },

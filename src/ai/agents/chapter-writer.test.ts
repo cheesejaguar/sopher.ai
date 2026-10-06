@@ -334,6 +334,17 @@ describe("writeChapter draft tier", () => {
     expect(result.critique).toBeNull();
     expect(result.qualityScore).toBe(0.75);
   });
+
+  it("never returns a checkpointed result whose text was pruned", async () => {
+    const result = await writeChapter(writerCtx({ tier: "draft" }), {
+      checkpoint: {
+        scenePlan,
+        draft: DRAFT,
+        result: { wordCount: 12, qualityScore: 0.9, critique: null } as never,
+      },
+    });
+    expect(result.content).toBe(DRAFT);
+  });
 });
 
 /** One streamed provider step: its text deltas between step boundaries. */
