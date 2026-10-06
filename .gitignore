@@ -66,3 +66,6 @@ next-env.d.ts
 
 # iCloud/Dropbox conflict copies ("foo 2.ts"); also enforced in CI
 * [0-9].*
+
+# Claude Code agent worktrees
+/.claude/worktrees/

@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main, rebuild/vercel-platform]
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,6 +15,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: No sync-duplicate files
@@ -90,6 +91,7 @@ jobs:
     # both removes a build from the critical path and guarantees the acceptance
     # suite and the performance budgets measure the same bytes.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -125,6 +127,7 @@ jobs:
 
   e2e-public:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [check, build]
     env:
       E2E_DB: "0"
@@ -181,6 +184,7 @@ jobs:
       (github.event.pull_request.user.login != 'dependabot[bot]' &&
       github.event.pull_request.head.repo.fork != true)
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     needs: check
     concurrency:
       # The suite deliberately resets one isolated Neon branch before it runs.
@@ -276,6 +280,7 @@ jobs:
     # public and trusted database acceptance visibly separate.
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [e2e-public, e2e-db]
     steps:
       - name: Require every applicable acceptance suite
@@ -294,6 +299,7 @@ jobs:
 
   lighthouse:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: [check, build]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
