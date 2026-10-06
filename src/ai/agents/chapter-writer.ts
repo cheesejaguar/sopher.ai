@@ -13,8 +13,9 @@ import {
   critiqueWireSchema,
   normalizeCritique,
   normalizeRevision,
+  normalizeScenePlan,
   revisionWireSchema,
-  scenePlanSchema,
+  scenePlanWireSchema,
   type ChapterOutlinePlan,
   type Critique,
   type ScenePlan,
@@ -222,11 +223,13 @@ export async function writeChapter(
           prompt: planPrompt(ctx),
           maxOutputTokens: meteredMaxOutputTokens("writer.plan"),
           prepareStep: meteredInputGuard("writer.plan"),
-          output: Output.object({ schema: scenePlanSchema }),
+          // Wire schema + normalizer: a seventh scene or a ninth character
+          // used to fail validation and re-buy the plan.
+          output: Output.object({ schema: scenePlanWireSchema }),
           providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.planner }),
         }),
     );
-    plan = result.output;
+    plan = normalizeScenePlan(result.output);
     await save({ ...checkpoint, scenePlan: plan });
   }
 

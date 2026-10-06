@@ -243,21 +243,20 @@ export class MeteredOutputDeliveryError extends Error {
    * this is what makes the next structured-output incident diagnosable.
    */
   readonly validationIssues: readonly string[];
-  /**
-   * Output the author already paid for, kept so a caller can attempt a free
-   * local repair instead of billing a second provider call. Private-with-getter
-   * on purpose: it can hold manuscript prose, so it must never appear in an
-   * inspected, serialized, or structured-cloned error. It therefore does not
-   * survive a Workflow step boundary — repair it in the same process or lose it.
-   */
-  readonly #rawText: string | undefined;
 
+  /**
+   * Deliberately carries no model output: the rejected text can hold
+   * manuscript prose, and this error is logged and crosses Workflow step
+   * boundaries. The settlement already compensated the author for the
+   * undelivered output, so there is nothing for a caller to salvage here;
+   * the defence against validation misses is the permissive wire schema.
+   */
   constructor(
     readonly operation: string,
     readonly finishReason: string,
     readonly outputTokens: number,
     readonly reasoningTokens: number,
-    paidOutput?: { rawText?: string; validationCause?: unknown },
+    paidOutput?: { validationCause?: unknown },
   ) {
     const usageDetail = [
       outputTokens > 0 ? `${outputTokens} output tokens` : null,
@@ -272,11 +271,6 @@ export class MeteredOutputDeliveryError extends Error {
     this.name = "MeteredOutputDeliveryError";
     this.isRetryable = !DETERMINISTIC_FINISH_REASONS.has(finishReason);
     this.validationIssues = validationIssueSummary(paidOutput?.validationCause);
-    this.#rawText = paidOutput?.rawText;
-  }
-
-  get rawText(): string | undefined {
-    return this.#rawText;
   }
 }
 
@@ -660,18 +654,12 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
         "finishReason" in result && typeof result.finishReason === "string"
           ? result.finishReason
           : "unknown";
-      // The result's text is the paid, unparsed answer behind the failed getter
-      // (a truncated response leaves it partial but often repairable).
-      const rawText = (result as { text?: unknown }).text;
       throw new MeteredOutputDeliveryError(
         info.operation,
         finishReason,
         result.usage.outputTokens ?? 0,
         result.usage.outputTokenDetails?.reasoningTokens ?? 0,
-        {
-          ...(typeof rawText === "string" ? { rawText } : {}),
-          validationCause: outputDeliveryFailure,
-        },
+        { validationCause: outputDeliveryFailure },
       );
     }
 
@@ -682,8 +670,8 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
       // AI SDK rejects generateText(Output.object(...)) after the provider has
       // returned when its response cannot be parsed or validated. The usage
       // attached to this error is authoritative: settle and compensate it so a
-      // caller can repair, degrade, or redo the structured output instead of
-      // mistaking its own completed attempt for unresolved external billing.
+      // caller can degrade or redo the structured output instead of mistaking
+      // its own completed attempt for unresolved external billing.
       await settleProviderUsage({
         carrier: {
           usage: error.usage,
@@ -696,10 +684,7 @@ export async function metered<T extends { usage: LanguageModelUsage }>(
         error.finishReason ?? "unknown",
         error.usage.outputTokens ?? 0,
         error.usage.outputTokenDetails?.reasoningTokens ?? 0,
-        // The rejected text was paid for; hand it to the caller for a free
-        // local repair rather than re-billing an identical request.
         {
-          ...(typeof error.text === "string" ? { rawText: error.text } : {}),
           validationCause: error,
         },
       );

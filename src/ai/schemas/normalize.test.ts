@@ -3,6 +3,8 @@ import fc from "fast-check";
 import type { z } from "zod";
 
 import {
+  bookOutlineSchema,
+  chapterOutlineSchema,
   chapterSummarySchema,
   chapterSummaryWireSchema,
   conceptSchema,
@@ -20,12 +22,15 @@ import {
   normalizeEditSuggestionList,
   normalizeEditSuggestionListWithDiagnostics,
   normalizeModerationVerdict,
+  normalizeBookOutline,
   normalizeReviewPhaseResult,
   normalizeRevision,
+  normalizeScenePlan,
   reviewPhaseResultSchema,
   reviewPhaseResultWireSchema,
   revisionSchema,
   revisionWireSchema,
+  scenePlanSchema,
   type ReviewPhaseResult,
 } from "@/ai/schemas";
 import {
@@ -731,4 +736,93 @@ describe("normalizers are total", () => {
       );
     },
   );
+});
+
+describe("normalizeScenePlan", () => {
+  const scene = (index: number) => ({
+    beat: `Beat ${index}`,
+    povGoal: "Reach the ledger",
+    conflict: "The harbormaster is gone",
+    exitState: "Mira holds the ledger",
+    charactersNeeded: ["Mira"],
+  });
+
+  it("keeps a well-formed plan intact", () => {
+    const plan = {
+      scenes: [scene(1), scene(2)],
+      openingHookApproach: "Salt on the wind",
+      closingHookApproach: "The missing hull",
+    };
+    expect(normalizeScenePlan(plan)).toEqual(plan);
+  });
+
+  it("survives seven scenes and nine characters when the caps are six and eight", () => {
+    const plan = normalizeScenePlan({
+      scenes: Array.from({ length: 7 }, (_, index) => ({
+        ...scene(index),
+        charactersNeeded: Array.from({ length: 9 }, (_, n) => `C${n}`),
+      })),
+      openingHookApproach: "A",
+      closingHookApproach: "B",
+    });
+    expect(plan.scenes).toHaveLength(6);
+    expect(plan.scenes[0].charactersNeeded).toHaveLength(8);
+    expect(scenePlanSchema.safeParse(plan).success).toBe(true);
+  });
+
+  it("survives arbitrary provider output with every scene on the strict type", () => {
+    const sceneSchema = scenePlanSchema.shape.scenes.element;
+    fc.assert(
+      fc.property(fc.anything(), (input) => {
+        const plan = normalizeScenePlan(input);
+        expect(plan.scenes.length).toBeLessThanOrEqual(6);
+        for (const entry of plan.scenes) expect(sceneSchema.safeParse(entry).success).toBe(true);
+      }),
+      { numRuns: 500 },
+    );
+  });
+});
+
+describe("normalizeBookOutline", () => {
+  it("survives arbitrary provider output with every chapter on the strict type", () => {
+    fc.assert(
+      fc.property(fc.anything(), (input) => {
+        const outline = normalizeBookOutline(input);
+        expect(outline.themes.length).toBeLessThanOrEqual(6);
+        expect(outline.chapters.length).toBeLessThanOrEqual(60);
+        outline.chapters.forEach((chapter, index) => {
+          expect(chapterOutlineSchema.safeParse(chapter).success).toBe(true);
+          expect(chapter.number).toBe(index + 1);
+        });
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("clamps word targets into the run range and fills a missing one from it", () => {
+    const outline = normalizeBookOutline(
+      {
+        title: "T",
+        logline: "L",
+        synopsis: "S",
+        plotStructure: "three_act",
+        chapters: [
+          { title: "One", summary: "a", targetWords: 12_000 },
+          { title: "Two", summary: "b", targetWords: "900" },
+          { title: "Three", summary: "c" },
+        ],
+      },
+      { targetWords: { min: 1_600, max: 2_400 } },
+    );
+    expect(outline.chapters.map((chapter) => chapter.targetWords)).toEqual([2_400, 1_600, 2_000]);
+    expect(bookOutlineSchema.safeParse(outline).success).toBe(true);
+  });
+
+  it("does not invent chapters the model never wrote", () => {
+    const outline = normalizeBookOutline({
+      title: "T",
+      chapters: [{ title: "Only", summary: "a" }, { notAChapter: true }],
+    });
+    expect(outline.chapters).toHaveLength(1);
+  });
 });

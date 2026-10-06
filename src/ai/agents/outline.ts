@@ -14,10 +14,20 @@ import {
 import { isNonFictionGenre } from "@/ai/knowledge/genres";
 import {
   bookOutlineSchema,
+  bookOutlineWireSchema,
   chapterOutlineSchema,
+  normalizeBookOutline,
   type BookConcept,
   type BookOutline,
 } from "@/ai/schemas";
+import {
+  asRecord,
+  coerceArray,
+  coerceInt,
+  coerceNonEmptyString,
+  coerceString,
+  truncateArray,
+} from "@/ai/schemas/normalize";
 import {
   getPlotTemplate,
   getTemplateSummary,
@@ -46,24 +56,52 @@ export type OutlineInput = {
   contentGuidelines?: string;
 };
 
+const MAX_STRUCTURE_ACTS = 8;
+
 // Internal to this agent: the cheap structure-plan call's output shape.
-const structurePlanSchema = z.object({
+export type StructurePlan = {
+  plotStructure: string;
+  acts: { name: string; startChapter: number; endChapter: number; arc: string }[];
+};
+
+/**
+ * What the provider is shown for the structure plan. Anthropic strips the
+ * strict schema's bounds before the model sees them, so a ninth act or a
+ * chapter "0" used to fail validation and re-buy the call; the wire schema
+ * carries the caps as descriptions and normalizeStructurePlan enforces them.
+ */
+const structurePlanWireSchema = z.object({
   plotStructure: z
     .string()
     .describe("One of: three_act, five_act, heros_journey, seven_point, save_the_cat"),
   acts: z
     .array(
       z.object({
-        name: z.string(),
-        startChapter: z.number().int().min(1),
-        endChapter: z.number().int().min(1),
-        arc: z.string().describe("One-line arc for this act"),
+        name: z.string().nullish(),
+        startChapter: z.union([z.number(), z.string()]).nullish(),
+        endChapter: z.union([z.number(), z.string()]).nullish(),
+        arc: z.string().nullish().describe("One-line arc for this act"),
       }),
     )
-    .min(2)
-    .max(8),
+    .describe(`Between 2 and ${MAX_STRUCTURE_ACTS} acts covering every chapter`),
 });
-export type StructurePlan = z.infer<typeof structurePlanSchema>;
+
+export function normalizeStructurePlan(wire: unknown): StructurePlan {
+  const value = asRecord(wire);
+  return {
+    plotStructure: coerceString(value.plotStructure),
+    acts: truncateArray(coerceArray(value.acts), MAX_STRUCTURE_ACTS).map((entry, index) => {
+      const act = asRecord(entry);
+      const startChapter = Math.max(1, coerceInt(act.startChapter) ?? 1);
+      return {
+        name: coerceNonEmptyString(act.name) ?? `Act ${index + 1}`,
+        startChapter,
+        endChapter: Math.max(startChapter, coerceInt(act.endChapter) ?? startChapter),
+        arc: coerceString(act.arc),
+      };
+    }),
+  };
+}
 
 export type OutlineGenerationCheckpoint = {
   plan?: StructurePlan;
@@ -397,11 +435,11 @@ export async function generateOutline(
           prompt: structurePlanPrompt(input),
           maxOutputTokens: meteredMaxOutputTokens("outliner.plan"),
           prepareStep: meteredInputGuard("outliner.plan"),
-          output: Output.object({ schema: structurePlanSchema }),
+          output: Output.object({ schema: structurePlanWireSchema }),
           providerOptions: gatewayOptions(input.meter, "outliner", { model: model }),
         }),
     );
-    plan = planResult.output;
+    plan = normalizeStructurePlan(planResult.output);
     await save({ ...checkpoint, plan });
   }
   const structureId = resolveStructureId(plan.plotStructure, input.plotStructure);
@@ -419,11 +457,17 @@ export async function generateOutline(
           prompt: outlinePrompt(input, plan, structureId),
           maxOutputTokens: meteredMaxOutputTokens("outliner.outline"),
           prepareStep: meteredInputGuard("outliner.outline"),
-          output: Output.object({ schema: bookOutlineSchema }),
+          // Permissive wire schema, normalized back onto BookOutline. The
+          // strict schema's caps (8 key events, 10 characters, 6 themes,
+          // 500-10,000 words) were invisible to the model and failed a whole
+          // paid outline over one overlong list.
+          output: Output.object({ schema: bookOutlineWireSchema }),
           providerOptions: gatewayOptions(input.meter, "outliner", { model: model }),
         }),
     );
-    outline = outlineResult.output;
+    outline = normalizeBookOutline(outlineResult.output, {
+      targetWords: targetWordRange(input.targetWordsPerChapter),
+    });
     await save({ ...checkpoint, draft: outline });
   }
   if (!outline) throw new Error("Outline generation produced no draft");
@@ -464,11 +508,15 @@ export async function generateOutline(
           ),
           maxOutputTokens: meteredMaxOutputTokens("outliner.selfCheck"),
           prepareStep: meteredInputGuard("outliner.selfCheck"),
-          output: Output.object({ schema: runSchema }),
+          // The run schema's superRefine checks never reach the provider;
+          // normalize the answer, then the explicit parse below enforces them.
+          output: Output.object({ schema: bookOutlineWireSchema }),
           providerOptions: gatewayOptions(input.meter, "outliner", { model: model }),
         }),
     );
-    outline = checked.output;
+    outline = normalizeBookOutline(checked.output, {
+      targetWords: targetWordRange(input.targetWordsPerChapter),
+    });
   }
 
   // Never trust a repair merely because the model returned an object. This

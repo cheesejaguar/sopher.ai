@@ -419,7 +419,6 @@ describe("metered atomic authorization", () => {
       // did not — and the callers most exposed to a validation miss produce the
       // manuscript rather than polish it, so they have no degrade path.
       isRetryable: true,
-      rawText: '{"entities":[]}',
     });
     expect(mocks.recordMany).toHaveBeenCalledWith(
       [
@@ -509,8 +508,6 @@ describe("metered atomic authorization", () => {
 
     expect(failure).toBeInstanceOf(MeteredOutputDeliveryError);
     expect(failure?.isRetryable).toBe(true);
-    // Paid output is salvageable in process, so a repair costs the author nothing.
-    expect(failure?.rawText).toBe(rawText);
     // Structure only: every entry is a schema path plus a zod code. The
     // model-chosen record key is masked because it is author content.
     expect(failure?.validationIssues).toEqual([
@@ -551,7 +548,6 @@ describe("metered atomic authorization", () => {
 
   it("reports an unparseable response as a structure-only diagnostic", () => {
     const failure = new MeteredOutputDeliveryError("concept.refine", "stop", 500, 0, {
-      rawText: "Here is the concept you asked for:\n```json\n{",
       validationCause: new NoObjectGeneratedError({
         message: "No object generated: could not parse the response.",
         cause: Object.assign(new Error("JSON parsing failed"), {
@@ -596,7 +592,6 @@ describe("metered atomic authorization", () => {
         validationCause: new NoOutputGeneratedError(),
       }).validationIssues,
     ).toEqual([]);
-    expect(new MeteredOutputDeliveryError("cover.generate", "error", 0, 0).rawText).toBeUndefined();
   });
 
   it("releases a first-step input guard failure that proves no provider dispatch", async () => {
@@ -758,8 +753,6 @@ describe("metered atomic authorization", () => {
       reasoningTokens: 4_928,
       isRetryable: false,
       message: expect.stringContaining("finish reason: length"),
-      // Truncated JSON is still paid-for output a caller may be able to close.
-      rawText: partialText,
     });
     await expect(call).rejects.toBeInstanceOf(MeteredOutputDeliveryError);
     await expect(call).rejects.toMatchObject({
