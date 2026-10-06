@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { and, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { getRun } from "workflow/api";
 
@@ -316,6 +317,14 @@ export const RUN_HEARTBEAT_CRITICAL_MS = 30 * 60_000;
 export const RUN_QUEUED_WARNING_MS = 10 * 60_000;
 export const RUN_MISSING_TERMINAL_EVIDENCE_MS = 10 * 60_000;
 export const RUN_CANCELLATION_WARNING_MS = 10 * 60_000;
+/**
+ * Repeated "missing" probes inside this window are one observation. A single
+ * page view renders the project layout and the page concurrently, and the
+ * status endpoint polls every few seconds; without a floor those would stack
+ * toward the three-observation threshold far faster than the watchdog's
+ * five-minute cadence the threshold was sized for.
+ */
+export const WORKFLOW_MISSING_OBSERVATION_MIN_INTERVAL_MS = 60_000;
 
 export function deriveWorkflowMissingObservationTransition(input: {
   status: WorkflowHealthStatus;
@@ -492,21 +501,38 @@ async function persistWorkflowObservation(
   missingSince: Date | null;
 }> {
   const now = new Date();
+  const missingWindowStart = new Date(now.getTime() - WORKFLOW_MISSING_OBSERVATION_MIN_INTERVAL_MS);
   const transition = deriveWorkflowMissingObservationTransition({
     status: workflow.status,
     currentCount: run.workflowMissingCount,
     currentSince: run.workflowMissingSince,
     observedAt: now,
   });
+  // Postgres evaluates every SET expression against the row as it was before
+  // this UPDATE, and concurrent probes serialize on the row lock, so only the
+  // first missing probe in a window counts. A deduplicated probe also keeps
+  // the counted observation's timestamp: refreshing it would let a page that
+  // polls faster than the window hold the count at one indefinitely.
+  const repeatsCountedMissing = sql`(
+    ${schema.generationRuns.workflowObservedStatus} = 'missing'
+    and ${schema.generationRuns.workflowObservedAt} > ${missingWindowStart}
+  )`;
   try {
     const [observed] = await getDb()
       .update(schema.generationRuns)
       .set({
         workflowObservedStatus: workflow.status,
-        workflowObservedAt: now,
+        workflowObservedAt:
+          transition.mode === "increment"
+            ? sql`case when ${repeatsCountedMissing}
+                then ${schema.generationRuns.workflowObservedAt}
+                else ${now} end`
+            : now,
         workflowMissingCount:
           transition.mode === "increment"
-            ? sql`${schema.generationRuns.workflowMissingCount} + 1`
+            ? sql`case when ${repeatsCountedMissing}
+                then ${schema.generationRuns.workflowMissingCount}
+                else ${schema.generationRuns.workflowMissingCount} + 1 end`
             : transition.mode === "preserve"
               ? sql`${schema.generationRuns.workflowMissingCount}`
               : 0,
@@ -1104,6 +1130,36 @@ export async function getRunHealth(run: RunForHealth): Promise<RunHealth> {
     rootErrorCode: currentRun.rootErrorCode,
     rootErrorStage: currentRun.rootErrorStage,
   };
+}
+
+type RunHealthRequestScope = Map<string, Promise<RunHealth>>;
+
+/**
+ * One memo per server render. React's cache() only dedupes on argument
+ * identity, and every caller holds its own run row object, so the scope is a
+ * zero-argument cache holding a Map keyed by the primitive run id.
+ */
+const runHealthRequestScope = cache((): RunHealthRequestScope => new Map());
+
+/**
+ * getRunHealth for server-rendered pages. The project layout and the page it
+ * wraps render concurrently and both need the same run's health; each
+ * uncached call costs a Workflow API probe (up to four seconds) and a
+ * persisted observation write. Storing the in-flight promise lets the second
+ * caller join the first. Route handlers and the watchdog keep calling
+ * getRunHealth directly because they need a fresh read every time.
+ */
+export function getRequestRunHealth(
+  run: RunForHealth,
+  scope: RunHealthRequestScope = runHealthRequestScope(),
+): Promise<RunHealth> {
+  const existing = scope.get(run.id);
+  if (existing) return existing;
+  const health = getRunHealth(run);
+  scope.set(run.id, health);
+  // A rejected probe must not poison later renders that share this scope.
+  health.catch(() => scope.delete(run.id));
+  return health;
 }
 
 export type ReconcileRunResult =

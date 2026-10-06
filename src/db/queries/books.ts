@@ -304,8 +304,11 @@ export function authoringJourneyRunPrioritySql() {
   end`;
 }
 
-/** Select the run that currently governs the author's next step. */
-export async function getLatestAuthoringJourneyRun(projectId: string) {
+/**
+ * Select the run that currently governs the author's next step. Per-request
+ * deduped: the project layout and its page both derive the journey.
+ */
+export const getLatestAuthoringJourneyRun = cache(async (projectId: string) => {
   const db = getDb();
   const [run] = await db
     .select()
@@ -319,7 +322,7 @@ export async function getLatestAuthoringJourneyRun(projectId: string) {
     .orderBy(authoringJourneyRunPrioritySql(), desc(schema.generationRuns.createdAt))
     .limit(1);
   return run ?? null;
-}
+});
 
 export async function getProjectSpend(projectId: string) {
   const db = getDb();
