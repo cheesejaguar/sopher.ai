@@ -72,7 +72,8 @@ export function StepEstimate({
   // Debounced re-quote whenever the book's shape changes.
   React.useEffect(() => {
     const controller = new AbortController();
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => void quote(), 350);
+    async function quote() {
       setLoading(true);
       setQuoteError(null);
       try {
@@ -109,7 +110,7 @@ export function StepEstimate({
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
-    }, 350);
+    }
     return () => {
       clearTimeout(timer);
       controller.abort();

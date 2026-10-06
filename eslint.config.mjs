@@ -6,6 +6,24 @@ const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
+    // Type-aware promise checks. Most async work here is fire-and-forget by
+    // design (polls, debounced quotes, effects), so an unhandled rejection
+    // would vanish silently; these rules make every such site say `void` or
+    // handle the result.
+    files: ["src/**/*.ts", "src/**/*.tsx"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      "@typescript-eslint/no-floating-promises": "error",
+      "@typescript-eslint/no-misused-promises": [
+        "error",
+        // JSX handlers returning a promise are routine with async actions.
+        { checksVoidReturn: { attributes: false } },
+      ],
+    },
+  },
+  {
     // Playwright fixtures take a `use` callback that is not a React hook.
     files: ["e2e/**", "playwright.config.ts"],
     rules: {

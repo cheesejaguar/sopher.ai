@@ -233,7 +233,7 @@ export function ManuscriptRevisionPanel({
               setAnnouncement(
                 "The review reached a final state. Saved results are temporarily unavailable; Sopher will check again.",
               );
-              timer = setTimeout(poll, 5_000);
+              timer = setTimeout(() => void poll(), 5_000);
             }
             return;
           }
@@ -275,7 +275,7 @@ export function ManuscriptRevisionPanel({
         if (!cancelled)
           setDetail("Status is temporarily unavailable. The review may still be running.");
       }
-      if (!cancelled) timer = setTimeout(poll, 5_000);
+      if (!cancelled) timer = setTimeout(() => void poll(), 5_000);
     };
 
     void poll();

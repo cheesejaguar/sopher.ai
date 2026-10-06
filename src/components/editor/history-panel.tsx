@@ -98,7 +98,7 @@ export function HistoryPanel({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const rows = await listChapterRevisions(chapterId);
         if (!cancelled) {
