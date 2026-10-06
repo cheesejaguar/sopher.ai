@@ -110,8 +110,8 @@ export default async function ManuscriptPage({
 }) {
   const [{ projectId }, sp] = await Promise.all([params, searchParams]);
   const { userId } = await requirePageUser();
-  // Neither query needs the project row, so both start now and are awaited
-  // only once a chapter is going to render. Both are scoped to ids, and
+  // None of these queries needs the project row, so all start now and are
+  // awaited only once a chapter is going to render. All are scoped to ids, and
   // nothing they return is rendered before the ownership check below.
   const figuresPromise = loadFigures(projectId);
   const assetUrlsPromise = loadProjectImageAssetUrls(projectId);
