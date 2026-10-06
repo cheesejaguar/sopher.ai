@@ -3,7 +3,6 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { entityGet, entityRelate, entitySearch, entityUpsert } from "@/ai/tools/entities";
-import { withAuthoringToolMutation } from "@/ai/tools/authoring-mutation";
 import { analyzeQuality, getQualityRecommendations } from "@/ai/analysis/quality-metrics";
 import { analyzePacing } from "@/ai/analysis/pacing";
 import { getGenreTemplate, chapterPromptForGenre, genreAvoidList } from "@/ai/knowledge/genres";
@@ -137,6 +136,8 @@ function outlineGetStructure(ctx: ToolCtx) {
   });
 }
 
+const CHAPTER_TEXT_WINDOW_CHARS = 6_000;
+
 function chaptersGetText(ctx: ToolCtx) {
   return tool({
     description:
@@ -148,53 +149,25 @@ function chaptersGetText(ctx: ToolCtx) {
     }),
     execute: async ({ number, startChar, endChar }) => {
       const db = getDb();
+      const start = startChar ?? 0;
+      const length = Math.max(0, (endChar ?? start + CHAPTER_TEXT_WINDOW_CHARS) - start);
+      // Slice in SQL: a continuity phase spot-checks many windows, and pulling
+      // the whole chapter over the wire for each one was the cost. Postgres
+      // counts characters where String.slice counts UTF-16 units, so a window
+      // past astral characters (emoji) can shift by one — harmless for a
+      // read-only spot check.
       const [row] = await db
-        .select({ content: schema.chapters.content, title: schema.chapters.title })
+        .select({
+          text: sql<string>`substring(${schema.chapters.content} from ${start + 1}::int for ${length}::int)`,
+          title: schema.chapters.title,
+        })
         .from(schema.chapters)
         .where(
           and(eq(schema.chapters.bookId, ctx.bookId), eq(schema.chapters.chapterNumber, number)),
         )
         .limit(1);
       if (!row) return { error: `Chapter ${number} not found` };
-      const text = row.content.slice(startChar ?? 0, endChar ?? (startChar ?? 0) + 6_000);
-      return { chapterNumber: number, title: row.title, text };
-    },
-  });
-}
-
-function continuityRecordIssue(ctx: ToolCtx) {
-  return tool({
-    description:
-      "Record a continuity issue you found (contradiction, timeline error, dropped thread) so it can be fixed and tracked.",
-    inputSchema: z.object({
-      chapters: z.array(z.number().int()).min(1).max(10),
-      category: z.enum(["character", "timeline", "setting", "plot", "factual"]),
-      severity: z.enum(["critical", "major", "minor"]),
-      description: z.string(),
-      suggestedFix: z.string(),
-    }),
-    execute: async (issue, { toolCallId }) => {
-      const logicalOrdinal = ctx.nextMutationOrdinal?.();
-      return withAuthoringToolMutation({
-        ctx,
-        toolName: "continuityRecordIssue",
-        toolCallId,
-        logicalOrdinal,
-        payload: issue,
-        mutate: async (tx) => {
-          await tx.insert(schema.continuityIssues).values({
-            bookId: ctx.bookId,
-            runId: ctx.runId!,
-            chapters: issue.chapters,
-            category: issue.category,
-            severity: issue.severity,
-            description: issue.description,
-            suggestedFix: issue.suggestedFix,
-          });
-          return { recorded: true };
-        },
-        replay: () => ({ recorded: true }),
-      });
+      return { chapterNumber: number, title: row.title, text: row.text ?? "" };
     },
   });
 }
@@ -300,7 +273,9 @@ export function buildToolset(role: AgentRole, ctx: ToolCtx): ToolSet {
         entityGet: entityGet(mutationCtx),
         entitySearch: entitySearch(mutationCtx),
         outlineGetStructure: outlineGetStructure(ctx),
-        continuityRecordIssue: continuityRecordIssue(mutationCtx),
+        // No issue-recording tool: findings come back in the structured phase
+        // result, and continuityFinalizeStep replaces the run's issue rows
+        // wholesale, so an issue recorded mid-phase would only be deleted.
       };
     case "concept":
       return { knowledgeGenre };
