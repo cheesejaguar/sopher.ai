@@ -290,6 +290,14 @@ describe("writeChapter revision", () => {
     expect(result.qualityScore).toBeCloseTo(0.72, 5);
   });
 
+  it("inserts revised prose literally, never as a $-replacement pattern", async () => {
+    const result = await runFromDraft(critique(), {
+      replacements: [{ original: ANCHOR, revised: "The fare was $$$, or $& and $' and $`." }],
+    });
+    expect(result.content).toContain("The fare was $$$, or $& and $' and $`.");
+    expect(result.content).not.toContain(ANCHOR);
+  });
+
   it("caps the revision bump at 1", async () => {
     const result = await runFromDraft(critique({ score: 0.98 }), {
       replacements: [{ original: ANCHOR, revised: "Salt and cold iron rode the wind." }],
