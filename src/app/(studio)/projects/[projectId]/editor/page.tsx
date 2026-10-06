@@ -22,7 +22,7 @@ import {
   chapterStatusLabels,
   formatWordCount,
 } from "@/lib/editor/chapter-status";
-import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
+import { getRequestAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import {
@@ -40,49 +40,51 @@ export default async function EditorIndexPage({
   const { userId } = await requireUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
+  const { book } = data;
 
-  const [chapters, archivedChapters, pendingSuggestionRows] = data.book
-    ? await Promise.all([
-        getChapterList(data.book.id),
-        getArchivedChapterRecoveries(data.book.id),
-        getDb()
-          .select({
-            chapterId: schema.suggestions.chapterId,
-            count: sql<number>`count(*)::int`,
-          })
-          .from(schema.suggestions)
-          .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
-          .where(
-            and(eq(schema.chapters.bookId, data.book.id), eq(schema.suggestions.status, "pending")),
-          )
-          .groupBy(schema.suggestions.chapterId),
-      ])
-    : [[], [], []];
-  const journey = await getAuthoringJourneySnapshot({
-    userId,
-    projectId,
-    data,
-    chapters,
-  });
-  const [latestEditRun] = await getDb()
-    .select({
-      id: schema.generationRuns.id,
-      status: schema.generationRuns.status,
-      config: schema.generationRuns.config,
-      workflowRunId: schema.generationRuns.workflowRunId,
-      error: schema.generationRuns.error,
-      acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
-    })
-    .from(schema.generationRuns)
-    .where(
-      and(
-        eq(schema.generationRuns.projectId, projectId),
-        eq(schema.generationRuns.userId, userId),
-        eq(schema.generationRuns.kind, "edit_pass"),
-      ),
-    )
-    .orderBy(desc(schema.generationRuns.createdAt))
-    .limit(1);
+  // Everything below depends only on ids this page already holds, so the
+  // chapter queue, the journey, and the latest edit pass load in one round.
+  // getChapterList is request-cached, so the journey shares the queue's query.
+  const [[chapters, archivedChapters, pendingSuggestionRows], journey, [latestEditRun]] =
+    await Promise.all([
+      book
+        ? Promise.all([
+            getChapterList(book.id),
+            getArchivedChapterRecoveries(book.id),
+            getDb()
+              .select({
+                chapterId: schema.suggestions.chapterId,
+                count: sql<number>`count(*)::int`,
+              })
+              .from(schema.suggestions)
+              .innerJoin(schema.chapters, eq(schema.chapters.id, schema.suggestions.chapterId))
+              .where(
+                and(eq(schema.chapters.bookId, book.id), eq(schema.suggestions.status, "pending")),
+              )
+              .groupBy(schema.suggestions.chapterId),
+          ])
+        : Promise.resolve([[], [], []] as [never[], never[], never[]]),
+      getRequestAuthoringJourneySnapshot({ userId, projectId, data }),
+      getDb()
+        .select({
+          id: schema.generationRuns.id,
+          status: schema.generationRuns.status,
+          config: schema.generationRuns.config,
+          workflowRunId: schema.generationRuns.workflowRunId,
+          error: schema.generationRuns.error,
+          acceptanceUncertainAt: schema.generationRuns.acceptanceUncertainAt,
+        })
+        .from(schema.generationRuns)
+        .where(
+          and(
+            eq(schema.generationRuns.projectId, projectId),
+            eq(schema.generationRuns.userId, userId),
+            eq(schema.generationRuns.kind, "edit_pass"),
+          ),
+        )
+        .orderBy(desc(schema.generationRuns.createdAt))
+        .limit(1),
+    ]);
   const latestSuggestionChapters: ManuscriptRevisionSuggestionChapter[] =
     latestEditRun && data.book
       ? await getDb()

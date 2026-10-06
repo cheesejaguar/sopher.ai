@@ -275,7 +275,12 @@ export async function getActiveFullBookRun(projectId: string) {
   return run ?? null;
 }
 
-export async function getLatestFullBookRun(projectId: string) {
+/**
+ * The whole-book run the Write surface shows: the newest active run if one
+ * exists, otherwise the newest run of any status. One ordered query instead of
+ * an active lookup followed by a fallback lookup.
+ */
+export async function getCurrentFullBookRun(projectId: string) {
   const db = getDb();
   const [run] = await db
     .select()
@@ -286,7 +291,10 @@ export async function getLatestFullBookRun(projectId: string) {
         eq(schema.generationRuns.kind, "full_book"),
       ),
     )
-    .orderBy(desc(schema.generationRuns.createdAt))
+    .orderBy(
+      sql`case when ${schema.generationRuns.status} in ('queued', 'running', 'awaiting_input') then 0 else 1 end`,
+      desc(schema.generationRuns.createdAt),
+    )
     .limit(1);
   return run ?? null;
 }

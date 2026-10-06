@@ -25,7 +25,7 @@ vi.mock("@/db/queries/books", () => ({
   getChapterList: mocks.getChapterList,
 }));
 vi.mock("@/db/queries/authoring-journey", () => ({
-  getAuthoringJourneySnapshot: mocks.getJourney,
+  getRequestAuthoringJourneySnapshot: mocks.getJourney,
 }));
 vi.mock("@/components/editor/editor-shell-loader", () => ({
   EditorShellLoader: (props: unknown) => {

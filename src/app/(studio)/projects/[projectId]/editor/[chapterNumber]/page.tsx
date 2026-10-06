@@ -5,7 +5,7 @@ import { Feather } from "lucide-react";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
-import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
+import { getRequestAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 import { requireUser } from "@/lib/auth";
 import { toSuggestionDTO, type SuggestionDTO } from "@/lib/editor/types";
@@ -73,7 +73,8 @@ export default async function EditorChapterPage({
     if (!reviewRun) notFound();
     reviewRunId = reviewRun.id;
   }
-  const [chapters, pendingRows] = await Promise.all([
+  // getChapterList is request-cached, so the journey shares this query.
+  const [chapters, pendingRows, journey] = await Promise.all([
     getChapterList(book.id),
     db
       .select()
@@ -88,14 +89,9 @@ export default async function EditorChapterPage({
         ),
       )
       .orderBy(schema.suggestions.createdAt),
+    getRequestAuthoringJourneySnapshot({ userId, projectId, data }),
   ]);
   const initialSuggestions: SuggestionDTO[] = pendingRows.map(toSuggestionDTO);
-  const journey = await getAuthoringJourneySnapshot({
-    userId,
-    projectId,
-    data,
-    chapters,
-  });
   const productionStatus = journey ? incompleteProductionStatus(journey) : null;
 
   return (

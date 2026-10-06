@@ -20,7 +20,7 @@ import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/
 import { ManuscriptSearch } from "@/components/editor/manuscript-search";
 import { ManuscriptStatsPanel } from "@/components/manuscript/manuscript-stats-panel";
 import { manuscriptStats } from "@/lib/manuscript-stats";
-import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
+import { getRequestAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import { getDb, schema } from "@/db";
@@ -109,18 +109,26 @@ export default async function ManuscriptPage({
 }) {
   const [{ projectId }, sp] = await Promise.all([params, searchParams]);
   const { userId } = await requireUser();
+  // Neither query needs the project row, so both start now and are awaited
+  // only once a chapter is going to render. Both are scoped to ids, and
+  // nothing they return is rendered before the ownership check below.
+  const figuresPromise = loadFigures(projectId);
+  const skippedPassesPromise = skippedFinishingPasses(userId, projectId);
+  // The not-found and empty-manuscript exits never await them; a rejection on
+  // those paths must not surface as an unhandled rejection.
+  figuresPromise.catch(() => {});
+  skippedPassesPromise.catch(() => {});
+
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { project, book } = data;
 
-  const chapterRows = book ? await getChapterList(book.id) : [];
+  // getChapterList is request-cached, so the journey shares this query.
+  const [chapterRows, journey] = await Promise.all([
+    book ? getChapterList(book.id) : Promise.resolve([]),
+    getRequestAuthoringJourneySnapshot({ userId, projectId, data }),
+  ]);
   const readable = chapterRows.filter((c) => c.wordCount > 0);
-  const journey = await getAuthoringJourneySnapshot({
-    userId,
-    projectId,
-    data,
-    chapters: chapterRows,
-  });
 
   if (!book || readable.length === 0) {
     return (
@@ -142,10 +150,7 @@ export default async function ManuscriptPage({
   if (!chapter) notFound();
 
   // Cached diagram renders, so mermaid fences read as diagrams rather than source.
-  const [figures, skippedPasses] = await Promise.all([
-    loadFigures(projectId),
-    skippedFinishingPasses(userId, projectId),
-  ]);
+  const [figures, skippedPasses] = await Promise.all([figuresPromise, skippedPassesPromise]);
 
   const previous = activeIndex > 0 ? readable[activeIndex - 1] : null;
   const next = activeIndex < readable.length - 1 ? readable[activeIndex + 1] : null;
