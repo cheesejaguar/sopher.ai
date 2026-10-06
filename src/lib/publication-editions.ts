@@ -8,6 +8,7 @@ import { lockProjectAuthoring } from "@/db/transaction-operations";
 import { bookMatterSchema, type BookMatter } from "@/lib/book-package";
 import { captureExportSnapshot, type ExportSnapshot } from "@/lib/export/assemble";
 import type { FigureMap } from "@/lib/export/figures";
+import { isOwnedBlobUrl } from "@/lib/security/blob-url";
 
 const READER_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 export const MAX_ACTIVE_READER_SHARES_PER_PROJECT = 20;
@@ -27,18 +28,9 @@ const publicationFigureSchema = z.object({
   height: z.number().int().positive().optional(),
 });
 
+/** Reader editions only ever proxy objects from this deployment's Blob store. */
 export function isOwnedReaderAssetUrl(value: string | null | undefined): value is string {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
-      (url.hostname === "public.blob.vercel-storage.com" ||
-        url.hostname.endsWith(".public.blob.vercel-storage.com"))
-    );
-  } catch {
-    return false;
-  }
+  return isOwnedBlobUrl(value);
 }
 
 export function readerAssetKey(url: string): string {

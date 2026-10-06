@@ -13,7 +13,8 @@ import { ShareReaderDialog } from "@/components/manuscript/share-reader-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
 import { Button } from "@/components/ui/button";
 import { markdownToHtml } from "@/lib/export/assemble";
-import { loadFigures } from "@/lib/export/figures";
+import { loadFigures, loadProjectImageAssetUrls } from "@/lib/export/figures";
+import { ownedImageUrlFilter } from "@/lib/security/blob-url";
 import { requireUser } from "@/lib/auth";
 import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book-package";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
@@ -113,10 +114,12 @@ export default async function ManuscriptPage({
   // only once a chapter is going to render. Both are scoped to ids, and
   // nothing they return is rendered before the ownership check below.
   const figuresPromise = loadFigures(projectId);
+  const assetUrlsPromise = loadProjectImageAssetUrls(projectId);
   const skippedPassesPromise = skippedFinishingPasses(userId, projectId);
   // The not-found and empty-manuscript exits never await them; a rejection on
   // those paths must not surface as an unhandled rejection.
   figuresPromise.catch(() => {});
+  assetUrlsPromise.catch(() => {});
   skippedPassesPromise.catch(() => {});
 
   const data = await getProjectWithBook(userId, projectId);
@@ -150,7 +153,14 @@ export default async function ManuscriptPage({
   if (!chapter) notFound();
 
   // Cached diagram renders, so mermaid fences read as diagrams rather than source.
-  const [figures, skippedPasses] = await Promise.all([figuresPromise, skippedPassesPromise]);
+  const [figures, assetUrls, skippedPasses] = await Promise.all([
+    figuresPromise,
+    assetUrlsPromise,
+    skippedPassesPromise,
+  ]);
+  // Only the project's own Blob images render; an external `![](…)` would be a
+  // third-party request from every page view, so it degrades to its alt text.
+  const imageUrl = ownedImageUrlFilter(assetUrls);
 
   const previous = activeIndex > 0 ? readable[activeIndex - 1] : null;
   const next = activeIndex < readable.length - 1 ? readable[activeIndex + 1] : null;
@@ -314,7 +324,7 @@ export default async function ManuscriptPage({
                 <h2>{section.title}</h2>
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: markdownToHtml(section.markdown, figures),
+                    __html: markdownToHtml(section.markdown, figures, "svg", { imageUrl }),
                   }}
                 />
               </section>
@@ -333,7 +343,9 @@ export default async function ManuscriptPage({
           </h2>
           <div
             // Manuscript markdown rendered server-side; raw HTML is escaped in markdownToHtml.
-            dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content, figures) }}
+            dangerouslySetInnerHTML={{
+              __html: markdownToHtml(chapter.content, figures, "svg", { imageUrl }),
+            }}
           />
         </section>
 
@@ -346,7 +358,7 @@ export default async function ManuscriptPage({
                 <h2>{section.title}</h2>
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: markdownToHtml(section.markdown, figures),
+                    __html: markdownToHtml(section.markdown, figures, "svg", { imageUrl }),
                   }}
                 />
               </section>

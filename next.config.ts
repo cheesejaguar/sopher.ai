@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { withWorkflow } from "workflow/next";
 
+import { ownedBlobHostname } from "./src/lib/security/blob-url";
 import { securityHeaders } from "./src/lib/security/headers";
 
 const nextConfig: NextConfig = {
@@ -26,7 +27,9 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "img.clerk.com" },
-      { protocol: "https", hostname: "*.public.blob.vercel-storage.com" },
+      // Only this deployment's Blob store when the build can identify it (see
+      // ownedBlobHostname); otherwise any public store, as before.
+      { protocol: "https", hostname: ownedBlobHostname() ?? "*.public.blob.vercel-storage.com" },
     ],
     formats: ["image/avif", "image/webp"],
     minimumCacheTTL: 2678400,

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { isOwnedBlobUrl } from "@/lib/security/blob-url";
 
 /**
  * Figure resolution for diagrams and inline images.
@@ -101,13 +102,48 @@ export async function loadFigures(projectId: string): Promise<FigureMap> {
   return buildFigureMap(rows);
 }
 
+/** Asset kinds whose images may appear inside a manuscript or on its cover. */
+export const MANUSCRIPT_IMAGE_ASSET_KINDS = ["cover", "illustration", "diagram"] as const;
+
+/**
+ * The project's own uploaded images — the allowlist every surface that renders
+ * or fetches a manuscript image checks against. Pure; rows come from the
+ * caller's query (or transaction) over `MANUSCRIPT_IMAGE_ASSET_KINDS`.
+ */
+export function projectImageAssetUrls(
+  rows: Array<{ blobUrl: string; contentType: string }>,
+): string[] {
+  return [
+    ...new Set(
+      rows
+        .filter((row) => row.contentType.startsWith("image/") && isOwnedBlobUrl(row.blobUrl))
+        .map((row) => row.blobUrl),
+    ),
+  ].sort();
+}
+
+export async function loadProjectImageAssetUrls(projectId: string): Promise<string[]> {
+  const rows = await getDb()
+    .select({ blobUrl: schema.assets.blobUrl, contentType: schema.assets.contentType })
+    .from(schema.assets)
+    .where(
+      and(
+        eq(schema.assets.projectId, projectId),
+        inArray(schema.assets.kind, [...MANUSCRIPT_IMAGE_ASSET_KINDS]),
+      ),
+    );
+  return projectImageAssetUrls(rows);
+}
+
 /**
  * Downloads PNG bytes for the figures PDF/DOCX will embed. Failures are
  * swallowed per-figure: a fetch error degrades that one diagram to source text
  * rather than failing the whole export.
  */
 export async function hydrateFigureBytes(figures: FigureMap): Promise<FigureMap> {
-  const entries = Object.entries(figures).filter(([, figure]) => figure.pngUrl);
+  // Diagram rows are server-written, but these bytes are fetched server-side
+  // and embedded in a download: never follow anything off our own store.
+  const entries = Object.entries(figures).filter(([, figure]) => isOwnedBlobUrl(figure.pngUrl));
   const hydrated: FigureMap = { ...figures };
 
   await Promise.all(
