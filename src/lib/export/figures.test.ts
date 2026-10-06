@@ -17,7 +17,11 @@ const unusedSource = "graph TD\n  X --> Y";
 
 function figureMap(count = 0): FigureMap {
   const figures: FigureMap = {
-    [diagramSourceHash(usedSource)]: { svgUrl: null, pngUrl: "https://store.public.blob.vercel-storage.com/used.png", alt: "Used" },
+    [diagramSourceHash(usedSource)]: {
+      svgUrl: null,
+      pngUrl: "https://store.public.blob.vercel-storage.com/used.png",
+      alt: "Used",
+    },
     [diagramSourceHash(unusedSource)]: {
       svgUrl: null,
       pngUrl: "https://store.public.blob.vercel-storage.com/unused.png",
@@ -25,7 +29,11 @@ function figureMap(count = 0): FigureMap {
     },
   };
   for (let index = 0; index < count; index += 1) {
-    figures[`hash-${index}`] = { svgUrl: null, pngUrl: `https://store.public.blob.vercel-storage.com/${index}.png`, alt: "" };
+    figures[`hash-${index}`] = {
+      svgUrl: null,
+      pngUrl: `https://store.public.blob.vercel-storage.com/${index}.png`,
+      alt: "",
+    };
   }
   return figures;
 }
@@ -44,8 +52,18 @@ describe("referencedFigureKeys", () => {
   });
 
   it("keeps an image keyed by URL when the text links it", () => {
-    const figures = { "https://store.public.blob.vercel-storage.com/photo.png": { svgUrl: null, pngUrl: "x", alt: "Photo" } };
-    expect(referencedFigureKeys(figures, ["![Photo](https://store.public.blob.vercel-storage.com/photo.png)"]).size).toBe(1);
+    const figures = {
+      "https://store.public.blob.vercel-storage.com/photo.png": {
+        svgUrl: null,
+        pngUrl: "x",
+        alt: "Photo",
+      },
+    };
+    expect(
+      referencedFigureKeys(figures, [
+        "![Photo](https://store.public.blob.vercel-storage.com/photo.png)",
+      ]).size,
+    ).toBe(1);
   });
 });
 
@@ -57,7 +75,10 @@ describe("hydrateFigureBytes", () => {
     const hydrated = await hydrateFigureBytes(figureMap(), [chapter]);
 
     expect(fetch).toHaveBeenCalledOnce();
-    expect(fetch).toHaveBeenCalledWith("https://store.public.blob.vercel-storage.com/used.png", expect.anything());
+    expect(fetch).toHaveBeenCalledWith(
+      "https://store.public.blob.vercel-storage.com/used.png",
+      expect.anything(),
+    );
     expect(hydrated[diagramSourceHash(usedSource)]).toMatchObject({ width: 40, height: 20 });
     expect(hydrated[diagramSourceHash(unusedSource)].pngBytes).toBeUndefined();
   });

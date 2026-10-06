@@ -57,4 +57,3 @@ jobs:
           # pinned so a provider-default retirement cannot silently break CI.
           claude_args: |
             --model claude-sonnet-5-5
-
