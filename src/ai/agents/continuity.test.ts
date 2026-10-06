@@ -236,30 +236,25 @@ describe("runContinuityPhase", () => {
     expect(prompt).not.toContain("Provide your analysis in JSON format");
   });
 
-  it("puts the shared manuscript ahead of the phase rubric as its own cache breakpoint", async () => {
+  it("puts the shared manuscript in the cached block, ahead of the phase rubric", async () => {
     await phaseResult(wellFormed);
     const instructions = mocks.calls[0].instructions as {
       role: string;
       content: string;
       providerOptions?: { anthropic?: { cacheControl?: unknown } };
-    }[];
-    expect(instructions).toHaveLength(2);
-    expect(instructions[1].content).toContain(
-      "Chapter 1 (The Salt Ledger): Mira reaches the harbor.",
-    );
-    for (const block of instructions) {
-      expect(block.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" });
-    }
-    // The rubric varies per phase, so it must come after every cached block.
+    };
+    expect(instructions.content).toContain("Chapter 1 (The Salt Ledger): Mira reaches the harbor.");
+    expect(instructions.providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" });
+    // The rubric varies per phase, so it must come after the cached block.
     expect(mocks.calls[0].prompt).not.toContain("Mira reaches the harbor.");
   });
 
-  it("sends a byte-identical manuscript block to every phase", async () => {
+  it("sends a byte-identical cached block to every phase", async () => {
     mocks.outputs.push(wellFormed, wellFormed);
     await runContinuityPhase(phaseInput, "narrative_structure");
     await runContinuityPhase(phaseInput, "character_development");
     const [first, second] = mocks.calls.map(
-      (call) => (call.instructions as { content: string }[])[1].content,
+      (call) => (call.instructions as { content: string }).content,
     );
     expect(second).toBe(first);
     expect(mocks.calls[0].prompt).not.toBe(mocks.calls[1].prompt);

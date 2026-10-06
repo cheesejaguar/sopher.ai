@@ -66,14 +66,16 @@ function summariesCorpus(
 }
 
 /**
- * The manuscript block every phase reads. It is the largest part of the
- * request and byte-identical across the phases of one review (the workflow
- * binds each phase to the same manuscript digest), so it sits ahead of the
- * per-phase rubric as its own cache breakpoint: phases 2-6 read it from
- * cache instead of paying for it six times.
+ * The system prompt plus the manuscript every phase reads. The corpus is the
+ * largest part of the request and byte-identical across the phases of one
+ * review (the workflow binds each phase to the same manuscript digest), so it
+ * sits ahead of the per-phase rubric inside the cached system block: phases
+ * 2-6 read it from cache instead of paying for it six times. One breakpoint,
+ * not two: the Gateway's automatic caching may add its own, and Anthropic rejects
+ * a request carrying more than four.
  */
-function manuscriptInstructions(corpus: string): string {
-  return `## Manuscript (chapter summaries)\n${corpus}`;
+function continuityInstructions(corpus: string): string {
+  return `${CONTINUITY_SYSTEM_PROMPT}\n\n## Manuscript (chapter summaries)\n${corpus}`;
 }
 
 /**
@@ -192,10 +194,7 @@ export async function runContinuityPhase(
     () =>
       generateText({
         model,
-        instructions: [
-          anthropicCachedSystem(CONTINUITY_SYSTEM_PROMPT),
-          anthropicCachedSystem(manuscriptInstructions(corpus)),
-        ],
+        instructions: anthropicCachedSystem(continuityInstructions(corpus)),
         prompt: phaseUserPrompt(phaseKey),
         tools: buildToolset("continuity", input.tools),
         stopWhen: isStepCount(5),
