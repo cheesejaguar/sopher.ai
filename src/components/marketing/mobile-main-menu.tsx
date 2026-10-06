@@ -39,7 +39,7 @@ export function MobileMainMenu() {
             <button
               type="button"
               aria-label="Open main menu"
-              className="grid min-h-11 min-w-11 shrink-0 place-items-center border border-black/15 dark:border-white/15"
+              className="grid min-h-11 min-w-11 shrink-0 place-items-center border border-hairline-strong"
             />
           }
         >

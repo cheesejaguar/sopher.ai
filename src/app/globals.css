@@ -38,6 +38,16 @@
   --input: oklch(0.84 0.015 275);
   --ring: oklch(0.5 0.2 276);
 
+  /*
+    Persuade-surface rules and washes: translucent ink, so a hairline reads the
+    same over the canvas, a graphite band or a raised card. Lighter than
+    --border, which separates operational controls.
+  */
+  --hairline: oklch(0 0 0 / 10%);
+  --hairline-strong: oklch(0 0 0 / 15%);
+  --wash: oklch(0 0 0 / 3.5%);
+  --wash-subtle: oklch(0 0 0 / 2%);
+
   /* 4.5:1 or better on both instrument and --ai-soft surfaces. */
   --ai: oklch(0.49 0.18 250);
   --ai-foreground: oklch(0.99 0.004 275);
@@ -63,6 +73,10 @@
   --future-stage-accent: #b8adff;
   --future-stage-action: #6243d7;
   --future-stage-action-hover: #5233bd;
+  --future-stage-rule: oklch(1 0 0 / 10%);
+  /* Labels laid over photographs and artwork: theme-independent by design. */
+  --scrim: oklch(0 0 0);
+  --scrim-foreground: oklch(1 0 0);
 
   --chart-1: oklch(0.48 0.24 289);
   --chart-2: oklch(0.52 0.18 250);
@@ -106,6 +120,11 @@
   --border: oklch(0.255 0.028 274);
   --input: oklch(0.255 0.028 274);
   --ring: oklch(0.71 0.16 251);
+
+  --hairline: oklch(1 0 0 / 10%);
+  --hairline-strong: oklch(1 0 0 / 15%);
+  --wash: oklch(1 0 0 / 4%);
+  --wash-subtle: oklch(1 0 0 / 2.5%);
 
   --ai: oklch(0.72 0.15 251);
   --ai-foreground: oklch(0.11 0.02 274);
@@ -162,6 +181,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-wash: var(--wash);
+  --color-wash-subtle: var(--wash-subtle);
 
   --color-ai: var(--ai);
   --color-ai-foreground: var(--ai-foreground);
@@ -184,6 +207,9 @@
   --color-future-stage-accent: var(--future-stage-accent);
   --color-future-stage-action: var(--future-stage-action);
   --color-future-stage-action-hover: var(--future-stage-action-hover);
+  --color-future-stage-rule: var(--future-stage-rule);
+  --color-scrim: var(--scrim);
+  --color-scrim-foreground: var(--scrim-foreground);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

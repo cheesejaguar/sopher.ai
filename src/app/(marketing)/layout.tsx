@@ -18,7 +18,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
       <PublicAnalytics gaId={gaId} vercelEnabled={vercelAnalyticsEnabled} />
       {/* The skip link lives once, in the root layout; this layout supplies its
           target below so it resolves without JavaScript. */}
-      <header className="sticky top-0 z-40 border-b border-black/10 bg-background/95 backdrop-blur-xl dark:border-white/10">
+      <header className="sticky top-0 z-40 border-b border-hairline bg-background/95 backdrop-blur-xl">
         <nav
           aria-label="Main"
           className="mx-auto flex min-h-16 w-full max-w-7xl flex-wrap items-center gap-2 py-2 pr-[max(1rem,env(safe-area-inset-right))] pl-[max(1rem,env(safe-area-inset-left))] min-[360px]:gap-3 sm:pr-[max(1.5rem,env(safe-area-inset-right))] sm:pl-[max(1.5rem,env(safe-area-inset-left))] lg:pr-[max(2rem,env(safe-area-inset-right))] lg:pl-[max(2rem,env(safe-area-inset-left))]"
@@ -90,7 +90,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      <footer className="border-t border-black/10 pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)] dark:border-white/10">
+      <footer className="border-t border-hairline pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
         <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 sm:grid-cols-2 min-[1200px]:grid-cols-12 min-[1200px]:px-8 min-[1200px]:py-20">
           <div className="min-[1200px]:col-span-5">
             <p>
@@ -108,7 +108,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
             aria-label="Footer"
             className="grid grid-cols-2 gap-8 min-[1200px]:col-span-7 min-[1200px]:grid-cols-3"
           >
-            <div className="border-t border-black/10 pt-4 dark:border-white/10">
+            <div className="border-t border-hairline pt-4">
               <p className="font-mono text-[0.6875rem] tracking-[0.16em] text-muted-foreground uppercase">
                 Product
               </p>
@@ -156,7 +156,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 </li>
               </ul>
             </div>
-            <div className="border-t border-black/10 pt-4 dark:border-white/10">
+            <div className="border-t border-hairline pt-4">
               <p className="font-mono text-[0.6875rem] tracking-[0.16em] text-muted-foreground uppercase">
                 Terms
               </p>
@@ -195,7 +195,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
                 </li>
               </ul>
             </div>
-            <div className="col-span-2 border-t border-black/10 pt-4 dark:border-white/10 min-[1200px]:col-span-1">
+            <div className="col-span-2 border-t border-hairline pt-4 min-[1200px]:col-span-1">
               <p className="font-mono text-[0.65rem] tracking-[0.16em] text-muted-foreground uppercase">
                 Sequence
               </p>

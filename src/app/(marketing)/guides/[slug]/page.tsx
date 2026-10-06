@@ -57,7 +57,7 @@ function Block({ block }: { block: GuideBlock }) {
       return (
         <h2
           id={block.id}
-          className="mt-16 scroll-mt-24 border-t border-black/10 pt-10 font-display text-3xl font-semibold tracking-[-0.035em] dark:border-white/10"
+          className="mt-16 scroll-mt-24 border-t border-hairline pt-10 font-display text-3xl font-semibold tracking-[-0.035em]"
         >
           {block.text}
         </h2>
@@ -70,7 +70,7 @@ function Block({ block }: { block: GuideBlock }) {
       );
     case "list":
       return (
-        <ul className="mt-6 divide-y divide-black/10 border-y border-black/10 dark:divide-white/10 dark:border-white/10">
+        <ul className="mt-6 divide-y divide-hairline border-y border-hairline">
           {block.items.map((item, index) => (
             <li key={item} className="grid grid-cols-[3rem_1fr] gap-3 py-4">
               <span className="font-mono text-[0.6875rem] text-primary">
@@ -83,11 +83,11 @@ function Block({ block }: { block: GuideBlock }) {
       );
     case "steps":
       return (
-        <ol className="mt-7 border-y border-black/10 dark:border-white/10">
+        <ol className="mt-7 border-y border-hairline">
           {block.items.map((item, index) => (
             <li
               key={item.name}
-              className="grid gap-3 border-b border-black/10 py-5 last:border-b-0 dark:border-white/10 sm:grid-cols-[3rem_11rem_1fr]"
+              className="grid gap-3 border-b border-hairline py-5 last:border-b-0 sm:grid-cols-[3rem_11rem_1fr]"
             >
               <span className="font-mono text-[0.6875rem] tabular-nums text-primary">
                 {String(index + 1).padStart(2, "0")}
@@ -104,7 +104,7 @@ function Block({ block }: { block: GuideBlock }) {
       );
     case "note":
       return (
-        <p className="mt-8 border-l border-ion bg-black/[0.02] px-5 py-4 text-sm leading-6 text-pretty dark:bg-white/[0.025]">
+        <p className="mt-8 border-l border-ion bg-wash-subtle px-5 py-4 text-sm leading-6 text-pretty">
           {block.text}
         </p>
       );
@@ -129,7 +129,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
       />
 
       <article>
-        <header className="marketing-canvas border-b border-black/10 dark:border-white/10">
+        <header className="marketing-canvas border-b border-hairline">
           <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-16 lg:grid-cols-12 lg:px-8 lg:py-24">
             <div className="lg:col-span-3">
               <nav aria-label="Breadcrumb">
@@ -161,7 +161,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
         </header>
 
         <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-28">
-          <details className="border-y border-black/10 lg:hidden dark:border-white/10">
+          <details className="border-y border-hairline lg:hidden">
             <summary className="flex min-h-11 cursor-pointer items-center justify-between py-3 font-mono text-[0.68rem] tracking-[0.09em] text-muted-foreground uppercase marker:content-none">
               On this page
               <span aria-hidden="true" className="text-primary">
@@ -169,7 +169,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
               </span>
             </summary>
             <nav aria-label="On this page">
-              <ol className="border-t border-black/10 py-2 dark:border-white/10">
+              <ol className="border-t border-hairline py-2">
                 {guide.blocks.map((block, index) =>
                   block.kind === "h2" ? (
                     <li key={block.id}>
@@ -190,10 +190,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
           </details>
 
           <aside className="hidden lg:col-span-3 lg:block">
-            <nav
-              aria-label="On this page"
-              className="sticky top-24 border-t border-black/10 pt-4 dark:border-white/10"
-            >
+            <nav aria-label="On this page" className="sticky top-24 border-t border-hairline pt-4">
               <p className="folio-label text-muted-foreground">On this page</p>
               <ol className="mt-4 space-y-1">
                 {guide.blocks.map((block, index) =>
@@ -224,10 +221,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
             </div>
 
             {guide.faqs ? (
-              <section
-                aria-labelledby="guide-faq"
-                className="mt-20 border-t border-black/10 pt-10 dark:border-white/10"
-              >
+              <section aria-labelledby="guide-faq" className="mt-20 border-t border-hairline pt-10">
                 <p className="folio-label text-primary">Reference / direct answers</p>
                 <h2
                   id="guide-faq"
@@ -235,11 +229,11 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
                 >
                   Questions
                 </h2>
-                <dl className="mt-7 border-t border-black/10 dark:border-white/10">
+                <dl className="mt-7 border-t border-hairline">
                   {guide.faqs.map((faq) => (
                     <div
                       key={faq.question}
-                      className="grid gap-2 border-b border-black/10 py-6 dark:border-white/10 sm:grid-cols-[0.8fr_1.2fr] sm:gap-8"
+                      className="grid gap-2 border-b border-hairline py-6 sm:grid-cols-[0.8fr_1.2fr] sm:gap-8"
                     >
                       <dt className="font-display font-semibold tracking-[-0.015em]">
                         {faq.question}
@@ -253,10 +247,7 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
               </section>
             ) : null}
 
-            <nav
-              aria-label="Other guides"
-              className="mt-20 border-t border-black/10 pt-8 text-sm dark:border-white/10"
-            >
+            <nav aria-label="Other guides" className="mt-20 border-t border-hairline pt-8 text-sm">
               <p className="folio-label text-muted-foreground">Keep reading</p>
               <ul className="mt-4 space-y-1">
                 {others.map((other) => (
