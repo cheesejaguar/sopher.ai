@@ -177,6 +177,14 @@ export async function markAuthoringPauseRegistered(input: {
   return Boolean(updated);
 }
 
+/** A deliberate refusal whose message is safe to show the author. */
+export class AuthoringInputRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthoringInputRejectedError";
+  }
+}
+
 export async function acceptAuthoringRunInput(input: {
   runId: string;
   userId: string;
@@ -220,7 +228,7 @@ export async function acceptAuthoringRunInput(input: {
       run.version !== input.pauseVersion ||
       run.cancellationRequestedAt
     ) {
-      throw new Error("Run is not waiting for this input");
+      throw new AuthoringInputRejectedError("Run is not waiting for this input");
     }
 
     const [inserted] = await tx
@@ -249,12 +257,14 @@ export async function acceptAuthoringRunInput(input: {
           )
           .limit(1)
       )[0];
-    if (!row) throw new Error("Authoring input could not be accepted");
+    if (!row) throw new AuthoringInputRejectedError("Authoring input could not be accepted");
     // Postgres jsonb does not preserve object key insertion order. Compare a
     // canonical representation so an identical response-loss retry cannot be
     // rejected merely because the database returned its keys in another order.
     if (!authoringInputPayloadsEqual(row.payload, input.payload)) {
-      throw new Error("This authoring input was already answered differently");
+      throw new AuthoringInputRejectedError(
+        "This authoring input was already answered differently",
+      );
     }
     return {
       input: {

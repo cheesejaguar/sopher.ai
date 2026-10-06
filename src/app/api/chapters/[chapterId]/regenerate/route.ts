@@ -282,12 +282,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       )
       .limit(1);
   } catch (error) {
+    // Persisted run errors reach the author; keep driver text in the logs.
+    console.error("Could not verify chapter for regeneration", { runId: run.id, error });
     await terminalizeAuthoringRun({
       runId: run.id,
       projectId: ownership.projectId,
       userId,
       status: "failed",
-      error: error instanceof Error ? error.message : "Could not verify the chapter",
+      error: "Could not verify the chapter",
       releaseImmediately: true,
     });
     return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
@@ -325,12 +327,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       .returning({ id: schema.generationRuns.id });
     if (!updatedRun) throw new Error("Generation run changed before settings were frozen");
   } catch (error) {
+    console.error("Could not freeze chapter regeneration settings", { runId: run.id, error });
     await terminalizeAuthoringRun({
       runId: run.id,
       projectId: ownership.projectId,
       userId,
       status: "failed",
-      error: error instanceof Error ? error.message : "Could not freeze chapter settings",
+      error: "Could not freeze chapter settings",
       releaseImmediately: true,
     });
     return Response.json({ error: "Could not start chapter regeneration" }, { status: 503 });
@@ -349,12 +352,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
       runId: run.id,
     });
   } catch (error) {
+    console.error("Could not reserve chapter regeneration credits", { runId: run.id, error });
     await terminalizeAuthoringRun({
       runId: run.id,
       projectId: ownership.projectId,
       userId,
       status: "failed",
-      error: error instanceof Error ? error.message : "Credit authorization unavailable",
+      error: "Credit authorization unavailable",
       releaseImmediately: true,
     });
     return Response.json(

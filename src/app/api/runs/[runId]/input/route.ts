@@ -6,6 +6,7 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { getBalance } from "@/lib/billing/credits";
 import {
   acceptAuthoringRunInput,
+  AuthoringInputRejectedError,
   authoringInputPayloadsEqual,
   authoringInputToken,
   deliverAuthoringRunInput,
@@ -284,10 +285,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ runId: string 
       requestKey: parsed.data.requestKey,
     });
   } catch (error) {
-    return Response.json(
-      { error: error instanceof Error ? error.message : "Input could not be accepted" },
-      { status: 409 },
-    );
+    // Only the deliberate refusals are worded for the author; anything else
+    // (a database or driver failure) is logged and answered generically.
+    if (error instanceof AuthoringInputRejectedError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    console.error("Could not accept authoring input", { runId, error });
+    return Response.json({ error: "Input could not be accepted" }, { status: 409 });
   }
 
   // For v2, the durable row wins. Persist only the already accepted payload so
