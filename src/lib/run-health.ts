@@ -47,6 +47,8 @@ export function countSavedAuthoringCheckpoints(rawConfig: unknown): number {
   const chapterWorkCount = Object.values(work?.chapters ?? {}).reduce(
     (total, chapter) =>
       total +
+      // Checkpoints whose text was pruned once the chapter row held it.
+      (chapter.persisted?.checkpointCount ?? 0) +
       countPresent([
         chapter.scenePlan,
         chapter.draft,

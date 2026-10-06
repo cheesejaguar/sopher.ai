@@ -66,19 +66,30 @@ function summariesCorpus(
 }
 
 /**
+ * The system prompt plus the manuscript every phase reads. The corpus is the
+ * largest part of the request and byte-identical across the phases of one
+ * review (the workflow binds each phase to the same manuscript digest), so it
+ * sits ahead of the per-phase rubric inside the cached system block: phases
+ * 2-6 read it from cache instead of paying for it six times. One breakpoint,
+ * not two: the Gateway's automatic caching may add its own, and Anthropic rejects
+ * a request carrying more than four.
+ */
+function continuityInstructions(corpus: string): string {
+  return `${CONTINUITY_SYSTEM_PROMPT}\n\n## Manuscript (chapter summaries)\n${corpus}`;
+}
+
+/**
  * The result contract belongs to buildReviewPhasePrompt alone. Restating it
  * here — or contradicting it, as an earlier "ignore the JSON template above"
  * note did — is what taught the model to answer in a shape the schema rejects.
  */
-function phaseUserPrompt(key: ReviewPhaseKey, corpus: string): string {
+function phaseUserPrompt(key: ReviewPhaseKey): string {
   return [
     buildReviewPhasePrompt(key),
-    `## Manuscript (chapter summaries)\n${corpus}`,
     [
-      `The summaries above are your map, not your evidence: before flagging a specific issue,`,
+      `The chapter summaries are your map, not your evidence: before flagging a specific issue,`,
       `spot-check the actual prose with chaptersGetText (and entityGet or`,
-      `storySoFarSearch as needed). Do not call continuityRecordIssue — issues are persisted`,
-      `separately from your answer.`,
+      `storySoFarSearch as needed). Report every issue in your answer.`,
     ].join(" "),
   ].join("\n\n");
 }
@@ -183,8 +194,8 @@ export async function runContinuityPhase(
     () =>
       generateText({
         model,
-        instructions: anthropicCachedSystem(CONTINUITY_SYSTEM_PROMPT),
-        prompt: phaseUserPrompt(phaseKey, corpus),
+        instructions: anthropicCachedSystem(continuityInstructions(corpus)),
+        prompt: phaseUserPrompt(phaseKey),
         tools: buildToolset("continuity", input.tools),
         stopWhen: isStepCount(5),
         // Force the final step to produce the structured result — without

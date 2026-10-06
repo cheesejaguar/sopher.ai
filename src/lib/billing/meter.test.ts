@@ -135,6 +135,33 @@ describe("recordLlmCallsAndDebit", () => {
     expect(mocks.cacheDelete).toHaveBeenCalledWith("spend:user-1");
   });
 
+  it("records cache-write tokens on each llm_calls row", async () => {
+    let settlementQuery: { strings: TemplateStringsArray; values: unknown[] } | undefined;
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      settlementQuery = build(tx)[1];
+      return [
+        [],
+        [{ recorded: true, authorized: "10", required: "0.0700", debited_credits: "0.0700" }],
+      ];
+    });
+
+    await recordLlmCallsAndDebit(
+      [{ ...firstRecord, usage: { ...firstRecord.usage, cacheWriteTokens: 4_321 } }],
+      debit,
+    );
+
+    const queryText = settlementQuery!.strings.join("?");
+    expect(queryText).toMatch(/cached_input_tokens, cache_write_tokens, reasoning_tokens/);
+    expect(queryText).toContain("cache_write_tokens integer");
+    const callRows = settlementQuery!.values.find(
+      (value) => typeof value === "string" && value.includes('"agent_role"'),
+    );
+    expect(JSON.parse(callRows as string)).toEqual([
+      expect.objectContaining({ cached_input_tokens: 0, cache_write_tokens: 4_321 }),
+    ]);
+  });
+
   it("atomically refunds incomplete interactive output and releases its project lease", async () => {
     let queries: Array<{ strings: TemplateStringsArray; values: unknown[] }> = [];
     mocks.transaction.mockImplementation(async (build) => {

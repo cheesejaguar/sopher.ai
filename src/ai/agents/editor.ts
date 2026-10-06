@@ -189,7 +189,9 @@ function applyReplacements(
   let skipped = 0;
   for (const r of replacements) {
     if (r.original && out.includes(r.original)) {
-      out = out.replace(r.original, r.revised);
+      // A replacer function: a string replacement would expand $&, $', $` and
+      // $$ patterns that are ordinary characters in prose.
+      out = out.replace(r.original, () => r.revised);
     } else {
       skipped += 1;
     }

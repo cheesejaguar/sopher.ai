@@ -12,7 +12,18 @@ import {
   PUBLISHING_KIT_SYSTEM_PROMPT,
   type PublishingBookFacts,
 } from "@/ai/prompts/publishing-kit";
-import { publishingKitSchema, type BookMatterDraftField } from "@/lib/book-package";
+import {
+  publishingKitSchema,
+  type BookMatterDraftField,
+  type PublishingKit,
+} from "@/lib/book-package";
+import {
+  asRecord,
+  coerceString,
+  coerceStringArray,
+  truncateArray,
+  truncateString,
+} from "@/ai/schemas/normalize";
 
 export const PUBLISHING_KIT_OPERATION = "publishing.kit";
 export const MATTER_DRAFT_OPERATION = "publishing.matter";
@@ -36,13 +47,76 @@ export function publishingCallInfo(input: {
 }
 
 /** A drafted page is a suggestion, so it is bounded well below the stored max. */
-const matterDraftSchema = z.object({
+const MAX_MATTER_DRAFT_CHARS = 3_000;
+
+/**
+ * Wire schemas: Anthropic strips length bounds before the model sees them, so
+ * the strict kit/matter schemas failed a paid call over a blurb a few words
+ * long or one keyword too many. Bounds live in the descriptions and the
+ * normalizers below; an empty answer still reaches the route, which refunds it.
+ */
+const matterDraftWireSchema = z.object({
   text: z
     .string()
-    .min(1)
-    .max(3_000)
-    .describe("The page text exactly as it should appear in the book, and nothing else."),
+    .describe(
+      `The page text exactly as it should appear in the book, and nothing else. At most ${MAX_MATTER_DRAFT_CHARS} characters.`,
+    ),
 });
+
+const publishingKitWireSchema = z.object({
+  blurb: z
+    .string()
+    .nullish()
+    .describe(publishingKitSchema.shape.blurb.description ?? ""),
+  storeDescription: z
+    .string()
+    .nullish()
+    .describe(publishingKitSchema.shape.storeDescription.description ?? ""),
+  keywords: z
+    .array(z.string().nullish())
+    .nullish()
+    .describe(publishingKitSchema.shape.keywords.description ?? ""),
+  categories: z
+    .array(z.string().nullish())
+    .nullish()
+    .describe(publishingKitSchema.shape.categories.description ?? ""),
+  authorBio: z
+    .string()
+    .nullish()
+    .describe(publishingKitSchema.shape.authorBio.description ?? ""),
+});
+
+const KIT_LIMITS = {
+  blurb: 1_200,
+  storeDescription: 4_000,
+  authorBio: 1_200,
+  keywords: 10,
+  keywordChars: 60,
+  categories: 5,
+  categoryChars: 120,
+} as const;
+
+/** Lands any kit answer on publishingKitSchema; an over-long entry is dropped, not cut. */
+export function normalizePublishingKit(wire: unknown): PublishingKit {
+  const value = asRecord(wire);
+  const text = (field: unknown, max: number) => truncateString(coerceString(field).trim(), max);
+  const list = (field: unknown, maxItems: number, maxChars: number) =>
+    truncateArray(
+      coerceStringArray(field).filter((entry) => entry.length <= maxChars),
+      maxItems,
+    );
+  return publishingKitSchema.parse({
+    blurb: text(value.blurb, KIT_LIMITS.blurb),
+    storeDescription: text(value.storeDescription, KIT_LIMITS.storeDescription),
+    keywords: list(value.keywords, KIT_LIMITS.keywords, KIT_LIMITS.keywordChars),
+    categories: list(value.categories, KIT_LIMITS.categories, KIT_LIMITS.categoryChars),
+    authorBio: text(value.authorBio, KIT_LIMITS.authorBio),
+  });
+}
+
+export function normalizeMatterDraft(wire: unknown): string {
+  return truncateString(coerceString(asRecord(wire).text).trim(), MAX_MATTER_DRAFT_CHARS);
+}
 
 export type PublishingKitInput = {
   meter: MeterCtx;
@@ -68,12 +142,12 @@ export async function generatePublishingKit(input: PublishingKitInput) {
       prompt: buildPublishingKitUserPrompt({ ...input.book, instruction: input.instruction }),
       maxOutputTokens: meteredMaxOutputTokens(info.operation, info.maxOutputTokens),
       prepareStep: meteredInputGuard(info.operation),
-      output: Output.object({ schema: publishingKitSchema }),
+      output: Output.object({ schema: publishingKitWireSchema }),
       providerOptions: gatewayOptions(input.meter, info.role, { model: info.model }),
     }),
   );
 
-  return result.output;
+  return normalizePublishingKit(result.output);
 }
 
 /**
@@ -94,10 +168,10 @@ export async function draftBookMatter(input: MatterDraftInput): Promise<string> 
       }),
       maxOutputTokens: meteredMaxOutputTokens(info.operation, info.maxOutputTokens),
       prepareStep: meteredInputGuard(info.operation),
-      output: Output.object({ schema: matterDraftSchema }),
+      output: Output.object({ schema: matterDraftWireSchema }),
       providerOptions: gatewayOptions(input.meter, info.role, { model: info.model }),
     }),
   );
 
-  return result.output.text.trim();
+  return normalizeMatterDraft(result.output);
 }

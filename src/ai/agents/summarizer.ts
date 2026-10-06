@@ -122,9 +122,3 @@ export async function persistChapterSummary(
   if (transaction) return persist(transaction);
   await withDbTransaction(persist);
 }
-
-export async function summarizeChapter(input: ChapterSummaryInput): Promise<ChapterSummary> {
-  const summary = await generateChapterSummary(input);
-  await persistChapterSummary(input, summary);
-  return summary;
-}

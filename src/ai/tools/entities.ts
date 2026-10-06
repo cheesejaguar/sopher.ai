@@ -1,5 +1,5 @@
 import { tool } from "ai";
-import { and, eq, ilike, or, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "@/db";
@@ -60,16 +60,32 @@ export function entityGet(ctx: EntityToolCtx) {
     }),
     execute: async ({ names, kind }) => {
       const db = getDb();
+      const wanted = new Set(names.map((n) => n.toLowerCase()));
+      const wantedList = sql.join(
+        [...wanted].map((name) => sql`${name}`),
+        sql`, `,
+      );
+      // Fetch only the requested entities. A writer calls this before nearly
+      // every scene, and loading the whole bible per call grew with the book.
       const rows = await db
         .select()
         .from(schema.entities)
         .where(
-          kind
-            ? and(eq(schema.entities.bookId, ctx.bookId), eq(schema.entities.kind, kind))
-            : eq(schema.entities.bookId, ctx.bookId),
+          and(
+            eq(schema.entities.bookId, ctx.bookId),
+            kind ? eq(schema.entities.kind, kind) : undefined,
+            or(
+              sql`lower(${schema.entities.name}) in (${wantedList})`,
+              sql`exists (
+                select 1
+                from jsonb_array_elements_text(${schema.entities.aliases}) as alias(value)
+                where lower(alias.value) in (${wantedList})
+              )`,
+            ),
+          ),
         );
 
-      const wanted = new Set(names.map((n) => n.toLowerCase()));
+      // Same match as before the SQL prefilter, so case folding stays JS's.
       const matches = (row: (typeof rows)[number]) =>
         wanted.has(row.name.toLowerCase()) ||
         row.aliases.some((alias) => wanted.has(alias.toLowerCase()));
@@ -78,7 +94,7 @@ export function entityGet(ctx: EntityToolCtx) {
       const ids = found.map((r) => r.id);
 
       // Relationships give the writer the family/ownership context that keeps
-      // names and possessions consistent.
+      // names and possessions consistent — only those touching a found entity.
       const relationships = ids.length
         ? await db
             .select({
@@ -88,10 +104,30 @@ export function entityGet(ctx: EntityToolCtx) {
               description: schema.entityRelationships.description,
             })
             .from(schema.entityRelationships)
-            .where(eq(schema.entityRelationships.bookId, ctx.bookId))
+            .where(
+              and(
+                eq(schema.entityRelationships.bookId, ctx.bookId),
+                or(
+                  inArray(schema.entityRelationships.fromEntityId, ids),
+                  inArray(schema.entityRelationships.toEntityId, ids),
+                ),
+              ),
+            )
         : [];
 
-      const nameById = new Map(rows.map((r) => [r.id, r.name]));
+      const nameById = new Map(found.map((r) => [r.id, r.name]));
+      const otherIds = [...new Set(relationships.flatMap((rel) => [rel.from, rel.to]))].filter(
+        (id) => !nameById.has(id),
+      );
+      if (otherIds.length > 0) {
+        const others = await db
+          .select({ id: schema.entities.id, name: schema.entities.name })
+          .from(schema.entities)
+          .where(
+            and(eq(schema.entities.bookId, ctx.bookId), inArray(schema.entities.id, otherIds)),
+          );
+        for (const other of others) nameById.set(other.id, other.name);
+      }
 
       return {
         entities: found.map((r) => ({
@@ -322,10 +358,17 @@ export function entityRelate(ctx: EntityToolCtx) {
         logicalOrdinal,
         payload: { from, to, type, description: description ?? null },
         mutate: async (tx) => {
+          // Only the two named entities, not the whole bible inside the
+          // mutation transaction.
           const rows = await tx
             .select({ id: schema.entities.id, name: schema.entities.name })
             .from(schema.entities)
-            .where(eq(schema.entities.bookId, ctx.bookId));
+            .where(
+              and(
+                eq(schema.entities.bookId, ctx.bookId),
+                sql`lower(${schema.entities.name}) in (lower(${from}), lower(${to}))`,
+              ),
+            );
 
           const lookup = (name: string) =>
             rows.find((r) => r.name.toLowerCase() === name.toLowerCase());

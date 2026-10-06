@@ -1,12 +1,11 @@
 import { generateText, isStepCount, Output, streamText } from "ai";
-import { and, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import {
   assertMeteredInputWithinBudget,
   meteredInputGuard,
   meteredMaxOutputTokens,
+  writerDraftMaxOutputTokens,
 } from "@/ai/metering-limits";
 import { buildToolset, type ToolCtx } from "@/ai/tools";
 import { CHAPTER_PROSE_RESPONSE_FORMAT, WRITER_SYSTEM_PROMPT } from "@/ai/prompts/writer";
@@ -14,8 +13,9 @@ import {
   critiqueWireSchema,
   normalizeCritique,
   normalizeRevision,
+  normalizeScenePlan,
   revisionWireSchema,
-  scenePlanSchema,
+  scenePlanWireSchema,
   type ChapterOutlinePlan,
   type Critique,
   type ScenePlan,
@@ -130,7 +130,9 @@ function applyReplacements(draft: string, replacements: { original: string; revi
   let out = draft;
   for (const r of replacements) {
     if (r.original && out.includes(r.original)) {
-      out = out.replace(r.original, r.revised);
+      // A replacer function: a string replacement would expand $&, $', $` and
+      // $$ patterns that are ordinary characters in prose.
+      out = out.replace(r.original, () => r.revised);
     }
   }
   return out;
@@ -138,6 +140,61 @@ function applyReplacements(draft: string, replacements: { original: string; revi
 
 function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * A step's text is held back from the live view until it reaches this many
+ * characters. Tool-step chatter is a sentence or two; a chapter crosses this
+ * within its first paragraph.
+ */
+const LIVE_PROSE_MIN_CHARS = 400;
+
+/** A step shorter than this share of the longest step is not chapter prose. */
+const PROSE_STEP_SHARE = 0.25;
+
+type DraftStep = { text: string; finishReason: string };
+
+/**
+ * Picks the chapter out of a multi-step tool loop.
+ *
+ * Finish reason cannot tell prose from chatter: the working method asks the
+ * model to write the chapter and then record new canon, so the prose step
+ * usually ends in tool calls, while the closing "I've recorded the new
+ * entities." ends in `stop`. Length can: the chapter is the longest step by
+ * an order of magnitude. Any other step at least a quarter as long is kept
+ * too, in order, so a draft the model split around a mid-chapter lookup is
+ * not cut in half.
+ */
+export function selectDraftProse(steps: readonly DraftStep[]): {
+  text: string;
+  truncated: boolean;
+} {
+  const longest = Math.max(0, ...steps.map((step) => step.text.trim().length));
+  if (longest === 0) return { text: "", truncated: steps.at(-1)?.finishReason === "length" };
+  const kept = steps.filter((step) => step.text.trim().length >= longest * PROSE_STEP_SHARE);
+  return {
+    text: kept.map((step) => step.text.trim()).join("\n\n"),
+    truncated: kept.some((step) => step.finishReason === "length"),
+  };
+}
+
+/**
+ * The prose step hit its output ceiling, so the chapter stops mid-scene.
+ * Retryable: a fresh sample at 2x the target word count rarely runs that long
+ * twice, and the redo is compensated rather than billed again.
+ */
+export class ChapterDraftTruncatedError extends Error {
+  readonly isRetryable = true;
+
+  constructor(
+    readonly chapterNumber: number,
+    readonly maxOutputTokens: number,
+  ) {
+    super(
+      `Chapter ${chapterNumber} draft reached its ${maxOutputTokens}-token output limit before the chapter ended`,
+    );
+    this.name = "ChapterDraftTruncatedError";
+  }
 }
 
 export async function writeChapter(
@@ -152,7 +209,9 @@ export async function writeChapter(
     await options.onCheckpoint?.(checkpoint);
   };
 
-  if (checkpoint.result) return checkpoint.result;
+  // A result without its text (pruned work state) is not a result: returning
+  // it would persist an empty chapter.
+  if (typeof checkpoint.result?.content === "string") return checkpoint.result;
 
   let plan = checkpoint.scenePlan;
   if (!plan) {
@@ -162,24 +221,25 @@ export async function writeChapter(
       () =>
         generateText({
           model: models.planner,
-          instructions: system,
+          // Same book-static system prompt as the draft, critique and revise
+          // calls; every chapter's plan reads it from cache after the first.
+          instructions: anthropicCachedSystem(system),
           prompt: planPrompt(ctx),
           maxOutputTokens: meteredMaxOutputTokens("writer.plan"),
           prepareStep: meteredInputGuard("writer.plan"),
-          output: Output.object({ schema: scenePlanSchema }),
+          // Wire schema + normalizer: a seventh scene or a ninth character
+          // used to fail validation and re-buy the plan.
+          output: Output.object({ schema: scenePlanWireSchema }),
           providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.planner }),
         }),
     );
-    plan = result.output;
+    plan = normalizeScenePlan(result.output);
     await save({ ...checkpoint, scenePlan: plan });
   }
 
   let draft = checkpoint.draft;
   if (!draft) {
-    const draftOutputTokens = meteredMaxOutputTokens(
-      "writer.draft",
-      Math.round(ctx.targetWords * 1.5),
-    );
+    const draftOutputTokens = writerDraftMaxOutputTokens(ctx.targetWords);
     const draftResult = await metered(
       ctx.meter,
       {
@@ -207,22 +267,51 @@ export async function writeChapter(
             return options.stepNumber >= 2 ? { activeTools: [] } : {};
           },
           maxOutputTokens: draftOutputTokens,
-          providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.prose, withFallbacks: true }),
+          providerOptions: gatewayOptions(ctx.meter, "writer", {
+            model: models.prose,
+            withFallbacks: true,
+          }),
         });
-        let text = "";
-        for await (const delta of stream.textStream) {
-          text += delta;
-          await ctx.onProseDelta?.(delta);
+        // The loop's text spans every step, and only one of them is the
+        // chapter: tool steps open with chatter ("I'll check the story bible
+        // first…") and the step after the canon writes reports on them ("I've
+        // recorded the new entities."). Live deltas are held per step until
+        // the step has proved itself prose, so chatter never reaches the UI.
+        let pending = "";
+        let streaming = false;
+        for await (const part of stream.fullStream) {
+          if (part.type === "start-step") {
+            pending = "";
+            streaming = false;
+          } else if (part.type === "text-delta") {
+            if (streaming) {
+              await ctx.onProseDelta?.(part.text);
+            } else {
+              pending += part.text;
+              if (pending.trim().length >= LIVE_PROSE_MIN_CHARS) {
+                streaming = true;
+                await ctx.onProseDelta?.(pending);
+              }
+            }
+          } else if (part.type === "error") {
+            throw part.error;
+          }
         }
         const [usage, response, steps] = await Promise.all([
           stream.usage,
           stream.response,
           stream.steps,
         ]);
-        return { text, usage, response, steps };
+        return { usage, response, steps, prose: selectDraftProse(steps) };
       },
     );
-    draft = normalizeManuscriptMarkdown(draftResult.text);
+    // Thrown before the checkpoint save: a retry must redraft rather than
+    // resume from a chapter that stops mid-sentence. The settled attempt is
+    // compensated by metered()'s redo path, so the author pays once.
+    if (draftResult.prose.truncated) {
+      throw new ChapterDraftTruncatedError(ctx.chapterNumber, draftOutputTokens);
+    }
+    draft = normalizeManuscriptMarkdown(draftResult.prose.text);
     await save({ ...checkpoint, draft });
   }
 
@@ -303,7 +392,10 @@ export async function writeChapter(
         maxOutputTokens: meteredMaxOutputTokens("writer.revise"),
         prepareStep: meteredInputGuard("writer.revise"),
         output: Output.object({ schema: revisionWireSchema }),
-        providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.prose, withFallbacks: true }),
+        providerOptions: gatewayOptions(ctx.meter, "writer", {
+          model: models.prose,
+          withFallbacks: true,
+        }),
       }),
   );
 
@@ -323,32 +415,4 @@ export async function writeChapter(
   };
   await save({ ...checkpoint, result });
   return result;
-}
-
-/** Persists the finished chapter and bumps status; returns the chapter row id. */
-export async function persistChapter(
-  ctx: ChapterWriterCtx,
-  result: ChapterResult,
-  expectedVersion: number,
-): Promise<string | undefined> {
-  const db = getDb();
-  const [row] = await db
-    .update(schema.chapters)
-    .set({
-      content: result.content,
-      wordCount: result.wordCount,
-      qualityScore: result.qualityScore.toFixed(3),
-      status: "drafted",
-      version: sql`${schema.chapters.version} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(schema.chapters.bookId, ctx.tools.bookId),
-        eq(schema.chapters.chapterNumber, ctx.chapterNumber),
-        eq(schema.chapters.version, expectedVersion),
-      ),
-    )
-    .returning({ id: schema.chapters.id });
-  return row?.id;
 }
