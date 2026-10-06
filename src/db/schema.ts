@@ -761,6 +761,8 @@ export const llmCalls = pgTable(
     inputTokens: bigint("input_tokens", { mode: "number" }).default(0).notNull(),
     outputTokens: bigint("output_tokens", { mode: "number" }).default(0).notNull(),
     cachedInputTokens: bigint("cached_input_tokens", { mode: "number" }).default(0).notNull(),
+    /** Anthropic cache-write tokens, priced above ordinary input; 0 on older rows. */
+    cacheWriteTokens: bigint("cache_write_tokens", { mode: "number" }).default(0).notNull(),
     reasoningTokens: bigint("reasoning_tokens", { mode: "number" }).default(0).notNull(),
     usd: numeric("usd", { precision: 12, scale: 6 }).default("0").notNull(),
     latencyMs: integer("latency_ms"),
@@ -816,6 +818,12 @@ export const creditLedger = pgTable(
   },
   (t) => [
     index("idx_ledger_user").on(t.userId, t.createdAt),
+    // Run spend, reservation and health reads all filter on run_id.
+    index("idx_ledger_run").on(t.runId),
+    // Metering looks up `external_ref like 'prefix%'` under a per-user advisory
+    // lock; text_pattern_ops lets that prefix match use the index under any
+    // collation.
+    index("idx_ledger_user_external_ref").on(t.userId, t.externalRef.op("text_pattern_ops")),
     // Idempotency: one credit entry per Stripe object, enforced by the database
     // rather than by application logic that a retry could race.
     uniqueIndex("uq_ledger_external_ref").on(t.externalRef),
