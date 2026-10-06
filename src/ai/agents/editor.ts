@@ -247,7 +247,7 @@ function reviewPrompt(input: ReviewChapterInput, metricsNote: string): string {
       `## Output format (this overrides the response format in your instructions)`,
       `Return suggestions where "anchorText" is an exact verbatim contiguous quote copied from the chapter (at least 8 characters, unique enough to locate) and "replacement" is the concrete revised text for that quote. One suggestion may replace multiple sentences or paragraphs when the fix needs that scope.`,
       `Every "replacement" must make an actual textual change to its "anchorText". Never return praise, an unchanged passage, "no change needed", a request to verify something, or a suggestion to consider a change elsewhere. Implement the change in the replacement itself; if no justified change exists, return an empty suggestions array.`,
-      `Give a one-line rationale, a category (line, structure, continuity, style), and a severity (info, warning, error) for each.`,
+      `Give a one-line rationale, a category (line, structure, style), and a severity (info, warning, error) for each. Continuity is reviewed by a separate manuscript-wide sweep and must not be returned here.`,
       `Respect the author's voice: light touch — refinement, not rewriting. Only suggest changes the measurements or clear craft principles support.`,
     ].join("\n"),
   ]

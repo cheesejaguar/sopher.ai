@@ -107,6 +107,7 @@ export function ManuscriptRevisionPanel({
   const [error, setError] = useState<string | null>(null);
   const [creditsHref, setCreditsHref] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
+  const [applyingAll, setApplyingAll] = useState(false);
   const [terminalResultPending, setTerminalResultPending] = useState<TerminalRunStatus | null>(
     null,
   );
@@ -357,6 +358,36 @@ export function ManuscriptRevisionPanel({
     }
   };
 
+  const acceptAllChanges = async () => {
+    if (!run || suggestionCount === 0 || applyingAll) return;
+    setApplyingAll(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/projects/${projectId}/suggestions/apply-all`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: run.id }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        applied?: number;
+        error?: string;
+      };
+      if (!response.ok) {
+        setError(result.error ?? "Nothing was applied. Refresh the review and try again.");
+        return;
+      }
+      setSuggestionCount(0);
+      setAnnouncement(
+        `Applied ${result.applied ?? suggestionCount} changes across the manuscript.`,
+      );
+      router.refresh();
+    } catch {
+      setError("The manuscript could not be updated. No changes were applied.");
+    } finally {
+      setApplyingAll(false);
+    }
+  };
+
   const reconnect = async () => {
     if (!run) return;
     setBusy(true);
@@ -567,6 +598,19 @@ export function ManuscriptRevisionPanel({
                 Review {suggestionCount} suggestion{suggestionCount === 1 ? "" : "s"}
                 <ArrowRight aria-hidden="true" />
               </Link>
+            ) : null}
+            {suggestionCount > 0 && run?.status === "completed" && !isActive ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void acceptAllChanges()}
+                disabled={applyingAll || suspended}
+                className="min-h-11 rounded-sm"
+              >
+                {applyingAll
+                  ? "Applying manuscript changes…"
+                  : `Accept all ${suggestionCount} changes`}
+              </Button>
             ) : null}
           </div>
           <p id="manuscript-direction-cost" className="mt-2 text-xs text-muted-foreground">

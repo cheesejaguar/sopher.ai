@@ -197,6 +197,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
   const values: (typeof schema.suggestions.$inferInsert)[] = [];
   let skipped = 0;
   for (const s of reviewed.suggestions) {
+    // Continuity is a manuscript-wide sweep, not a chapter-local edit card.
+    // Keep this endpoint from reintroducing the exact UX the workbench is
+    // designed to replace.
+    if (s.category === "continuity") {
+      skipped += 1;
+      continue;
+    }
     if (!isActionableReplacement(s.anchorText, s.replacement)) {
       skipped += 1;
       console.warn(`[review] chapter ${chapterId}: skipped a no-op replacement`);
