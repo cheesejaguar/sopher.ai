@@ -330,7 +330,7 @@ function ProductShellFallback({ variant }: { variant: ShellVariant }) {
     <div
       role="status"
       aria-label={variant === "admin" ? "Loading admin workspace" : "Loading writing studio"}
-      className="min-h-dvh bg-background text-foreground [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]"
+      className="min-h-dvh bg-background text-foreground lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]"
     >
       <span className="sr-only">
         {variant === "admin" ? "Loading admin workspace" : "Loading writing studio"}
@@ -435,7 +435,7 @@ function ProductShellWithPathname({
       seenCoachmarks={seenCoachmarks}
       onCoachmarkSeen={markCoachmarkSeen}
     >
-      <div className="min-h-dvh min-w-0 bg-background text-foreground [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="min-h-dvh min-w-0 bg-background text-foreground lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
         <aside
           aria-label={
             variant === "admin" ? "Admin navigation and account" : "Studio navigation and account"

@@ -24,6 +24,8 @@
   --popover-foreground: oklch(0.17 0.025 275);
   --primary: oklch(0.48 0.24 289);
   --primary-foreground: oklch(0.99 0.004 275);
+  /* Ultraviolet as text: 6:1 or better on every studio and marketing surface. */
+  --primary-text: oklch(0.44 0.199 286.04);
   --secondary: oklch(0.925 0.012 275);
   --secondary-foreground: oklch(0.24 0.03 275);
   --muted: oklch(0.93 0.009 275);
@@ -92,6 +94,7 @@
   --popover-foreground: oklch(0.95 0.01 270);
   --primary: oklch(0.68 0.2 289);
   --primary-foreground: oklch(0.11 0.02 274);
+  --primary-text: oklch(0.779 0.12 289.23);
   --secondary: oklch(0.195 0.025 274);
   --secondary-foreground: oklch(0.86 0.014 270);
   --muted: oklch(0.18 0.02 274);
@@ -147,6 +150,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-text: var(--primary-text);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -260,6 +264,20 @@
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+/*
+  Ultraviolet as text needs a different lightness from ultraviolet as a fill:
+  --primary carries luminous labels on buttons, --primary-text is read on the
+  canvas. Tailwind merges this rule into its generated `.text-primary`, so the
+  plain utility reads the text token while bg-, border- and opacity variants
+  keep the fill. Variant forms (hover:, group-hover:) still resolve to the
+  fill; use text-primary-text where one of those must match.
+*/
+@layer utilities {
+  .text-primary {
+    color: var(--primary-text);
   }
 }
 
