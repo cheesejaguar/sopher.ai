@@ -23,7 +23,11 @@ let viewCounter = 0;
 /** One shared load of the (large) mermaid bundle for every view and render. */
 let mermaidModule: Promise<typeof import("mermaid")> | null = null;
 function loadMermaid(): Promise<typeof import("mermaid")> {
-  mermaidModule ??= import("mermaid");
+  // A failed chunk load must not be cached: the next render retries it.
+  mermaidModule ??= import("mermaid").catch((error: unknown) => {
+    mermaidModule = null;
+    throw error;
+  });
   return mermaidModule;
 }
 
