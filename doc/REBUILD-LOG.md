@@ -1,4 +1,8 @@
-# TODO
+# Rebuild log (closed)
+
+Archived from the former root `TODO.md`. Kept for history; counts and model
+names below are as of the rebuild and are not maintained. Current state lives in
+`README.md`, `CLAUDE.md` and `doc/audit-2026-10.md`.
 
 Tracking for the Vercel-native rebuild (shipped to production 2026-07-27,
 PRs #103/#111/#112). Items are checked only with all associated tests passing.
