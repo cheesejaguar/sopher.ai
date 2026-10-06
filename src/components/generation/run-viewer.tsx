@@ -170,7 +170,7 @@ function ProductionTelemetry({
       id="production-status"
       tabIndex={-1}
       aria-labelledby="production-now-title"
-      className="instrument-surface-raised scroll-mt-28 overflow-hidden rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+      className="instrument-surface-raised scroll-mt-28 overflow-hidden rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-solid focus-visible:outline-ring"
     >
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
         <div>
@@ -855,7 +855,7 @@ export function RecoveryCard({
       id="authoring-recovery"
       tabIndex={-1}
       aria-labelledby="authoring-recovery-title"
-      className="instrument-surface-raised scroll-mt-28 rounded-sm border-l-destructive px-5 py-6 outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring sm:px-7"
+      className="instrument-surface-raised scroll-mt-28 rounded-sm border-l-destructive px-5 py-6 outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-solid focus-visible:outline-ring sm:px-7"
     >
       <p className="folio-label text-destructive">
         {cancelled ? "Production stopped" : "Production needs attention"}
