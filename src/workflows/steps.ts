@@ -73,6 +73,13 @@ import {
 } from "./opening-credit-plan";
 import { isChapterComplete, isChapterProductionComplete, planFreshRunChapter } from "./resume";
 import {
+  currentManuscriptFromRows,
+  digestScopeKey,
+  loadCurrentManuscript,
+  manuscriptDigestMatches,
+  revisionContentEquals,
+} from "./manuscript-digest";
+import {
   contentDigest,
   dropCompletedRunWork,
   editOutputAlreadyApplied,
@@ -296,10 +303,6 @@ async function loadManuscriptState(bookId: string): Promise<ManuscriptStateRow[]
     })
     .from(schema.chapters)
     .where(eq(schema.chapters.bookId, bookId));
-}
-
-async function loadManuscriptDigest(bookId: string): Promise<string> {
-  return manuscriptDigest(await loadManuscriptState(bookId));
 }
 
 async function loadStoredGenerationConfig(runId: string): Promise<GenerationConfig> {
@@ -818,18 +821,23 @@ export async function openingCreditCheckStep(
       })
       .from(schema.chapters)
       .where(eq(schema.chapters.bookId, book.id));
-    const currentManuscriptDigest = manuscriptDigest(rows);
+    // These rows already carry content, so both digest versions are free;
+    // a source run's checkpoints may have been written with either.
+    const currentManuscript = currentManuscriptFromRows(rows);
+    const legacyManuscriptDigest = await currentManuscript.legacyDigest();
+    const isCurrentManuscript = (stored: string | undefined) =>
+      stored !== undefined &&
+      (stored === currentManuscript.digest || stored === legacyManuscriptDigest);
     const byNumber = new Map(rows.map((row) => [row.chapterNumber, row]));
     const meteredChapters: ResumeChapterMeteredWork[] = [];
     const reportCheckpoint = source.completion?.continuityReport;
-    const report =
-      reportCheckpoint?.manuscriptDigest === currentManuscriptDigest
-        ? reportCheckpoint.report
-        : undefined;
+    const report = isCurrentManuscript(reportCheckpoint?.manuscriptDigest)
+      ? reportCheckpoint?.report
+      : undefined;
     const currentContinuityOutcomes = Object.values(
       source.completion?.continuityOutcomes ?? {},
     ).flatMap((checkpoint) =>
-      checkpoint?.manuscriptDigest === currentManuscriptDigest ? [checkpoint.outcome] : [],
+      checkpoint && isCurrentManuscript(checkpoint.manuscriptDigest) ? [checkpoint.outcome] : [],
     );
     const revisionTargets = report
       ? new Set(
@@ -912,7 +920,7 @@ export async function openingCreditCheckStep(
         revision =
           !(
             revisionCheckpoint?.contentDigest === digest &&
-            revisionCheckpoint.reviewManuscriptDigest === currentManuscriptDigest
+            isCurrentManuscript(revisionCheckpoint.reviewManuscriptDigest)
           ) && !(digest !== null && cachedRevision?.baseContentDigest === digest);
       }
 
@@ -926,8 +934,9 @@ export async function openingCreditCheckStep(
       ? 0
       : phaseKeys.filter(
           (phaseKey) =>
-            source.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest !==
-            currentManuscriptDigest,
+            !isCurrentManuscript(
+              source.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest,
+            ),
         ).length;
     requiredUsd = resumeOpeningRequiredUsd(config, {
       entityBible: !source.completion?.entityBible,
@@ -1224,12 +1233,14 @@ export async function continuityCreditCheckStep(
 ): Promise<CreditCheck> {
   "use step";
   const { book } = await loadRunContext(ref);
-  const [stored, currentDigest] = await Promise.all([
+  const [stored, currentManuscript] = await Promise.all([
     loadStoredGenerationConfig(ref.dbRunId),
-    loadManuscriptDigest(book.id),
+    loadCurrentManuscript(book.id),
   ]);
-  const complete =
-    stored.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest === currentDigest;
+  const complete = await manuscriptDigestMatches(
+    stored.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest,
+    currentManuscript,
+  );
   return checkWalletForUsd(ref, complete ? 0 : continuityPhaseRequiredUsd(config));
 }
 
@@ -1314,7 +1325,7 @@ async function resetManuscriptForPreparation(
               eq(schema.chapterRevisions.chapterId, chapter.id),
               eq(schema.chapterRevisions.runId, ref.dbRunId),
               sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
-              eq(schema.chapterRevisions.content, chapter.content),
+              revisionContentEquals(chapter.content),
             ),
           )
           .limit(1);
@@ -1917,7 +1928,7 @@ export async function resetChapterStep(ref: RunRef, chapterNumber: number): Prom
             eq(schema.chapterRevisions.chapterId, chapter.id),
             eq(schema.chapterRevisions.runId, ref.dbRunId),
             eq(schema.chapterRevisions.source, "regenerate"),
-            eq(schema.chapterRevisions.content, chapter.content),
+            revisionContentEquals(chapter.content),
           ),
         )
         .limit(1);
@@ -2459,7 +2470,7 @@ export async function editChapterStep(
               eq(schema.chapterRevisions.chapterId, chapter.id),
               eq(schema.chapterRevisions.runId, ref.dbRunId),
               eq(schema.chapterRevisions.source, revisionSource),
-              eq(schema.chapterRevisions.content, chapter.content),
+              revisionContentEquals(chapter.content),
             ),
           )
           .limit(1);
@@ -2582,10 +2593,16 @@ export async function continuityPhaseStep(
 ): Promise<ContinuityOutcome> {
   "use step";
   const { book, meter } = await loadRunContext(ref);
-  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+  const currentManuscript = await loadCurrentManuscript(book.id);
+  const currentManuscriptDigest = currentManuscript.digest;
   const stored = await loadStoredGenerationConfig(ref.dbRunId);
   const checkpoint = stored.completion?.continuityOutcomes?.[phaseKey];
-  if (checkpoint?.manuscriptDigest === currentManuscriptDigest) return checkpoint.outcome;
+  if (
+    checkpoint &&
+    (await manuscriptDigestMatches(checkpoint.manuscriptDigest, currentManuscript))
+  ) {
+    return checkpoint.outcome;
+  }
   try {
     const outcome = await runContinuityPhase(
       {
@@ -2593,7 +2610,7 @@ export async function continuityPhaseStep(
           meter,
           ref,
           config,
-          `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
+          `continuity:${phaseKey}:${digestScopeKey(currentManuscriptDigest)}`,
           reservationRef,
         ),
         tools: {
@@ -2601,7 +2618,7 @@ export async function continuityPhaseStep(
           userId: ref.userId,
           projectId: ref.projectId,
           bookId: book.id,
-          mutationScope: `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
+          mutationScope: `continuity:${phaseKey}:${digestScopeKey(currentManuscriptDigest)}`,
         },
         tier: config.tier,
       },
@@ -2625,7 +2642,7 @@ export async function continuityPhaseStep(
         },
       },
     }));
-    if ((await loadManuscriptDigest(book.id)) !== currentManuscriptDigest) {
+    if ((await loadCurrentManuscript(book.id)).digest !== currentManuscriptDigest) {
       throw new RetryableError("Manuscript changed during continuity review", {
         retryAfter: "1s",
       });
@@ -2653,10 +2670,14 @@ export async function continuityFinalizeStep(
 ): Promise<ContinuityReport> {
   "use step";
   const { book } = await loadRunContext(ref);
-  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+  const currentManuscript = await loadCurrentManuscript(book.id);
+  const currentManuscriptDigest = currentManuscript.digest;
   const stored = await loadStoredGenerationConfig(ref.dbRunId);
   const checkpoint = stored.completion?.continuityReport;
-  if (checkpoint?.manuscriptDigest === currentManuscriptDigest) {
+  if (
+    checkpoint &&
+    (await manuscriptDigestMatches(checkpoint.manuscriptDigest, currentManuscript))
+  ) {
     await persistAndPublishProgress(
       ref,
       {
@@ -2669,13 +2690,15 @@ export async function continuityFinalizeStep(
     );
     return checkpoint.report;
   }
-  if (
-    outcomes.some(
-      (outcome) =>
-        stored.completion?.continuityOutcomes?.[outcome.key]?.manuscriptDigest !==
-        currentManuscriptDigest,
-    )
-  ) {
+  const outcomesMatch = await Promise.all(
+    outcomes.map((outcome) =>
+      manuscriptDigestMatches(
+        stored.completion?.continuityOutcomes?.[outcome.key]?.manuscriptDigest,
+        currentManuscript,
+      ),
+    ),
+  );
+  if (outcomesMatch.includes(false)) {
     throw new RetryableError("Continuity phases do not match the current manuscript", {
       retryAfter: "1s",
     });
