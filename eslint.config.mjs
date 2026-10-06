@@ -25,6 +25,8 @@ const eslintConfig = defineConfig([
     "src/app/.well-known/**",
     ".workflow-data/**",
     ".workflow-vitest/**",
+    // Claude Code agent worktrees are whole checkouts of this repo.
+    ".claude/worktrees/**",
     // iCloud/Dropbox conflict copies; ESLint does not read .gitignore.
     "**/* [0-9].*",
   ]),
