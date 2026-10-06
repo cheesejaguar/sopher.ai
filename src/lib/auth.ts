@@ -208,6 +208,24 @@ export async function requireUser(): Promise<{ userId: string }> {
 }
 
 /**
+ * `requireUser` for server-rendered Studio pages and layouts. The proxy gates
+ * these paths, but a session can still lapse between that check and a render
+ * (or arrive on a request the proxy treated as signed in), and then
+ * `UnauthorizedError` surfaced as a 500 and the Studio error page. A page has
+ * a better answer than an error: send the visitor to sign in and back.
+ * Route handlers and server actions keep `requireUser` and answer 401.
+ */
+export async function requirePageUser(): Promise<{ userId: string }> {
+  try {
+    return await requireUser();
+  } catch (error) {
+    if (!(error instanceof UnauthorizedError)) throw error;
+    const { redirectToSignIn } = await auth();
+    return redirectToSignIn();
+  }
+}
+
+/**
  * Admin gate. Role lives on the users row (bootstrapped by migration for the
  * founder account and the dev identity); everything admin-shaped calls this
  * and treats failure as 404, so the surface stays quiet.

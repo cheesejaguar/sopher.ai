@@ -10,7 +10,7 @@ import {
   type ManuscriptRevisionSuggestionChapter,
 } from "@/components/editor/manuscript-revision-panel";
 import { cn } from "@/lib/utils";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getDb, schema } from "@/db";
 import {
   getArchivedChapterRecoveries,
@@ -37,7 +37,7 @@ export default async function EditorIndexPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { book } = data;

@@ -6,7 +6,7 @@ import { BookPackageForm } from "@/components/manuscript/book-package-form";
 import { BookMatterPreview } from "@/components/manuscript/book-matter-preview";
 import { Button } from "@/components/ui/button";
 import { getProjectWithBook } from "@/db/queries/books";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { readBookMatter } from "@/lib/book-package";
 
 export const metadata = { title: "Book setup" };
@@ -17,7 +17,7 @@ export default async function BookSetupPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
 

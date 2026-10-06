@@ -7,11 +7,11 @@ import { formatCredits } from "@/components/usage/format";
 import { CREDIT_MARKUP } from "@/lib/billing/credits";
 import { RoleTable } from "@/components/usage/role-table";
 import { estimateBookCost } from "@/ai/estimate";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getProjectSpend, getProjectWithBook, getSpendByRole } from "@/db/queries/books";
 
 async function ProjectUsage({ projectId }: { projectId: string }) {
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { project } = data;

@@ -9,7 +9,7 @@ import { WorkspaceRail } from "@/components/studio/workspace-rail";
 import { ProjectProgressProvider } from "@/components/studio/project-progress";
 import { ProjectNextStep } from "@/components/studio/project-next-step";
 import { StudioHelpProjectGenre } from "@/components/studio/studio-help-context";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getRequestAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { getChapterList, getProjectWithBook } from "@/db/queries/books";
 import { getProjectProductionProgress } from "@/db/queries/project-progress";
@@ -27,14 +27,14 @@ export async function generateMetadata({
   params: Promise<{ projectId: string }>;
 }): Promise<Metadata> {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   return { title: data?.project.title ?? "Project" };
 }
 
 export default async function ProjectLayout({ children, params }: ProjectLayoutProps) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const [data, access] = await Promise.all([
     getProjectWithBook(userId, projectId),
     getStudioAccess(userId),

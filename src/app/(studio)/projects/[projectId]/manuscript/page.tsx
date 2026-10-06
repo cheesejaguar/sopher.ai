@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { markdownToHtml } from "@/lib/export/assemble";
 import { loadFigures, loadProjectImageAssetUrls } from "@/lib/export/figures";
 import { ownedImageUrlFilter } from "@/lib/security/blob-url";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book-package";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 import { ManuscriptSearch } from "@/components/editor/manuscript-search";
@@ -109,7 +109,7 @@ export default async function ManuscriptPage({
   searchParams: Promise<{ chapter?: string | string[] }>;
 }) {
   const [{ projectId }, sp] = await Promise.all([params, searchParams]);
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   // Neither query needs the project row, so both start now and are awaited
   // only once a chapter is going to render. Both are scoped to ids, and
   // nothing they return is rendered before the ownership check below.

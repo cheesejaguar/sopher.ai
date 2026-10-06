@@ -18,7 +18,7 @@ vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
   return { ...actual, getDb: mocks.getDb };
 });
-vi.mock("@/lib/auth", () => ({ requireUser: mocks.requireUser }));
+vi.mock("@/lib/auth", () => ({ requirePageUser: mocks.requireUser }));
 vi.mock("@/db/queries/books", () => ({
   getProjectWithBook: mocks.getProjectWithBook,
   getChapterWithContent: mocks.getChapterWithContent,

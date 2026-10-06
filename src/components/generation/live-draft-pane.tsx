@@ -225,7 +225,9 @@ function ChapterProseView({
     el.scrollTop = el.scrollHeight;
   }
 
-  const paragraphs = text.length > 0 ? text.split(/\n{2,}/) : [];
+  // A chapter's prose grows to tens of thousands of characters; scroll and
+  // jump-button state re-render this view far more often than text changes.
+  const paragraphs = React.useMemo(() => (text.length > 0 ? text.split(/\n{2,}/) : []), [text]);
 
   return (
     <div className="relative">

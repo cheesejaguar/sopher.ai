@@ -7,7 +7,7 @@ import { ImportDialog } from "@/components/studio/import-dialog";
 import type { WizardState } from "@/components/wizard/wizard-state";
 import { GENRE_IDS, type GenreId } from "@/ai/knowledge/genres";
 import { getDb, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { isE2EWorkflowStubEnabled } from "@/lib/e2e-workflow-stub";
 import { projectCarryForwardSetup } from "@/lib/project-carry-forward";
 import { getStudioAccess } from "@/lib/studio-access";
@@ -48,7 +48,7 @@ export default async function NewBookPage({
     requestedE2EStartMode === "fail_before_work" && isE2EWorkflowStubEnabled()
       ? requestedE2EStartMode
       : undefined;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const access = await getStudioAccess(userId);
   const sourceProjectId = z.uuid().safeParse(from).success ? from : undefined;
   // Any book the author owns can seed the next one — the included story was

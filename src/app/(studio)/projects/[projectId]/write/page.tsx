@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getChapterList, getCurrentFullBookRun, getProjectWithBook } from "@/db/queries/books";
 import { estimateBookCost } from "@/ai/estimate";
 import type { QualityTier } from "@/ai/models";
@@ -16,7 +16,7 @@ import { fullBookRequiredCredits } from "@/lib/full-book-credit-requirement";
 
 export default async function WritePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const [data, access, balance, run] = await Promise.all([
     getProjectWithBook(userId, projectId),
     getStudioAccess(userId),

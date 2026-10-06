@@ -7,7 +7,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { getRequestAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { toSuggestionDTO, type SuggestionDTO } from "@/lib/editor/types";
 import { EditorShellLoader } from "@/components/editor/editor-shell-loader";
 import { EditorSkeleton } from "@/components/editor/editor-skeleton";
@@ -41,7 +41,7 @@ export default async function EditorChapterPage({
   const number = Number(chapterParam);
   if (!Number.isInteger(number) || number < 1 || number > 10_000) notFound();
 
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data?.book) notFound();
   const { project, book } = data;
