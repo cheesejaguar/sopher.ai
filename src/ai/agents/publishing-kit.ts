@@ -69,7 +69,7 @@ export async function generatePublishingKit(input: PublishingKitInput) {
       maxOutputTokens: meteredMaxOutputTokens(info.operation, info.maxOutputTokens),
       prepareStep: meteredInputGuard(info.operation),
       output: Output.object({ schema: publishingKitSchema }),
-      providerOptions: gatewayOptions(input.meter, info.role),
+      providerOptions: gatewayOptions(input.meter, info.role, { model: info.model }),
     }),
   );
 
@@ -95,7 +95,7 @@ export async function draftBookMatter(input: MatterDraftInput): Promise<string> 
       maxOutputTokens: meteredMaxOutputTokens(info.operation, info.maxOutputTokens),
       prepareStep: meteredInputGuard(info.operation),
       output: Output.object({ schema: matterDraftSchema }),
-      providerOptions: gatewayOptions(input.meter, info.role),
+      providerOptions: gatewayOptions(input.meter, info.role, { model: info.model }),
     }),
   );
 

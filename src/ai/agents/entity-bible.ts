@@ -544,7 +544,7 @@ export async function generateEntityBible(input: {
         // before a single chapter had been written. `normalizeBible` puts the
         // answer back on the strict shape below.
         output: Output.object({ schema: bibleWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "entity-bible"),
+        providerOptions: gatewayOptions(input.meter, "entity-bible", { model: model }),
       }),
   );
 

@@ -209,7 +209,7 @@ export async function runContinuityPhase(
         // NoObjectGeneratedError, retried identically four times, and failed a
         // run whose manuscript was already written and edited.
         output: Output.object({ schema: reviewPhaseResultWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "continuity"),
+        providerOptions: gatewayOptions(input.meter, "continuity", { model: model }),
       }),
   );
   return {

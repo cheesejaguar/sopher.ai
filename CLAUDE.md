@@ -28,8 +28,9 @@ All quality gates: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
 
 ## Architecture
 
-- `src/ai/models.ts` — the ONLY place gateway model slugs live (sonnet-5 /
-  opus-5 / haiku-4.5 tiers). `src/lib/billing/pricing.ts` mirrors gateway
+- `src/ai/models.ts` — the ONLY place gateway model slugs live (sonnet-5.5 /
+  opus-5.5 / haiku-4.5 tiers) and the per-model reasoning policy
+  (`anthropicReasoningOptions`: 5.5 models cannot disable thinking). `src/lib/billing/pricing.ts` mirrors gateway
   pricing; verify both against `https://ai-gateway.vercel.sh/v1/models` when
   changing models.
 - `src/ai/metering.ts` — every LLM call goes through `metered()` (budget

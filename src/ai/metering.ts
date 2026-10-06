@@ -22,7 +22,7 @@ import {
   AuthoringRunInactiveError,
   throwIfAuthoringCancellationRequested,
 } from "@/lib/authoring-cancellation";
-import { PROSE_FALLBACK_MODELS } from "./models";
+import { anthropicReasoningOptions, PROSE_FALLBACK_MODELS } from "./models";
 
 /**
  * Mutable state for one sequential metered operation. Do not share a MeterCtx
@@ -77,17 +77,18 @@ export type MeterCtx = {
 
 /**
  * Gateway provider options for a metered call: per-user attribution, role/project
- * tags for the Gateway dashboard, automatic prompt caching, and (for prose calls)
- * a same-family fallback chain.
+ * tags for the Gateway dashboard, automatic prompt caching, minimal reasoning for
+ * the model in use, and (for prose calls) a same-family fallback chain.
  */
 export function gatewayOptions(
   ctx: MeterCtx,
   role: string,
-  opts?: { withFallbacks?: boolean },
+  opts: { model: string; withFallbacks?: boolean },
 ): {
   gateway: Record<string, JSONValue>;
   anthropic: Record<string, JSONValue>;
 } {
+  const fallbacks = opts.withFallbacks ? PROSE_FALLBACK_MODELS : [];
   return {
     gateway: {
       user: ctx.userId,
@@ -97,16 +98,14 @@ export function gatewayOptions(
         ...(ctx.meteringAttemptId ? [`attempt:${ctx.meteringAttemptId}`] : []),
       ],
       caching: "auto",
-      ...(opts?.withFallbacks ? { models: PROSE_FALLBACK_MODELS } : {}),
+      ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
     },
-    // Sonnet 5 enables thinking by default. This is deliberately a blanket
-    // metering policy: our output ceilings are sized for author-facing
-    // JSON/prose, so implicit reasoning can otherwise consume the allowance
-    // before any deliverable output is produced. A future operation that needs
-    // extended thinking must opt into it with a separately budgeted contract.
-    anthropic: {
-      thinking: { type: "disabled" },
-    },
+    // Deliberately a blanket metering policy: output ceilings are sized for
+    // author-facing JSON/prose, so implicit reasoning could otherwise consume
+    // the allowance before any deliverable is produced. A future operation that
+    // needs extended thinking must opt into it with a separately budgeted
+    // contract. Per-model details live with the slugs in src/ai/models.ts.
+    anthropic: anthropicReasoningOptions(opts.model, fallbacks),
   };
 }
 

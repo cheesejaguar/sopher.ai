@@ -167,7 +167,7 @@ export async function writeChapter(
           maxOutputTokens: meteredMaxOutputTokens("writer.plan"),
           prepareStep: meteredInputGuard("writer.plan"),
           output: Output.object({ schema: scenePlanSchema }),
-          providerOptions: gatewayOptions(ctx.meter, "writer"),
+          providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.planner }),
         }),
     );
     plan = result.output;
@@ -207,7 +207,7 @@ export async function writeChapter(
             return options.stepNumber >= 2 ? { activeTools: [] } : {};
           },
           maxOutputTokens: draftOutputTokens,
-          providerOptions: gatewayOptions(ctx.meter, "writer", { withFallbacks: true }),
+          providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.prose, withFallbacks: true }),
         });
         let text = "";
         for await (const delta of stream.textStream) {
@@ -272,7 +272,7 @@ export async function writeChapter(
           // the chapter 8 instead of 0.8 — threw NoObjectGeneratedError and
           // discarded a chapter that was already drafted and paid for.
           output: Output.object({ schema: critiqueWireSchema }),
-          providerOptions: gatewayOptions(ctx.meter, "writer"),
+          providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.critic }),
         }),
     );
     // The score here is persisted as the chapter's qualityScore and decides
@@ -303,7 +303,7 @@ export async function writeChapter(
         maxOutputTokens: meteredMaxOutputTokens("writer.revise"),
         prepareStep: meteredInputGuard("writer.revise"),
         output: Output.object({ schema: revisionWireSchema }),
-        providerOptions: gatewayOptions(ctx.meter, "writer", { withFallbacks: true }),
+        providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.prose, withFallbacks: true }),
       }),
   );
 

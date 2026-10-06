@@ -56,7 +56,7 @@ export async function generateChapterSummary(input: ChapterSummaryInput): Promis
         // call runs after every chapter, so a rejection here strands a chapter
         // that is already written — and takes the story bible with it.
         output: Output.object({ schema: chapterSummaryWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "summarizer"),
+        providerOptions: gatewayOptions(input.meter, "summarizer", { model: model }),
       }),
   );
 

@@ -13,14 +13,11 @@ import type { WizardActionEvent, WizardState } from "@/components/wizard/wizard-
 
 const TIERS = QUALITY_TIERS;
 
-const MODEL_NAMES: Record<string, string> = {
-  "anthropic/claude-haiku-4.5": "Haiku",
-  "anthropic/claude-sonnet-5": "Sonnet",
-  "anthropic/claude-opus-5": "Opus",
-};
-
+/** "anthropic/claude-sonnet-5.5" -> "Sonnet"; non-Claude slugs fall back to their id. */
 function modelName(slug: string): string {
-  return MODEL_NAMES[slug] ?? slug.split("/").pop() ?? slug;
+  const family = /^anthropic\/claude-([a-z]+)-/.exec(slug)?.[1];
+  if (family) return family.charAt(0).toUpperCase() + family.slice(1);
+  return slug.split("/").pop() ?? slug;
 }
 
 /** The tier's model mix, in plain words. */

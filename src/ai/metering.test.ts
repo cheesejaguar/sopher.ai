@@ -79,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("metered atomic authorization", () => {
-  it("disables implicit Anthropic thinking without dropping Gateway attribution or fallbacks", () => {
+  it("minimises Anthropic reasoning without dropping Gateway attribution or fallbacks", () => {
     expect(
       gatewayOptions(
         {
@@ -88,15 +88,16 @@ describe("metered atomic authorization", () => {
           meteringAttemptId: "attempt-1",
         },
         "writer",
-        { withFallbacks: true },
+        { model: "anthropic/claude-sonnet-5.5", withFallbacks: true },
       ),
     ).toEqual({
       gateway: {
         user: "user-1",
         tags: ["role:writer", "project:project-1", "attempt:attempt-1"],
         caching: "auto",
-        models: expect.any(Array),
+        models: ["anthropic/claude-sonnet-5"],
       },
+      // Sonnet 5 rejects `between_tools`, so the shared chain sends `disabled`.
       anthropic: {
         thinking: { type: "disabled" },
       },

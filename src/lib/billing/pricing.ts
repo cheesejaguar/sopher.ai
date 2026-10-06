@@ -10,6 +10,8 @@ export type ModelPricing = {
   perImageUsd?: number;
 };
 
+// Superseded slugs stay priced: runs pinned to an older deployment, and
+// historical reconciliation, still report them.
 export const MODEL_PRICING: Record<string, ModelPricing> = {
   "anthropic/claude-haiku-4.5": {
     inputPerMTok: 1,
@@ -29,11 +31,29 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cachedInputPerMTok: 0.3,
     cacheWritePerMTok: 3.75,
   },
+  "anthropic/claude-sonnet-5.5": {
+    inputPerMTok: 2,
+    outputPerMTok: 10,
+    cachedInputPerMTok: 0.2,
+    cacheWritePerMTok: 2.5,
+  },
   "anthropic/claude-opus-5": {
     inputPerMTok: 5,
     outputPerMTok: 25,
     cachedInputPerMTok: 0.5,
     cacheWritePerMTok: 6.25,
+  },
+  "anthropic/claude-opus-5.5": {
+    inputPerMTok: 4,
+    outputPerMTok: 20,
+    cachedInputPerMTok: 0.2,
+    cacheWritePerMTok: 5,
+  },
+  "anthropic/claude-fable-5.1": {
+    inputPerMTok: 10,
+    outputPerMTok: 50,
+    cachedInputPerMTok: 0.25,
+    cacheWritePerMTok: 12.5,
   },
   "google/gemini-3.1-flash-image": {
     inputPerMTok: 0.5,
@@ -44,13 +64,24 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   },
 };
 
-const FALLBACK_PRICING: ModelPricing = {
-  inputPerMTok: 5,
-  outputPerMTok: 25,
-  cachedInputPerMTok: 0.5,
-  cacheWritePerMTok: 6.25,
-  perImageUsd: 0.15,
-};
+/**
+ * Rates for a slug missing from the table: the most expensive value of every
+ * field, so an unmapped model can be over-held but never undercharged.
+ */
+export const FALLBACK_PRICING: ModelPricing = (() => {
+  const all = Object.values(MODEL_PRICING);
+  const max = (pick: (pricing: ModelPricing) => number) => Math.max(...all.map(pick));
+  return {
+    inputPerMTok: max((p) => p.inputPerMTok),
+    outputPerMTok: max((p) => p.outputPerMTok),
+    cachedInputPerMTok: max((p) => p.cachedInputPerMTok),
+    cacheWritePerMTok: max((p) => p.cacheWritePerMTok),
+    perImageUsd: Math.max(
+      0.15,
+      max((p) => p.perImageUsd ?? 0),
+    ),
+  };
+})();
 
 export type UsageTokens = {
   inputTokens: number;

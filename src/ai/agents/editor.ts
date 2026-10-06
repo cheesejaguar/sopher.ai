@@ -217,7 +217,7 @@ export async function editChapter(input: EditChapterInput): Promise<EditChapterR
         maxOutputTokens: meteredMaxOutputTokens("editor.edit"),
         prepareStep: meteredInputGuard("editor.edit"),
         output: Output.object({ schema: editReplacementsWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "editor"),
+        providerOptions: gatewayOptions(input.meter, "editor", { model: model }),
       }),
   );
 
@@ -282,7 +282,7 @@ export async function reviewChapter(
         // "critical" — threw NoObjectGeneratedError and cost the author a
         // paid pass that produced nothing.
         output: Output.object({ schema: editSuggestionListWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "editor"),
+        providerOptions: gatewayOptions(input.meter, "editor", { model: model }),
       }),
   );
 

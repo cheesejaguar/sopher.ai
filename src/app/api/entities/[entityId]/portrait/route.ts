@@ -226,7 +226,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
         prompt,
         maxOutputTokens: meteredMaxOutputTokens("entity.portrait"),
         prepareStep: meteredInputGuard("entity.portrait"),
-        providerOptions: gatewayOptions(meter, "content-tool"),
+        providerOptions: gatewayOptions(meter, "content-tool", { model: model }),
       }),
     );
 

@@ -398,7 +398,7 @@ export async function generateOutline(
           maxOutputTokens: meteredMaxOutputTokens("outliner.plan"),
           prepareStep: meteredInputGuard("outliner.plan"),
           output: Output.object({ schema: structurePlanSchema }),
-          providerOptions: gatewayOptions(input.meter, "outliner"),
+          providerOptions: gatewayOptions(input.meter, "outliner", { model: model }),
         }),
     );
     plan = planResult.output;
@@ -420,7 +420,7 @@ export async function generateOutline(
           maxOutputTokens: meteredMaxOutputTokens("outliner.outline"),
           prepareStep: meteredInputGuard("outliner.outline"),
           output: Output.object({ schema: bookOutlineSchema }),
-          providerOptions: gatewayOptions(input.meter, "outliner"),
+          providerOptions: gatewayOptions(input.meter, "outliner", { model: model }),
         }),
     );
     outline = outlineResult.output;
@@ -465,7 +465,7 @@ export async function generateOutline(
           maxOutputTokens: meteredMaxOutputTokens("outliner.selfCheck"),
           prepareStep: meteredInputGuard("outliner.selfCheck"),
           output: Output.object({ schema: runSchema }),
-          providerOptions: gatewayOptions(input.meter, "outliner"),
+          providerOptions: gatewayOptions(input.meter, "outliner", { model: model }),
         }),
     );
     outline = checked.output;

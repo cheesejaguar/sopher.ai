@@ -58,7 +58,7 @@ import { resolveBlobUploads } from "@/lib/blob/lifecycle";
 
 export const maxDuration = 120;
 
-const COVER_USD = MODEL_PRICING["google/gemini-3.1-flash-image"]?.perImageUsd ?? 0.067;
+const COVER_USD = MODEL_PRICING[MODELS.standard.image]?.perImageUsd ?? 0.067;
 
 function coverPrompt(input: { title: string; synopsis: string | null; genre: string | null }) {
   return [
@@ -233,7 +233,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
         prompt: coverPrompt(row),
         maxOutputTokens: meteredMaxOutputTokens("cover.generate"),
         prepareStep: meteredInputGuard("cover.generate"),
-        providerOptions: gatewayOptions(meter, "content-tool"),
+        providerOptions: gatewayOptions(meter, "content-tool", { model: model }),
       }),
     );
   } catch (error) {

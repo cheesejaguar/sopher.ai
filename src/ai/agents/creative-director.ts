@@ -51,7 +51,7 @@ export async function generateCreativeQuestion(input: {
         // The wire schema carries none of those, and the normalizer reassigns
         // ids positionally and truncates on the way to CreativeQuestion.
         output: Output.object({ schema: creativeQuestionWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "creative-director"),
+        providerOptions: gatewayOptions(input.meter, "creative-director", { model: model }),
       }),
   );
   return normalizeCreativeQuestion(result.output);
