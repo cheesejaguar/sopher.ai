@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { FatalError, RetryableError, getStepMetadata, getWritable } from "workflow";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
 import { getDb, schema, withDbTransaction, type DbTransaction } from "@/db";
 import { generateConcept, persistConcept } from "@/ai/agents/concept";
@@ -2136,21 +2136,26 @@ export async function writeChapterStep(
     };
   }
 
-  const prevSummaries = await db
-    .select({
-      chapterNumber: schema.chapters.chapterNumber,
-      title: schema.chapters.title,
-      summary: schema.chapters.summary,
-    })
-    .from(schema.chapters)
-    .where(
-      and(
-        eq(schema.chapters.bookId, book.id),
-        sql`${schema.chapters.chapterNumber} < ${chapterNumber}`,
-        sql`${schema.chapters.summary} is not null`,
-      ),
-    )
-    .orderBy(schema.chapters.chapterNumber);
+  // The writer sees the four most recent summaries; select only those
+  // (newest first, then back into reading order).
+  const prevSummaries = (
+    await db
+      .select({
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+      })
+      .from(schema.chapters)
+      .where(
+        and(
+          eq(schema.chapters.bookId, book.id),
+          sql`${schema.chapters.chapterNumber} < ${chapterNumber}`,
+          sql`${schema.chapters.summary} is not null`,
+        ),
+      )
+      .orderBy(desc(schema.chapters.chapterNumber))
+      .limit(4)
+  ).reverse();
 
   const claimed = await withActiveAuthoringMutation(ref, async (tx) => {
     const [row] = await tx
@@ -2205,7 +2210,7 @@ export async function writeChapterStep(
         chapterNumber,
         totalChapters: config.targetChapters,
         chapterOutline,
-        prevSummaries: prevSummaries.slice(-4),
+        prevSummaries,
         genre: config.inputSnapshot.genre ?? undefined,
         styleGuide: config.inputSnapshot.styleGuide ?? undefined,
         voiceProfile: config.inputSnapshot.voiceProfile ?? undefined,
