@@ -1,6 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { hasCompleteClerkConfiguration, isProtectedPath } from "./auth-route-policy";
+import {
+  hasBackslashInPath,
+  hasCompleteClerkConfiguration,
+  isProtectedPath,
+} from "./auth-route-policy";
+
+describe("backslash probe guard", () => {
+  it.each([
+    ["https://sopher.ai/opengraph-image%5C", "/opengraph-image%5C"],
+    ["https://sopher.ai/opengraph-image%5c", "/opengraph-image%5c"],
+    ["https://sopher.ai/studio%5C..%5Cetc", "/studio%5C..%5Cetc"],
+    ["https://sopher.ai/x", "/a\\b"],
+  ])("rejects %s", (url, pathname) => {
+    expect(hasBackslashInPath(url, pathname)).toBe(true);
+  });
+
+  it.each([
+    ["https://sopher.ai/opengraph-image", "/opengraph-image"],
+    ["https://sopher.ai/studio?q=%5C", "/studio"],
+    ["https://sopher.ai/r/abc_DEF-123", "/r/abc_DEF-123"],
+  ])("allows %s", (url, pathname) => {
+    expect(hasBackslashInPath(url, pathname)).toBe(false);
+  });
+});
 
 describe("proxy auth route policy", () => {
   it.each([
@@ -31,6 +54,7 @@ describe("proxy auth route policy", () => {
     "/api/estimates/private",
     "/api/events-private",
     "/api/events/private",
+    "/api/csp-report/private",
     "/api/reader-session/private",
     "/api/reader-sessions",
     "/api/internal/reconcile-runs/private",
@@ -47,6 +71,7 @@ describe("proxy auth route policy", () => {
     "/api/webhooks/clerk",
     "/api/estimates",
     "/api/events",
+    "/api/csp-report",
     "/api/reader-session",
     "/api/internal/reconcile-runs",
   ])("keeps %s public", (pathname) => {

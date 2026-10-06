@@ -13,14 +13,22 @@
  * unexpected reports.
  */
 
+import { ownedBlobHostname } from "./blob-url";
+
 const CSP_MODE: "report-only" | "enforce" = "report-only";
+
+/** Same-origin collector for violation reports; see `src/app/api/csp-report`. */
+export const CSP_REPORT_PATH = "/api/csp-report";
+const CSP_REPORT_GROUP = "csp-endpoint";
 
 /** Clerk, Stripe, GA, Vercel Analytics, and our own blob store. */
 const CLERK = ["https://*.clerk.accounts.dev", "https://clerk.sopher.ai", "https://*.clerk.com"];
 const STRIPE = ["https://js.stripe.com", "https://api.stripe.com", "https://hooks.stripe.com"];
 const GOOGLE = ["https://www.googletagmanager.com", "https://*.google-analytics.com"];
 const VERCEL = ["https://va.vercel-scripts.com", "https://vitals.vercel-insights.com"];
-const BLOB = ["https://*.public.blob.vercel-storage.com"];
+// This deployment's own store when the build can identify it; otherwise any
+// public Blob host, which is what the policy allowed before.
+const BLOB = [`https://${ownedBlobHostname() ?? "*.public.blob.vercel-storage.com"}`];
 
 /**
  * `unsafe-inline` in script-src is not an oversight: Next's bootstrap and the
@@ -45,6 +53,10 @@ function fullPolicy(includeUpgrade = true): string {
     "object-src 'none'",
     "base-uri 'self'",
     ...(includeUpgrade ? ["upgrade-insecure-requests"] : []),
+    // `report-uri` is deprecated but is still the only directive Firefox and
+    // Safari honour; `report-to` is what Chromium prefers when both exist.
+    `report-uri ${CSP_REPORT_PATH}`,
+    `report-to ${CSP_REPORT_GROUP}`,
   ].join("; ");
 }
 
@@ -64,6 +76,7 @@ export function securityHeaders(): { key: string; value: string }[] {
       key: "Permissions-Policy",
       value: "camera=(), microphone=(), geolocation=(), browsing-topics=(), payment=(self)",
     },
+    { key: "Reporting-Endpoints", value: `${CSP_REPORT_GROUP}="${CSP_REPORT_PATH}"` },
   ];
 
   // One Content-Security-Policy header, never two — a browser intersects
