@@ -110,7 +110,7 @@ describe("restoreArchivedChapter", () => {
         status: "drafted",
       }),
     );
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/projects/project-1");
+    expect(mocks.revalidatePath).toHaveBeenCalledWith("/projects/project-1", "layout");
   });
 
   it("refuses restoration while production is active", async () => {

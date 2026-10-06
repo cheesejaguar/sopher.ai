@@ -96,11 +96,11 @@ describe("updateBookPackage", () => {
     expect(updates[1]).toEqual(
       expect.objectContaining({ title: "The Finished Title", updatedAt: expect.any(Date) }),
     );
-    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([
-      "/projects/project-1",
-      "/projects/project-1/book",
-      "/projects/project-1/manuscript",
-      "/studio",
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      ["/projects/project-1", "layout"],
+      ["/projects/project-1/book"],
+      ["/projects/project-1/manuscript"],
+      ["/studio"],
     ]);
   });
 

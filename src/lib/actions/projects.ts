@@ -821,7 +821,7 @@ export async function updateProject(projectId: string, input: unknown) {
   if (outcome === "active_run") {
     throw new Error("Finish or stop the current run before changing project settings");
   }
-  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}`, "layout");
   revalidatePath("/studio");
 }
 

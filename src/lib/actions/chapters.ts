@@ -143,7 +143,7 @@ export async function renameChapter(chapterId: string, title: string): Promise<v
     .where(and(eq(schema.chapters.id, chapterId), noActiveAuthoringRunSql(ownership.projectId)))
     .returning({ id: schema.chapters.id });
   if (!renamed) throw new Error("Finish or stop the current run before renaming chapters");
-  revalidatePath(`/projects/${ownership.projectId}`);
+  revalidatePath(`/projects/${ownership.projectId}`, "layout");
 }
 
 export async function deleteChapter(chapterId: string): Promise<void> {
@@ -206,7 +206,7 @@ export async function deleteChapter(chapterId: string): Promise<void> {
   if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
     throw new Error("Finish or stop the current run before changing the manuscript");
   }
-  revalidatePath(`/projects/${ownership.projectId}`);
+  revalidatePath(`/projects/${ownership.projectId}`, "layout");
 }
 
 /** Inserts a blank chapter after `afterNumber` (0 = at the start). */
@@ -276,7 +276,7 @@ export async function addChapter(
   if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
     throw new Error("Finish or stop the current run before changing the manuscript");
   }
-  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}`, "layout");
   return { chapterNumber: insertAt };
 }
 
@@ -349,7 +349,7 @@ export async function moveChapter(chapterId: string, direction: "up" | "down"): 
   if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
     throw new Error("Finish or stop the current run before changing the manuscript");
   }
-  revalidatePath(`/projects/${ownership.projectId}`);
+  revalidatePath(`/projects/${ownership.projectId}`, "layout");
 }
 
 /** How many split points the dialog will offer before it stops being a menu. */
@@ -516,7 +516,7 @@ export async function splitChapter(
       "This chapter moved or changed while you were splitting it — reopen it and try again",
     );
   }
-  revalidatePath(`/projects/${ownership.projectId}`);
+  revalidatePath(`/projects/${ownership.projectId}`, "layout");
   return { chapterNumber: insertAt };
 }
 
@@ -658,7 +658,7 @@ export async function mergeChapterWithNext(chapterId: string): Promise<void> {
       "These chapters moved or changed while you were merging — reopen them and try again",
     );
   }
-  revalidatePath(`/projects/${ownership.projectId}`);
+  revalidatePath(`/projects/${ownership.projectId}`, "layout");
 }
 
 /** Revision history for the editor's History panel, newest first. */
@@ -827,6 +827,6 @@ export async function restoreArchivedChapter(
     });
 
   if (!restored) return { ok: false, error: "conflict" };
-  revalidatePath(`/projects/${ownership.projectId}`);
+  revalidatePath(`/projects/${ownership.projectId}`, "layout");
   return { ok: true, chapterNumber: restored.chapterNumber, version: restored.version };
 }
