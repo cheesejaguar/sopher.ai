@@ -1,6 +1,4 @@
 import { generateText, isStepCount, Output, streamText } from "ai";
-import { and, eq, sql } from "drizzle-orm";
-import { getDb, schema } from "@/db";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import {
@@ -207,7 +205,10 @@ export async function writeChapter(
             return options.stepNumber >= 2 ? { activeTools: [] } : {};
           },
           maxOutputTokens: draftOutputTokens,
-          providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.prose, withFallbacks: true }),
+          providerOptions: gatewayOptions(ctx.meter, "writer", {
+            model: models.prose,
+            withFallbacks: true,
+          }),
         });
         let text = "";
         for await (const delta of stream.textStream) {
@@ -303,7 +304,10 @@ export async function writeChapter(
         maxOutputTokens: meteredMaxOutputTokens("writer.revise"),
         prepareStep: meteredInputGuard("writer.revise"),
         output: Output.object({ schema: revisionWireSchema }),
-        providerOptions: gatewayOptions(ctx.meter, "writer", { model: models.prose, withFallbacks: true }),
+        providerOptions: gatewayOptions(ctx.meter, "writer", {
+          model: models.prose,
+          withFallbacks: true,
+        }),
       }),
   );
 
@@ -323,32 +327,4 @@ export async function writeChapter(
   };
   await save({ ...checkpoint, result });
   return result;
-}
-
-/** Persists the finished chapter and bumps status; returns the chapter row id. */
-export async function persistChapter(
-  ctx: ChapterWriterCtx,
-  result: ChapterResult,
-  expectedVersion: number,
-): Promise<string | undefined> {
-  const db = getDb();
-  const [row] = await db
-    .update(schema.chapters)
-    .set({
-      content: result.content,
-      wordCount: result.wordCount,
-      qualityScore: result.qualityScore.toFixed(3),
-      status: "drafted",
-      version: sql`${schema.chapters.version} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(schema.chapters.bookId, ctx.tools.bookId),
-        eq(schema.chapters.chapterNumber, ctx.chapterNumber),
-        eq(schema.chapters.version, expectedVersion),
-      ),
-    )
-    .returning({ id: schema.chapters.id });
-  return row?.id;
 }

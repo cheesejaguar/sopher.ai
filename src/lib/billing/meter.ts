@@ -112,24 +112,6 @@ export class ReservationSettlementError extends Error {
   }
 }
 
-function llmCallValues(record: LlmCallRecord, usd: number) {
-  return {
-    userId: record.userId,
-    projectId: record.projectId ?? null,
-    runId: record.runId ?? null,
-    agentRole: record.agentRole,
-    operation: record.operation,
-    model: record.model,
-    inputTokens: record.usage.inputTokens,
-    outputTokens: record.usage.outputTokens,
-    cachedInputTokens: record.usage.cachedInputTokens ?? 0,
-    cacheWriteTokens: record.usage.cacheWriteTokens ?? 0,
-    reasoningTokens: record.usage.reasoningTokens ?? 0,
-    usd: usd.toFixed(6),
-    latencyMs: record.latencyMs,
-  };
-}
-
 async function invalidateSpendCache(userId: string): Promise<void> {
   try {
     await getCache().delete(spendCacheKey(userId));
@@ -1572,15 +1554,6 @@ export async function attachGatewayGenerationIds(input: {
         eq(schema.creditLedger.externalRef, input.externalRef),
       ),
     );
-}
-
-/** Persists one llm_calls row and busts the cached month-to-date spend. Returns the metered USD. */
-export async function recordLlmCall(record: LlmCallRecord): Promise<number> {
-  const usd = calculateUsd(record.model, record.usage);
-  const db = getDb();
-  await db.insert(schema.llmCalls).values(llmCallValues(record, usd));
-  await invalidateSpendCache(record.userId);
-  return usd;
 }
 
 /**
