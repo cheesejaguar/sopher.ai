@@ -6,6 +6,7 @@ import { gatewayOptions, metered, type MeterCtx } from "@/ai/metering";
 import { meteredInputGuard, meteredMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS, type QualityTier } from "@/ai/models";
 import { isNonFictionGenre } from "@/ai/knowledge/genres";
+import { anthropicCachedSystem } from "@/ai/cache";
 import {
   attrsSchemaFor,
   bibleEntitySchema,
@@ -506,7 +507,9 @@ export async function generateEntityBible(input: {
     () =>
       generateText({
         model,
-        instructions: bibleInstructions(),
+        // Static across every book, so runs started within the cache window
+        // share the prefix.
+        instructions: anthropicCachedSystem(bibleInstructions()),
         prompt: [
           `## Book`,
           `${input.concept.title} — ${input.concept.logline}`,

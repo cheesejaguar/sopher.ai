@@ -221,7 +221,9 @@ export async function writeChapter(
       () =>
         generateText({
           model: models.planner,
-          instructions: system,
+          // Same book-static system prompt as the draft, critique and revise
+          // calls; every chapter's plan reads it from cache after the first.
+          instructions: anthropicCachedSystem(system),
           prompt: planPrompt(ctx),
           maxOutputTokens: meteredMaxOutputTokens("writer.plan"),
           prepareStep: meteredInputGuard("writer.plan"),
