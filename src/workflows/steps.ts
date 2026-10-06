@@ -1649,23 +1649,33 @@ export async function prepareCreativeQuestionStep(
 
   const { meter } = await loadRunContext(ref);
   try {
-    const question = await generateCreativeQuestion({
-      meter: await meteredScope(
-        meter,
-        ref,
-        config,
-        "creative-question:after-concept",
-        reservationRef,
-      ),
-      tier: config.tier,
-      concept,
-      brief: config.inputSnapshot.brief,
-      genre: config.inputSnapshot.genre ?? undefined,
-    });
-    // No salvageable question. Every early return above is the same outcome —
-    // outline straight from the concept — so this joins them instead of
-    // throwing: a retry would buy the identical answer.
-    if (!question) return null;
+    let question = stored.work?.creativeQuestion ?? null;
+    if (!question) {
+      question = await generateCreativeQuestion({
+        meter: await meteredScope(
+          meter,
+          ref,
+          config,
+          "creative-question:after-concept",
+          reservationRef,
+        ),
+        tier: config.tier,
+        concept,
+        brief: config.inputSnapshot.brief,
+        genre: config.inputSnapshot.genre ?? undefined,
+      });
+      // No salvageable question. Every early return above is the same
+      // outcome — outline straight from the concept — so this joins them
+      // instead of throwing: a retry would buy the identical answer.
+      if (!question) return null;
+      // Checkpoint the paid question before its row is written, so a
+      // transient insert failure retries the insert rather than the call.
+      const generated = question;
+      await updateStoredGenerationConfig(ref, (current) => ({
+        ...current,
+        work: { ...current.work, creativeQuestion: generated },
+      }));
+    }
     return persistCreativeQuestion({
       runId: ref.dbRunId,
       projectId: ref.projectId,
@@ -1832,26 +1842,42 @@ export async function entityBibleStep(
     };
   }
   try {
-    const existing = await listEntities(book.id);
-    const bible = await generateEntityBible({
-      meter: await meteredScope(meter, ref, config, "entity-bible", reservationRef),
-      bookId: book.id,
-      tier: config.tier,
-      concept,
-      outline,
-      genre: config.inputSnapshot.genre ?? undefined,
-      authoringContract: buildFrozenAuthoringContract(config.inputSnapshot),
-      existingNames: existing.map((e) => e.name),
-    });
+    const generateAndCheckpoint = async () => {
+      const existing = await listEntities(book.id);
+      const generated = await generateEntityBible({
+        meter: await meteredScope(meter, ref, config, "entity-bible", reservationRef),
+        bookId: book.id,
+        tier: config.tier,
+        concept,
+        outline,
+        genre: config.inputSnapshot.genre ?? undefined,
+        authoringContract: buildFrozenAuthoringContract(config.inputSnapshot),
+        existingNames: existing.map((e) => e.name),
+      });
+      // Checkpoint the paid output before persisting it: a transient failure
+      // in the transaction below then retries the write, not the provider
+      // call (which metered() would otherwise refund and buy again).
+      await updateStoredGenerationConfig(ref, (current) => ({
+        ...current,
+        work: { ...current.work, entityBible: generated },
+      }));
+      return generated;
+    };
+    const bible = stored.work?.entityBible ?? (await generateAndCheckpoint());
     const result = await withActiveAuthoringMutation(ref, async (tx) => {
       const persisted = await persistEntityBible(book.id, bible, tx);
-      await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
-        ...current,
-        completion: {
-          ...current.completion,
-          entityBible: { sourceRunId: ref.dbRunId, ...persisted },
-        },
-      }));
+      await updateStoredGenerationConfigInTransaction(tx, ref, (current) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- persisted with this checkpoint
+        const { entityBible: _applied, ...work } = current.work ?? {};
+        return {
+          ...current,
+          work,
+          completion: {
+            ...current.completion,
+            entityBible: { sourceRunId: ref.dbRunId, ...persisted },
+          },
+        };
+      });
       return persisted;
     });
     return result;
@@ -2581,11 +2607,10 @@ export async function continuityPhaseStep(
       },
       phaseKey,
     );
-    if ((await loadManuscriptDigest(book.id)) !== currentManuscriptDigest) {
-      throw new RetryableError("Manuscript changed during continuity review", {
-        retryAfter: "1s",
-      });
-    }
+    // Checkpoint first. The outcome is bound to the digest it reviewed, so if
+    // the manuscript changed meanwhile the retry below ignores it and reviews
+    // the new text — but a transient failure in that check no longer re-buys
+    // a phase that already reviewed the right manuscript.
     await updateStoredGenerationConfig(ref, (current) => ({
       ...current,
       completion: {
@@ -2600,6 +2625,11 @@ export async function continuityPhaseStep(
         },
       },
     }));
+    if ((await loadManuscriptDigest(book.id)) !== currentManuscriptDigest) {
+      throw new RetryableError("Manuscript changed during continuity review", {
+        retryAfter: "1s",
+      });
+    }
     return outcome;
   } catch (error) {
     toWorkflowError(error);
