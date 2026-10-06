@@ -247,6 +247,26 @@ export function meteredMaxOutputTokens(operation: string, requested?: number): n
 }
 
 /**
+ * Output tokens a chapter draft may use per target word. Prose runs about
+ * 1.35 tokens per word (src/ai/estimate.ts), so the old 1.5x left a chapter
+ * that ran 10% long cut off mid-scene. 2x leaves room for a long chapter and
+ * still sits under the operation's 14k ceiling up to a 7,000-word target.
+ */
+export const WRITER_DRAFT_OUTPUT_TOKENS_PER_WORD = 2;
+
+/**
+ * The writer.draft output cap for a chapter target. The chapter-wave credit
+ * gate sizes its parent hold with this same function, so a child claim always
+ * fits inside the hold that authorized it.
+ */
+export function writerDraftMaxOutputTokens(targetWords: number): number {
+  return meteredMaxOutputTokens(
+    "writer.draft",
+    Math.round(targetWords * WRITER_DRAFT_OUTPUT_TOKENS_PER_WORD),
+  );
+}
+
+/**
  * Hard per-operation authorization ceiling. Expected book pricing remains
  * separate; this prices the costliest allowed model and every possible SDK
  * step before any provider request starts.

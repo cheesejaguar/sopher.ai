@@ -139,7 +139,7 @@ describe("opening credit plan", () => {
 
   it("sizes a writer-wave parent as the exact sum of every parallel child claim", () => {
     const maxOutputTokensPerStep = Math.round(
-      Math.min(10_000, config.targetWordsPerChapter * 1.2) * 1.5,
+      Math.min(10_000, config.targetWordsPerChapter * 1.2) * 2,
     );
     const oneChapterCredits = [
       meteredOperationCeilingCredits({
