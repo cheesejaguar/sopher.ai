@@ -35,6 +35,7 @@ export type UpdateBookPackageInput = z.infer<typeof editableBookMatterSchema>;
  */
 export async function updateBook(projectId: string, input: unknown): Promise<void> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Book not found");
   const data = updateBookSchema.parse(input);
 
   const db = getDb();
@@ -77,6 +78,7 @@ export async function updateBook(projectId: string, input: unknown): Promise<voi
  */
 export async function updateBookPackage(projectId: string, input: unknown): Promise<void> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Book not found");
   const data = editableBookMatterSchema.parse(input);
 
   await withDbTransaction(async (tx) => {

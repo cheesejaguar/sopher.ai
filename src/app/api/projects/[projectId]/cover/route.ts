@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { generateText } from "ai";
 import { and, desc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import {
   gatewayOptions,
@@ -98,6 +99,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   const limited = await rateLimit(LIMITS.imageGen, req, userId);
   if (limited.limited) return limited.response;
   const { projectId } = await ctx.params;
+  // Malformed ids are a 404, not a Postgres uuid-cast 500.
+  if (!z.uuid().safeParse(projectId).success) {
+    return Response.json({ error: "Book not found" }, { status: 404 });
+  }
   let idempotencyKey: string;
   try {
     idempotencyKey = requireIdempotencyKey(req);

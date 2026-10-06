@@ -804,6 +804,8 @@ async function recoverStartBookFailure(input: {
 
 export async function updateProject(projectId: string, input: unknown) {
   const { userId } = await requireUser();
+  // A malformed id would otherwise reach a uuid column as a Postgres error.
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Project not found");
   const data = updateProjectSchema.parse(input);
 
   await reconcileBeforeAuthoringRunConflict({ projectId, userId });
@@ -832,6 +834,9 @@ export async function updateProject(projectId: string, input: unknown) {
  */
 export async function setProjectArchived(projectId: string, archived: boolean) {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Project not found");
+  // Server-action arguments arrive as untyped wire data whatever TS says.
+  if (!z.boolean().safeParse(archived).success) throw new Error("Invalid archive state");
   await reconcileBeforeAuthoringRunConflict({ projectId, userId });
   const outcome = await withDbTransaction((tx) =>
     setProjectArchivedTransaction(tx, { projectId, userId, archived }),
@@ -845,6 +850,7 @@ export async function setProjectArchived(projectId: string, archived: boolean) {
 
 export async function deleteProject(projectId: string) {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Project not found");
   await reconcileBeforeAuthoringRunConflict({ projectId, userId });
   const outcome = await withDbTransaction((tx) =>
     deleteProjectTransaction(tx, {

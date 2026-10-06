@@ -36,7 +36,7 @@ vi.mock("workflow/api", () => ({
   start: mocks.start,
 }));
 
-import { deleteProject, updateProject } from "./projects";
+import { deleteProject, setProjectArchived, updateProject } from "./projects";
 
 function transactionDb(input: {
   selectResults: unknown[][];
@@ -98,13 +98,13 @@ beforeEach(() => {
 describe("project structural mutation locks", () => {
   it("acquires the shared project lock before snapshotting and updating settings", async () => {
     const { db, tx } = transactionDb({
-      selectResults: [[{ id: "project-1" }]],
-      updateResults: [[{ id: "project-1" }]],
+      selectResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }]],
+      updateResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }]],
     });
     mocks.getDb.mockReturnValue(db);
 
     await expect(
-      updateProject("project-1", {
+      updateProject("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", {
         targetChapters: 14,
         targetWordsPerChapter: 3_400,
       }),
@@ -121,24 +121,24 @@ describe("project structural mutation locks", () => {
 
   it("distinguishes an owned project blocked by an active run", async () => {
     const { db } = transactionDb({
-      selectResults: [[{ id: "project-1" }]],
+      selectResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }]],
       updateResults: [[]],
     });
     mocks.getDb.mockReturnValue(db);
 
-    await expect(updateProject("project-1", { targetChapters: 14 })).rejects.toThrow(
-      "Finish or stop the current run before changing project settings",
-    );
+    await expect(
+      updateProject("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", { targetChapters: 14 }),
+    ).rejects.toThrow("Finish or stop the current run before changing project settings");
   });
 
   it("checks for an active run and deletes only while holding the same project lock", async () => {
     const { db, tx } = transactionDb({
-      selectResults: [[{ id: "project-1" }], [], [], []],
-      deleteResults: [[{ id: "project-1" }]],
+      selectResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }], [], [], []],
+      deleteResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }]],
     });
     mocks.getDb.mockReturnValue(db);
 
-    await expect(deleteProject("project-1")).resolves.toBeUndefined();
+    await expect(deleteProject("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d")).resolves.toBeUndefined();
 
     expect(tx.execute).toHaveBeenCalledTimes(3);
     expect(tx.execute.mock.invocationCallOrder[0]).toBeLessThan(
@@ -156,11 +156,11 @@ describe("project structural mutation locks", () => {
 
   it("never issues the delete when the post-lock snapshot contains an active run", async () => {
     const { db, tx } = transactionDb({
-      selectResults: [[{ id: "project-1" }], [{ id: "run-1" }]],
+      selectResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }], [{ id: "run-1" }]],
     });
     mocks.getDb.mockReturnValue(db);
 
-    await expect(deleteProject("project-1")).rejects.toThrow(
+    await expect(deleteProject("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d")).rejects.toThrow(
       "Stop the current generation run before deleting this project",
     );
     expect(tx.delete).not.toHaveBeenCalled();
@@ -169,20 +169,26 @@ describe("project structural mutation locks", () => {
   it("retains Blob pathnames in durable cleanup before cascade-deleting asset rows", async () => {
     const { db, tx } = transactionDb({
       selectResults: [
-        [{ id: "project-1" }],
+        [{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }],
         [],
         [],
-        [{ pathname: "covers/project-1/cover.png" }, { pathname: "exports/project-1/book.epub" }],
+        [
+          { pathname: "covers/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/cover.png" },
+          { pathname: "exports/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/book.epub" },
+        ],
       ],
-      deleteResults: [[{ id: "project-1" }]],
+      deleteResults: [[{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }]],
     });
     mocks.getDb.mockReturnValue(db);
 
-    await deleteProject("project-1");
+    await deleteProject("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d");
 
     expect(mocks.start).toHaveBeenCalledWith(expect.any(Function), [
-      "project-1",
-      ["covers/project-1/cover.png", "exports/project-1/book.epub"],
+      "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      [
+        "covers/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/cover.png",
+        "exports/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/book.epub",
+      ],
     ]);
     expect(mocks.start.mock.invocationCallOrder[0]).toBeLessThan(
       tx.delete.mock.invocationCallOrder[0],
@@ -191,13 +197,35 @@ describe("project structural mutation locks", () => {
 
   it("keeps terminal projects with open billing protocol rows undeletable", async () => {
     const { db, tx } = transactionDb({
-      selectResults: [[{ id: "project-1" }], [], [{ id: "open-intent" }]],
+      selectResults: [
+        [{ id: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d" }],
+        [],
+        [{ id: "open-intent" }],
+      ],
     });
     mocks.getDb.mockReturnValue(db);
 
-    await expect(deleteProject("project-1")).rejects.toThrow(
+    await expect(deleteProject("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d")).rejects.toThrow(
       "Wait for pending generation charges to reconcile before deleting this project",
     );
     expect(tx.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe("project action id validation", () => {
+  it.each([
+    ["updateProject", () => updateProject("not-a-uuid", { targetChapters: 12 })],
+    ["setProjectArchived", () => setProjectArchived("not-a-uuid", true)],
+    ["deleteProject", () => deleteProject("not-a-uuid")],
+  ])("%s treats a malformed id as not found before reconciling", async (_name, call) => {
+    await expect(call()).rejects.toThrow("Project not found");
+    expect(mocks.reconcileBeforeAuthoringRunConflict).not.toHaveBeenCalled();
+  });
+
+  it("refuses a non-boolean archive flag", async () => {
+    await expect(
+      setProjectArchived("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", "yes" as unknown as boolean),
+    ).rejects.toThrow("Invalid archive state");
+    expect(mocks.reconcileBeforeAuthoringRunConflict).not.toHaveBeenCalled();
   });
 });

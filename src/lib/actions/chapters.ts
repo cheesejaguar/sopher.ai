@@ -36,6 +36,13 @@ const REVISION_CHAR_DELTA = 2000;
 const MAX_CONTENT_CHARS = MAX_CHAPTER_CONTENT_CHARS;
 
 /**
+ * A book's chapter ceiling: the largest production target and import a book
+ * can have, and what a reader edition can hold. Manual inserts stop here too.
+ */
+const MAX_BOOK_CHAPTERS = 60;
+const insertAfterSchema = z.number().int().min(0).max(MAX_BOOK_CHAPTERS);
+
+/**
  * Persist the editor's markdown with optimistic concurrency: the write only
  * lands when the stored version still equals `baseVersion` (pass
  * `force: true` for the "Keep mine" conflict resolution, which overwrites
@@ -215,6 +222,9 @@ export async function addChapter(
   afterNumber: number,
 ): Promise<{ chapterNumber: number }> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Book not found");
+  const position = insertAfterSchema.safeParse(afterNumber);
+  if (!position.success) throw new Error("Invalid chapter position");
   const db = getDb();
   const [book] = await db
     .select({ id: schema.books.id })
@@ -225,24 +235,31 @@ export async function addChapter(
   if (!book) throw new Error("Book not found");
   await assertNoActiveAuthoringRun(projectId);
 
-  const insertAt = Math.max(0, Math.trunc(afterNumber)) + 1;
+  const insertAt = position.data + 1;
+  // Every statement re-checks the ceiling under the project lock. The shifts
+  // leave the row count unchanged, so all of them see the same answer and a
+  // refused insert never leaves a renumbered gap behind.
   const [, allowed] = await getSqlClient().transaction((tx) => [
     tx`select pg_advisory_xact_lock(
       hashtextextended('sopher:project-authoring:' || ${projectId}, 0)
     )`,
     tx`
-      select not exists (
-        select 1 from generation_runs
-        where project_id = ${projectId}
-          and status in ('queued', 'running', 'awaiting_input')
-          and kind <> 'export'
-      ) as allowed
+      select
+        not exists (
+          select 1 from generation_runs
+          where project_id = ${projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        ) as allowed,
+        (select count(*) from chapters where book_id = ${book.id}) < ${MAX_BOOK_CHAPTERS}
+          as has_room
     `,
     tx`
       update chapters
       set chapter_number = chapter_number + 100000
       where book_id = ${book.id}
         and chapter_number >= ${insertAt}
+        and (select count(*) from chapters where book_id = ${book.id}) < ${MAX_BOOK_CHAPTERS}
         and not exists (
           select 1 from generation_runs
           where project_id = ${projectId}
@@ -265,16 +282,21 @@ export async function addChapter(
     tx`
       insert into chapters (book_id, chapter_number, status, content)
       select ${book.id}, ${insertAt}, 'drafted', ''
-      where not exists (
-        select 1 from generation_runs
-        where project_id = ${projectId}
-          and status in ('queued', 'running', 'awaiting_input')
-          and kind <> 'export'
-      )
+      where (select count(*) from chapters where book_id = ${book.id}) < ${MAX_BOOK_CHAPTERS}
+        and not exists (
+          select 1 from generation_runs
+          where project_id = ${projectId}
+            and status in ('queued', 'running', 'awaiting_input')
+            and kind <> 'export'
+        )
     `,
   ]);
-  if (!(allowed as Array<{ allowed: boolean }>)[0]?.allowed) {
+  const gate = (allowed as Array<{ allowed: boolean; has_room: boolean }>)[0];
+  if (!gate?.allowed) {
     throw new Error("Finish or stop the current run before changing the manuscript");
+  }
+  if (!gate.has_room) {
+    throw new Error(`A book can hold at most ${MAX_BOOK_CHAPTERS} chapters`);
   }
   revalidatePath(`/projects/${projectId}`, "layout");
   return { chapterNumber: insertAt };
@@ -695,7 +717,9 @@ export async function restoreChapterRevision(
   revisionId: string,
 ): Promise<SaveChapterResult> {
   const { userId } = await requireUser();
-  if (!z.uuid().safeParse(revisionId).success) return { ok: false, error: "not_found" };
+  if (!z.uuid().safeParse(chapterId).success || !z.uuid().safeParse(revisionId).success) {
+    return { ok: false, error: "not_found" };
+  }
   const ownership = await getChapterOwnership(chapterId);
   if (!ownership || ownership.userId !== userId) return { ok: false, error: "not_found" };
   if (await hasActiveAuthoringRun(ownership.projectId)) {

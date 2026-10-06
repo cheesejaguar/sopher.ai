@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import { getDb, getSqlClient, schema, withDbTransaction } from "@/db";
 import { releaseRunCreditReservations } from "@/lib/billing/credits";
@@ -102,21 +103,27 @@ export async function assertNoActiveAuthoringRun(
  * replaces this no-op with a terminal-state check before conflict decisions;
  * callers deliberately await it so a dead remote workflow cannot block a
  * project forever.
+ *
+ * Callers pass ids straight from the client, sometimes before their own
+ * ownership check. The pass is therefore scoped to the caller's own runs and
+ * skipped outright for a malformed id, so nobody can make the server reconcile
+ * (and write health state for) another author's project.
  */
-export async function reconcileBeforeAuthoringRunConflict(_input: {
+export async function reconcileBeforeAuthoringRunConflict(input: {
   projectId: string;
   userId: string;
 }): Promise<void> {
+  if (!z.uuid().safeParse(input.projectId).success) return;
   try {
     // Reconciliation also validates completed full-book evidence. Restricting
     // this call to active rows let a contradictory terminal run bypass the
     // safety gate and be replaced with new paid work.
     const { reconcileActiveAuthoringRuns } = await import("@/lib/run-health");
-    await reconcileActiveAuthoringRuns({ projectId: _input.projectId });
+    await reconcileActiveAuthoringRuns({ projectId: input.projectId, userId: input.userId });
   } catch (error) {
     // Preserve the database conflict when Workflow is unavailable.
     console.error("Could not reconcile authoring run before start", {
-      projectId: _input.projectId,
+      projectId: input.projectId,
       error,
     });
   }

@@ -1600,6 +1600,8 @@ export function authoringReconciliationCandidateCondition() {
 
 export async function reconcileActiveAuthoringRuns(input?: {
   projectId?: string;
+  /** Restricts an author-triggered pass to that author's own runs. */
+  userId?: string;
   limit?: number;
 }): Promise<ReconcileRunResult[]> {
   const db = getDb();
@@ -1608,6 +1610,7 @@ export async function reconcileActiveAuthoringRuns(input?: {
     authoringReconciliationCandidateCondition(),
   ];
   if (input?.projectId) conditions.push(eq(schema.generationRuns.projectId, input.projectId));
+  if (input?.userId) conditions.push(eq(schema.generationRuns.userId, input.userId));
 
   const baseQuery = db
     .select()

@@ -1,6 +1,7 @@
 import { put } from "@vercel/blob";
 import { generateText } from "ai";
 import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import {
   gatewayOptions,
@@ -72,6 +73,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ entityId: stri
   const limited = await rateLimit(LIMITS.imageGen, req, userId);
   if (limited.limited) return limited.response;
   const { entityId } = await ctx.params;
+  // Malformed ids are a 404, not a Postgres uuid-cast 500.
+  if (!z.uuid().safeParse(entityId).success) {
+    return Response.json({ error: "Entity not found" }, { status: 404 });
+  }
   let idempotencyKey: string;
   try {
     idempotencyKey = requireIdempotencyKey(req);

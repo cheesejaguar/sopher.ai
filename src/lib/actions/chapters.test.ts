@@ -27,7 +27,14 @@ vi.mock("next/cache", () => ({
   revalidatePath: mocks.revalidatePath,
 }));
 
-import { moveChapter, renameChapter, restoreArchivedChapter, saveChapter } from "./chapters";
+import {
+  addChapter,
+  moveChapter,
+  renameChapter,
+  restoreArchivedChapter,
+  restoreChapterRevision,
+  saveChapter,
+} from "./chapters";
 import { generationResetSource } from "@/lib/generation-archive";
 
 function selectResult<T>(rows: T[]) {
@@ -207,5 +214,54 @@ describe("chapter mutation ownership", () => {
 
     await expect(moveChapter(chapterId, "down")).rejects.toBe(failure);
     expect(mocks.transaction).toHaveBeenCalledOnce();
+  });
+});
+
+describe("chapter action input validation", () => {
+  const projectId = "33333333-3333-4333-8333-333333333333";
+
+  it.each([Number.NaN, -1, 1.5, 61, Number.POSITIVE_INFINITY, "2" as unknown as number])(
+    "refuses insert position %s before touching the database",
+    async (afterNumber) => {
+      await expect(addChapter(projectId, afterNumber)).rejects.toThrow("Invalid chapter position");
+      expect(mocks.getDb).not.toHaveBeenCalled();
+    },
+  );
+
+  it("treats a malformed project id as not found", async () => {
+    await expect(addChapter("not-a-uuid", 0)).rejects.toThrow("Book not found");
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("refuses to grow a book past its chapter ceiling", async () => {
+    const chain: Record<string, ReturnType<typeof vi.fn>> = {};
+    chain.from = vi.fn(() => chain);
+    chain.innerJoin = vi.fn(() => chain);
+    chain.where = vi.fn(() => chain);
+    chain.limit = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: "book-1" }])
+      .mockResolvedValueOnce([]);
+    mocks.getDb.mockReturnValue({ select: vi.fn(() => chain) });
+    mocks.transaction.mockImplementation(async (build) => {
+      const tx = (strings: TemplateStringsArray, ...values: unknown[]) => ({ strings, values });
+      const queries = build(tx);
+      // Both the shift and the insert carry the ceiling, so a refused insert
+      // cannot leave renumbered chapters behind.
+      expect(queries[2].strings.join("?")).toContain("count(*)");
+      expect(queries[4].strings.join("?")).toContain("count(*)");
+      return [[], [{ allowed: true, has_room: false }], [], [], []];
+    });
+
+    await expect(addChapter(projectId, 3)).rejects.toThrow("at most 60 chapters");
+    expect(mocks.revalidatePath).not.toHaveBeenCalled();
+  });
+
+  it("treats a malformed chapter id on revision restore as not found", async () => {
+    await expect(restoreChapterRevision("not-a-uuid", revisionId)).resolves.toEqual({
+      ok: false,
+      error: "not_found",
+    });
+    expect(mocks.ownership).not.toHaveBeenCalled();
   });
 });
