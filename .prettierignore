@@ -7,3 +7,6 @@ drizzle
 .playwright-cli
 doc
 src/app/.well-known
+.workflow-data
+.workflow-vitest
+.impeccable

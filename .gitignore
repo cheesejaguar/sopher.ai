@@ -40,12 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# local env
-.env
-.env.local
-
-# vercel
-.vercel
 /.swc
 
 # playwright
@@ -59,9 +53,16 @@ next-env.d.ts
 /.impeccable/config.local.json
 /.impeccable/hook.cache.json
 
+# Workflow DevKit local-world / vitest runner output
+/.workflow-data/
+/.workflow-vitest/
+
+# tool caches
+/.ruff_cache/
+
 # Playwright MCP session artifacts
 .playwright-mcp/
 .playwright-cli/
 
-# Filesystem-sync duplicate artifacts (sync-duplicate guard; also enforced in CI)
+# iCloud/Dropbox conflict copies ("foo 2.ts"); also enforced in CI
 * [0-9].*

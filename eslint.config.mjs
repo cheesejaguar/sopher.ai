@@ -23,6 +23,10 @@ const eslintConfig = defineConfig([
     ".lighthouseci/**",
     "next-env.d.ts",
     "src/app/.well-known/**",
+    ".workflow-data/**",
+    ".workflow-vitest/**",
+    // iCloud/Dropbox conflict copies; ESLint does not read .gitignore.
+    "**/* [0-9].*",
   ]),
 ]);
 
