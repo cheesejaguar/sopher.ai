@@ -280,6 +280,29 @@ describe("metered atomic authorization", () => {
     );
   });
 
+  it("stores a streamed provider model id as the priced Gateway slug", async () => {
+    // Streamed responses report the provider's id, not the slug requested.
+    const result = {
+      usage,
+      steps: [{ usage, response: { modelId: "claude-sonnet-5-5" } }],
+    };
+
+    await metered(
+      {
+        userId: "user-1",
+        runId: "run-1",
+        billingScope: "generation:run-1:chapter:1",
+        reservationRef: "generation-reservation:run-1:wave-1",
+      },
+      { role: "writer", operation: "writer.draft", model: "anthropic/claude-sonnet-5.5" },
+      async () => result,
+    );
+
+    expect(mocks.recordMany.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ model: "anthropic/claude-sonnet-5.5" }),
+    ]);
+  });
+
   it("atomically aborts only a synchronous pre-dispatch failure", async () => {
     const failure = new Error("local request construction failed");
     const provider = vi.fn(() => {

@@ -100,6 +100,20 @@ export function canonicalModelId(model: string): string {
   return slug in MODEL_PRICING ? slug : model;
 }
 
+const warnedUnpricedModels = new Set<string>();
+
+/**
+ * The unknown-model rates, said out loud once per model. Falling through here
+ * silently is how streamed ids went unpriced for two months.
+ */
+function fallbackPricingFor(model: string): ModelPricing {
+  if (!warnedUnpricedModels.has(model)) {
+    warnedUnpricedModels.add(model);
+    console.warn(`[pricing] no rates for "${model}"; charging FALLBACK_PRICING`);
+  }
+  return FALLBACK_PRICING;
+}
+
 export type UsageTokens = {
   inputTokens: number;
   outputTokens: number;
@@ -109,7 +123,7 @@ export type UsageTokens = {
 };
 
 export function calculateUsd(model: string, usage: UsageTokens): number {
-  const pricing = MODEL_PRICING[canonicalModelId(model)] ?? FALLBACK_PRICING;
+  const pricing = MODEL_PRICING[canonicalModelId(model)] ?? fallbackPricingFor(model);
   const cachedRead = usage.cachedInputTokens ?? 0;
   const cacheWrite = usage.cacheWriteTokens ?? 0;
   const uncachedInput = Math.max(0, usage.inputTokens - cachedRead - cacheWrite);
