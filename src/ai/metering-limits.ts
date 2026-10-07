@@ -247,12 +247,15 @@ export function meteredMaxOutputTokens(operation: string, requested?: number): n
 }
 
 /**
- * Output tokens a chapter draft may use per target word. Prose runs about
- * 1.35 tokens per word (src/ai/estimate.ts), so the old 1.5x left a chapter
- * that ran 10% long cut off mid-scene. 2x leaves room for a long chapter and
- * still sits under the operation's 14k ceiling up to a 7,000-word target.
+ * Output tokens a chapter draft may use per target word. Plain prose runs
+ * about 1.35 tokens per word (src/ai/estimate.ts), but Sonnet 5.5 cannot turn
+ * thinking off, and its prose steps measured ~1.9 output tokens per saved
+ * word: at 2x, a 1,000-word chapter landed at 1,975-1,987 of 2,000 tokens and
+ * one that ran a little long failed every retry as truncated. 3x leaves real
+ * headroom and still sits under the operation's 14k ceiling up to a
+ * ~4,600-word target, where the ceiling takes over.
  */
-export const WRITER_DRAFT_OUTPUT_TOKENS_PER_WORD = 2;
+export const WRITER_DRAFT_OUTPUT_TOKENS_PER_WORD = 3;
 
 /**
  * The writer.draft output cap for a chapter target. The chapter-wave credit
