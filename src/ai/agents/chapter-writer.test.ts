@@ -1,3 +1,4 @@
+import { streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   critiqueSchema,
@@ -49,6 +50,7 @@ vi.mock("@/ai/metering", () => ({
 vi.mock("@/ai/tools", () => ({ buildToolset: vi.fn(() => ({})) }));
 
 import {
+  ChapterDraftIncompleteError,
   ChapterDraftTruncatedError,
   selectDraftProse,
   writeChapter,
@@ -366,8 +368,9 @@ function mockDraftStream(...steps: ReturnType<typeof streamStep>[]) {
   };
 }
 
+// ~630 words: comfortably above the incomplete-draft floor for a 2,000-word target.
 const PROSE = Array.from(
-  { length: 30 },
+  { length: 70 },
   (_, index) => `Paragraph ${index + 1}: Mira counted the hulls against the ledger again.`,
 ).join("\n\n");
 const PREAMBLE = "I'll check the story bible for Mira and the harbor first.";
@@ -410,6 +413,56 @@ describe("writeChapter draft", () => {
     ).rejects.toBeInstanceOf(ChapterDraftTruncatedError);
     // No truncated draft checkpoint for a retry to resume from.
     expect(onCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("refuses working notes in place of a chapter instead of saving them", async () => {
+    // What Sonnet 5.5 produced when it spent every tool step on lookups.
+    mockDraftStream(
+      streamStep(PREAMBLE, "tool-calls"),
+      streamStep("Let me check a few details on the ledger.", "tool-calls"),
+      streamStep("Let me check the harbor next.", "stop"),
+    );
+    const onCheckpoint = vi.fn();
+
+    await expect(
+      writeChapter(writerCtx({ tier: "draft" }), { checkpoint: { scenePlan }, onCheckpoint }),
+    ).rejects.toBeInstanceOf(ChapterDraftIncompleteError);
+    expect(onCheckpoint).not.toHaveBeenCalled();
+    expect(new ChapterDraftIncompleteError(2, 1_000).isRetryable).toBe(true);
+  });
+
+  it("asks for the chapter on the tool-free final step only when none was written", async () => {
+    mockDraftStream(streamStep(PROSE, "stop"));
+    await writeChapter(writerCtx({ tier: "draft" }), { checkpoint: { scenePlan } });
+    const { prepareStep } = vi.mocked(streamText).mock.calls.at(-1)![0] as unknown as {
+      prepareStep: (options: {
+        stepNumber: number;
+        steps: { text: string }[];
+        messages: unknown[];
+        instructions?: unknown;
+      }) => { activeTools?: unknown[]; messages?: { role: string; content: string }[] };
+    };
+    const messages = [{ role: "user", content: "Write chapter 1" }];
+
+    expect(prepareStep({ stepNumber: 1, steps: [{ text: PREAMBLE }], messages })).toEqual({});
+
+    const nudged = prepareStep({
+      stepNumber: 2,
+      steps: [{ text: PREAMBLE }, { text: "Let me check the ledger." }],
+      messages,
+    });
+    expect(nudged.activeTools).toEqual([]);
+    expect(nudged.messages?.at(-1)).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("write the complete chapter now"),
+    });
+
+    const alreadyWritten = prepareStep({
+      stepNumber: 2,
+      steps: [{ text: PREAMBLE }, { text: PROSE }],
+      messages,
+    });
+    expect(alreadyWritten).toEqual({ activeTools: [] });
   });
 
   it("marks a truncation retryable so the workflow redrafts", () => {

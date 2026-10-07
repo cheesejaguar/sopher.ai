@@ -102,6 +102,7 @@ function draftPrompt(ctx: ChapterWriterCtx, plan: ScenePlan): string {
     `## Scene plan\n${JSON.stringify(plan, null, 2)}`,
     `## Working method`,
     `Before writing anything involving a person, place, object, organization or event, call entityGet for it — the story bible is canon and you must not contradict it. If you are unsure whether something already exists, call entitySearch before inventing it, so you do not create a near-duplicate under a slightly different name. When you need an earlier event's details, call storySoFarSearch instead of inventing them.`,
+    `Make every lookup you need in a single round of parallel tool calls, then write the complete chapter in your next response. You have one round for lookups, one for the chapter and its canon updates, and a final response.`,
     `If you must introduce something new, derive its name from the entities it relates to: family members share surnames, and heritage governs naming. After you finish the draft, call entityUpsert for anything you established that later chapters must honor, entityRelate for any new relationship, then stop.`,
     `Open with: ${ctx.chapterOutline.openingHook}`,
     `Close with: ${ctx.chapterOutline.closingHook}`,
@@ -152,6 +153,20 @@ const LIVE_PROSE_MIN_CHARS = 400;
 /** A step shorter than this share of the longest step is not chapter prose. */
 const PROSE_STEP_SHARE = 0.25;
 
+/**
+ * Below this share of the target length, the "chapter" is the writer's
+ * working notes ("I'll start by checking the story bible…"), not prose.
+ */
+const DRAFT_MIN_SHARE_OF_TARGET = 0.25;
+
+/**
+ * The final draft step has no tools. A model that spent the earlier steps on
+ * lookups otherwise ends here with one more "let me check…" line and stops,
+ * which Sonnet 5.5 does when it follows the lookup instructions literally.
+ */
+const FINAL_DRAFT_TURN =
+  "The story bible lookups are finished and tools are now closed. Using what you have gathered, write the complete chapter now: prose only, with no notes about your process.";
+
 type DraftStep = { text: string; finishReason: string };
 
 /**
@@ -194,6 +209,25 @@ export class ChapterDraftTruncatedError extends Error {
       `Chapter ${chapterNumber} draft reached its ${maxOutputTokens}-token output limit before the chapter ended`,
     );
     this.name = "ChapterDraftTruncatedError";
+  }
+}
+
+/**
+ * The writer returned working notes instead of a chapter. Retryable for the
+ * same reason as truncation: saving it would put a sentence of process
+ * commentary in the manuscript as the whole chapter.
+ */
+export class ChapterDraftIncompleteError extends Error {
+  readonly isRetryable = true;
+
+  constructor(
+    readonly chapterNumber: number,
+    readonly targetWords: number,
+  ) {
+    super(
+      `Chapter ${chapterNumber} draft came back far shorter than its ${targetWords}-word target`,
+    );
+    this.name = "ChapterDraftIncompleteError";
   }
 }
 
@@ -264,7 +298,14 @@ export async function writeChapter(
               },
               options.stepNumber,
             );
-            return options.stepNumber >= 2 ? { activeTools: [] } : {};
+            if (options.stepNumber < 2) return {};
+            const longestWords = Math.max(0, ...options.steps.map((step) => countWords(step.text)));
+            return longestWords >= ctx.targetWords * DRAFT_MIN_SHARE_OF_TARGET
+              ? { activeTools: [] }
+              : {
+                  activeTools: [],
+                  messages: [...options.messages, { role: "user", content: FINAL_DRAFT_TURN }],
+                };
           },
           maxOutputTokens: draftOutputTokens,
           providerOptions: gatewayOptions(ctx.meter, "writer", {
@@ -310,6 +351,9 @@ export async function writeChapter(
     // compensated by metered()'s redo path, so the author pays once.
     if (draftResult.prose.truncated) {
       throw new ChapterDraftTruncatedError(ctx.chapterNumber, draftOutputTokens);
+    }
+    if (countWords(draftResult.prose.text) < ctx.targetWords * DRAFT_MIN_SHARE_OF_TARGET) {
+      throw new ChapterDraftIncompleteError(ctx.chapterNumber, ctx.targetWords);
     }
     draft = normalizeManuscriptMarkdown(draftResult.prose.text);
     await save({ ...checkpoint, draft });

@@ -457,7 +457,7 @@ describe("metered atomic authorization", () => {
       notes: z.record(z.string(), z.number()),
     });
     const rejected = {
-      score: 85,
+      score: 857_361, // distinctive: short numbers also match stack-trace line numbers
       issues: [
         { severity: "high", chapters: [1, 2, 3] },
         { severity: "major", chapters: [4] },
@@ -517,7 +517,7 @@ describe("metered atomic authorization", () => {
       "issues: too_big",
       "notes.*: invalid_type",
     ]);
-    for (const leak of ["lighthouse", "keeper wept", "high", "85"]) {
+    for (const leak of ["lighthouse", "keeper wept", "high", "857361"]) {
       expect(failure?.validationIssues.join(" ")).not.toContain(leak);
       expect(failure?.message).not.toContain(leak);
       // Own enumerable state is what logging, JSON, and structured clone see.

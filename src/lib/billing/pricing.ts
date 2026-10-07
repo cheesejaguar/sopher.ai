@@ -83,6 +83,23 @@ export const FALLBACK_PRICING: ModelPricing = (() => {
   };
 })();
 
+/**
+ * The pricing slug for a model id as the Gateway reports it. Streamed
+ * responses name the provider's model ("claude-sonnet-5-5", sometimes with a
+ * date suffix) rather than the Gateway slug we requested
+ * ("anthropic/claude-sonnet-5.5"); unmapped, every streamed chapter draft was
+ * billed at FALLBACK_PRICING. Ids that do not resolve to a priced slug are
+ * returned unchanged.
+ */
+export function canonicalModelId(model: string): string {
+  if (model in MODEL_PRICING) return model;
+  const match = /^(?:anthropic[/.])?(claude-[a-z]+)-(\d+)(?:[-.](\d+))?(?:-\d{8})?$/.exec(model);
+  if (!match) return model;
+  const [, family, major, minor] = match;
+  const slug = `anthropic/${family}-${major}${minor ? `.${minor}` : ""}`;
+  return slug in MODEL_PRICING ? slug : model;
+}
+
 export type UsageTokens = {
   inputTokens: number;
   outputTokens: number;
@@ -92,7 +109,7 @@ export type UsageTokens = {
 };
 
 export function calculateUsd(model: string, usage: UsageTokens): number {
-  const pricing = MODEL_PRICING[model] ?? FALLBACK_PRICING;
+  const pricing = MODEL_PRICING[canonicalModelId(model)] ?? FALLBACK_PRICING;
   const cachedRead = usage.cachedInputTokens ?? 0;
   const cacheWrite = usage.cacheWriteTokens ?? 0;
   const uncachedInput = Math.max(0, usage.inputTokens - cachedRead - cacheWrite);

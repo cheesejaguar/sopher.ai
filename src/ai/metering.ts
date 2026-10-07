@@ -22,6 +22,7 @@ import {
   AuthoringRunInactiveError,
   throwIfAuthoringCancellationRequested,
 } from "@/lib/authoring-cancellation";
+import { canonicalModelId } from "@/lib/billing/pricing";
 import { anthropicReasoningOptions, PROSE_FALLBACK_MODELS } from "./models";
 
 /**
@@ -315,7 +316,9 @@ function actualCalls<T extends { usage: LanguageModelUsage }>(
         carrier.responses?.findLast((response) => Boolean(response.modelId))?.modelId;
       return {
         usage: carrier.usage,
-        model: responseModel || requestedModel,
+        // Stored as the priced Gateway slug, so llm_calls rows group and
+        // reconcile under one name whichever form the response reported.
+        model: canonicalModelId(responseModel || requestedModel),
         ...(generationId ? { generationId } : {}),
       };
     });
