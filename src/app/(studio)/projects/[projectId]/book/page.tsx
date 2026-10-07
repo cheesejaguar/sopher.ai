@@ -6,7 +6,7 @@ import { BookPackageForm } from "@/components/manuscript/book-package-form";
 import { BookMatterPreview } from "@/components/manuscript/book-matter-preview";
 import { Button } from "@/components/ui/button";
 import { getProjectWithBook } from "@/db/queries/books";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { readBookMatter } from "@/lib/book-package";
 
 export const metadata = { title: "Book setup" };
@@ -17,7 +17,7 @@ export default async function BookSetupPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
 
@@ -31,7 +31,11 @@ export default async function BookSetupPage({
           Your brief is safe. Review the production setup first; the title page, dedication, and
           closing matter become editable as soon as the book record is prepared.
         </p>
-        <Button className="mt-6" render={<Link href={`/projects/${projectId}/write`} />}>
+        <Button
+          className="mt-6"
+          render={<Link href={`/projects/${projectId}/write`} />}
+          nativeButton={false}
+        >
           Review production
           <ArrowRight aria-hidden="true" data-icon="inline-end" />
         </Button>

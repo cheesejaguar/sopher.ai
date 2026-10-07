@@ -5,12 +5,13 @@ import { describe, expect, it } from "vitest";
 
 type Oklch = { l: number; c: number; h: number };
 
-function token(css: string, name: string): Oklch {
-  const root = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
-  const match = root.match(
+function token(css: string, name: string, theme: "light" | "dark" = "light"): Oklch {
+  const selector = theme === "light" ? ":root" : "\\.dark";
+  const block = css.match(new RegExp(`(?:^|\\n)${selector}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? "";
+  const match = block.match(
     new RegExp(`--${name}:\\s*oklch\\(([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\)`),
   );
-  if (!match) throw new Error(`Missing --${name} OKLCH token`);
+  if (!match) throw new Error(`Missing --${name} OKLCH token for the ${theme} theme`);
   return { l: Number(match[1]), c: Number(match[2]), h: Number(match[3]) };
 }
 
@@ -47,4 +48,45 @@ describe("light semantic color contrast", () => {
     expect(contrast(ai, token(css, "ai-soft"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(ai, token(css, "instrument"))).toBeGreaterThanOrEqual(4.5);
   });
+});
+
+describe("primary text contrast", () => {
+  const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+  const surfaces = [
+    "background",
+    "card",
+    "instrument",
+    "instrument-high",
+    "muted",
+    "secondary",
+    "accent",
+    "sidebar",
+    "sidebar-accent",
+  ];
+
+  it.each(["light", "dark"] as const)(
+    "keeps text-primary at AA body contrast on every %s surface",
+    (theme) => {
+      const text = token(css, "primary-text", theme);
+      for (const surface of surfaces) {
+        expect(
+          contrast(text, token(css, surface, theme)),
+          `primary-text on ${surface}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    },
+  );
+});
+
+describe("paper focus indicator", () => {
+  it.each(["light", "dark"] as const)(
+    "outlines a focused manuscript field at 3:1 against %s paper",
+    (theme) => {
+      const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+      // --paper-link is declared once on :root and inherited by the dark theme.
+      expect(contrast(token(css, "paper-link"), token(css, "paper", theme))).toBeGreaterThanOrEqual(
+        3,
+      );
+    },
+  );
 });

@@ -59,7 +59,7 @@ vi.mock("@/lib/generation-runs", () => ({
 vi.mock("workflow/api", () => ({ start: mocks.start }));
 vi.mock("@/workflows/review-continuity", () => ({ reviewManuscriptContinuity: () => {} }));
 
-import { startConsistencyReview } from "./continuity";
+import { setContinuityIssueStatus, startConsistencyReview } from "./continuity";
 import { continuityPhaseKeys } from "@/ai/prompts/review-rubric";
 import { canonicalizeCreditRequirement, creditsForUsd } from "@/lib/billing/credits-shared";
 import { continuityPhaseRequiredUsd } from "@/workflows/opening-credit-plan";
@@ -294,5 +294,17 @@ describe("startConsistencyReview", () => {
 
     expect(result).toEqual({ status: "refused", message: "Project not found" });
     expect(mocks.insertQueuedAuthoringRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("setContinuityIssueStatus", () => {
+  it("refuses a status outside the author's two choices", async () => {
+    mocks.requireUser.mockResolvedValue({ userId: "user-1" });
+    await expect(
+      setContinuityIssueStatus(
+        "11111111-1111-4111-8111-111111111111",
+        "open" as unknown as "resolved",
+      ),
+    ).rejects.toThrow("Invalid issue status");
   });
 });

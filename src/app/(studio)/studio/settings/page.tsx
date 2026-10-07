@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getBalance } from "@/lib/billing/credits";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import Link from "next/link";
 
 import { AppearanceCard, DefaultsCard, NotificationPreferencesCard } from "./settings-cards";
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 async function CreditsSection() {
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const [balance, access] = await Promise.all([getBalance(userId), getStudioAccess(userId)]);
   return (
     <Card className="instrument-surface rounded-sm">
@@ -68,7 +68,7 @@ function CreditsSkeleton() {
 }
 
 async function NotificationPreferencesSection() {
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const settings = await getNotificationSettings(userId);
   return (
     <NotificationPreferencesCard email={settings.email} initialPreferences={settings.preferences} />

@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
 import type { ProjectProgressSnapshot, ProductionStage } from "@/lib/project-progress";
-import { runEventSchema, type GenerationConfig } from "@/lib/run-events";
+import { runEventSchema } from "@/lib/run-events";
 
 type ChapterProgressSeed = {
   chapterNumber: number;
@@ -69,7 +69,10 @@ export async function getProjectProductionProgress(
   const runColumns = {
     id: schema.generationRuns.id,
     status: schema.generationRuns.status,
-    config: schema.generationRuns.config,
+    // Only the run's chapter target is needed here. The config column also
+    // carries the run's resumable work state, so reading it whole on every
+    // project page load moved far more than this one number.
+    targetChapters: sql<number | null>`(${schema.generationRuns.config} ->> 'targetChapters')::int`,
     currentStage: schema.generationRuns.currentStage,
     progressPct: schema.generationRuns.progressPct,
     stageDescription: schema.generationRuns.stageDescription,
@@ -126,8 +129,7 @@ export async function getProjectProductionProgress(
     .limit(1);
   const parsed = runEventSchema.safeParse(latestStageEvent?.payload);
   const stageEvent = parsed.success && parsed.data.type === "stage" ? parsed.data : null;
-  const config = run.config as Partial<GenerationConfig>;
-  const totalChapters = config.targetChapters ?? fallbackTotalChapters;
+  const totalChapters = run.targetChapters ?? fallbackTotalChapters;
   const draftedCount = chapters.filter(
     (chapter) =>
       chapter.chapterNumber <= totalChapters &&

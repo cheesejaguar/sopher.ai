@@ -9,7 +9,7 @@ import Link from "next/link";
 
 import { formatCredits, formatUsd } from "@/components/usage/format";
 import { RoleTable } from "@/components/usage/role-table";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getMonthToDateSpend } from "@/lib/billing/meter";
 import { CREDIT_MARKUP, getBalance } from "@/lib/billing/credits";
 import { getSpendByProject, getSpendByRole } from "@/db/queries/books";
@@ -26,7 +26,7 @@ function monthStartUtc(): Date {
 }
 
 async function WalletCard() {
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const [spentUsd, balance, access] = await Promise.all([
     getMonthToDateSpend(userId),
     getBalance(userId),
@@ -77,7 +77,7 @@ async function WalletCard() {
 }
 
 async function ProjectSpendCard() {
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const rows = await getSpendByProject(userId, monthStartUtc());
   return (
     <Card className="instrument-surface rounded-sm">
@@ -95,7 +95,7 @@ async function ProjectSpendCard() {
 }
 
 async function RoleSpendCard() {
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const rows = await getSpendByRole(userId, undefined, monthStartUtc());
   return (
     <Card className="instrument-surface rounded-sm">

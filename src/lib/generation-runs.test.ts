@@ -7,7 +7,10 @@ const mocks = vi.hoisted(() => ({
   withDbTransaction: vi.fn(),
   transaction: vi.fn(),
   releaseRun: vi.fn(),
+  reconcileActive: vi.fn(),
 }));
+
+vi.mock("@/lib/run-health", () => ({ reconcileActiveAuthoringRuns: mocks.reconcileActive }));
 
 vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
@@ -35,6 +38,7 @@ import {
   linkAuthoringRunWorkflow,
   markAuthoringRunAcceptanceUncertain,
   ProjectStartSnapshotChangedError,
+  reconcileBeforeAuthoringRunConflict,
   settleStubbedAuthoringRunHandoff,
   terminalizeAuthoringRun,
   TrialOptionalWorkInProgressError,
@@ -48,6 +52,20 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+describe("reconcileBeforeAuthoringRunConflict", () => {
+  it("scopes the reconciliation pass to the caller's own runs", async () => {
+    mocks.reconcileActive.mockResolvedValue([]);
+    const projectId = "11111111-1111-4111-8111-111111111111";
+    await reconcileBeforeAuthoringRunConflict({ projectId, userId: "author-1" });
+    expect(mocks.reconcileActive).toHaveBeenCalledWith({ projectId, userId: "author-1" });
+  });
+
+  it("does nothing for a malformed project id", async () => {
+    await reconcileBeforeAuthoringRunConflict({ projectId: "not-a-uuid", userId: "author-1" });
+    expect(mocks.reconcileActive).not.toHaveBeenCalled();
+  });
 });
 
 function terminalDb(input: {

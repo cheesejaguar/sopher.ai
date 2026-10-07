@@ -130,8 +130,21 @@ orphaned. Safe to delete; left in place to avoid an unnecessary cascade.
   ```bash
   vercel env pull /tmp/sk.txt --environment=production --yes
   export STRIPE_SECRET_KEY=$(grep '^STRIPE_SECRET_KEY=' /tmp/sk.txt | cut -d= -f2- | tr -d '"') && rm /tmp/sk.txt
-  node -e 'const S=require("stripe");const s=new S(process.env.STRIPE_SECRET_KEY);s.webhookEndpoints.create({url:"https://sopher.ai/api/webhooks/stripe",enabled_events:["checkout.session.completed","charge.refunded"],description:"sopher.ai credits fulfilment"}).then(e=>process.stdout.write(e.secret))'     | vercel env add STRIPE_WEBHOOK_SECRET production --force
+  node -e 'const S=require("stripe");const s=new S(process.env.STRIPE_SECRET_KEY);s.webhookEndpoints.create({url:"https://sopher.ai/api/webhooks/stripe",enabled_events:["checkout.session.completed","checkout.session.async_payment_succeeded","charge.refunded","charge.dispute.created","charge.dispute.funds_withdrawn","charge.dispute.closed"],description:"sopher.ai credits fulfilment"}).then(e=>process.stdout.write(e.secret))'     | vercel env add STRIPE_WEBHOOK_SECRET production --force
   ```
+
+  The existing endpoint must subscribe to every event in that list (Dashboard →
+  Developers → Webhooks → endpoint → Update details), not only the original
+  two: delayed payment methods fulfil on `checkout.session.async_payment_succeeded`,
+  and chargebacks claw back / restore credits on the `charge.dispute.*` events.
+
+- **Reader links** derive their bearer tokens with `READER_LINK_SECRET`. Until
+  it is set, production falls back to `CLERK_SECRET_KEY` (and logs a warning
+  once per instance). Set a dedicated random value
+  (`openssl rand -base64 48 | vercel env add READER_LINK_SECRET production`).
+  Existing links keep working after a change — they are verified by the stored
+  token hash, not by re-deriving — only a retry of a share request in flight
+  at the moment of the switch mints a second link instead of replaying.
 
 - **Resend** was linked manually (outside the Marketplace), so its key does not
   auto-sync: create an API key at resend.com (Sending access) and

@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// The completion card imports a server action; Next compiles that to a
+// reference, but vitest would load the real server module graph.
+vi.mock("@/lib/actions/continuity", () => ({ startConsistencyReview: vi.fn() }));
 
 import { announcementFor } from "./run-viewer";
 

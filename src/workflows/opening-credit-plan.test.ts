@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { meteredOperationCeilingCredits, meteredOperationCeilingUsd } from "@/ai/metering-limits";
+import {
+  meteredOperationCeilingCredits,
+  meteredOperationCeilingUsd,
+  WRITER_DRAFT_OUTPUT_TOKENS_PER_WORD,
+} from "@/ai/metering-limits";
 import { MODELS } from "@/ai/models";
 import {
   CREDIT_MARKUP,
@@ -139,7 +143,7 @@ describe("opening credit plan", () => {
 
   it("sizes a writer-wave parent as the exact sum of every parallel child claim", () => {
     const maxOutputTokensPerStep = Math.round(
-      Math.min(10_000, config.targetWordsPerChapter * 1.2) * 1.5,
+      Math.min(10_000, config.targetWordsPerChapter * 1.2) * WRITER_DRAFT_OUTPUT_TOKENS_PER_WORD,
     );
     const oneChapterCredits = [
       meteredOperationCeilingCredits({

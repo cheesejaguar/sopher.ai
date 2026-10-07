@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { isOwnedBlobUrl } from "@/lib/security/blob-url";
 
 /**
  * Figure resolution for diagrams and inline images.
@@ -101,27 +102,106 @@ export async function loadFigures(projectId: string): Promise<FigureMap> {
   return buildFigureMap(rows);
 }
 
+/** Asset kinds whose images may appear inside a manuscript or on its cover. */
+export const MANUSCRIPT_IMAGE_ASSET_KINDS = ["cover", "illustration", "diagram"] as const;
+
 /**
- * Downloads PNG bytes for the figures PDF/DOCX will embed. Failures are
- * swallowed per-figure: a fetch error degrades that one diagram to source text
- * rather than failing the whole export.
+ * The project's own uploaded images — the allowlist every surface that renders
+ * or fetches a manuscript image checks against. Pure; rows come from the
+ * caller's query (or transaction) over `MANUSCRIPT_IMAGE_ASSET_KINDS`.
  */
-export async function hydrateFigureBytes(figures: FigureMap): Promise<FigureMap> {
-  const entries = Object.entries(figures).filter(([, figure]) => figure.pngUrl);
+export function projectImageAssetUrls(
+  rows: Array<{ blobUrl: string; contentType: string }>,
+): string[] {
+  return [
+    ...new Set(
+      rows
+        .filter((row) => row.contentType.startsWith("image/") && isOwnedBlobUrl(row.blobUrl))
+        .map((row) => row.blobUrl),
+    ),
+  ].sort();
+}
+
+export async function loadProjectImageAssetUrls(projectId: string): Promise<string[]> {
+  const rows = await getDb()
+    .select({ blobUrl: schema.assets.blobUrl, contentType: schema.assets.contentType })
+    .from(schema.assets)
+    .where(
+      and(
+        eq(schema.assets.projectId, projectId),
+        inArray(schema.assets.kind, [...MANUSCRIPT_IMAGE_ASSET_KINDS]),
+      ),
+    );
+  return projectImageAssetUrls(rows);
+}
+
+/** Figure downloads in flight at once; a project can hold hundreds of renders. */
+const FIGURE_FETCH_CONCURRENCY = 4;
+/** One slow blob must not hold the export step open until its own timeout. */
+const FIGURE_FETCH_TIMEOUT_MS = 15_000;
+
+// Deliberately looser than the exporters' block parser (any fenced mermaid
+// block, not only one that is a paragraph of its own): a superset only
+// downloads a figure that ends up unused, while a miss would print source.
+const MERMAID_FENCE_ANYWHERE_RE = /```mermaid[ \t]*\n([\s\S]*?)\n?```/g;
+
+/**
+ * Figure keys a manuscript can actually resolve: the source hash of every
+ * mermaid fence, plus any key (an image URL) that appears in the text.
+ */
+export function referencedFigureKeys(figures: FigureMap, texts: readonly string[]): Set<string> {
+  const referenced = new Set<string>();
+  for (const text of texts) {
+    for (const match of text.matchAll(MERMAID_FENCE_ANYWHERE_RE)) {
+      referenced.add(diagramSourceHash(match[1]));
+    }
+  }
+  for (const key of Object.keys(figures)) {
+    if (!referenced.has(key) && texts.some((text) => text.includes(key))) referenced.add(key);
+  }
+  return referenced;
+}
+
+/**
+ * Downloads PNG bytes for the figures PDF/DOCX will embed. The figure map holds
+ * every diagram render the project ever stored, so `texts` (the manuscript
+ * being exported) narrows it to the figures that manuscript references;
+ * omitting it hydrates them all. Failures are swallowed per-figure: a fetch
+ * error or timeout degrades that one diagram to source text rather than
+ * failing the whole export.
+ */
+export async function hydrateFigureBytes(
+  figures: FigureMap,
+  texts?: readonly string[],
+): Promise<FigureMap> {
+  const wanted = texts ? referencedFigureKeys(figures, texts) : null;
+  // Diagram rows are server-written, but these bytes are fetched server-side
+  // and embedded in a download: never follow anything off our own store.
+  const entries = Object.entries(figures).filter(
+    ([key, figure]) =>
+      figure.pngUrl && isOwnedBlobUrl(figure.pngUrl) && (!wanted || wanted.has(key)),
+  );
   const hydrated: FigureMap = { ...figures };
 
-  await Promise.all(
-    entries.map(async ([key, figure]) => {
+  let next = 0;
+  const worker = async () => {
+    while (next < entries.length) {
+      const [key, figure] = entries[next++];
       try {
-        const response = await fetch(figure.pngUrl as string);
-        if (!response.ok) return;
+        const response = await fetch(figure.pngUrl as string, {
+          signal: AbortSignal.timeout(FIGURE_FETCH_TIMEOUT_MS),
+        });
+        if (!response.ok) continue;
         const bytes = new Uint8Array(await response.arrayBuffer());
         const dims = pngDimensions(bytes);
         hydrated[key] = { ...figure, pngBytes: bytes, ...(dims ?? {}) };
       } catch {
         // Leave the figure without bytes; exporters fall back to source text.
       }
-    }),
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(FIGURE_FETCH_CONCURRENCY, entries.length) }, worker),
   );
 
   return hydrated;

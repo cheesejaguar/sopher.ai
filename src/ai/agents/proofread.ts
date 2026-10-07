@@ -303,7 +303,7 @@ export async function proofreadChapter(
         maxOutputTokens: meteredMaxOutputTokens(PROOFREAD_OPERATION),
         prepareStep: meteredInputGuard(PROOFREAD_OPERATION),
         output: Output.object({ schema: proofreadSuggestionListWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "editor"),
+        providerOptions: gatewayOptions(input.meter, "editor", { model: model }),
       }),
   );
 

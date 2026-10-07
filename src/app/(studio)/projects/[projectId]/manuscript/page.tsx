@@ -13,14 +13,15 @@ import { ShareReaderDialog } from "@/components/manuscript/share-reader-dialog";
 import { ManuscriptRail } from "@/components/manuscript/manuscript-rail";
 import { Button } from "@/components/ui/button";
 import { markdownToHtml } from "@/lib/export/assemble";
-import { loadFigures } from "@/lib/export/figures";
-import { requireUser } from "@/lib/auth";
+import { loadFigures, loadProjectImageAssetUrls } from "@/lib/export/figures";
+import { ownedImageUrlFilter } from "@/lib/security/blob-url";
+import { requirePageUser } from "@/lib/auth";
 import { closingBookMatter, openingBookMatter, readBookMatter } from "@/lib/book-package";
 import { getChapterList, getChapterWithContent, getProjectWithBook } from "@/db/queries/books";
 import { ManuscriptSearch } from "@/components/editor/manuscript-search";
 import { ManuscriptStatsPanel } from "@/components/manuscript/manuscript-stats-panel";
 import { manuscriptStats } from "@/lib/manuscript-stats";
-import { getAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
+import { getRequestAuthoringJourneySnapshot } from "@/db/queries/authoring-journey";
 import { IncompleteProductionNotice } from "@/components/studio/incomplete-production-notice";
 import { HashFocusTarget } from "@/components/studio/hash-focus-target";
 import { getDb, schema } from "@/db";
@@ -108,19 +109,29 @@ export default async function ManuscriptPage({
   searchParams: Promise<{ chapter?: string | string[] }>;
 }) {
   const [{ projectId }, sp] = await Promise.all([params, searchParams]);
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
+  // None of these queries needs the project row, so all start now and are
+  // awaited only once a chapter is going to render. All are scoped to ids, and
+  // nothing they return is rendered before the ownership check below.
+  const figuresPromise = loadFigures(projectId);
+  const assetUrlsPromise = loadProjectImageAssetUrls(projectId);
+  const skippedPassesPromise = skippedFinishingPasses(userId, projectId);
+  // The not-found and empty-manuscript exits never await them; a rejection on
+  // those paths must not surface as an unhandled rejection.
+  figuresPromise.catch(() => {});
+  assetUrlsPromise.catch(() => {});
+  skippedPassesPromise.catch(() => {});
+
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { project, book } = data;
 
-  const chapterRows = book ? await getChapterList(book.id) : [];
+  // getChapterList is request-cached, so the journey shares this query.
+  const [chapterRows, journey] = await Promise.all([
+    book ? getChapterList(book.id) : Promise.resolve([]),
+    getRequestAuthoringJourneySnapshot({ userId, projectId, data }),
+  ]);
   const readable = chapterRows.filter((c) => c.wordCount > 0);
-  const journey = await getAuthoringJourneySnapshot({
-    userId,
-    projectId,
-    data,
-    chapters: chapterRows,
-  });
 
   if (!book || readable.length === 0) {
     return (
@@ -142,10 +153,14 @@ export default async function ManuscriptPage({
   if (!chapter) notFound();
 
   // Cached diagram renders, so mermaid fences read as diagrams rather than source.
-  const [figures, skippedPasses] = await Promise.all([
-    loadFigures(projectId),
-    skippedFinishingPasses(userId, projectId),
+  const [figures, assetUrls, skippedPasses] = await Promise.all([
+    figuresPromise,
+    assetUrlsPromise,
+    skippedPassesPromise,
   ]);
+  // Only the project's own Blob images render; an external `![](…)` would be a
+  // third-party request from every page view, so it degrades to its alt text.
+  const imageUrl = ownedImageUrlFilter(assetUrls);
 
   const previous = activeIndex > 0 ? readable[activeIndex - 1] : null;
   const next = activeIndex < readable.length - 1 ? readable[activeIndex + 1] : null;
@@ -195,7 +210,12 @@ export default async function ManuscriptPage({
         </div>
         <div className="flex max-w-full flex-wrap items-center gap-2">
           <CoverButton projectId={projectId} hasCover={Boolean(matter.coverUrl)} />
-          <Button variant="ghost" size="sm" render={<Link href={`/projects/${projectId}/book`} />}>
+          <Button
+            variant="ghost"
+            size="sm"
+            render={<Link href={`/projects/${projectId}/book`} />}
+            nativeButton={false}
+          >
             <BookMarked aria-hidden="true" />
             Book setup
           </Button>
@@ -309,7 +329,7 @@ export default async function ManuscriptPage({
                 <h2>{section.title}</h2>
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: markdownToHtml(section.markdown, figures),
+                    __html: markdownToHtml(section.markdown, figures, "svg", { imageUrl }),
                   }}
                 />
               </section>
@@ -328,7 +348,9 @@ export default async function ManuscriptPage({
           </h2>
           <div
             // Manuscript markdown rendered server-side; raw HTML is escaped in markdownToHtml.
-            dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content, figures) }}
+            dangerouslySetInnerHTML={{
+              __html: markdownToHtml(chapter.content, figures, "svg", { imageUrl }),
+            }}
           />
         </section>
 
@@ -341,7 +363,7 @@ export default async function ManuscriptPage({
                 <h2>{section.title}</h2>
                 <div
                   dangerouslySetInnerHTML={{
-                    __html: markdownToHtml(section.markdown, figures),
+                    __html: markdownToHtml(section.markdown, figures, "svg", { imageUrl }),
                   }}
                 />
               </section>

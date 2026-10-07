@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { calculateUsd } from "@/lib/billing/pricing";
+import { PROSE_FALLBACK_MODELS } from "@/ai/models";
+import { calculateUsd, type UsageTokens } from "@/lib/billing/pricing";
 import { CREDIT_MARKUP, creditsForUsd } from "@/lib/billing/credits-shared";
 import {
   assertMeteredInputWithinBudget,
@@ -15,31 +16,39 @@ function ceil4(value: number): number {
   return Math.ceil(value * 10_000 - 1e-9) / 10_000;
 }
 
-describe("metered operation limits", () => {
-  it("prices every possible writer tool-loop step at the costliest allowed fallback", () => {
-    const budget = meteredOperationBudget("writer.draft");
-    const outputTokens = 5_400;
-    const fallbackPerStep = calculateUsd("anthropic/claude-sonnet-4.6", {
-      inputTokens: budget.maxInputTokensPerStep,
-      cacheWriteTokens: budget.maxInputTokensPerStep,
-      outputTokens,
-    });
+/** A writer step may be served by the primary or any fallback; hold for the dearest. */
+function costliestWriterStep(model: string, usage: UsageTokens): number {
+  return Math.max(...[model, ...PROSE_FALLBACK_MODELS].map((slug) => calculateUsd(slug, usage)));
+}
 
-    expect(budget.maxProviderSteps).toBe(3);
-    const input = {
-      model: "anthropic/claude-sonnet-5",
-      operation: "writer.draft",
-      maxOutputTokensPerStep: outputTokens,
-    };
-    const expectedCredits = ceil4(fallbackPerStep * CREDIT_MARKUP) * budget.maxProviderSteps;
-    expect(meteredOperationCeilingCredits(input)).toBe(expectedCredits);
-    expect(meteredOperationCeilingUsd(input)).toBe(expectedCredits / CREDIT_MARKUP);
-  });
+describe("metered operation limits", () => {
+  it.each(["anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5"])(
+    "prices every possible %s writer tool-loop step at the costliest model in its chain",
+    (model) => {
+      const budget = meteredOperationBudget("writer.draft");
+      const outputTokens = 5_400;
+      const fallbackPerStep = costliestWriterStep(model, {
+        inputTokens: budget.maxInputTokensPerStep,
+        cacheWriteTokens: budget.maxInputTokensPerStep,
+        outputTokens,
+      });
+
+      expect(budget.maxProviderSteps).toBe(3);
+      const input = {
+        model,
+        operation: "writer.draft",
+        maxOutputTokensPerStep: outputTokens,
+      };
+      const expectedCredits = ceil4(fallbackPerStep * CREDIT_MARKUP) * budget.maxProviderSteps;
+      expect(meteredOperationCeilingCredits(input)).toBe(expectedCredits);
+      expect(meteredOperationCeilingUsd(input)).toBe(expectedCredits / CREDIT_MARKUP);
+    },
+  );
 
   it("includes per-step ledger quantization for an exact-max three-step writer result", () => {
     const budget = meteredOperationBudget("writer.draft");
     const outputTokens = 1_442;
-    const fallbackPerStep = calculateUsd("anthropic/claude-sonnet-4.6", {
+    const fallbackPerStep = costliestWriterStep("anthropic/claude-sonnet-5.5", {
       inputTokens: budget.maxInputTokensPerStep,
       cacheWriteTokens: budget.maxInputTokensPerStep,
       outputTokens,
@@ -48,7 +57,7 @@ describe("metered operation limits", () => {
 
     expect(
       meteredOperationCeilingCredits({
-        model: "anthropic/claude-sonnet-5",
+        model: "anthropic/claude-sonnet-5.5",
         operation: "writer.draft",
         maxOutputTokensPerStep: outputTokens,
       }),

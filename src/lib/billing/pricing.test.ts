@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateUsd, MODEL_PRICING } from "./pricing";
+import { calculateUsd, canonicalModelId, MODEL_PRICING } from "./pricing";
 
 describe("calculateUsd", () => {
   it("charges token models on tokens only", () => {
@@ -40,5 +40,30 @@ describe("calculateUsd", () => {
       imageCount: 1,
     });
     expect(usd).toBeGreaterThan(0.1);
+  });
+});
+
+describe("canonicalModelId", () => {
+  it.each([
+    ["claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"],
+    ["claude-opus-5-5", "anthropic/claude-opus-5.5"],
+    ["claude-sonnet-5", "anthropic/claude-sonnet-5"],
+    ["claude-opus-5", "anthropic/claude-opus-5"],
+    ["claude-haiku-4-5-20251001", "anthropic/claude-haiku-4.5"],
+    ["anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"],
+  ])("maps the Gateway's streamed id %s to %s", (reported, slug) => {
+    expect(canonicalModelId(reported)).toBe(slug);
+  });
+
+  it("leaves ids it cannot price unchanged", () => {
+    expect(canonicalModelId("claude-unknown-9-9")).toBe("claude-unknown-9-9");
+    expect(canonicalModelId("google/gemini-3.1-flash-image")).toBe("google/gemini-3.1-flash-image");
+  });
+
+  it("prices a streamed id at its model's rates, not the unknown-model fallback", () => {
+    const usage = { inputTokens: 10_000, outputTokens: 2_000, cacheWriteTokens: 8_000 };
+    expect(calculateUsd("claude-sonnet-5-5", usage)).toBe(
+      calculateUsd("anthropic/claude-sonnet-5.5", usage),
+    );
   });
 });

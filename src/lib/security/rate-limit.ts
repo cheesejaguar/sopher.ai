@@ -39,8 +39,14 @@ export const LIMITS = {
   readerShare: "reader-share",
   /** Anonymous fragment-to-cookie reader session exchanges, keyed by IP. */
   readerSession: "reader-session",
-  /** The one unauthenticated route — keyed by IP, not user. */
+  /** Unauthenticated price quotes — keyed by IP, not user. */
   estimates: "estimates",
+  /** Unauthenticated product-analytics ingest (a DB write) — keyed by IP. */
+  events: "events",
+  /** Unauthenticated CSP violation reports — keyed by IP. */
+  cspReport: "csp-report",
+  /** Client-rendered diagram caching: two public Blob uploads per miss. */
+  diagramCache: "diagram-cache",
 } as const;
 
 export type LimitId = (typeof LIMITS)[keyof typeof LIMITS];

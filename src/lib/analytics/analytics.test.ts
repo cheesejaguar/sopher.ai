@@ -133,4 +133,20 @@ describe("parseAttributionCookie", () => {
     expect(parseAttributionCookie(encodeURIComponent('{"no":"capturedAt"}'))).toBeNull();
     expect(parseAttributionCookie(encodeURIComponent('"a string"'))).toBeNull();
   });
+
+  it("persists only the documented shape, within its length caps", () => {
+    const capturedAt = "2026-10-01T12:00:00.000Z";
+    const forged = encodeURIComponent(
+      JSON.stringify({ source: "ads", capturedAt, isAdmin: true, nested: { deep: "x" } }),
+    );
+    expect(parseAttributionCookie(forged)).toEqual({ source: "ads", capturedAt });
+
+    const oversized = encodeURIComponent(JSON.stringify({ source: "x".repeat(101), capturedAt }));
+    expect(parseAttributionCookie(oversized)).toBeNull();
+    const wrongType = encodeURIComponent(JSON.stringify({ source: 42, capturedAt }));
+    expect(parseAttributionCookie(wrongType)).toBeNull();
+    const notADate = encodeURIComponent(JSON.stringify({ capturedAt: "yesterday" }));
+    expect(parseAttributionCookie(notADate)).toBeNull();
+    expect(parseAttributionCookie("x".repeat(5_000))).toBeNull();
+  });
 });

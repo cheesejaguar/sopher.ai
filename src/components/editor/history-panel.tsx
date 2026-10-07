@@ -43,6 +43,7 @@ const SOURCE_LABELS: Record<string, string> = {
   "pre-merge": "Before a chapter merge",
   "pre-merge-absorbed": "Merged into the previous chapter",
   "book-replace": "Before a book-wide replace",
+  "pre-apply-all": "Before accepting all review changes",
   import: "Imported draft",
 };
 
@@ -97,7 +98,7 @@ export function HistoryPanel({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    (async () => {
+    void (async () => {
       try {
         const rows = await listChapterRevisions(chapterId);
         if (!cancelled) {

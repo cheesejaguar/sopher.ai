@@ -1,3 +1,4 @@
+import { streamText } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   critiqueSchema,
@@ -7,9 +8,13 @@ import {
   type ScenePlan,
 } from "@/ai/schemas";
 
+type MockStreamPart = { type: string; text?: string; error?: unknown };
+type MockStep = { text: string; finishReason: string };
+
 const mocks = vi.hoisted(() => ({
   outputs: [] as unknown[],
   calls: [] as { prompt: string; schema: unknown }[],
+  stream: null as null | { parts: MockStreamPart[]; steps: MockStep[] },
 }));
 
 vi.mock("ai", () => ({
@@ -19,7 +24,16 @@ vi.mock("ai", () => ({
     return { output: mocks.outputs.shift() };
   }),
   streamText: vi.fn(() => {
-    throw new Error("streamText should not run: these tests start from a checkpointed draft");
+    const stream = mocks.stream;
+    if (!stream) throw new Error("streamText should not run: no mocked draft stream");
+    return {
+      fullStream: (async function* () {
+        yield* stream.parts;
+      })(),
+      usage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }),
+      response: Promise.resolve({}),
+      steps: Promise.resolve(stream.steps),
+    };
   }),
   isStepCount: vi.fn(() => () => false),
   tool: vi.fn((definition: unknown) => definition),
@@ -35,7 +49,13 @@ vi.mock("@/ai/metering", () => ({
 
 vi.mock("@/ai/tools", () => ({ buildToolset: vi.fn(() => ({})) }));
 
-import { writeChapter, type ChapterWriterCtx } from "./chapter-writer";
+import {
+  ChapterDraftIncompleteError,
+  ChapterDraftTruncatedError,
+  selectDraftProse,
+  writeChapter,
+  type ChapterWriterCtx,
+} from "./chapter-writer";
 
 /**
  * Two paragraphs whose first sentence is quotable verbatim, so a revision can
@@ -116,6 +136,7 @@ const passingCritique = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   mocks.outputs.length = 0;
   mocks.calls.length = 0;
+  mocks.stream = null;
 });
 
 /**
@@ -290,6 +311,14 @@ describe("writeChapter revision", () => {
     expect(result.qualityScore).toBeCloseTo(0.72, 5);
   });
 
+  it("inserts revised prose literally, never as a $-replacement pattern", async () => {
+    const result = await runFromDraft(critique(), {
+      replacements: [{ original: ANCHOR, revised: "The fare was $$$, or $& and $' and $`." }],
+    });
+    expect(result.content).toContain("The fare was $$$, or $& and $' and $`.");
+    expect(result.content).not.toContain(ANCHOR);
+  });
+
   it("caps the revision bump at 1", async () => {
     const result = await runFromDraft(critique({ score: 0.98 }), {
       replacements: [{ original: ANCHOR, revised: "Salt and cold iron rode the wind." }],
@@ -306,5 +335,184 @@ describe("writeChapter draft tier", () => {
     expect(mocks.calls).toHaveLength(0);
     expect(result.critique).toBeNull();
     expect(result.qualityScore).toBe(0.75);
+  });
+
+  it("never returns a checkpointed result whose text was pruned", async () => {
+    const result = await writeChapter(writerCtx({ tier: "draft" }), {
+      checkpoint: {
+        scenePlan,
+        draft: DRAFT,
+        result: { wordCount: 12, qualityScore: 0.9, critique: null } as never,
+      },
+    });
+    expect(result.content).toBe(DRAFT);
+  });
+});
+
+/** One streamed provider step: its text deltas between step boundaries. */
+function streamStep(text: string, finishReason: string) {
+  const parts: MockStreamPart[] = [{ type: "start-step" }];
+  // Several deltas, as a provider sends them, so live gating is exercised.
+  for (const chunk of text.match(/[\s\S]{1,40}/g) ?? []) {
+    parts.push({ type: "text-delta", text: chunk });
+  }
+  if (finishReason === "tool-calls") parts.push({ type: "tool-call" });
+  parts.push({ type: "finish-step" });
+  return { parts, step: { text, finishReason } };
+}
+
+function mockDraftStream(...steps: ReturnType<typeof streamStep>[]) {
+  mocks.stream = {
+    parts: steps.flatMap((step) => step.parts),
+    steps: steps.map((step) => step.step),
+  };
+}
+
+// ~630 words: comfortably above the incomplete-draft floor for a 2,000-word target.
+const PROSE = Array.from(
+  { length: 70 },
+  (_, index) => `Paragraph ${index + 1}: Mira counted the hulls against the ledger again.`,
+).join("\n\n");
+const PREAMBLE = "I'll check the story bible for Mira and the harbor first.";
+const POSTAMBLE = "I've recorded the new entities and relationships.";
+
+describe("writeChapter draft", () => {
+  it("keeps only the prose step, even when it ends in tool calls", async () => {
+    mockDraftStream(
+      streamStep(PREAMBLE, "tool-calls"),
+      // The working method asks for the chapter, then canon writes, so the
+      // prose step itself finishes on tool calls.
+      streamStep(PROSE, "tool-calls"),
+      streamStep(POSTAMBLE, "stop"),
+    );
+    const deltas: string[] = [];
+    const checkpoints: { draft?: string }[] = [];
+
+    const result = await writeChapter(
+      writerCtx({ tier: "draft", onProseDelta: (delta) => void deltas.push(delta) }),
+      {
+        checkpoint: { scenePlan },
+        onCheckpoint: (next) => void checkpoints.push(next),
+      },
+    );
+
+    expect(result.content).toBe(PROSE);
+    expect(result.content).not.toContain(PREAMBLE);
+    expect(result.content).not.toContain(POSTAMBLE);
+    expect(checkpoints[0].draft).toBe(PROSE);
+    // Chatter never reached the live view; the prose did, in full.
+    expect(deltas.join("")).toBe(PROSE);
+  });
+
+  it("refuses a draft that hit its output limit instead of saving it", async () => {
+    mockDraftStream(streamStep(PREAMBLE, "tool-calls"), streamStep(PROSE, "length"));
+    const onCheckpoint = vi.fn();
+
+    await expect(
+      writeChapter(writerCtx({ tier: "draft" }), { checkpoint: { scenePlan }, onCheckpoint }),
+    ).rejects.toBeInstanceOf(ChapterDraftTruncatedError);
+    // No truncated draft checkpoint for a retry to resume from.
+    expect(onCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("refuses working notes in place of a chapter instead of saving them", async () => {
+    // What Sonnet 5.5 produced when it spent every tool step on lookups.
+    mockDraftStream(
+      streamStep(PREAMBLE, "tool-calls"),
+      streamStep("Let me check a few details on the ledger.", "tool-calls"),
+      streamStep("Let me check the harbor next.", "stop"),
+    );
+    const onCheckpoint = vi.fn();
+
+    await expect(
+      writeChapter(writerCtx({ tier: "draft" }), { checkpoint: { scenePlan }, onCheckpoint }),
+    ).rejects.toBeInstanceOf(ChapterDraftIncompleteError);
+    expect(onCheckpoint).not.toHaveBeenCalled();
+    expect(new ChapterDraftIncompleteError(2, 1_000).isRetryable).toBe(true);
+  });
+
+  it("asks for the chapter on the tool-free final step only when none was written", async () => {
+    mockDraftStream(streamStep(PROSE, "stop"));
+    await writeChapter(writerCtx({ tier: "draft" }), { checkpoint: { scenePlan } });
+    const { prepareStep } = vi.mocked(streamText).mock.calls.at(-1)![0] as unknown as {
+      prepareStep: (options: {
+        stepNumber: number;
+        steps: { text: string }[];
+        messages: unknown[];
+        instructions?: unknown;
+      }) => { activeTools?: unknown[]; messages?: { role: string; content: string }[] };
+    };
+    const messages = [{ role: "user", content: "Write chapter 1" }];
+
+    expect(prepareStep({ stepNumber: 1, steps: [{ text: PREAMBLE }], messages })).toEqual({});
+
+    const nudged = prepareStep({
+      stepNumber: 2,
+      steps: [{ text: PREAMBLE }, { text: "Let me check the ledger." }],
+      messages,
+    });
+    expect(nudged.activeTools).toEqual([]);
+    expect(nudged.messages?.at(-1)).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("write the complete chapter now"),
+    });
+
+    const alreadyWritten = prepareStep({
+      stepNumber: 2,
+      steps: [{ text: PREAMBLE }, { text: PROSE }],
+      messages,
+    });
+    expect(alreadyWritten).toEqual({ activeTools: [] });
+  });
+
+  it.each([
+    { targetWords: 1_000, words: 249, accepted: false },
+    { targetWords: 1_000, words: 250, accepted: true },
+    { targetWords: 1_001, words: 250, accepted: false },
+    { targetWords: 1_001, words: 251, accepted: true },
+  ])(
+    "uses the shared quarter-target floor for $words words against $targetWords",
+    async ({ targetWords, words, accepted }) => {
+      mockDraftStream(streamStep(Array(words).fill("prose").join(" "), "stop"));
+      const onCheckpoint = vi.fn();
+      const writing = writeChapter(writerCtx({ tier: "draft", targetWords }), {
+        checkpoint: { scenePlan },
+        onCheckpoint,
+      });
+      if (accepted) {
+        await expect(writing).resolves.toMatchObject({ wordCount: words });
+        expect(onCheckpoint).toHaveBeenCalled();
+      } else {
+        await expect(writing).rejects.toBeInstanceOf(ChapterDraftIncompleteError);
+        expect(onCheckpoint).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("marks a truncation retryable so the workflow redrafts", () => {
+    expect(new ChapterDraftTruncatedError(3, 8_000).isRetryable).toBe(true);
+  });
+});
+
+describe("selectDraftProse", () => {
+  it("keeps both halves of a chapter split around a mid-draft lookup", () => {
+    const firstHalf = PROSE.slice(0, PROSE.length / 2);
+    const secondHalf = PROSE.slice(PROSE.length / 2);
+    const prose = selectDraftProse([
+      { text: PREAMBLE, finishReason: "tool-calls" },
+      { text: firstHalf, finishReason: "tool-calls" },
+      { text: secondHalf, finishReason: "stop" },
+    ]);
+    expect(prose.text).toBe(`${firstHalf.trim()}\n\n${secondHalf.trim()}`);
+    expect(prose.truncated).toBe(false);
+  });
+
+  it("ignores a truncated chatter step that is not the chapter", () => {
+    expect(
+      selectDraftProse([
+        { text: PROSE, finishReason: "tool-calls" },
+        { text: POSTAMBLE, finishReason: "length" },
+      ]),
+    ).toEqual({ text: PROSE, truncated: false });
   });
 });

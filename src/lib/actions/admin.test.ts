@@ -82,6 +82,8 @@ import {
   adminRecheckRun,
   adminRedeliverRunInput,
   adminRedispatchRun,
+  adminSetFlagStatus,
+  adminSetSuspended,
 } from "@/lib/actions/admin";
 
 const RUN_ID = "11111111-1111-4111-8111-111111111111";
@@ -411,5 +413,25 @@ describe("Admin authoring recovery actions", () => {
       ],
     });
     expect(mocks.resolveReconciledIncidents).toHaveBeenCalledWith(intentRef);
+  });
+});
+
+describe("admin enum arguments", () => {
+  beforeEach(() => {
+    mocks.requireAdmin.mockResolvedValue({ userId: "admin-1" });
+  });
+
+  it("refuses a non-boolean suspension flag before touching the database", async () => {
+    await expect(adminSetSuspended("user-2", "false" as unknown as boolean)).rejects.toThrow(
+      "Invalid suspension request",
+    );
+    expect(mocks.getDb).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unknown moderation flag status", async () => {
+    await expect(adminSetFlagStatus(RUN_ID, "deleted" as unknown as "dismissed")).rejects.toThrow(
+      "Invalid flag status",
+    );
+    expect(mocks.getDb).not.toHaveBeenCalled();
   });
 });

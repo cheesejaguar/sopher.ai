@@ -79,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("metered atomic authorization", () => {
-  it("disables implicit Anthropic thinking without dropping Gateway attribution or fallbacks", () => {
+  it("minimises Anthropic reasoning without dropping Gateway attribution or fallbacks", () => {
     expect(
       gatewayOptions(
         {
@@ -88,15 +88,16 @@ describe("metered atomic authorization", () => {
           meteringAttemptId: "attempt-1",
         },
         "writer",
-        { withFallbacks: true },
+        { model: "anthropic/claude-sonnet-5.5", withFallbacks: true },
       ),
     ).toEqual({
       gateway: {
         user: "user-1",
         tags: ["role:writer", "project:project-1", "attempt:attempt-1"],
         caching: "auto",
-        models: expect.any(Array),
+        models: ["anthropic/claude-sonnet-5"],
       },
+      // Sonnet 5 rejects `between_tools`, so the shared chain sends `disabled`.
       anthropic: {
         thinking: { type: "disabled" },
       },
@@ -279,6 +280,29 @@ describe("metered atomic authorization", () => {
     );
   });
 
+  it("stores a streamed provider model id as the priced Gateway slug", async () => {
+    // Streamed responses report the provider's id, not the slug requested.
+    const result = {
+      usage,
+      steps: [{ usage, response: { modelId: "claude-sonnet-5-5" } }],
+    };
+
+    await metered(
+      {
+        userId: "user-1",
+        runId: "run-1",
+        billingScope: "generation:run-1:chapter:1",
+        reservationRef: "generation-reservation:run-1:wave-1",
+      },
+      { role: "writer", operation: "writer.draft", model: "anthropic/claude-sonnet-5.5" },
+      async () => result,
+    );
+
+    expect(mocks.recordMany.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ model: "anthropic/claude-sonnet-5.5" }),
+    ]);
+  });
+
   it("atomically aborts only a synchronous pre-dispatch failure", async () => {
     const failure = new Error("local request construction failed");
     const provider = vi.fn(() => {
@@ -418,7 +442,6 @@ describe("metered atomic authorization", () => {
       // did not — and the callers most exposed to a validation miss produce the
       // manuscript rather than polish it, so they have no degrade path.
       isRetryable: true,
-      rawText: '{"entities":[]}',
     });
     expect(mocks.recordMany).toHaveBeenCalledWith(
       [
@@ -457,7 +480,7 @@ describe("metered atomic authorization", () => {
       notes: z.record(z.string(), z.number()),
     });
     const rejected = {
-      score: 85,
+      score: 857_361, // distinctive: short numbers also match stack-trace line numbers
       issues: [
         { severity: "high", chapters: [1, 2, 3] },
         { severity: "major", chapters: [4] },
@@ -508,8 +531,6 @@ describe("metered atomic authorization", () => {
 
     expect(failure).toBeInstanceOf(MeteredOutputDeliveryError);
     expect(failure?.isRetryable).toBe(true);
-    // Paid output is salvageable in process, so a repair costs the author nothing.
-    expect(failure?.rawText).toBe(rawText);
     // Structure only: every entry is a schema path plus a zod code. The
     // model-chosen record key is masked because it is author content.
     expect(failure?.validationIssues).toEqual([
@@ -519,7 +540,7 @@ describe("metered atomic authorization", () => {
       "issues: too_big",
       "notes.*: invalid_type",
     ]);
-    for (const leak of ["lighthouse", "keeper wept", "high", "85"]) {
+    for (const leak of ["lighthouse", "keeper wept", "high", "857361"]) {
       expect(failure?.validationIssues.join(" ")).not.toContain(leak);
       expect(failure?.message).not.toContain(leak);
       // Own enumerable state is what logging, JSON, and structured clone see.
@@ -550,7 +571,6 @@ describe("metered atomic authorization", () => {
 
   it("reports an unparseable response as a structure-only diagnostic", () => {
     const failure = new MeteredOutputDeliveryError("concept.refine", "stop", 500, 0, {
-      rawText: "Here is the concept you asked for:\n```json\n{",
       validationCause: new NoObjectGeneratedError({
         message: "No object generated: could not parse the response.",
         cause: Object.assign(new Error("JSON parsing failed"), {
@@ -595,7 +615,6 @@ describe("metered atomic authorization", () => {
         validationCause: new NoOutputGeneratedError(),
       }).validationIssues,
     ).toEqual([]);
-    expect(new MeteredOutputDeliveryError("cover.generate", "error", 0, 0).rawText).toBeUndefined();
   });
 
   it("releases a first-step input guard failure that proves no provider dispatch", async () => {
@@ -757,8 +776,6 @@ describe("metered atomic authorization", () => {
       reasoningTokens: 4_928,
       isRetryable: false,
       message: expect.stringContaining("finish reason: length"),
-      // Truncated JSON is still paid-for output a caller may be able to close.
-      rawText: partialText,
     });
     await expect(call).rejects.toBeInstanceOf(MeteredOutputDeliveryError);
     await expect(call).rejects.toMatchObject({

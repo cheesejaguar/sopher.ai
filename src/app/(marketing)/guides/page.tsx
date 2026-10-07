@@ -17,7 +17,7 @@ export default function GuidesIndex() {
     <>
       <BreadcrumbJsonLd trail={[{ name: "Guides", path: "/guides" }]} />
 
-      <header className="marketing-canvas border-b border-black/10 dark:border-white/10">
+      <header className="marketing-canvas border-b border-hairline">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-28">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Field manual / 05 guides</p>
@@ -49,12 +49,12 @@ export default function GuidesIndex() {
             </div>
           </div>
 
-          <ol className="border-y border-black/10 dark:border-white/10 lg:col-span-8">
+          <ol className="border-y border-hairline lg:col-span-8">
             {GUIDES.map((guide, index) => (
               <li key={guide.slug}>
                 <Link
                   href={`/guides/${guide.slug}`}
-                  className="group grid min-h-28 grid-cols-[3rem_1fr_auto] gap-3 border-b border-black/10 py-6 last:border-b-0 dark:border-white/10 sm:grid-cols-[4rem_1fr_auto] sm:px-3"
+                  className="group grid min-h-28 grid-cols-[3rem_1fr_auto] gap-3 border-b border-hairline py-6 last:border-b-0 sm:grid-cols-[4rem_1fr_auto] sm:px-3"
                 >
                   <span className="font-mono text-xs tracking-[0.12em] text-primary sm:pt-1">
                     {String(index + 1).padStart(2, "0")}

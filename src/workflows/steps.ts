@@ -1,6 +1,5 @@
-import { createHash } from "node:crypto";
 import { FatalError, RetryableError, getStepMetadata, getWritable } from "workflow";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { APICallError } from "ai";
 import { getDb, schema, withDbTransaction, type DbTransaction } from "@/db";
 import { generateConcept, persistConcept } from "@/ai/agents/concept";
@@ -11,6 +10,8 @@ import {
   type OutlineGenerationCheckpoint,
 } from "@/ai/agents/outline";
 import { writeChapter } from "@/ai/agents/chapter-writer";
+import { minimumChapterWordCount } from "@/ai/chapter-length";
+import { countWords } from "@/lib/editor/anchors";
 import { generateChapterSummary, persistChapterSummary } from "@/ai/agents/summarizer";
 import { generateEntityBible, persistEntityBible } from "@/ai/agents/entity-bible";
 import { editChapter } from "@/ai/agents/editor";
@@ -54,7 +55,6 @@ import {
 import { generationResetSource, shouldArchiveGenerationReset } from "@/lib/generation-archive";
 import {
   chapterTopologyFingerprint,
-  cachedEditOutputAlreadyApplied,
   manuscriptDigest,
   outlineStateFingerprint,
   type ManuscriptStateRow,
@@ -74,6 +74,21 @@ import {
   type ResumeChapterMeteredWork,
 } from "./opening-credit-plan";
 import { isChapterComplete, isChapterProductionComplete, planFreshRunChapter } from "./resume";
+import {
+  currentManuscriptFromRows,
+  digestScopeKey,
+  loadCurrentManuscript,
+  manuscriptDigestMatches,
+  revisionContentEquals,
+} from "./manuscript-digest";
+import {
+  contentDigest,
+  dropCompletedRunWork,
+  editOutputAlreadyApplied,
+  pruneChapterWork,
+  pruneEditWork,
+  reusableEditWork,
+} from "./work-state";
 import { runCostEvent } from "./run-cost";
 import {
   buildContinuityChapterRepairs,
@@ -277,10 +292,6 @@ async function meteredScope(
   };
 }
 
-function contentDigest(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
-}
-
 async function loadManuscriptState(bookId: string): Promise<ManuscriptStateRow[]> {
   return getDb()
     .select({
@@ -294,10 +305,6 @@ async function loadManuscriptState(bookId: string): Promise<ManuscriptStateRow[]
     })
     .from(schema.chapters)
     .where(eq(schema.chapters.bookId, bookId));
-}
-
-async function loadManuscriptDigest(bookId: string): Promise<string> {
-  return manuscriptDigest(await loadManuscriptState(bookId));
 }
 
 async function loadStoredGenerationConfig(runId: string): Promise<GenerationConfig> {
@@ -816,18 +823,23 @@ export async function openingCreditCheckStep(
       })
       .from(schema.chapters)
       .where(eq(schema.chapters.bookId, book.id));
-    const currentManuscriptDigest = manuscriptDigest(rows);
+    // These rows already carry content, so both digest versions are free;
+    // a source run's checkpoints may have been written with either.
+    const currentManuscript = currentManuscriptFromRows(rows);
+    const legacyManuscriptDigest = await currentManuscript.legacyDigest();
+    const isCurrentManuscript = (stored: string | undefined) =>
+      stored !== undefined &&
+      (stored === currentManuscript.digest || stored === legacyManuscriptDigest);
     const byNumber = new Map(rows.map((row) => [row.chapterNumber, row]));
     const meteredChapters: ResumeChapterMeteredWork[] = [];
     const reportCheckpoint = source.completion?.continuityReport;
-    const report =
-      reportCheckpoint?.manuscriptDigest === currentManuscriptDigest
-        ? reportCheckpoint.report
-        : undefined;
+    const report = isCurrentManuscript(reportCheckpoint?.manuscriptDigest)
+      ? reportCheckpoint?.report
+      : undefined;
     const currentContinuityOutcomes = Object.values(
       source.completion?.continuityOutcomes ?? {},
     ).flatMap((checkpoint) =>
-      checkpoint?.manuscriptDigest === currentManuscriptDigest ? [checkpoint.outcome] : [],
+      checkpoint && isCurrentManuscript(checkpoint.manuscriptDigest) ? [checkpoint.outcome] : [],
     );
     const revisionTargets = report
       ? new Set(
@@ -887,7 +899,8 @@ export async function openingCreditCheckStep(
 
       let editorial: ResumeChapterMeteredWork["editorial"] = "none";
       if (config.tier !== "draft" && !downstreamCheckpoint) {
-        const cachedEdit = source.work?.edits?.[`editorial:${chapterNumber}`];
+        // A pruned edit has no text left to apply, so it is not cached work.
+        const cachedEdit = reusableEditWork(source.work?.edits?.[`editorial:${chapterNumber}`]);
         const cachedEditMatches = digest !== null && cachedEdit?.baseContentDigest === digest;
         if (!cachedEditMatches) {
           if (!proseComplete) {
@@ -905,11 +918,11 @@ export async function openingCreditCheckStep(
 
       let revision = false;
       if (revisionTargets.has(chapterNumber)) {
-        const cachedRevision = source.work?.edits?.[`revision:${chapterNumber}`];
+        const cachedRevision = reusableEditWork(source.work?.edits?.[`revision:${chapterNumber}`]);
         revision =
           !(
             revisionCheckpoint?.contentDigest === digest &&
-            revisionCheckpoint.reviewManuscriptDigest === currentManuscriptDigest
+            isCurrentManuscript(revisionCheckpoint.reviewManuscriptDigest)
           ) && !(digest !== null && cachedRevision?.baseContentDigest === digest);
       }
 
@@ -923,8 +936,9 @@ export async function openingCreditCheckStep(
       ? 0
       : phaseKeys.filter(
           (phaseKey) =>
-            source.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest !==
-            currentManuscriptDigest,
+            !isCurrentManuscript(
+              source.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest,
+            ),
         ).length;
     requiredUsd = resumeOpeningRequiredUsd(config, {
       entityBible: !source.completion?.entityBible,
@@ -1181,9 +1195,8 @@ export async function editorialWaveCreditCheckStep(
 
     const cached = stored.work?.edits?.[`${mode}:${chapterNumber}`];
     if (
-      cached &&
-      (cached.baseContentDigest === digest ||
-        cachedEditOutputAlreadyApplied(chapter.content, cached))
+      reusableEditWork(cached)?.baseContentDigest === digest ||
+      editOutputAlreadyApplied(chapter.content, cached)
     ) {
       return [];
     }
@@ -1222,12 +1235,14 @@ export async function continuityCreditCheckStep(
 ): Promise<CreditCheck> {
   "use step";
   const { book } = await loadRunContext(ref);
-  const [stored, currentDigest] = await Promise.all([
+  const [stored, currentManuscript] = await Promise.all([
     loadStoredGenerationConfig(ref.dbRunId),
-    loadManuscriptDigest(book.id),
+    loadCurrentManuscript(book.id),
   ]);
-  const complete =
-    stored.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest === currentDigest;
+  const complete = await manuscriptDigestMatches(
+    stored.completion?.continuityOutcomes?.[phaseKey]?.manuscriptDigest,
+    currentManuscript,
+  );
   return checkWalletForUsd(ref, complete ? 0 : continuityPhaseRequiredUsd(config));
 }
 
@@ -1312,7 +1327,7 @@ async function resetManuscriptForPreparation(
               eq(schema.chapterRevisions.chapterId, chapter.id),
               eq(schema.chapterRevisions.runId, ref.dbRunId),
               sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
-              eq(schema.chapterRevisions.content, chapter.content),
+              revisionContentEquals(chapter.content),
             ),
           )
           .limit(1);
@@ -1647,23 +1662,33 @@ export async function prepareCreativeQuestionStep(
 
   const { meter } = await loadRunContext(ref);
   try {
-    const question = await generateCreativeQuestion({
-      meter: await meteredScope(
-        meter,
-        ref,
-        config,
-        "creative-question:after-concept",
-        reservationRef,
-      ),
-      tier: config.tier,
-      concept,
-      brief: config.inputSnapshot.brief,
-      genre: config.inputSnapshot.genre ?? undefined,
-    });
-    // No salvageable question. Every early return above is the same outcome —
-    // outline straight from the concept — so this joins them instead of
-    // throwing: a retry would buy the identical answer.
-    if (!question) return null;
+    let question = stored.work?.creativeQuestion ?? null;
+    if (!question) {
+      question = await generateCreativeQuestion({
+        meter: await meteredScope(
+          meter,
+          ref,
+          config,
+          "creative-question:after-concept",
+          reservationRef,
+        ),
+        tier: config.tier,
+        concept,
+        brief: config.inputSnapshot.brief,
+        genre: config.inputSnapshot.genre ?? undefined,
+      });
+      // No salvageable question. Every early return above is the same
+      // outcome — outline straight from the concept — so this joins them
+      // instead of throwing: a retry would buy the identical answer.
+      if (!question) return null;
+      // Checkpoint the paid question before its row is written, so a
+      // transient insert failure retries the insert rather than the call.
+      const generated = question;
+      await updateStoredGenerationConfig(ref, (current) => ({
+        ...current,
+        work: { ...current.work, creativeQuestion: generated },
+      }));
+    }
     return persistCreativeQuestion({
       runId: ref.dbRunId,
       projectId: ref.projectId,
@@ -1830,26 +1855,42 @@ export async function entityBibleStep(
     };
   }
   try {
-    const existing = await listEntities(book.id);
-    const bible = await generateEntityBible({
-      meter: await meteredScope(meter, ref, config, "entity-bible", reservationRef),
-      bookId: book.id,
-      tier: config.tier,
-      concept,
-      outline,
-      genre: config.inputSnapshot.genre ?? undefined,
-      authoringContract: buildFrozenAuthoringContract(config.inputSnapshot),
-      existingNames: existing.map((e) => e.name),
-    });
+    const generateAndCheckpoint = async () => {
+      const existing = await listEntities(book.id);
+      const generated = await generateEntityBible({
+        meter: await meteredScope(meter, ref, config, "entity-bible", reservationRef),
+        bookId: book.id,
+        tier: config.tier,
+        concept,
+        outline,
+        genre: config.inputSnapshot.genre ?? undefined,
+        authoringContract: buildFrozenAuthoringContract(config.inputSnapshot),
+        existingNames: existing.map((e) => e.name),
+      });
+      // Checkpoint the paid output before persisting it: a transient failure
+      // in the transaction below then retries the write, not the provider
+      // call (which metered() would otherwise refund and buy again).
+      await updateStoredGenerationConfig(ref, (current) => ({
+        ...current,
+        work: { ...current.work, entityBible: generated },
+      }));
+      return generated;
+    };
+    const bible = stored.work?.entityBible ?? (await generateAndCheckpoint());
     const result = await withActiveAuthoringMutation(ref, async (tx) => {
       const persisted = await persistEntityBible(book.id, bible, tx);
-      await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
-        ...current,
-        completion: {
-          ...current.completion,
-          entityBible: { sourceRunId: ref.dbRunId, ...persisted },
-        },
-      }));
+      await updateStoredGenerationConfigInTransaction(tx, ref, (current) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- persisted with this checkpoint
+        const { entityBible: _applied, ...work } = current.work ?? {};
+        return {
+          ...current,
+          work,
+          completion: {
+            ...current.completion,
+            entityBible: { sourceRunId: ref.dbRunId, ...persisted },
+          },
+        };
+      });
       return persisted;
     });
     return result;
@@ -1889,7 +1930,7 @@ export async function resetChapterStep(ref: RunRef, chapterNumber: number): Prom
             eq(schema.chapterRevisions.chapterId, chapter.id),
             eq(schema.chapterRevisions.runId, ref.dbRunId),
             eq(schema.chapterRevisions.source, "regenerate"),
-            eq(schema.chapterRevisions.content, chapter.content),
+            revisionContentEquals(chapter.content),
           ),
         )
         .limit(1);
@@ -1979,16 +2020,29 @@ async function ensureChapterPostWrite(
 
   await withActiveAuthoringMutation(ref, async (tx) => {
     await persistChapterSummary(summaryInput, summaryCheckpoint.result, tx);
-    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => ({
-      ...current,
-      completion: {
-        ...current.completion,
-        chapterSummaries: {
-          ...current.completion?.chapterSummaries,
-          [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+    await updateStoredGenerationConfigInTransaction(tx, ref, (current) => {
+      // The chapter row holds this prose and the checkpoint below proves its
+      // upkeep ran, so the writer/summary text in work is now duplication.
+      const chapterWork = pruneChapterWork(current.work?.chapters?.[key], digest);
+      return {
+        ...current,
+        ...(chapterWork
+          ? {
+              work: {
+                ...current.work,
+                chapters: { ...current.work?.chapters, [key]: chapterWork },
+              },
+            }
+          : {}),
+        completion: {
+          ...current.completion,
+          chapterSummaries: {
+            ...current.completion?.chapterSummaries,
+            [key]: { sourceRunId: ref.dbRunId, contentDigest: digest },
+          },
         },
-      },
-    }));
+      };
+    });
   });
 }
 
@@ -2136,21 +2190,26 @@ export async function writeChapterStep(
     };
   }
 
-  const prevSummaries = await db
-    .select({
-      chapterNumber: schema.chapters.chapterNumber,
-      title: schema.chapters.title,
-      summary: schema.chapters.summary,
-    })
-    .from(schema.chapters)
-    .where(
-      and(
-        eq(schema.chapters.bookId, book.id),
-        sql`${schema.chapters.chapterNumber} < ${chapterNumber}`,
-        sql`${schema.chapters.summary} is not null`,
-      ),
-    )
-    .orderBy(schema.chapters.chapterNumber);
+  // The writer sees the four most recent summaries; select only those
+  // (newest first, then back into reading order).
+  const prevSummaries = (
+    await db
+      .select({
+        chapterNumber: schema.chapters.chapterNumber,
+        title: schema.chapters.title,
+        summary: schema.chapters.summary,
+      })
+      .from(schema.chapters)
+      .where(
+        and(
+          eq(schema.chapters.bookId, book.id),
+          sql`${schema.chapters.chapterNumber} < ${chapterNumber}`,
+          sql`${schema.chapters.summary} is not null`,
+        ),
+      )
+      .orderBy(desc(schema.chapters.chapterNumber))
+      .limit(4)
+  ).reverse();
 
   const claimed = await withActiveAuthoringMutation(ref, async (tx) => {
     const [row] = await tx
@@ -2205,7 +2264,7 @@ export async function writeChapterStep(
         chapterNumber,
         totalChapters: config.targetChapters,
         chapterOutline,
-        prevSummaries: prevSummaries.slice(-4),
+        prevSummaries,
         genre: config.inputSnapshot.genre ?? undefined,
         styleGuide: config.inputSnapshot.styleGuide ?? undefined,
         voiceProfile: config.inputSnapshot.voiceProfile ?? undefined,
@@ -2343,8 +2402,14 @@ export async function editChapterStep(
   }
 
   try {
-    let edited = stored.work?.edits?.[key];
-    const cachedOutputAlreadyApplied = cachedEditOutputAlreadyApplied(chapter.content, edited);
+    const cachedOutputAlreadyApplied = editOutputAlreadyApplied(
+      chapter.content,
+      stored.work?.edits?.[key],
+    );
+    // A pruned checkpoint (text dropped after it was applied) is not
+    // reusable; reaching one here means the author restored the pre-edit
+    // prose, so the pass is genuinely bought again.
+    let edited = reusableEditWork(stored.work?.edits?.[key]);
     if (!cachedOutputAlreadyApplied && (!edited || edited.baseContentDigest !== beforeDigest)) {
       const scopedMeter = await meteredScope(
         meter,
@@ -2385,16 +2450,18 @@ export async function editChapterStep(
           edits: { ...current.work?.edits, [key]: editResult },
         },
       }));
-      edited = stored.work?.edits?.[key] ?? edited;
+      edited = reusableEditWork(stored.work?.edits?.[key]) ?? edited;
     }
-    if (!edited) {
+    if (!edited && !cachedOutputAlreadyApplied) {
       throw new RetryableError("Editorial output was not checkpointed", { retryAfter: "1s" });
     }
+    const changed = cachedOutputAlreadyApplied || edited?.changed === true;
 
     let finalContent = chapter.content;
     const persistedStatus =
       mode === "revision" ? continuityRevisionStatus(chapter.status) : "edited";
-    if (edited.changed && !cachedOutputAlreadyApplied) {
+    if (!cachedOutputAlreadyApplied && edited?.changed && edited.content !== undefined) {
+      const editedContent = edited.content;
       const revisionSource = mode === "revision" ? "continuity-revision" : "writer";
       await withActiveAuthoringMutation(ref, async (tx) => {
         const [archive] = await tx
@@ -2405,7 +2472,7 @@ export async function editChapterStep(
               eq(schema.chapterRevisions.chapterId, chapter.id),
               eq(schema.chapterRevisions.runId, ref.dbRunId),
               eq(schema.chapterRevisions.source, revisionSource),
-              eq(schema.chapterRevisions.content, chapter.content),
+              revisionContentEquals(chapter.content),
             ),
           )
           .limit(1);
@@ -2420,8 +2487,8 @@ export async function editChapterStep(
         const [updated] = await tx
           .update(schema.chapters)
           .set({
-            content: edited.content,
-            wordCount: edited.content.split(/\s+/).filter(Boolean).length,
+            content: editedContent,
+            wordCount: editedContent.split(/\s+/).filter(Boolean).length,
             // A prose change invalidates the old summary as a continuity and
             // export aid. Entity canon is intentionally not rewritten here:
             // findings stay open until the author verifies the correction.
@@ -2444,40 +2511,47 @@ export async function editChapterStep(
           .from(schema.chapters)
           .where(eq(schema.chapters.id, chapter.id))
           .limit(1);
-        if (current?.content !== edited.content) {
+        if (current?.content !== editedContent) {
           throw new RetryableError("Chapter changed while its editorial pass was applying", {
             retryAfter: "1s",
           });
         }
       });
-      finalContent = edited.content;
+      finalContent = editedContent;
     }
 
     const checkpoint = {
       sourceRunId: ref.dbRunId,
       contentDigest: contentDigest(finalContent),
-      changed: edited.changed,
+      changed,
       ...(mode === "revision" && reviewManuscriptDigest ? { reviewManuscriptDigest } : {}),
     };
-    await updateStoredGenerationConfig(ref, (current) => ({
-      ...current,
-      completion: {
-        ...current.completion,
-        ...(mode === "revision"
-          ? {
-              revisionChapters: {
-                ...current.completion?.revisionChapters,
-                [String(chapterNumber)]: checkpoint,
-              },
-            }
-          : {
-              editedChapters: {
-                ...current.completion?.editedChapters,
-                [String(chapterNumber)]: checkpoint,
-              },
-            }),
-      },
-    }));
+    await updateStoredGenerationConfig(ref, (current) => {
+      // The chapter row now holds the output; keep only the edit's digest.
+      const appliedEdit = pruneEditWork(current.work?.edits?.[key]);
+      return {
+        ...current,
+        ...(appliedEdit
+          ? { work: { ...current.work, edits: { ...current.work?.edits, [key]: appliedEdit } } }
+          : {}),
+        completion: {
+          ...current.completion,
+          ...(mode === "revision"
+            ? {
+                revisionChapters: {
+                  ...current.completion?.revisionChapters,
+                  [String(chapterNumber)]: checkpoint,
+                },
+              }
+            : {
+                editedChapters: {
+                  ...current.completion?.editedChapters,
+                  [String(chapterNumber)]: checkpoint,
+                },
+              }),
+        },
+      };
+    });
     await persistAndPublishProgress(
       ref,
       {
@@ -2487,7 +2561,7 @@ export async function editChapterStep(
       },
       `chapter:${chapterNumber}:edited`,
     );
-    return { chapterNumber, changed: edited.changed };
+    return { chapterNumber, changed };
   } catch (error) {
     toWorkflowError(error);
   }
@@ -2521,10 +2595,16 @@ export async function continuityPhaseStep(
 ): Promise<ContinuityOutcome> {
   "use step";
   const { book, meter } = await loadRunContext(ref);
-  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+  const currentManuscript = await loadCurrentManuscript(book.id);
+  const currentManuscriptDigest = currentManuscript.digest;
   const stored = await loadStoredGenerationConfig(ref.dbRunId);
   const checkpoint = stored.completion?.continuityOutcomes?.[phaseKey];
-  if (checkpoint?.manuscriptDigest === currentManuscriptDigest) return checkpoint.outcome;
+  if (
+    checkpoint &&
+    (await manuscriptDigestMatches(checkpoint.manuscriptDigest, currentManuscript))
+  ) {
+    return checkpoint.outcome;
+  }
   try {
     const outcome = await runContinuityPhase(
       {
@@ -2532,7 +2612,7 @@ export async function continuityPhaseStep(
           meter,
           ref,
           config,
-          `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
+          `continuity:${phaseKey}:${digestScopeKey(currentManuscriptDigest)}`,
           reservationRef,
         ),
         tools: {
@@ -2540,17 +2620,16 @@ export async function continuityPhaseStep(
           userId: ref.userId,
           projectId: ref.projectId,
           bookId: book.id,
-          mutationScope: `continuity:${phaseKey}:${currentManuscriptDigest.slice(0, 16)}`,
+          mutationScope: `continuity:${phaseKey}:${digestScopeKey(currentManuscriptDigest)}`,
         },
         tier: config.tier,
       },
       phaseKey,
     );
-    if ((await loadManuscriptDigest(book.id)) !== currentManuscriptDigest) {
-      throw new RetryableError("Manuscript changed during continuity review", {
-        retryAfter: "1s",
-      });
-    }
+    // Checkpoint first. The outcome is bound to the digest it reviewed, so if
+    // the manuscript changed meanwhile the retry below ignores it and reviews
+    // the new text — but a transient failure in that check no longer re-buys
+    // a phase that already reviewed the right manuscript.
     await updateStoredGenerationConfig(ref, (current) => ({
       ...current,
       completion: {
@@ -2565,6 +2644,11 @@ export async function continuityPhaseStep(
         },
       },
     }));
+    if ((await loadCurrentManuscript(book.id)).digest !== currentManuscriptDigest) {
+      throw new RetryableError("Manuscript changed during continuity review", {
+        retryAfter: "1s",
+      });
+    }
     return outcome;
   } catch (error) {
     toWorkflowError(error);
@@ -2588,10 +2672,14 @@ export async function continuityFinalizeStep(
 ): Promise<ContinuityReport> {
   "use step";
   const { book } = await loadRunContext(ref);
-  const currentManuscriptDigest = await loadManuscriptDigest(book.id);
+  const currentManuscript = await loadCurrentManuscript(book.id);
+  const currentManuscriptDigest = currentManuscript.digest;
   const stored = await loadStoredGenerationConfig(ref.dbRunId);
   const checkpoint = stored.completion?.continuityReport;
-  if (checkpoint?.manuscriptDigest === currentManuscriptDigest) {
+  if (
+    checkpoint &&
+    (await manuscriptDigestMatches(checkpoint.manuscriptDigest, currentManuscript))
+  ) {
     await persistAndPublishProgress(
       ref,
       {
@@ -2604,13 +2692,15 @@ export async function continuityFinalizeStep(
     );
     return checkpoint.report;
   }
-  if (
-    outcomes.some(
-      (outcome) =>
-        stored.completion?.continuityOutcomes?.[outcome.key]?.manuscriptDigest !==
-        currentManuscriptDigest,
-    )
-  ) {
+  const outcomesMatch = await Promise.all(
+    outcomes.map((outcome) =>
+      manuscriptDigestMatches(
+        stored.completion?.continuityOutcomes?.[outcome.key]?.manuscriptDigest,
+        currentManuscript,
+      ),
+    ),
+  );
+  if (outcomesMatch.includes(false)) {
     throw new RetryableError("Continuity phases do not match the current manuscript", {
       retryAfter: "1s",
     });
@@ -2743,6 +2833,19 @@ export async function finalizeStep(
       .where(eq(schema.books.projectId, ref.projectId))
       .limit(1);
     if (!book) throw new FatalError("Book not found");
+    // Use the same latest outline and fallback target as writeChapterStep,
+    // including runs resumed from saved chapters. Do not trust cached counts
+    // alone: the persisted prose must also meet the writer's minimum.
+    const [outlineRow] = await tx
+      .select({ content: schema.outlines.content })
+      .from(schema.outlines)
+      .where(eq(schema.outlines.bookId, book.id))
+      .orderBy(desc(schema.outlines.version))
+      .limit(1);
+    const outline = outlineRow?.content as BookOutline | undefined;
+    const chapterTargets = new Map(
+      outline?.chapters.map((chapter) => [chapter.number, chapter.targetWords]),
+    );
     const beforeRows = await tx
       .select({
         id: schema.chapters.id,
@@ -2758,13 +2861,19 @@ export async function finalizeStep(
     const expected = stored.targetChapters;
     const completeNumbers = new Set(
       beforeRows
-        .filter(
-          (chapter) =>
+        .filter((chapter) => {
+          const minimumWords = minimumChapterWordCount(
+            resolvedChapterTargetWords(stored, chapterTargets.get(chapter.chapterNumber)),
+          );
+          return (
             chapter.chapterNumber >= 1 &&
             chapter.chapterNumber <= expected &&
             chapter.wordCount > 0 &&
-            chapter.content.trim().length > 0,
-        )
+            chapter.wordCount >= minimumWords &&
+            chapter.content.trim().length > 0 &&
+            countWords(chapter.content) >= minimumWords
+          );
+        })
         .map((chapter) => chapter.chapterNumber),
     );
     if (completeNumbers.size < expected) {
@@ -2789,8 +2898,10 @@ export async function finalizeStep(
     ) as ManuscriptStateRow[];
     const digest = manuscriptDigest(finalizedRows);
     const now = new Date();
+    // A completed run is never a resume source, so its chapter/edit work is
+    // dropped here; the manuscript it produced is the chapter rows.
     const config: GenerationConfig = {
-      ...stored,
+      ...dropCompletedRunWork(stored),
       completion: {
         ...stored.completion,
         finalized: { sourceRunId: ref.dbRunId, manuscriptDigest: digest },

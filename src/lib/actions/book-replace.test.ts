@@ -264,7 +264,7 @@ describe("applyBookReplace", () => {
       version: 4,
       wordCount: 9,
     });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/projects/${projectId}`);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(`/projects/${projectId}`, "layout");
   });
 
   it("writes nothing when a chapter moved under the preview", async () => {

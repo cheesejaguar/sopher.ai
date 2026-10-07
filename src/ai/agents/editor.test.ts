@@ -163,6 +163,15 @@ describe("editChapter", () => {
     expect(result.changed).toBe(true);
   });
 
+  it("inserts revised text literally, never as a $-replacement pattern", async () => {
+    const result = await edit({
+      replacements: [replacement({ revised: "It cost $$$ and $& and $' and $` to count them." })],
+      notes: [],
+    });
+    expect(result.content).toContain("It cost $$$ and $& and $' and $` to count them.");
+    expect(result.content).not.toContain("Mira counted the boats twice");
+  });
+
   it("drops an unchanged replacement instead of recording a fake edit", async () => {
     const original = "Mira counted the boats twice and got a different number both times.";
     const result = await edit({

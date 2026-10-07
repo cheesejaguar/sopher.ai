@@ -4,7 +4,7 @@ export function Faq() {
   return (
     <section
       aria-labelledby="faq-heading"
-      className="defer-offscreen defer-faq border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-faq border-b border-hairline"
     >
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 sm:gap-10 sm:px-6 sm:py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
         <div className="lg:col-span-4">
@@ -16,11 +16,11 @@ export function Faq() {
             Common questions
           </h2>
         </div>
-        <dl className="border-t border-black/10 dark:border-white/10 lg:col-span-8">
+        <dl className="border-t border-hairline lg:col-span-8">
           {FAQS.map((item) => (
             <div
               key={item.question}
-              className="grid gap-3 border-b border-black/10 py-6 dark:border-white/10 sm:grid-cols-[minmax(10rem,0.8fr)_1.2fr] sm:gap-8"
+              className="grid gap-3 border-b border-hairline py-6 sm:grid-cols-[minmax(10rem,0.8fr)_1.2fr] sm:gap-8"
             >
               <dt className="font-display font-semibold tracking-[-0.015em]">{item.question}</dt>
               <dd className="text-sm leading-6 text-pretty text-muted-foreground">{item.answer}</dd>

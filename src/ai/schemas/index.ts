@@ -335,7 +335,7 @@ export function normalizeCreativeQuestion(wire: unknown): CreativeQuestion | nul
   return parsed.success ? parsed.data : null;
 }
 
-export const emotionalArcSchema = z.enum([
+const EMOTIONAL_ARCS = [
   "exposition",
   "rising_action",
   "tension_building",
@@ -344,18 +344,26 @@ export const emotionalArcSchema = z.enum([
   "resolution",
   "denouement",
   "transition",
-]);
+] as const;
+export const emotionalArcSchema = z.enum(EMOTIONAL_ARCS);
+
+const MAX_OUTLINE_KEY_EVENTS = 8;
+const MAX_OUTLINE_CHARACTERS_PRESENT = 10;
+const MAX_OUTLINE_THEMES = 6;
+const MAX_OUTLINE_CHAPTERS = 60;
+const MIN_CHAPTER_TARGET_WORDS = 500;
+const MAX_CHAPTER_TARGET_WORDS = 10_000;
 
 export const chapterOutlineSchema = z.object({
   number: z.number().int().min(1),
   title: z.string(),
   summary: z.string(),
-  keyEvents: z.array(z.string()).max(8),
-  charactersPresent: z.array(z.string()).max(10),
+  keyEvents: z.array(z.string()).max(MAX_OUTLINE_KEY_EVENTS),
+  charactersPresent: z.array(z.string()).max(MAX_OUTLINE_CHARACTERS_PRESENT),
   emotionalArc: emotionalArcSchema,
   openingHook: z.string(),
   closingHook: z.string(),
-  targetWords: z.number().int().min(500).max(10_000),
+  targetWords: z.number().int().min(MIN_CHAPTER_TARGET_WORDS).max(MAX_CHAPTER_TARGET_WORDS),
 });
 export type ChapterOutlinePlan = z.infer<typeof chapterOutlineSchema>;
 
@@ -363,11 +371,115 @@ export const bookOutlineSchema = z.object({
   title: z.string(),
   logline: z.string(),
   synopsis: z.string(),
-  themes: z.array(z.string()).max(6),
+  themes: z.array(z.string()).max(MAX_OUTLINE_THEMES),
   plotStructure: z.string(),
-  chapters: z.array(chapterOutlineSchema).min(3).max(60),
+  chapters: z.array(chapterOutlineSchema).min(3).max(MAX_OUTLINE_CHAPTERS),
 });
 export type BookOutline = z.infer<typeof bookOutlineSchema>;
+
+export const bookOutlineWireSchema = z.object({
+  // Required: an outline answer without these has nothing to salvage, and a
+  // missing field is the one constraint the provider enforces.
+  title: z.string(),
+  logline: z.string(),
+  synopsis: z.string(),
+  themes: wireTextArray.describe(`At most ${MAX_OUTLINE_THEMES} themes`),
+  plotStructure: z.string(),
+  chapters: z
+    .array(
+      z.object({
+        number: wireNumber.describe("Chapter number, starting at 1"),
+        title: z.string(),
+        summary: z.string(),
+        keyEvents: wireTextArray.describe(`At most ${MAX_OUTLINE_KEY_EVENTS} key events`),
+        charactersPresent: wireTextArray.describe(
+          `At most ${MAX_OUTLINE_CHARACTERS_PRESENT} characters`,
+        ),
+        emotionalArc: wireText.describe(`One of: ${EMOTIONAL_ARCS.join(", ")}`),
+        openingHook: wireText,
+        closingHook: wireText,
+        targetWords: wireNumber.describe("Target length of the chapter in words"),
+      }),
+    )
+    .describe("Every chapter, in reading order"),
+});
+export type BookOutlineWire = z.infer<typeof bookOutlineWireSchema>;
+
+export type OutlineNormalizationOptions = {
+  /**
+   * The run's per-chapter word range. A target outside it is clamped into it —
+   * the same repair a self-check call would otherwise be paid to make.
+   */
+  targetWords?: { min: number; max: number };
+};
+
+function normalizeOutlineChapter(
+  wire: unknown,
+  index: number,
+  targetWords: { min: number; max: number },
+): ChapterOutlinePlan | null {
+  const chapter = asRecord(wire);
+  const title = coerceNonEmptyString(chapter.title);
+  const summary = coerceNonEmptyString(chapter.summary);
+  // A chapter with neither a title nor a summary gives the writer nothing.
+  if (!title && !summary) return null;
+  const words = coerceNumber(chapter.targetWords);
+  return {
+    // Reading order is the order the model wrote; renumbering by position
+    // repairs a 0-based or gapped list instead of paying a self-check for it.
+    number: index + 1,
+    title: title ?? `Chapter ${index + 1}`,
+    summary: summary ?? "",
+    keyEvents: truncateArray(coerceStringArray(chapter.keyEvents), MAX_OUTLINE_KEY_EVENTS),
+    charactersPresent: truncateArray(
+      coerceStringArray(chapter.charactersPresent),
+      MAX_OUTLINE_CHARACTERS_PRESENT,
+    ),
+    emotionalArc: oneOfOr(chapter.emotionalArc, EMOTIONAL_ARCS, "transition"),
+    openingHook: coerceString(chapter.openingHook),
+    closingHook: coerceString(chapter.closingHook),
+    targetWords: Math.round(
+      words === null
+        ? (targetWords.min + targetWords.max) / 2
+        : Math.min(Math.max(words, targetWords.min), targetWords.max),
+    ),
+  };
+}
+
+/**
+ * Pulls an outline answer back onto the canonical type. The production shape
+ * the author approved — exact chapter count — is deliberately not invented
+ * here: a short or long outline still reaches the outline agent's code check
+ * and self-check, which can actually write the missing chapters.
+ */
+export function normalizeBookOutline(
+  wire: unknown,
+  options: OutlineNormalizationOptions = {},
+): BookOutline {
+  const value = asRecord(wire);
+  const range = options.targetWords ?? {
+    min: MIN_CHAPTER_TARGET_WORDS,
+    max: MAX_CHAPTER_TARGET_WORDS,
+  };
+  const targetWords = {
+    min: Math.max(MIN_CHAPTER_TARGET_WORDS, Math.ceil(range.min)),
+    max: Math.min(MAX_CHAPTER_TARGET_WORDS, Math.floor(range.max)),
+  };
+  const chapters = truncateArray(compact(coerceArray(value.chapters)), MAX_OUTLINE_CHAPTERS);
+  return {
+    title: coerceString(value.title),
+    logline: coerceString(value.logline),
+    synopsis: coerceString(value.synopsis),
+    themes: truncateArray(coerceStringArray(value.themes), MAX_OUTLINE_THEMES),
+    plotStructure: coerceString(value.plotStructure),
+    chapters: compact(
+      chapters.map((chapter, index) => normalizeOutlineChapter(chapter, index, targetWords)),
+    ).map((chapter, index) => ({ ...chapter, number: index + 1 })),
+  };
+}
+
+const MAX_SCENES = 6;
+const MAX_SCENE_CHARACTERS = 8;
 
 export const scenePlanSchema = z.object({
   scenes: z
@@ -377,15 +489,66 @@ export const scenePlanSchema = z.object({
         povGoal: z.string(),
         conflict: z.string(),
         exitState: z.string(),
-        charactersNeeded: z.array(z.string()).max(8),
+        charactersNeeded: z.array(z.string()).max(MAX_SCENE_CHARACTERS),
       }),
     )
     .min(1)
-    .max(6),
+    .max(MAX_SCENES),
   openingHookApproach: z.string(),
   closingHookApproach: z.string(),
 });
 export type ScenePlan = z.infer<typeof scenePlanSchema>;
+
+export const scenePlanWireSchema = z.object({
+  scenes: z
+    .array(
+      z.object({
+        beat: wireText,
+        povGoal: wireText,
+        conflict: wireText,
+        exitState: wireText,
+        charactersNeeded: wireTextArray.describe(
+          `At most ${MAX_SCENE_CHARACTERS} characters per scene`,
+        ),
+      }),
+    )
+    .describe(`Between 1 and ${MAX_SCENES} scenes, in order`),
+  openingHookApproach: wireText,
+  closingHookApproach: wireText,
+});
+export type ScenePlanWire = z.infer<typeof scenePlanWireSchema>;
+
+function normalizeScene(wire: unknown): ScenePlan["scenes"][number] | null {
+  const scene = asRecord(wire);
+  const beat = coerceString(scene.beat);
+  const exitState = coerceString(scene.exitState);
+  // A scene that names neither what happens nor where it ends plans nothing.
+  if (!beat.trim() && !exitState.trim()) return null;
+  return {
+    beat,
+    povGoal: coerceString(scene.povGoal),
+    conflict: coerceString(scene.conflict),
+    exitState,
+    charactersNeeded: truncateArray(
+      coerceStringArray(scene.charactersNeeded),
+      MAX_SCENE_CHARACTERS,
+    ),
+  };
+}
+
+/**
+ * A scene plan is scaffolding for the draft, not author-facing output, so a
+ * seventh scene is dropped rather than failing a paid planning call. An empty
+ * plan stays empty: the draft prompt still carries the chapter outline.
+ */
+export function normalizeScenePlan(wire: unknown): ScenePlan {
+  const value = asRecord(wire);
+  return {
+    scenes: truncateArray(compact(coerceArray(value.scenes).map(normalizeScene)), MAX_SCENES),
+    openingHookApproach: coerceString(value.openingHookApproach),
+    closingHookApproach: coerceString(value.closingHookApproach),
+  };
+}
 
 const CRITIQUE_VERDICTS = ["pass", "revise"] as const;
 const CRITIQUE_SEVERITIES = ["minor", "major"] as const;

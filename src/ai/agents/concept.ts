@@ -126,7 +126,7 @@ export async function generateConcept(
           // for, deterministically, on every retry. normalizeConcept truncates
           // instead and lands back on BookConcept.
           output: Output.object({ schema: conceptWireSchema }),
-          providerOptions: gatewayOptions(input.meter, "concept"),
+          providerOptions: gatewayOptions(input.meter, "concept", { model: model }),
         }),
     );
     const salvaged = normalizeConcept(result.output);
@@ -153,7 +153,7 @@ export async function generateConcept(
         // checkpointed it and the retry resumes from there — but it does buy
         // the same over-cap answer again, at the price of the whole pass.
         output: Output.object({ schema: conceptWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "concept"),
+        providerOptions: gatewayOptions(input.meter, "concept", { model: model }),
       }),
   );
 

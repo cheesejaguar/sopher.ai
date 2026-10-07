@@ -20,6 +20,7 @@ import {
   type ImportPreviewResponse,
 } from "@/lib/import";
 import { MAX_CHAPTER_CONTENT_CHARS } from "@/lib/chapter-split";
+import { MAX_DOCX_UNCOMPRESSED_BYTES, measureZipUncompressedBytes } from "@/lib/import/zip";
 import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { getStudioAccess } from "@/lib/studio-access";
 import { projectGenreSchema, projectTitleSchema } from "@/lib/validation/project";
@@ -128,9 +129,28 @@ export async function POST(req: Request) {
 
   let markdown: string;
   if (format === "docx") {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    // A 4 MB upload can expand a thousandfold. Measure what it really inflates
+    // to, with a hard cap, before handing it to mammoth.
+    const measured = measureZipUncompressedBytes(buffer);
+    if (!measured.ok && measured.reason === "too_large") {
+      return Response.json(
+        {
+          error: `That .docx expands to more than ${Math.round(MAX_DOCX_UNCOMPRESSED_BYTES / (1024 * 1024))} MB. Export the manuscript as Markdown or plain text instead.`,
+          code: "file_too_large",
+        },
+        { status: 413 },
+      );
+    }
+    if (!measured.ok) {
+      return Response.json(
+        { error: "That .docx could not be read. Re-save it from Word and try again." },
+        { status: 422 },
+      );
+    }
     try {
       const { value } = await mammoth.convertToHtml(
-        { buffer: Buffer.from(await file.arrayBuffer()) },
+        { buffer },
         {
           // Word stores its pictures inside the file and mammoth returns them
           // as base64 by default, which would put megabytes of data URI into

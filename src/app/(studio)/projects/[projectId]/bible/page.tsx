@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { EntityCard } from "@/components/bible/entity-card";
 import { EntityCanonDialog } from "@/components/bible/entity-canon-dialog";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 import { listEntities, openContradictions } from "@/db/queries/entities";
 import { ENTITY_KINDS, type EntityKind } from "@/ai/schemas/entities";
@@ -20,7 +20,7 @@ const KIND_LABELS: Record<EntityKind, string> = {
 
 export default async function BiblePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { book } = data;

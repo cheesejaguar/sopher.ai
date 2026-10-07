@@ -45,7 +45,7 @@ export const imageTool: ContentTool = {
           prompt: visualPromptInstruction(input.text),
           maxOutputTokens: meteredMaxOutputTokens("tool.image.prompt"),
           prepareStep: meteredInputGuard("tool.image.prompt"),
-          providerOptions: gatewayOptions(promptMeter, "content-tool"),
+          providerOptions: gatewayOptions(promptMeter, "content-tool", { model: promptModel }),
         }),
     );
     const visualPrompt = promptResult.text.trim();
@@ -62,7 +62,7 @@ export const imageTool: ContentTool = {
           prompt: visualPrompt,
           maxOutputTokens: meteredMaxOutputTokens("tool.image.generate"),
           prepareStep: meteredInputGuard("tool.image.generate"),
-          providerOptions: gatewayOptions(imageMeter, "content-tool"),
+          providerOptions: gatewayOptions(imageMeter, "content-tool", { model: imageModel }),
         }),
     );
 

@@ -2,12 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
+  assertNotSuspended: vi.fn(),
   createReaderShare: vi.fn(),
   rateLimit: vi.fn(),
 }));
 
+const { TestSuspendedError } = vi.hoisted(() => ({
+  TestSuspendedError: class TestSuspendedError extends Error {},
+}));
+
 vi.mock("@/lib/auth", () => ({
   requireUser: mocks.requireUser,
+  assertNotSuspended: mocks.assertNotSuspended,
+  SuspendedError: TestSuspendedError,
   UnauthorizedError: class UnauthorizedError extends Error {},
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -32,11 +39,26 @@ const token = "uXFb2jtK_sno-TzLiofyD7TqBYZ3p3YP5eI6jgoyjZs";
 
 beforeEach(() => {
   mocks.requireUser.mockReset().mockResolvedValue({ userId: "user-1" });
+  mocks.assertNotSuspended.mockReset().mockResolvedValue(undefined);
   mocks.createReaderShare.mockReset();
   mocks.rateLimit.mockReset().mockResolvedValue({ limited: false });
 });
 
 describe("reader-share creation route", () => {
+  it("refuses a suspended author before capturing an edition", async () => {
+    mocks.assertNotSuspended.mockRejectedValue(new TestSuspendedError("This account is suspended"));
+    const response = await POST(
+      new Request("https://sopher.ai/api/projects/x/reader-shares", {
+        method: "POST",
+        body: JSON.stringify({ requestKey, expires: "30d", acceptedReaderTerms: true }),
+      }),
+      { params: Promise.resolve({ projectId }) },
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.assertNotSuspended).toHaveBeenCalledWith("user-1");
+    expect(mocks.createReaderShare).not.toHaveBeenCalled();
+  });
+
   it("never accepts a caller-selected bearer secret", async () => {
     const response = await POST(
       new Request("https://sopher.ai/api/projects/x/reader-shares", {

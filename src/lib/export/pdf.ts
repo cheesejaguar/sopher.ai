@@ -11,6 +11,7 @@ import {
   type PrintLayout,
   type PrintOptions,
 } from "./print-layout";
+import { ownedImageUrlFilter } from "@/lib/security/blob-url";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 const SERIF = "Times-Roman";
@@ -386,7 +387,8 @@ export async function exportPdf(
   m: AssembledManuscript,
   options: PrintOptions = DEFAULT_PRINT_OPTIONS,
 ): Promise<ExportResult> {
-  const cover = await fetchCover(m.coverUrl);
+  // Same allowlist as EPUB: the cover is fetched server-side and embedded.
+  const cover = await fetchCover(m.coverUrl ? ownedImageUrlFilter(m.assetUrls)(m.coverUrl) : null);
 
   // The gutter widens with page count and narrows the measure, which can push
   // the book into the next tier, so the first pass is an estimate. Gutters only
