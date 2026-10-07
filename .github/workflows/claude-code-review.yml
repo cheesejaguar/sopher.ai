@@ -56,4 +56,4 @@ jobs:
           # v1 routes CLI configuration through claude_args. Keep the model
           # pinned so a provider-default retirement cannot silently break CI.
           claude_args: |
-            --model claude-sonnet-5-5
+            --model claude-sonnet-5
