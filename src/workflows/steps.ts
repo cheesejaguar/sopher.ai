@@ -10,6 +10,8 @@ import {
   type OutlineGenerationCheckpoint,
 } from "@/ai/agents/outline";
 import { writeChapter } from "@/ai/agents/chapter-writer";
+import { minimumChapterWordCount } from "@/ai/chapter-length";
+import { countWords } from "@/lib/editor/anchors";
 import { generateChapterSummary, persistChapterSummary } from "@/ai/agents/summarizer";
 import { generateEntityBible, persistEntityBible } from "@/ai/agents/entity-bible";
 import { editChapter } from "@/ai/agents/editor";
@@ -2831,6 +2833,19 @@ export async function finalizeStep(
       .where(eq(schema.books.projectId, ref.projectId))
       .limit(1);
     if (!book) throw new FatalError("Book not found");
+    // Use the same latest outline and fallback target as writeChapterStep,
+    // including runs resumed from saved chapters. Do not trust cached counts
+    // alone: the persisted prose must also meet the writer's minimum.
+    const [outlineRow] = await tx
+      .select({ content: schema.outlines.content })
+      .from(schema.outlines)
+      .where(eq(schema.outlines.bookId, book.id))
+      .orderBy(desc(schema.outlines.version))
+      .limit(1);
+    const outline = outlineRow?.content as BookOutline | undefined;
+    const chapterTargets = new Map(
+      outline?.chapters.map((chapter) => [chapter.number, chapter.targetWords]),
+    );
     const beforeRows = await tx
       .select({
         id: schema.chapters.id,
@@ -2846,13 +2861,19 @@ export async function finalizeStep(
     const expected = stored.targetChapters;
     const completeNumbers = new Set(
       beforeRows
-        .filter(
-          (chapter) =>
+        .filter((chapter) => {
+          const minimumWords = minimumChapterWordCount(
+            resolvedChapterTargetWords(stored, chapterTargets.get(chapter.chapterNumber)),
+          );
+          return (
             chapter.chapterNumber >= 1 &&
             chapter.chapterNumber <= expected &&
             chapter.wordCount > 0 &&
-            chapter.content.trim().length > 0,
-        )
+            chapter.wordCount >= minimumWords &&
+            chapter.content.trim().length > 0 &&
+            countWords(chapter.content) >= minimumWords
+          );
+        })
         .map((chapter) => chapter.chapterNumber),
     );
     if (completeNumbers.size < expected) {

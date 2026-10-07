@@ -25,6 +25,8 @@ import { chapterGuidance } from "@/ai/knowledge/plot-structures";
 import { voicePrompt, type VoiceProfileId } from "@/ai/knowledge/voice-profiles";
 import { anthropicCachedSystem } from "@/ai/cache";
 import { normalizeManuscriptMarkdown } from "@/lib/manuscript-markdown";
+import { minimumChapterWordCount } from "@/ai/chapter-length";
+import { countWords } from "@/lib/editor/anchors";
 
 export type ChapterWriterCtx = {
   meter: MeterCtx;
@@ -139,10 +141,6 @@ function applyReplacements(draft: string, replacements: { original: string; revi
   return out;
 }
 
-function countWords(text: string): number {
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
 /**
  * A step's text is held back from the live view until it reaches this many
  * characters. Tool-step chatter is a sentence or two; a chapter crosses this
@@ -152,12 +150,6 @@ const LIVE_PROSE_MIN_CHARS = 400;
 
 /** A step shorter than this share of the longest step is not chapter prose. */
 const PROSE_STEP_SHARE = 0.25;
-
-/**
- * Below this share of the target length, the "chapter" is the writer's
- * working notes ("I'll start by checking the story bible…"), not prose.
- */
-const DRAFT_MIN_SHARE_OF_TARGET = 0.25;
 
 /**
  * The final draft step has no tools. A model that spent the earlier steps on
@@ -300,7 +292,7 @@ export async function writeChapter(
             );
             if (options.stepNumber < 2) return {};
             const longestWords = Math.max(0, ...options.steps.map((step) => countWords(step.text)));
-            return longestWords >= ctx.targetWords * DRAFT_MIN_SHARE_OF_TARGET
+            return longestWords >= minimumChapterWordCount(ctx.targetWords)
               ? { activeTools: [] }
               : {
                   activeTools: [],
@@ -352,7 +344,7 @@ export async function writeChapter(
     if (draftResult.prose.truncated) {
       throw new ChapterDraftTruncatedError(ctx.chapterNumber, draftOutputTokens);
     }
-    if (countWords(draftResult.prose.text) < ctx.targetWords * DRAFT_MIN_SHARE_OF_TARGET) {
+    if (countWords(draftResult.prose.text) < minimumChapterWordCount(ctx.targetWords)) {
       throw new ChapterDraftIncompleteError(ctx.chapterNumber, ctx.targetWords);
     }
     draft = normalizeManuscriptMarkdown(draftResult.prose.text);

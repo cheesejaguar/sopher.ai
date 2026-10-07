@@ -465,6 +465,30 @@ describe("writeChapter draft", () => {
     expect(alreadyWritten).toEqual({ activeTools: [] });
   });
 
+  it.each([
+    { targetWords: 1_000, words: 249, accepted: false },
+    { targetWords: 1_000, words: 250, accepted: true },
+    { targetWords: 1_001, words: 250, accepted: false },
+    { targetWords: 1_001, words: 251, accepted: true },
+  ])(
+    "uses the shared quarter-target floor for $words words against $targetWords",
+    async ({ targetWords, words, accepted }) => {
+      mockDraftStream(streamStep(Array(words).fill("prose").join(" "), "stop"));
+      const onCheckpoint = vi.fn();
+      const writing = writeChapter(writerCtx({ tier: "draft", targetWords }), {
+        checkpoint: { scenePlan },
+        onCheckpoint,
+      });
+      if (accepted) {
+        await expect(writing).resolves.toMatchObject({ wordCount: words });
+        expect(onCheckpoint).toHaveBeenCalled();
+      } else {
+        await expect(writing).rejects.toBeInstanceOf(ChapterDraftIncompleteError);
+        expect(onCheckpoint).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   it("marks a truncation retryable so the workflow redrafts", () => {
     expect(new ChapterDraftTruncatedError(3, 8_000).isRetryable).toBe(true);
   });
