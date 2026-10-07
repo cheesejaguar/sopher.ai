@@ -210,7 +210,12 @@ export default async function ManuscriptPage({
         </div>
         <div className="flex max-w-full flex-wrap items-center gap-2">
           <CoverButton projectId={projectId} hasCover={Boolean(matter.coverUrl)} />
-          <Button variant="ghost" size="sm" render={<Link href={`/projects/${projectId}/book`} />}>
+          <Button
+            variant="ghost"
+            size="sm"
+            render={<Link href={`/projects/${projectId}/book`} />}
+            nativeButton={false}
+          >
             <BookMarked aria-hidden="true" />
             Book setup
           </Button>

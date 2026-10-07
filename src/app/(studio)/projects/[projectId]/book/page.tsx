@@ -31,7 +31,11 @@ export default async function BookSetupPage({
           Your brief is safe. Review the production setup first; the title page, dedication, and
           closing matter become editable as soon as the book record is prepared.
         </p>
-        <Button className="mt-6" render={<Link href={`/projects/${projectId}/write`} />}>
+        <Button
+          className="mt-6"
+          render={<Link href={`/projects/${projectId}/write`} />}
+          nativeButton={false}
+        >
           Review production
           <ArrowRight aria-hidden="true" data-icon="inline-end" />
         </Button>
