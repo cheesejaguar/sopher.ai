@@ -6,6 +6,10 @@ import { securityHeaders } from "./src/lib/security/headers";
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Explicitly the pre-16.4 prefetch behaviour. Turning this on makes every
+  // studio route report auth/URL data read outside <Suspense> as an instant-
+  // navigation insight; adopting it means restructuring those routes first.
+  partialPrefetching: false,
   typedRoutes: true,
   async headers() {
     const readerHeaders = [
