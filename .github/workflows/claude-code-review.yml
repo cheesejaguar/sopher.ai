@@ -57,3 +57,13 @@ jobs:
           # pinned so a provider-default retirement cannot silently break CI.
           claude_args: |
             --model claude-sonnet-5
+
+      # The action prints only `is_error: true` when the CLI fails before the
+      # review starts (an expired token, an unavailable model). Surface that
+      # one-line reason; full output stays off on this public repository.
+      - name: Explain a failed review run
+        if: failure() && steps.claude-review.outcome == 'failure'
+        run: |
+          file="${RUNNER_TEMP}/claude-execution-output.json"
+          [ -f "$file" ] || exit 0
+          jq -r '.[] | select(.type == "result") | .result // empty' "$file" | head -c 1000
