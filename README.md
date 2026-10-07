@@ -54,41 +54,29 @@ costs and credit packs live on the [pricing page](https://sopher.ai/pricing).
   book always has a truthful continuation path.
 - A live production view with real workflow stage, percentage, chapter assembly, elapsed time,
   estimate, last update, agent activity, credit use, approvals, pauses, cancellation, and recovery.
-- A structured Story Bible for characters, places, objects, and organizations, including generated
-  portraits that can be viewed at full size.
+- A choice between **Collaborative** production, which asks one post-concept question with three
+  suggested directions (one recommended) plus a custom answer, and **Autopilot**, which continues
+  without that pause.
+- A stage-backed "living manuscript" production animation that reflects saved workflow progress,
+  with a complete reduced-motion presentation.
+- A structured, author-managed Story Bible for characters, places, objects, and organizations,
+  including generated portraits that can be viewed at full size.
 - A full TipTap manuscript editor with autosave, stale-tab conflict handling, undo and redo, chapter
   history, find and replace, zen mode, suggestions, and selection-based writing and content tools.
 - A responsive phone and tablet editor with accessible chapter, suggestion, history, search, and
   tool sheets instead of a desktop-only interstitial.
-- A manuscript reader and consistent-snapshot exports to Markdown, Word/DOCX, EPUB, and PDF.
-- Persistent Help, contextual first-use guidance, and an artifact-derived first-book checklist
-  rather than a forced product tour.
-
-Authors own the resulting manuscript and can edit, export, and publish it wherever they choose.
-
-## Current branch preview
-
-The following capabilities are implemented in `codex/creative-authoring-journeys` but are not part
-of the production deployment described above. When a later production deployment includes this
-branch, this section should be folded into **What is live**.
-
-- A choice between **Collaborative** production—which can ask one post-concept question with
-  exactly three suggested directions, one recommended, plus a custom response—and **Autopilot**,
-  which continues without that pause. A collaborative author can also let Sopher choose.
-- A stage-backed “living manuscript” production animation that reflects saved workflow progress and
-  has a complete reduced-motion presentation.
-- Author-managed Story Bible canon, including structured character profiles, additions and edits,
-  duplicate safeguards, and an active-production lock.
 - A non-destructive whole-manuscript direction pass that turns one author instruction into anchored
-  suggestions to accept, edit, or reject.
+  suggestions to accept, edit, or reject, individually or all at once in a single atomic apply.
+- A manuscript reader and consistent-snapshot exports to Markdown, Word/DOCX, EPUB, and PDF.
 - A book package for title-page identity, rights details, dedication, epigraph, opening matter, and
   closing matter, propagated through the manuscript reader and exports.
 - Immutable browser reader editions shared through unlisted bearer links with optional expiry and
   download, explicit revocation, noindex protections, and only a token fingerprint stored in the
   database.
+- Persistent Help, contextual first-use guidance, and an artifact-derived first-book checklist
+  rather than a forced product tour.
 
-Reader-link environments should set an independent `READER_LINK_SECRET`; do not commit that value
-or any other `.env*` file.
+Authors own the resulting manuscript and can edit, export, and publish it wherever they choose.
 
 ## How a book is written
 
@@ -101,6 +89,25 @@ The public workflow has five stages:
 | **Chapters**   | Plans, drafts, critiques, and revises chapters against the shared outline, Story Bible, and story-so-far memory. |
 | **Editor**     | Makes targeted prose, pacing, voice, and quality improvements where the editorial gate calls for them.           |
 | **Continuity** | Reviews the complete manuscript for contradictions in names, timelines, facts, and character details.            |
+
+```mermaid
+flowchart LR
+  B[Brief + estimate] --> C[Concept]
+  C -->|collaborative| Q{{Story direction}}
+  C -->|autopilot| O[Outline]
+  Q --> O
+  O -->|optional| A{{Outline approval}}
+  O --> W
+  A --> W[Chapter waves<br/>plan → draft → critique → revise]
+  W --> E[Editorial gate]
+  E --> K[Continuity review]
+  K --> R[Bounded revision]
+  R --> M[(Manuscript)]
+```
+
+Every model call goes through one metering path: a credit pre-check and hold, per-user Gateway
+attribution, Anthropic prompt caching on book-static prompts, and a settled `llm_calls` row with
+cached and cache-write tokens.
 
 The pipeline is a durable Vercel Workflow rather than one long request. Starts, author inputs,
 events, checkpoints, and finalization are idempotent. Saved work remains available through
@@ -126,8 +133,8 @@ reduced motion, forced colors, 200–400% reflow, 44px mobile targets, and page-
 | Area                  | Implementation                                                                                              |
 | --------------------- | ----------------------------------------------------------------------------------------------------------- |
 | Application           | Next.js 16 App Router with Cache Components and typed routes, React 19, Tailwind CSS 4, Base UI, and shadcn |
-| AI                    | AI SDK 7 through Vercel AI Gateway; model tiers and pricing are centralized in source                       |
-| Orchestration         | Vercel Workflow with resumable NDJSON progress and chapter streams                                          |
+| AI                    | AI SDK 7 through Vercel AI Gateway: Claude Sonnet 5.5, Opus 5.5 and Haiku 4.5 tiers, centralized in source  |
+| Orchestration         | Vercel Workflow SDK 5 with resumable NDJSON progress and chapter streams                                    |
 | Data                  | Neon Postgres, Drizzle ORM, forward-only migrations, and Vercel Blob                                        |
 | Identity and commerce | Clerk, Stripe, credit-ledger metering, and Resend transactional email                                       |
 | Writing               | TipTap 3, versioned chapters and suggestions, Story Bible entities, and multi-format exports                |
@@ -148,6 +155,8 @@ Important implementation boundaries:
 ## Local development
 
 Prerequisites: Node.js 24, pnpm 10.28.2 through Corepack, and access to the linked Vercel project.
+Clone outside iCloud-synced folders such as `~/Documents`; evicted `node_modules` files stall the
+TypeScript compiler.
 The repository intentionally does not contain an `.env.example`; use the environment managed by
 Vercel.
 
@@ -187,7 +196,8 @@ production database.
 CI separates fast checks, public browser acceptance, trusted isolated-database acceptance, and
 Lighthouse so a public smoke test cannot be mistaken for authenticated product coverage. It runs:
 
-- dependency audit, typecheck, lint, formatting, unit tests, migration integrity, and Drizzle checks
+- dependency audit, typecheck, type-aware lint (including floating-promise checks), formatting,
+  unit tests, migration integrity, and Drizzle checks
 - production builds, Chromium tests in light and dark, and focused Firefox and WebKit smoke coverage
 - real Neon transaction tests plus seeded authenticated Studio, project, editor, manuscript, and
   Admin browser tests
@@ -207,11 +217,19 @@ A signed five-minute reconciler checks active authoring runs, and the progress s
 Vercel request cancellation. Current Workflow and runtime commands are documented in
 [`CLAUDE.md`](CLAUDE.md).
 
+Each environment should set an independent `READER_LINK_SECRET` for reader links, and each
+`LIMITS` id in [`src/lib/security/rate-limit.ts`](src/lib/security/rate-limit.ts) needs a matching
+Vercel WAF rate-limit rule; until one exists that limit fails open. Never commit `.env*` files.
+
 ## Repository documentation
 
 - [`PRODUCT.md`](PRODUCT.md) — current product contract and evidence rules
 - [`DESIGN.md`](DESIGN.md) — dark-first visual system and interaction principles
 - [`CLAUDE.md`](CLAUDE.md) — engineering architecture and repository conventions
+- [`doc/audit-2026-10.md`](doc/audit-2026-10.md) — the October 2026 security, correctness and
+  performance audit, with what was fixed and what was deferred
+- [`doc/PRICING.md`](doc/PRICING.md) — measured unit economics behind the credit prices
+- [`doc/CUTOVER.md`](doc/CUTOVER.md) — production runbook
 - [`docs/redesign`](docs/redesign/README.md) — synthetic production-mode redesign captures
 - [`docs/trial-onboarding`](docs/trial-onboarding/README.md) — synthetic included-story journey
   captures
