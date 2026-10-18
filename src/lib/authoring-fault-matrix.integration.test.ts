@@ -43,6 +43,7 @@ import {
   consumeAuthoringRunInput,
   markAuthoringPauseRegistered,
 } from "@/lib/authoring-inputs";
+import { minimumChapterWordCount } from "@/ai/chapter-length";
 import { DEGRADATION_CODES } from "@/lib/authoring-degradation";
 import { debitCredits, grantCredits, reserveCredits } from "@/lib/billing/credits";
 import {
@@ -56,6 +57,7 @@ import {
 } from "@/lib/generation-runs";
 import { persistRunEvent } from "@/lib/run-event-store";
 import { updateProjectTransaction } from "@/lib/project-transaction-operations";
+import { countWords } from "@/lib/editor/anchors";
 import type { GenerationConfig } from "@/lib/run-events";
 import { finalizeStep, withActiveAuthoringMutation } from "@/workflows/steps";
 
@@ -172,6 +174,17 @@ const bible: GeneratedEntityBible = {
     },
   ],
 };
+
+/**
+ * Finalization rejects chapters shorter than the writer's minimum share of the
+ * outline target, so a finished-manuscript fixture needs prose of that length.
+ */
+function finishedChapterProse(sentence: string, targetWords: number): string {
+  const minimumWords = minimumChapterWordCount(targetWords);
+  const sentences = [sentence];
+  while (countWords(sentences.join(" ")) < minimumWords) sentences.push(sentence);
+  return sentences.join(" ");
+}
 
 const continuityIssues = [
   {
@@ -888,7 +901,10 @@ describeIsolated.sequential("authoring fault matrix against isolated Neon", () =
       id: randomUUID(),
       chapterNumber: index + 1,
       title: `Final chapter ${index + 1}`,
-      content: `Chapter ${index + 1} contains durable manuscript text.`,
+      content: finishedChapterProse(
+        `Chapter ${index + 1} contains durable manuscript text.`,
+        outline.chapters[index]!.targetWords,
+      ),
     }));
     await getDb()
       .insert(schema.chapters)
@@ -899,7 +915,7 @@ describeIsolated.sequential("authoring fault matrix against isolated Neon", () =
           chapterNumber: chapter.chapterNumber,
           title: chapter.title,
           content: chapter.content,
-          wordCount: 6,
+          wordCount: countWords(chapter.content),
           status: "edited" as const,
         })),
       );
@@ -948,6 +964,12 @@ describeIsolated.sequential("authoring fault matrix against isolated Neon", () =
     // The 2026-08-04 incident, reproduced: every chapter is written and edited,
     // and the continuity review produced no report at all. Before graceful
     // degradation this run was marked `failed` and the finished book was lost.
+    const degradedContent = Array.from({ length: 3 }, (_, index) =>
+      finishedChapterProse(
+        `Chapter ${index + 1} was written and edited before the review failed.`,
+        outline.chapters[index]!.targetWords,
+      ),
+    );
     await getDb()
       .insert(schema.chapters)
       .values(
@@ -956,8 +978,8 @@ describeIsolated.sequential("authoring fault matrix against isolated Neon", () =
           bookId: degraded.bookId,
           chapterNumber: index + 1,
           title: `Degraded chapter ${index + 1}`,
-          content: `Chapter ${index + 1} was written and edited before the review failed.`,
-          wordCount: 10,
+          content: degradedContent[index]!,
+          wordCount: countWords(degradedContent[index]!),
           status: "edited" as const,
         })),
       );
