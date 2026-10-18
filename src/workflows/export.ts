@@ -15,7 +15,7 @@ import {
 } from "@/lib/export/assemble";
 import { renderExport } from "@/lib/export";
 import { parsePrintOptions } from "@/lib/export/print-layout";
-import { FORMAT_META, type ExportFormat } from "@/lib/export/types";
+import { FORMAT_META, filenameStem, type ExportFormat } from "@/lib/export/types";
 import { PROGRESS_NS, type RunEvent } from "@/lib/run-events";
 import { persistRunEvent } from "@/lib/run-event-store";
 import { linkAuthoringRunWorkflow } from "@/lib/generation-runs";
@@ -162,13 +162,6 @@ async function assembleAndUploadStep(
     throw new FatalError("No chapters have been written yet — nothing to export");
   }
 
-  // Print options travel with the run's config rather than as a Workflow
-  // argument, so `exportBook`'s signature — and every redispatch that replays
-  // it — is unchanged. An older run without them renders today's geometry.
-  const result =
-    format === "pdf"
-      ? await renderExport(format, manuscript, parsePrintOptions(config.print))
-      : await renderExport(format, manuscript);
   const meta = FORMAT_META[format];
   const findExistingAsset = async () => {
     const [existing] = await db
@@ -186,12 +179,25 @@ async function assembleAndUploadStep(
   };
 
   // A workflow retry after a committed insert must return the original asset
-  // instead of creating a duplicate row for the same export run.
+  // instead of creating a duplicate row for the same export run — and must
+  // find it before rendering, which for PDF/DOCX downloads every figure and
+  // lays out the whole book only to throw the bytes away.
   const existing = await findExistingAsset();
   if (existing) {
     const existingMeta = existing.meta as { filename?: string };
-    return { assetId: existing.id, filename: existingMeta.filename ?? result.filename };
+    return {
+      assetId: existing.id,
+      filename: existingMeta.filename ?? `${filenameStem(manuscript.title)}.${meta.extension}`,
+    };
   }
+
+  // Print options travel with the run's config rather than as a Workflow
+  // argument, so `exportBook`'s signature — and every redispatch that replays
+  // it — is unchanged. An older run without them renders today's geometry.
+  const result =
+    format === "pdf"
+      ? await renderExport(format, manuscript, parsePrintOptions(config.print))
+      : await renderExport(format, manuscript);
 
   const blob = await put(
     `exports/${ref.projectId}/${token}.${meta.extension}`,

@@ -24,6 +24,8 @@
   --popover-foreground: oklch(0.17 0.025 275);
   --primary: oklch(0.48 0.24 289);
   --primary-foreground: oklch(0.99 0.004 275);
+  /* Ultraviolet as text: 6:1 or better on every studio and marketing surface. */
+  --primary-text: oklch(0.44 0.199 286.04);
   --secondary: oklch(0.925 0.012 275);
   --secondary-foreground: oklch(0.24 0.03 275);
   --muted: oklch(0.93 0.009 275);
@@ -35,6 +37,16 @@
   --border: oklch(0.84 0.015 275);
   --input: oklch(0.84 0.015 275);
   --ring: oklch(0.5 0.2 276);
+
+  /*
+    Persuade-surface rules and washes: translucent ink, so a hairline reads the
+    same over the canvas, a graphite band or a raised card. Lighter than
+    --border, which separates operational controls.
+  */
+  --hairline: oklch(0 0 0 / 10%);
+  --hairline-strong: oklch(0 0 0 / 15%);
+  --wash: oklch(0 0 0 / 3.5%);
+  --wash-subtle: oklch(0 0 0 / 2%);
 
   /* 4.5:1 or better on both instrument and --ai-soft surfaces. */
   --ai: oklch(0.49 0.18 250);
@@ -61,6 +73,10 @@
   --future-stage-accent: #b8adff;
   --future-stage-action: #6243d7;
   --future-stage-action-hover: #5233bd;
+  --future-stage-rule: oklch(1 0 0 / 10%);
+  /* Labels laid over photographs and artwork: theme-independent by design. */
+  --scrim: oklch(0 0 0);
+  --scrim-foreground: oklch(1 0 0);
 
   --chart-1: oklch(0.48 0.24 289);
   --chart-2: oklch(0.52 0.18 250);
@@ -92,6 +108,7 @@
   --popover-foreground: oklch(0.95 0.01 270);
   --primary: oklch(0.68 0.2 289);
   --primary-foreground: oklch(0.11 0.02 274);
+  --primary-text: oklch(0.779 0.12 289.23);
   --secondary: oklch(0.195 0.025 274);
   --secondary-foreground: oklch(0.86 0.014 270);
   --muted: oklch(0.18 0.02 274);
@@ -103,6 +120,11 @@
   --border: oklch(0.255 0.028 274);
   --input: oklch(0.255 0.028 274);
   --ring: oklch(0.71 0.16 251);
+
+  --hairline: oklch(1 0 0 / 10%);
+  --hairline-strong: oklch(1 0 0 / 15%);
+  --wash: oklch(1 0 0 / 4%);
+  --wash-subtle: oklch(1 0 0 / 2.5%);
 
   --ai: oklch(0.72 0.15 251);
   --ai-foreground: oklch(0.11 0.02 274);
@@ -147,6 +169,7 @@
   --color-popover-foreground: var(--popover-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-text: var(--primary-text);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -158,6 +181,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-hairline: var(--hairline);
+  --color-hairline-strong: var(--hairline-strong);
+  --color-wash: var(--wash);
+  --color-wash-subtle: var(--wash-subtle);
 
   --color-ai: var(--ai);
   --color-ai-foreground: var(--ai-foreground);
@@ -180,6 +207,9 @@
   --color-future-stage-accent: var(--future-stage-accent);
   --color-future-stage-action: var(--future-stage-action);
   --color-future-stage-action-hover: var(--future-stage-action-hover);
+  --color-future-stage-rule: var(--future-stage-rule);
+  --color-scrim: var(--scrim);
+  --color-scrim-foreground: var(--scrim-foreground);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -260,6 +290,20 @@
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+}
+
+/*
+  Ultraviolet as text needs a different lightness from ultraviolet as a fill:
+  --primary carries luminous labels on buttons, --primary-text is read on the
+  canvas. Tailwind merges this rule into its generated `.text-primary`, so the
+  plain utility reads the text token while bg-, border- and opacity variants
+  keep the fill. Variant forms (hover:, group-hover:) still resolve to the
+  fill; use text-primary-text where one of those must match.
+*/
+@layer utilities {
+  .text-primary {
+    color: var(--primary-text);
   }
 }
 

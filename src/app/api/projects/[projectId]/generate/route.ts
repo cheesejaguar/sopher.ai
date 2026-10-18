@@ -444,13 +444,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
     }
   } catch (error) {
     // No Workflow invocation has happened yet, so this failure is proven
-    // local and can safely terminalize the queued row.
+    // local and can safely terminalize the queued row. The stored error is
+    // shown to the author by the run, export and progress endpoints, so it is
+    // a fixed sentence; the raw (often Postgres) text stays in the logs.
+    console.error("Could not prepare full-book dispatch", { runId: run.id, error });
     await terminalizeAuthoringRun({
       runId: run.id,
       projectId,
       userId,
       status: "failed",
-      error: error instanceof Error ? error.message : "Could not start generation",
+      error: "Could not start generation",
       releaseImmediately: true,
     });
     return Response.json({ error: "Could not start generation" }, { status: 503 });

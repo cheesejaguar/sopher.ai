@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getActiveFullBookRun, getLatestOutline, getProjectWithBook } from "@/db/queries/books";
 import { bookOutlineSchema, type BookOutline } from "@/ai/schemas";
 import { OutlineApprovalBar } from "@/components/generation/outline-approval-bar";
@@ -25,7 +25,7 @@ const ARC_LABELS: Record<BookOutline["chapters"][number]["emotionalArc"], string
 
 export default async function OutlinePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { book } = data;

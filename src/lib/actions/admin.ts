@@ -52,8 +52,15 @@ export async function adminAdjustCredits(input: unknown): Promise<void> {
   revalidatePath("/admin");
 }
 
+const suspendSchema = z.object({ userId: z.string().min(1).max(255), suspended: z.boolean() });
+const flagStatusSchema = z.enum(["dismissed", "actioned"]);
+
 export async function adminSetSuspended(userId: string, suspended: boolean): Promise<void> {
   const { userId: adminId } = await requireAdmin();
+  // Server-action arguments are wire data; a truthy string must not suspend.
+  if (!suspendSchema.safeParse({ userId, suspended }).success) {
+    throw new Error("Invalid suspension request");
+  }
   // An admin cannot suspend themselves — trivially reversible otherwise, but
   // locking the only key in the car is not a state worth allowing.
   if (userId === adminId && suspended) throw new Error("You cannot suspend your own account");
@@ -76,6 +83,7 @@ export async function adminSetFlagStatus(
 ): Promise<void> {
   const { userId: adminId } = await requireAdmin();
   if (!z.uuid().safeParse(flagId).success) throw new Error("Flag not found");
+  if (!flagStatusSchema.safeParse(status).success) throw new Error("Invalid flag status");
   await getDb()
     .update(schema.moderationFlags)
     .set({ status, reviewedBy: adminId })

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 
 import { ProjectSettingsForm } from "@/components/studio/project-settings-form";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 
 export const metadata = { title: "Project settings" };
@@ -12,7 +12,7 @@ export default async function ProjectSettingsPage({
   params: Promise<{ projectId: string }>;
 }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { project } = data;

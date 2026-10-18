@@ -1,21 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { bookOutlineSchema, bookOutlineWireSchema } from "@/ai/schemas";
 import type { BookConcept, BookOutline } from "@/ai/schemas";
 
 const mocks = vi.hoisted(() => ({
   outputs: [] as unknown[],
   prompts: [] as string[],
+  schemas: [] as unknown[],
   calls: 0,
 }));
 
 vi.mock("ai", () => ({
-  generateText: vi.fn(async ({ prompt }: { prompt?: unknown }) => {
-    mocks.calls += 1;
-    mocks.prompts.push(String(prompt ?? ""));
-    const output = mocks.outputs.shift();
-    if (output === undefined) throw new Error("No mocked outline output remains");
-    return { output };
-  }),
+  generateText: vi.fn(
+    async ({ prompt, output: format }: { prompt?: unknown; output?: { schema?: unknown } }) => {
+      mocks.calls += 1;
+      mocks.prompts.push(String(prompt ?? ""));
+      mocks.schemas.push(format?.schema);
+      const output = mocks.outputs.shift();
+      if (output === undefined) throw new Error("No mocked outline output remains");
+      return { output };
+    },
+  ),
   Output: {
     object: vi.fn(({ schema }: { schema: unknown }) => ({ schema })),
   },
@@ -103,6 +108,7 @@ function input(tier: OutlineInput["tier"]): OutlineInput {
 beforeEach(() => {
   mocks.outputs = [];
   mocks.prompts = [];
+  mocks.schemas = [];
   mocks.calls = 0;
 });
 
@@ -187,9 +193,87 @@ describe("generateOutline production-shape enforcement", () => {
   });
 
   it("rejects a repaired result that still violates the run shape", async () => {
-    mocks.outputs = [plan(5), outline(5, 1_500), outline(5, 1_500)];
+    mocks.outputs = [plan(5), outline(4), outline(4)];
 
-    await expect(generateOutline(input("standard"))).rejects.toThrow(/>=1600/i);
+    await expect(generateOutline(input("standard"))).rejects.toThrow(/exactly 5 chapters/i);
     expect(mocks.calls).toBe(3);
+  });
+
+  it("clamps word targets into the run range instead of paying for a self-check", async () => {
+    mocks.outputs = [plan(5), outline(5, 1_500)];
+
+    const result = await generateOutline(input("draft"));
+
+    expect(mocks.calls).toBe(2);
+    expect(result.chapters.map((chapter) => chapter.targetWords)).toEqual(Array(5).fill(1_600));
+  });
+});
+
+/**
+ * Anthropic strips numeric and length bounds from the schema the model sees,
+ * so each answer below failed the strict outline schema, retried at full cost,
+ * and could fail a run before a single chapter was written.
+ */
+describe("generateOutline wire schemas", () => {
+  it("hands the provider permissive schemas for the plan, draft and self-check", async () => {
+    mocks.outputs = [plan(5), outline(4), outline(5)];
+
+    await generateOutline(input("draft"));
+
+    expect(mocks.schemas[1]).toBe(bookOutlineWireSchema);
+    expect(mocks.schemas[2]).toBe(bookOutlineWireSchema);
+    expect(mocks.schemas).not.toContain(bookOutlineSchema);
+  });
+
+  it("survives nine key events, eleven characters and seven themes", async () => {
+    const long = outline(5) as BookOutline & { themes: string[] };
+    long.themes = Array.from({ length: 7 }, (_, index) => `Theme ${index}`);
+    long.chapters[0].keyEvents = Array.from({ length: 9 }, (_, index) => `Event ${index}`);
+    long.chapters[0].charactersPresent = Array.from({ length: 11 }, (_, index) => `C${index}`);
+    mocks.outputs = [plan(5), long];
+
+    const result = await generateOutline(input("draft"));
+
+    expect(bookOutlineSchema.safeParse(result).success).toBe(true);
+    expect(result.themes).toHaveLength(6);
+    expect(result.chapters[0].keyEvents).toHaveLength(8);
+    expect(result.chapters[0].charactersPresent).toHaveLength(10);
+  });
+
+  it("renumbers a zero-based chapter list and maps an unknown arc", async () => {
+    const offByOne = outline(5);
+    const wire = {
+      ...offByOne,
+      chapters: offByOne.chapters.map((chapter, index) => ({
+        ...chapter,
+        number: index,
+        emotionalArc: index === 0 ? "inciting_incident" : chapter.emotionalArc,
+      })),
+    };
+    mocks.outputs = [plan(5), wire];
+
+    const result = await generateOutline(input("draft"));
+
+    expect(mocks.calls).toBe(2);
+    expect(result.chapters.map((chapter) => chapter.number)).toEqual([1, 2, 3, 4, 5]);
+    expect(result.chapters[0].emotionalArc).toBe("transition");
+  });
+
+  it("survives a structure plan with nine acts and a chapter 0", async () => {
+    const acts = Array.from({ length: 9 }, (_, index) => ({
+      name: `Act ${index + 1}`,
+      startChapter: index === 0 ? 0 : 1,
+      endChapter: 5,
+      arc: "Arc",
+    }));
+    mocks.outputs = [{ plotStructure: "three_act", acts }, outline(5)];
+    const checkpoints: { plan?: { acts: unknown[] } }[] = [];
+
+    await generateOutline(input("draft"), {
+      onCheckpoint: (next) => void checkpoints.push(next),
+    });
+
+    expect(checkpoints[0].plan?.acts).toHaveLength(8);
+    expect(checkpoints[0].plan?.acts[0]).toMatchObject({ startChapter: 1 });
   });
 });

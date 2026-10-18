@@ -6,7 +6,7 @@ import StudioLoading from "./loading";
 import { ClerkRouteProvider } from "@/components/auth/clerk-route-provider";
 import { ProductShell } from "@/components/studio/product-shell";
 import { getBalance } from "@/lib/billing/credits";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getStudioAccess } from "@/lib/studio-access";
 
 export const metadata: Metadata = {
@@ -38,7 +38,7 @@ async function StudioShell({ children }: { children: React.ReactNode }) {
   // private data and auth checks out of the public prerender while retaining
   // streaming boundaries for the shell and page content.
   await connection();
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const [credits, access] = await Promise.all([getBalance(userId), getStudioAccess(userId)]);
   const publicCredits = access.fullBookUnlocked ? credits : undefined;
   const creditLabel =

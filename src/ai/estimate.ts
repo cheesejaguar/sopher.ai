@@ -37,11 +37,20 @@ export function estimateBookCost(
 ): BookEstimate {
   const m = MODELS[tier];
   const chapterOutputTokens = wordsPerChapter * TOKENS_PER_WORD;
-  // Calibrated 2026-07-27 against llm_calls from a real 12x3,000-word run:
-  // draft inputs ~9.5k with ~50% served from cache (system prefix + outline
-  // slice + summaries + tool results).
-  const chapterInputTokens = 9_500;
-  const cachedShare = 0.5;
+  // writer.draft recalibrated 2026-10-06 from llm_calls on Sonnet 5.5 (three
+  // clean 1,000-1,300-word chapters). The draft is a three-step tool loop and
+  // every step resends the book context, so a chapter reads ~38k input
+  // tokens, ~78% of them written to the prompt cache and ~22% read from it;
+  // the 2026-07 figure (9.5k input, half cached, no cache writes) quoted about
+  // a third of the real cost. Sonnet 5.5 cannot disable thinking, so output
+  // runs ~2.2 tokens per prose word rather than TOKENS_PER_WORD.
+  const draftInputTokens = 34_000 + 3 * chapterOutputTokens;
+  const draftUsage = {
+    inputTokens: draftInputTokens,
+    cacheWriteTokens: Math.round(draftInputTokens * 0.78),
+    cachedInputTokens: Math.round(draftInputTokens * 0.22),
+    outputTokens: wordsPerChapter * 2.2,
+  };
 
   const stages: StageEstimate[] = [];
 
@@ -55,11 +64,7 @@ export function estimateBookCost(
   const planUsd = calculateUsd(m.planner, { inputTokens: 2_500, outputTokens: 700 });
   // A fallback is still real provider spend. Authorize the most expensive
   // allowed model rather than assuming the requested primary handled it.
-  const draftUsd = costliestAllowedProseUsd(m.prose, {
-    inputTokens: chapterInputTokens,
-    outputTokens: chapterOutputTokens,
-    cachedInputTokens: chapterInputTokens * cachedShare,
-  });
+  const draftUsd = costliestAllowedProseUsd(m.prose, draftUsage);
   stages.push({ stage: "Chapter drafting", usd: (planUsd + draftUsd) * chapters });
 
   if (tier !== "draft") {
@@ -89,7 +94,12 @@ export function estimateBookCost(
     inputTokens: chapterOutputTokens + 1_500,
     outputTokens: 1_200,
   });
-  stages.push({ stage: "Summaries + character bible", usd: summaryUsd * chapters });
+  // One story-bible pass per book: ~5k in, ~20k out (llm_calls, 2026-08..10).
+  const bibleUsd = calculateUsd(m.summarizer, { inputTokens: 5_500, outputTokens: 20_000 });
+  stages.push({
+    stage: "Summaries + character bible",
+    usd: summaryUsd * chapters + bibleUsd,
+  });
 
   const continuityCalls = tier === "draft" ? 1 : 6;
   // Each phase re-reads the summary corpus and spot-checks prose via tools.
@@ -97,7 +107,8 @@ export function estimateBookCost(
   const continuityUsd = calculateUsd(m.continuity, {
     inputTokens: continuityInput,
     outputTokens: 2_000,
-    cachedInputTokens: continuityInput * cachedShare,
+    // Unchanged 2026-07 assumption; not yet re-measured on 5.5.
+    cachedInputTokens: continuityInput * 0.5,
   });
   stages.push({ stage: "Continuity review", usd: continuityUsd * continuityCalls });
 

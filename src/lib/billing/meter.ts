@@ -112,23 +112,6 @@ export class ReservationSettlementError extends Error {
   }
 }
 
-function llmCallValues(record: LlmCallRecord, usd: number) {
-  return {
-    userId: record.userId,
-    projectId: record.projectId ?? null,
-    runId: record.runId ?? null,
-    agentRole: record.agentRole,
-    operation: record.operation,
-    model: record.model,
-    inputTokens: record.usage.inputTokens,
-    outputTokens: record.usage.outputTokens,
-    cachedInputTokens: record.usage.cachedInputTokens ?? 0,
-    reasoningTokens: record.usage.reasoningTokens ?? 0,
-    usd: usd.toFixed(6),
-    latencyMs: record.latencyMs,
-  };
-}
-
 async function invalidateSpendCache(userId: string): Promise<void> {
   try {
     await getCache().delete(spendCacheKey(userId));
@@ -1055,6 +1038,7 @@ export async function reconcileMeteredCallAsCharged(input: {
       input_tokens: usage.inputTokens,
       output_tokens: usage.outputTokens,
       cached_input_tokens: usage.cachedInputTokens,
+      cache_write_tokens: usage.cacheWriteTokens,
       reasoning_tokens: usage.reasoningTokens,
       usd: usd.toFixed(6),
       latency_ms: null,
@@ -1115,6 +1099,7 @@ export async function reconcileMeteredCallAsCharged(input: {
           input_tokens integer,
           output_tokens integer,
           cached_input_tokens integer,
+          cache_write_tokens integer,
           reasoning_tokens integer,
           usd numeric,
           latency_ms integer
@@ -1218,7 +1203,7 @@ export async function reconcileMeteredCallAsCharged(input: {
       call_insert as (
         insert into llm_calls (
           user_id, project_id, run_id, agent_role, operation, model,
-          input_tokens, output_tokens, cached_input_tokens, reasoning_tokens,
+          input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
           usd, latency_ms
         )
         select
@@ -1231,6 +1216,7 @@ export async function reconcileMeteredCallAsCharged(input: {
           call_values.input_tokens,
           call_values.output_tokens,
           call_values.cached_input_tokens,
+          call_values.cache_write_tokens,
           call_values.reasoning_tokens,
           call_values.usd,
           call_values.latency_ms
@@ -1570,15 +1556,6 @@ export async function attachGatewayGenerationIds(input: {
     );
 }
 
-/** Persists one llm_calls row and busts the cached month-to-date spend. Returns the metered USD. */
-export async function recordLlmCall(record: LlmCallRecord): Promise<number> {
-  const usd = calculateUsd(record.model, record.usage);
-  const db = getDb();
-  await db.insert(schema.llmCalls).values(llmCallValues(record, usd));
-  await invalidateSpendCache(record.userId);
-  return usd;
-}
-
 /**
  * Settles every model step from one provider result in a single SQL statement.
  * Either all llm_calls rows, all per-step usage debits, the intent terminal
@@ -1631,6 +1608,7 @@ export async function recordLlmCallsAndDebit(
       input_tokens: record.usage.inputTokens,
       output_tokens: record.usage.outputTokens,
       cached_input_tokens: record.usage.cachedInputTokens ?? 0,
+      cache_write_tokens: record.usage.cacheWriteTokens ?? 0,
       reasoning_tokens: record.usage.reasoningTokens ?? 0,
       usd: usd.toFixed(6),
       latency_ms: record.latencyMs ?? null,
@@ -1672,6 +1650,7 @@ export async function recordLlmCallsAndDebit(
         input_tokens integer,
         output_tokens integer,
         cached_input_tokens integer,
+        cache_write_tokens integer,
         reasoning_tokens integer,
         usd numeric,
         latency_ms integer
@@ -1774,7 +1753,7 @@ export async function recordLlmCallsAndDebit(
     call_insert as (
       insert into llm_calls (
         user_id, project_id, run_id, agent_role, operation, model,
-        input_tokens, output_tokens, cached_input_tokens, reasoning_tokens,
+        input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
         usd, latency_ms
       )
       select call_values.*

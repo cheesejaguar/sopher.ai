@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { markdownToHtml } from "@/lib/export/assemble";
+import { loadProjectImageAssetUrls } from "@/lib/export/figures";
+import { ownedImageUrlFilter } from "@/lib/security/blob-url";
 import { getAdminBook } from "@/db/queries/admin";
 import { AuthorInputsPanel } from "@/components/admin/author-inputs";
 import { PageHeader } from "@/components/studio/product-primitives";
@@ -22,6 +24,9 @@ export default async function AdminBookView({
   const { projectId } = await params;
   const book = await getAdminBook(projectId);
   if (!book) notFound();
+  // An external image in someone else's manuscript is a tracking pixel aimed at
+  // the moderator reading it. Only the project's own Blob images render.
+  const imageUrl = ownedImageUrlFilter(await loadProjectImageAssetUrls(book.projectId));
 
   return (
     <div className="space-y-6">
@@ -88,7 +93,9 @@ export default async function AdminBookView({
             <div
               className="prose-manuscript mt-4 bg-paper text-paper-foreground"
               // Same escaped-HTML renderer as the author-facing reading view.
-              dangerouslySetInnerHTML={{ __html: markdownToHtml(chapter.content) }}
+              dangerouslySetInnerHTML={{
+                __html: markdownToHtml(chapter.content, undefined, "svg", { imageUrl }),
+              }}
             />
           </article>
         ))}

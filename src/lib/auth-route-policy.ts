@@ -34,6 +34,9 @@ export function isProtectedPath(pathname: string): boolean {
     within(pathname, "/api/webhooks") ||
     pathname === "/api/estimates" ||
     pathname === "/api/events" ||
+    // Browsers post CSP violation reports without credentials. The handler is
+    // rate-limited, body-capped, and only logs.
+    pathname === "/api/csp-report" ||
     // A reader recipient may not have a Sopher account. This exact endpoint
     // validates the fragment bearer token, rate-limits anonymous attempts, and
     // exchanges it for a path-scoped HttpOnly reader cookie. Adjacent reader
@@ -44,4 +47,19 @@ export function isProtectedPath(pathname: string): boolean {
     // remain behind Clerk.
     pathname === "/api/internal/reconcile-runs"
   );
+}
+
+/**
+ * No route in this app has a backslash in its path. Scanners probe paths like
+ * `/opengraph-image%5C`, which Next resolves to a missing module and answers
+ * with a 500 — log noise for a request that can never match a real page — so
+ * the proxy turns them away with a 404 first.
+ */
+export function hasBackslashInPath(url: string, pathname: string): boolean {
+  if (pathname.includes("\\")) return true;
+  try {
+    return /%5c/i.test(new URL(url).pathname);
+  } catch {
+    return false;
+  }
 }

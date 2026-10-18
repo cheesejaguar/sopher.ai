@@ -20,6 +20,17 @@ import type { NodeView } from "@tiptap/pm/view";
 let initializedTheme: "default" | "dark" | null = null;
 let viewCounter = 0;
 
+/** One shared load of the (large) mermaid bundle for every view and render. */
+let mermaidModule: Promise<typeof import("mermaid")> | null = null;
+function loadMermaid(): Promise<typeof import("mermaid")> {
+  // A failed chunk load must not be cached: the next render retries it.
+  mermaidModule ??= import("mermaid").catch((error: unknown) => {
+    mermaidModule = null;
+    throw error;
+  });
+  return mermaidModule;
+}
+
 /** Source hashes already uploaded this session — avoids re-posting on every keystroke. */
 const uploaded = new Set<string>();
 
@@ -121,6 +132,8 @@ export class MermaidCodeBlockView implements NodeView {
   private timer: number | null = null;
   private renderedSource: string | null = null;
   private lastRenderId: string | null = null;
+  /** Monotonic per view: two renders in one millisecond must not share an id. */
+  private renderSeq = 0;
   private destroyed = false;
   private expanded = false;
   private readonly viewId = `editor-mermaid-${++viewCounter}`;
@@ -236,18 +249,23 @@ export class MermaidCodeBlockView implements NodeView {
     const source = this.node.textContent.trim();
     if (!source || source === this.renderedSource) return;
 
+    // Renders overlap when typing outpaces mermaid. Each gets its own id, and
+    // only the newest may touch the preview; an older one finishing later
+    // would otherwise paint a stale diagram (and cache it) over a newer one.
+    const renderId = `${this.viewId}-${++this.renderSeq}`;
+    this.lastRenderId = renderId;
+    const isCurrent = () => !this.destroyed && this.lastRenderId === renderId;
+
     try {
-      const mermaid = (await import("mermaid")).default;
+      const mermaid = (await loadMermaid()).default;
       const theme = document.documentElement.classList.contains("dark") ? "dark" : "default";
       if (initializedTheme !== theme) {
         mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme });
         initializedTheme = theme;
       }
 
-      const renderId = `${this.viewId}-${Date.now()}`;
-      this.lastRenderId = renderId;
       const { svg } = await mermaid.render(renderId, source);
-      if (this.destroyed) return;
+      if (!isCurrent() || !this.preview || !this.errorEl) return;
 
       this.renderedSource = source;
       this.preview.innerHTML = svg;
@@ -256,12 +274,10 @@ export class MermaidCodeBlockView implements NodeView {
 
       void this.cache(source, svg);
     } catch (error) {
-      if (this.destroyed) return;
       // Mermaid can leave an orphaned scratch element behind on parse errors.
-      if (this.lastRenderId) {
-        document.getElementById(this.lastRenderId)?.remove();
-        document.getElementById(`d${this.lastRenderId}`)?.remove();
-      }
+      document.getElementById(renderId)?.remove();
+      document.getElementById(`d${renderId}`)?.remove();
+      if (!isCurrent() || !this.preview || !this.errorEl) return;
       this.renderedSource = null;
       const message =
         error instanceof Error ? error.message.split("\n")[0] : "Invalid Mermaid syntax";

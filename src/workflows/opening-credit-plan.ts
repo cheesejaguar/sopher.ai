@@ -1,4 +1,4 @@
-import { meteredOperationCeilingUsd } from "@/ai/metering-limits";
+import { meteredOperationCeilingUsd, writerDraftMaxOutputTokens } from "@/ai/metering-limits";
 import { MODELS } from "@/ai/models";
 import type { GenerationConfig } from "@/lib/run-events";
 
@@ -39,9 +39,11 @@ function operationCeiling(config: GenerationConfig, operation: string): number {
                   : operation === "editor.edit"
                     ? models.editor
                     : models.continuity;
+  // An outline chapter may target up to 120% of the per-chapter budget
+  // (outlineSchemaForRun), and the writer sizes its cap from that target.
   const maxOutputTokensPerStep =
     operation === "writer.draft"
-      ? Math.round(Math.min(10_000, config.targetWordsPerChapter * 1.2) * 1.5)
+      ? writerDraftMaxOutputTokens(Math.min(10_000, config.targetWordsPerChapter * 1.2))
       : undefined;
   return meteredOperationCeilingUsd({ model, operation, maxOutputTokensPerStep });
 }

@@ -8,7 +8,7 @@
 import { generateText, Output, isStepCount, tool } from "ai";
 import { z } from "zod";
 
-const SONNET = "anthropic/claude-sonnet-5";
+const SONNET = "anthropic/claude-sonnet-5.5";
 
 // ~2,600 tokens of stable prefix — comfortably above Anthropic's minimum cacheable size.
 const bigSystemPrefix =

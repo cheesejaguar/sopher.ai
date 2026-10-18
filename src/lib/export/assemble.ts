@@ -15,6 +15,9 @@ import {
   buildFigureMap,
   diagramSourceHash,
   loadFigures,
+  loadProjectImageAssetUrls,
+  MANUSCRIPT_IMAGE_ASSET_KINDS,
+  projectImageAssetUrls,
   type FigureAsset,
   type FigureMap,
 } from "./figures";
@@ -50,6 +53,12 @@ export type AssembledManuscript = {
   matter: BookMatter;
   /** Truthful title-page label for a complete proof or an in-progress snapshot. */
   editionNote: string;
+  /**
+   * The project's own uploaded images. Exporters that fetch image bytes embed
+   * only these; anything else renders as alt text. Absent on export snapshots
+   * captured before the list existed, which fall back to the owned-store check.
+   */
+  assetUrls?: string[];
 };
 
 export type ManuscriptSourceChapter = {
@@ -70,6 +79,7 @@ export function buildManuscript(input: {
   editionNote?: string;
   chapters: ManuscriptSourceChapter[];
   figures?: FigureMap;
+  assetUrls?: string[];
 }): AssembledManuscript {
   const matter = input.matter ?? {};
   const chapters = input.chapters
@@ -99,6 +109,7 @@ export function buildManuscript(input: {
     coverUrl: matter.coverUrl ?? input.coverUrl ?? null,
     matter,
     editionNote: input.editionNote?.trim() || READING_LINE,
+    ...(input.assetUrls ? { assetUrls: input.assetUrls } : {}),
   };
 }
 
@@ -176,14 +187,21 @@ export async function captureExportSnapshot(
     .from(schema.chapters)
     .where(eq(schema.chapters.bookId, row.bookId))
     .orderBy(schema.chapters.chapterNumber);
-  const figureRows = await tx
+  const imageRows = await tx
     .select({
+      kind: schema.assets.kind,
       blobUrl: schema.assets.blobUrl,
       contentType: schema.assets.contentType,
       meta: schema.assets.meta,
     })
     .from(schema.assets)
-    .where(and(eq(schema.assets.projectId, projectId), eq(schema.assets.kind, "diagram")));
+    .where(
+      and(
+        eq(schema.assets.projectId, projectId),
+        inArray(schema.assets.kind, [...MANUSCRIPT_IMAGE_ASSET_KINDS]),
+      ),
+    );
+  const figureRows = imageRows.filter((asset) => asset.kind === "diagram");
   const activeRuns = await tx
     .select({ id: schema.generationRuns.id })
     .from(schema.generationRuns)
@@ -280,6 +298,7 @@ export async function captureExportSnapshot(
       editionNote: incomplete ? "an incomplete production snapshot" : READING_LINE,
       chapters: written,
       figures: buildFigureMap(figureRows),
+      assetUrls: projectImageAssetUrls(imageRows),
     }),
   };
 }
@@ -572,5 +591,6 @@ export async function loadManuscript(
     matter,
     chapters,
     figures: await loadFigures(row.projectId),
+    assetUrls: await loadProjectImageAssetUrls(row.projectId),
   });
 }

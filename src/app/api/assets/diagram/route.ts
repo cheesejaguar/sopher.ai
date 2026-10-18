@@ -11,7 +11,8 @@ import {
   compensateUnreferencedBlobUpload,
   scheduleUnreferencedBlobCleanup,
 } from "@/lib/blob/orphan-cleanup";
-import { diagramSourceHash } from "@/lib/export/figures";
+import { diagramSourceHash, pngDimensions } from "@/lib/export/figures";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 import { sanitizeSvg } from "@/lib/security/svg";
 
 /**
@@ -27,6 +28,16 @@ export const maxDuration = 60;
 
 const MAX_SVG_CHARS = 512_000;
 const MAX_PNG_BYTES = 4_000_000;
+
+/**
+ * Renders are cached per source hash and never pruned while referenced, so an
+ * author iterating on a diagram leaves one pair per revision. These ceilings
+ * are far above any real book (each render is an SVG + PNG row) but stop a
+ * scripted caller from turning one owned chapter into unbounded public Blob
+ * storage.
+ */
+const MAX_DIAGRAM_ASSETS_PER_PROJECT = 1_000;
+const MAX_DIAGRAM_BYTES_PER_PROJECT = 250 * 1024 * 1024;
 
 const bodySchema = z.object({
   chapterId: z.uuid(),
@@ -81,9 +92,38 @@ export async function POST(req: Request) {
     return Response.json({ cached: true, sourceHash });
   }
 
+  // Only a cache miss uploads anything, so only a miss spends the limit: an
+  // editor re-posting every diagram on chapter open stays on the free path.
+  const limited = await rateLimit(LIMITS.diagramCache, req, userId);
+  if (limited.limited) return limited.response;
+
+  // The bytes become a public image/png object; refuse anything that does not
+  // at least start with the PNG signature and a readable IHDR.
   const png = Buffer.from(pngBase64, "base64");
-  if (png.length === 0) {
+  if (!pngDimensions(png)) {
     return Response.json({ error: "Invalid PNG payload" }, { status: 400 });
+  }
+
+  const [usage] = await db
+    .select({
+      count: sql<number>`count(*)::int`,
+      bytes: sql<number>`coalesce(sum(${schema.assets.sizeBytes}), 0)::bigint`,
+    })
+    .from(schema.assets)
+    .where(
+      and(eq(schema.assets.projectId, ownership.projectId), eq(schema.assets.kind, "diagram")),
+    );
+  if (
+    Number(usage?.count ?? 0) + 2 > MAX_DIAGRAM_ASSETS_PER_PROJECT ||
+    Number(usage?.bytes ?? 0) + png.length + svg.length > MAX_DIAGRAM_BYTES_PER_PROJECT
+  ) {
+    return Response.json(
+      {
+        error: "This book has reached its diagram storage limit. Contact support.",
+        code: "diagram_limit",
+      },
+      { status: 409 },
+    );
   }
 
   // The server can't render Mermaid, so it can't verify this SVG matches the

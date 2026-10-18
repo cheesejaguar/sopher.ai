@@ -7,6 +7,7 @@ import { Check, CircleAlert, Copy } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useClientNow } from "@/hooks/use-client-now";
 import { useRunStream, type RunSnapshot, type RunStreamState } from "@/hooks/use-run-stream";
 import { StageTimeline } from "@/components/generation/stage-timeline";
 import { BookAssembly } from "@/components/generation/book-assembly";
@@ -89,38 +90,61 @@ function formatElapsed(ms: number): string {
   return minutes > 0 ? `${hours} hr ${minutes} min` : `${hours} hr`;
 }
 
-function formatEventTime(value: string | undefined): string {
-  if (!value) return "Waiting for first update";
+function validEventDate(value: string | undefined): Date | null {
+  if (!value) return null;
   const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return "Waiting for first update";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(date);
+  return Number.isNaN(date.valueOf()) ? null : date;
+}
+
+const emptySubscribe = () => () => {};
+
+/**
+ * A clock time in the reader's own locale and zone. The server cannot know
+ * either, so it renders an empty <time> and the browser fills it in after
+ * hydration, the same pattern as RelativeTime.
+ */
+function EventTime({ date }: { date: Date }) {
+  const label = React.useSyncExternalStore(
+    emptySubscribe,
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+        second: "2-digit",
+      }).format(date),
+    () => "",
+  );
+  return <time dateTime={date.toISOString()}>{label}</time>;
 }
 
 function ProductionTelemetry({
   state,
-  now,
+  live,
   draftedCount,
   plannedTotal,
   estimatedMinutes,
   cancellationRequested,
 }: {
   state: RunStreamState;
-  now: number;
+  live: boolean;
   draftedCount: number;
   plannedTotal: number;
   estimatedMinutes?: number;
   cancellationRequested: boolean;
 }) {
   const statusTargetRef = useHashTargetFocus<HTMLElement>("production-status");
+  // Null during the server render and hydration; the server-measured elapsed
+  // time stands in until the browser clock takes over.
+  const now = useClientNow();
   const acceptedAt = state.health.acceptedAt ? Date.parse(state.health.acceptedAt) : Number.NaN;
   const completedAt = state.health.completedAt ? Date.parse(state.health.completedAt) : Number.NaN;
-  const elapsedMs = Number.isFinite(acceptedAt)
-    ? Math.max(0, (Number.isFinite(completedAt) ? completedAt : now) - acceptedAt)
-    : (state.health.elapsedMs ?? 0);
+  const endAt = Number.isFinite(completedAt) ? completedAt : live ? now : null;
+  const elapsedMs =
+    Number.isFinite(acceptedAt) && endAt !== null
+      ? Math.max(0, endAt - acceptedAt)
+      : (state.health.elapsedMs ?? 0);
+  const acceptedDate = validEventDate(state.health.acceptedAt);
+  const lastUpdateDate = validEventDate(state.health.lastUpdateAt ?? state.health.lastEventAt);
   const facts = [
     {
       label: "Progress",
@@ -136,7 +160,7 @@ function ProductionTelemetry({
     { label: "Credits used", value: state.totalCredits.toFixed(1) },
     {
       label: "Last confirmed update",
-      value: formatEventTime(state.health.lastUpdateAt ?? state.health.lastEventAt),
+      value: lastUpdateDate ? <EventTime date={lastUpdateDate} /> : "Waiting for first update",
     },
   ];
 
@@ -146,7 +170,7 @@ function ProductionTelemetry({
       id="production-status"
       tabIndex={-1}
       aria-labelledby="production-now-title"
-      className="instrument-surface-raised scroll-mt-28 overflow-hidden rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+      className="instrument-surface-raised scroll-mt-28 overflow-hidden rounded-sm outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-solid focus-visible:outline-ring"
     >
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-4 sm:px-5">
         <div>
@@ -161,9 +185,13 @@ function ProductionTelemetry({
           </p>
         </div>
         <p className="font-mono text-xs text-muted-foreground">
-          {state.health.acceptedAt
-            ? `Accepted ${formatEventTime(state.health.acceptedAt)}`
-            : "Run accepted"}
+          {acceptedDate ? (
+            <>
+              Accepted <EventTime date={acceptedDate} />
+            </>
+          ) : (
+            "Run accepted"
+          )}
         </p>
       </div>
       <dl className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -310,14 +338,6 @@ export function RunViewer({
   const announcement = cancellationRequested
     ? "Stopping safely. No new model calls will begin while the Studio confirms the stop."
     : announcementFor(state.stage, draftedCount, plannedTotal, experience);
-  const [now, setNow] = React.useState(() => Date.now());
-
-  React.useEffect(() => {
-    if (terminal) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, [terminal]);
-
   React.useEffect(() => {
     if (state.health.handoffConfirmed) onStartConfirmed?.();
   }, [onStartConfirmed, state.health.handoffConfirmed]);
@@ -547,7 +567,7 @@ export function RunViewer({
         ) : null}
         <ProductionTelemetry
           state={state}
-          now={now}
+          live={!terminal}
           draftedCount={draftedCount}
           plannedTotal={plannedTotal}
           estimatedMinutes={estimatedMinutes ?? state.health.estimatedMinutes}
@@ -835,7 +855,7 @@ export function RecoveryCard({
       id="authoring-recovery"
       tabIndex={-1}
       aria-labelledby="authoring-recovery-title"
-      className="instrument-surface-raised scroll-mt-28 rounded-sm border-l-destructive px-5 py-6 outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring sm:px-7"
+      className="instrument-surface-raised scroll-mt-28 rounded-sm border-l-destructive px-5 py-6 outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-solid focus-visible:outline-ring sm:px-7"
     >
       <p className="folio-label text-destructive">
         {cancelled ? "Production stopped" : "Production needs attention"}

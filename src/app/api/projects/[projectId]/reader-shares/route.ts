@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { requireUser, UnauthorizedError } from "@/lib/auth";
+import { assertNotSuspended, requireUser, SuspendedError, UnauthorizedError } from "@/lib/auth";
 import {
   createReaderShare,
   listReaderShares,
@@ -50,6 +50,16 @@ export async function POST(req: Request, ctx: { params: Promise<{ projectId: str
   const { projectId } = await ctx.params;
   if (!z.uuid().safeParse(projectId).success) {
     return Response.json({ error: "Not found" }, { status: 404 });
+  }
+  // A suspended author keeps reading and exporting their work, but may not
+  // publish new public reader links; existing links stay revocable.
+  try {
+    await assertNotSuspended(auth);
+  } catch (error) {
+    if (error instanceof SuspendedError) {
+      return Response.json({ error: error.message }, { status: 403 });
+    }
+    throw error;
   }
   const limited = await rateLimit(LIMITS.readerShare, req, auth);
   if (limited.limited) return limited.response;

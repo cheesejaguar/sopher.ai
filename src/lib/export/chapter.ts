@@ -26,6 +26,8 @@ export function buildChapterManuscript(input: {
   matter?: BookMatter;
   chapter: ManuscriptSourceChapter;
   figures?: FigureMap;
+  /** The project's own image assets; see `AssembledManuscript.assetUrls`. */
+  assetUrls?: string[];
 }): AssembledManuscript {
   const bookTitle = input.bookTitle.trim() || "Untitled book";
   const author = input.matter?.author?.trim();
@@ -36,6 +38,7 @@ export function buildChapterManuscript(input: {
     editionNote: `Chapter ${input.chapter.number} of ${bookTitle}`,
     chapters: [input.chapter],
     figures: input.figures,
+    assetUrls: input.assetUrls,
   });
 }
 

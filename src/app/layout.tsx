@@ -89,7 +89,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`dark ${archivo.variable} ${sourceSerif.variable}`}
     >
-      <body className="min-h-dvh antialiased [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff]">
+      <body className="min-h-dvh antialiased">
         <SiteJsonLd />
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
           <BaseUiFocusGuardLabels />

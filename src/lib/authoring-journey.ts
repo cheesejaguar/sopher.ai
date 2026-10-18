@@ -286,10 +286,14 @@ function hasEvidenceUnsafeRecoveryState(run: AuthoringJourneyRun): boolean {
   );
 }
 
-function formatCredits(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 4,
-  }).format(value);
+/**
+ * Credits to one decimal, like every other balance in the studio. A
+ * requirement rounds up and a balance rounds down, so the copy can never claim
+ * a shortfall is covered (9.96 needed against 9.98 must not read "10 vs 10").
+ */
+function formatCredits(value: number, round: "up" | "down"): string {
+  const scaled = round === "up" ? Math.ceil(value * 10 - 1e-9) : Math.floor(value * 10 + 1e-9);
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(scaled / 10);
 }
 
 function phaseFor(input: {
@@ -374,9 +378,9 @@ function actionForSeed(
         `/studio/credits?return=${encodeURIComponent(projectWriteHref)}&resumeRun=${encodeURIComponent(run.id)}`,
         "Add credits to continue",
         typeof run.pause?.requiredCredits === "number"
-          ? `Production needs ${formatCredits(run.pause.requiredCredits)} credits${
+          ? `Production needs ${formatCredits(run.pause.requiredCredits, "up")} credits${
               typeof run.pause.balanceCredits === "number"
-                ? ` and the current balance is ${formatCredits(run.pause.balanceCredits)}`
+                ? ` and the current balance is ${formatCredits(run.pause.balanceCredits, "down")}`
                 : ""
             }. ${artifacts.savedChapters} of ${artifacts.totalChapters} ${
               artifacts.savedChapters === 1 ? "chapter is" : "chapters are"
@@ -565,7 +569,7 @@ function actionForSeed(
         "add_credits",
         `/studio/credits?return=${encodeURIComponent(projectWriteHref)}&needed=${encodeURIComponent(String(needed))}`,
         "Add credits to start",
-        `Your setup is saved. Production needs ${formatCredits(requiredCredits)} credits and the current balance is ${formatCredits(access.balanceCredits)}. Checkout returns to the same confirmation.`,
+        `Your setup is saved. Production needs ${formatCredits(requiredCredits, "up")} credits and the current balance is ${formatCredits(access.balanceCredits, "down")}. Checkout returns to the same confirmation.`,
         true,
       );
     }
@@ -697,9 +701,13 @@ export function authoringJourneyWithProgress(
   const run: AuthoringJourneyRun = {
     id: progress.runId,
     kind: activeReplacement ? "full_book" : inheritedRun?.kind,
-    databaseStatus: terminalStatus ?? inheritedRun?.databaseStatus ?? activeStatus,
+    // Only active runs reach this point, and the progress stream is newer than
+    // the server snapshot. Inheriting the snapshot's status kept a resumed run
+    // "awaiting_input" with its pause already cleared, which derives an outline
+    // review for a run that is drafting chapters.
+    databaseStatus: terminalStatus ?? activeStatus,
     workflowStatus: inheritedRun?.workflowStatus ?? null,
-    effectiveStatus: terminalStatus ?? inheritedRun?.effectiveStatus ?? activeStatus,
+    effectiveStatus: terminalStatus ?? activeStatus,
     stage: progress.stage,
     progressPct: progress.pct,
     stageDescription: progress.detail ?? null,

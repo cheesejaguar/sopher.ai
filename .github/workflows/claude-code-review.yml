@@ -3,22 +3,11 @@ name: Claude Code Review
 on:
   pull_request:
     types: [opened, synchronize]
-    # Optional: Only run on specific file changes
-    # paths:
-    #   - "src/**/*.ts"
-    #   - "src/**/*.tsx"
-    #   - "src/**/*.js"
-    #   - "src/**/*.jsx"
 
 jobs:
   claude-review:
-    # Optional: Filter by PR author
-    # if: |
-    #   github.event.pull_request.user.login == 'external-contributor' ||
-    #   github.event.pull_request.user.login == 'new-developer' ||
-    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
@@ -44,9 +33,9 @@ jobs:
         uses: anthropics/claude-code-action@be7b93b1907a4abad570368f3c74b6fe3807510b # v1.0.183
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # A custom token is required while this PR changes the workflow:
-          # the Claude App deliberately rejects OIDC exchange unless the
-          # workflow is byte-identical to the default branch.
+          # The Claude App rejects OIDC exchange unless the workflow is
+          # byte-identical to the default branch, so a PR that edits this file
+          # could not be reviewed; the repository token avoids that.
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
           # v1 automation mode requires the repository and PR context in the
@@ -69,27 +58,12 @@ jobs:
           claude_args: |
             --model claude-sonnet-5
 
-          # Optional: Use sticky comments to make Claude reuse the same comment on subsequent pushes to the same PR
-          # use_sticky_comment: true
-
-          # Optional: Customize review based on file types
-          # prompt: |
-          #   Review this PR focusing on:
-          #   - For TypeScript files: Type safety and proper interface usage
-          #   - For API endpoints: Security, input validation, and error handling
-          #   - For React components: Performance, accessibility, and best practices
-          #   - For tests: Coverage, edge cases, and test quality
-
-          # Optional: Different prompts for different authors
-          # prompt: |
-          #   ${{ github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR' &&
-          #   'Welcome! Please review this PR from a first-time contributor. Be encouraging and provide detailed explanations for any suggestions.' ||
-          #   'Please provide a thorough code review focusing on our coding standards and best practices.' }}
-
-          # Optional: Add specific tools for running tests or linting
-          # claude_args: "--allowedTools Bash(npm run test),Bash(npm run lint),Bash(npm run typecheck)"
-
-          # Optional: Skip review for certain conditions
-          # if: |
-          #   !contains(github.event.pull_request.title, '[skip-review]') &&
-          #   !contains(github.event.pull_request.title, '[WIP]')
+      # The action prints only `is_error: true` when the CLI fails before the
+      # review starts (an expired token, an unavailable model). Surface that
+      # one-line reason; full output stays off on this public repository.
+      - name: Explain a failed review run
+        if: failure() && steps.claude-review.outcome == 'failure'
+        run: |
+          file="${RUNNER_TEMP}/claude-execution-output.json"
+          [ -f "$file" ] || exit 0
+          jq -r '.[] | select(.type == "result") | .result // empty' "$file" | head -c 1000

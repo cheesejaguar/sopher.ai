@@ -111,6 +111,7 @@ export async function updateBibleEntity(
   input: unknown,
 ): Promise<EntityMutationResult> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) return failure("not_found");
   const parsed = editableCanonSchema.safeParse(input);
   if (!z.uuid().safeParse(entityId).success || !parsed.success) {
     return {
@@ -217,6 +218,7 @@ export async function createBibleEntity(
   input: unknown,
 ): Promise<EntityMutationResult> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) return failure("not_found");
   const parsed = createCanonSchema.safeParse(input);
   if (!parsed.success) {
     return {

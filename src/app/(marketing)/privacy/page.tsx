@@ -12,12 +12,21 @@ export const metadata: Metadata = publicPageMetadata({
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy Policy" updated="August 2, 2026">
+    <LegalPage title="Privacy Policy" updated="August 12, 2026">
       <p>
-        This policy explains what we collect when you use sopher.ai, why we collect it, and what
-        control you have over it. The short version: we collect what the product needs to work, your
-        manuscripts are private unless you deliberately create a reader link, and we do not sell
-        data.
+        This policy is effective August 12, 2026. It explains what we collect when you use
+        sopher.ai, why we collect it, and what control you have over it. The short version: we
+        collect what the product needs to work, your manuscripts are private unless you deliberately
+        create a reader link, and we do not sell or share personal data for cross-context behavioral
+        advertising.
+      </p>
+
+      <h2>Who we are</h2>
+      <p>
+        sopher.ai operates this Service. For privacy questions, requests, or complaints, contact us
+        at <a href="mailto:support@sopher.ai">support@sopher.ai</a>. If you send a request, we may
+        ask for information needed to verify that you control the relevant account before we
+        disclose or delete account information.
       </p>
 
       <h2>What we collect</h2>
@@ -33,7 +42,18 @@ export default function PrivacyPage() {
         <li>
           <strong>Usage metering</strong> — a record of each AI model call your account makes
           (model, token counts, cost) so we can show you exactly what you spent. This record
-          contains counts, not the text of your book.
+          contains accounting and usage metadata, not the text of your book.
+        </li>
+        <li>
+          <strong>Product events</strong> — events such as wizard steps, starting or finishing a
+          book, exporting, and applying an edit. Events may be associated with your account after
+          sign-in; their properties are restricted to small scalar values and are not used to store
+          manuscript text.
+        </li>
+        <li>
+          <strong>Safety and support records</strong> — information needed to prevent abuse, enforce
+          our terms, investigate service failures, handle support requests, and comply with law.
+          This can include a limited excerpt or moderation record when a safety check requires one.
         </li>
         <li>
           <strong>Payment records</strong> — handled by Stripe. We store the transaction reference
@@ -53,9 +73,10 @@ export default function PrivacyPage() {
           (authentication), Stripe (payments).
         </li>
         <li>
-          <strong>Google Analytics</strong> — anonymous usage measurement (pages visited, rough
-          location, device type), so we can see what to improve. It never receives your manuscripts
-          or account content.
+          <strong>Analytics providers</strong> — Google Analytics and Vercel Analytics measure
+          public-page visits and performance so we can improve the site. They are not loaded on the
+          authenticated Studio, admin, API, or reader-link routes, and they never receive your
+          manuscript text.
         </li>
       </ul>
       <p>
@@ -84,11 +105,11 @@ export default function PrivacyPage() {
         family), and two first-party cookies of our own: <code>sopher_aid</code>, a random
         identifier that lets us count a visit as one visit, and <code>sopher_attr</code>, which
         records how you first arrived (a campaign tag or referring site) so we know which channels
-        are worth continuing. Neither contains personal information, and the referring site is
-        stored as a domain only, never a full address. There are no advertising cookies. You can
-        block analytics cookies in your browser or with Google&rsquo;s{" "}
-        <a href="https://tools.google.com/dlpage/gaoptout">opt-out add-on</a> without affecting the
-        product.
+        are worth continuing. Both are first-touch cookies and last for up to 90 days; the referring
+        site is stored as a domain only, never a full address. Neither contains your manuscript.
+        There are no advertising cookies. You can block analytics cookies in your browser or with
+        Google&rsquo;s <a href="https://tools.google.com/dlpage/gaoptout">opt-out add-on</a> without
+        affecting the product.
       </p>
       <p>
         We also record which steps of the book wizard you reach, and when a book is started,
@@ -99,18 +120,48 @@ export default function PrivacyPage() {
       <h2>Retention and deletion</h2>
       <p>
         Your content is kept while your account exists. We may review content when required to
-        enforce our terms or comply with law; such review is limited to that purpose. Deleting a
-        project removes its manuscript, story bible, reader editions, reader links, and generated
-        files. Deleting your account removes your account record and all projects; transaction
-        records are retained as required for tax and accounting. To delete your account, use your
-        account menu or email us.
+        enforce our terms, operate safety checks, or comply with law; such review is limited to that
+        purpose. Deleting a project removes its manuscript, story bible, reader editions, reader
+        links, and generated files. Expired or revoked reader snapshots are eligible for cleanup
+        after 30 days. Deleting your account removes your account record and all projects;
+        transaction records are retained as required for tax and accounting. To delete your account,
+        use your account menu or email us. Some backups or fraud-prevention records may persist for
+        a limited period before their normal secure deletion cycle.
+      </p>
+
+      <h2>Security and international processing</h2>
+      <p>
+        We use authentication, scoped access controls, secure transport, project-level ownership
+        checks, and operational safeguards designed to protect your information. No internet service
+        can guarantee absolute security, so do not use sopher.ai to store information that requires
+        a specialized regulated system. sopher.ai and the processors listed above may process
+        information in countries other than where you live. Where applicable, we use the contractual
+        or other safeguards required for those transfers.
+      </p>
+
+      <h2>Children</h2>
+      <p>
+        The Service is not directed to children under 13, and we do not knowingly collect personal
+        information from children under 13. If you believe a child has provided personal
+        information, contact us so we can investigate and remove it where appropriate.
       </p>
 
       <h2>Your rights</h2>
       <p>
-        You can export your manuscripts at any time from the product. Depending on where you live
-        you may have additional rights (access, correction, deletion, portability) — email{" "}
-        <a href="mailto:support@sopher.ai">support@sopher.ai</a> and we will honor them.
+        You can export your manuscripts at any time from the product. Depending on where you live,
+        you may have rights to access, correct, delete, restrict, object to, or receive a portable
+        copy of your personal information, and to withdraw consent where processing relies on
+        consent. You may also have the right to opt out of sale or sharing; we do not sell personal
+        data or share it for cross-context behavioral advertising. Email{" "}
+        <a href="mailto:support@sopher.ai">support@sopher.ai</a> to exercise a right. We will not
+        discriminate against you for making a lawful privacy request, subject to applicable legal
+        exceptions and verification requirements.
+      </p>
+
+      <h2>Third-party links</h2>
+      <p>
+        The Service may link to third-party sites or services. Their privacy practices are governed
+        by their own notices, not this policy. Review those notices before providing information.
       </p>
 
       <h2>Changes</h2>

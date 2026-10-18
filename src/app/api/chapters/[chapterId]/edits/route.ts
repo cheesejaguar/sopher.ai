@@ -189,7 +189,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ chapterId: str
         maxOutputTokens: meteredMaxOutputTokens("editor.selection"),
         prepareStep: meteredInputGuard("editor.selection"),
         output: Output.object({ schema: selectionEditSchema }),
-        providerOptions: gatewayOptions(meter, "editor"),
+        providerOptions: gatewayOptions(meter, "editor", { model: model }),
       }),
     );
     output = result.output;

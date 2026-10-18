@@ -1,6 +1,8 @@
 import epub, { type Chapter } from "epub-gen-memory";
 import { chapterHeading, markdownToHtml, type AssembledManuscript } from "./assemble";
 import { closingBookMatter, openingBookMatter } from "@/lib/book-package";
+import { isOwnedBlobUrl, ownedImageUrlFilter } from "@/lib/security/blob-url";
+import type { FigureMap } from "./figures";
 import { FORMAT_META, filenameStem, type ExportResult } from "./types";
 
 const CSS = `
@@ -40,7 +42,32 @@ function titlePageHtml(m: AssembledManuscript): string {
     .join("\n");
 }
 
+/**
+ * epub-gen-memory downloads every `<img src>` (and the cover) on the server and
+ * packs the bytes into the file it hands back, following redirects to any
+ * host. Left unfiltered, `![x](http://169.254.169.254/…)` in a chapter would be
+ * a server-side request forgery whose response the author can then read out of
+ * their own download. Only the project's own Blob images may reach it.
+ */
+function ownedFigures(figures: FigureMap): FigureMap {
+  return Object.fromEntries(
+    Object.entries(figures).map(([key, figure]) => [
+      key,
+      {
+        ...figure,
+        svgUrl: isOwnedBlobUrl(figure.svgUrl) ? figure.svgUrl : null,
+        pngUrl: isOwnedBlobUrl(figure.pngUrl) ? figure.pngUrl : null,
+      },
+    ]),
+  );
+}
+
 export async function exportEpub(m: AssembledManuscript): Promise<ExportResult> {
+  const imageUrl = ownedImageUrlFilter(m.assetUrls);
+  const figures = ownedFigures(m.figures);
+  const html = (markdown: string) => markdownToHtml(markdown, figures, "png", { imageUrl });
+  const cover = m.coverUrl ? (imageUrl(m.coverUrl) ?? undefined) : undefined;
+
   const rights: string[] = [];
   if (m.matter.copyrightHolder) {
     rights.push(
@@ -99,18 +126,18 @@ export async function exportEpub(m: AssembledManuscript): Promise<ExportResult> 
       : []),
     ...openingBookMatter(m.matter).map((section) => ({
       title: section.title,
-      content: `<h2>${escapeHtml(section.title)}</h2>\n${markdownToHtml(section.markdown, m.figures, "png")}`,
+      content: `<h2>${escapeHtml(section.title)}</h2>\n${html(section.markdown)}`,
       beforeToc: true,
     })),
     ...m.chapters.map((chapter) => ({
       title: chapterHeading(chapter),
       // PNG rather than SVG: epub-gen-memory downloads referenced images, and
       // reader support for inline SVG is far less dependable than for raster.
-      content: `<h2>${escapeHtml(chapterHeading(chapter))}</h2>\n${markdownToHtml(chapter.markdown, m.figures, "png")}`,
+      content: `<h2>${escapeHtml(chapterHeading(chapter))}</h2>\n${html(chapter.markdown)}`,
     })),
     ...closingBookMatter(m.matter).map((section) => ({
       title: section.title,
-      content: `<h2>${escapeHtml(section.title)}</h2>\n${markdownToHtml(section.markdown, m.figures, "png")}`,
+      content: `<h2>${escapeHtml(section.title)}</h2>\n${html(section.markdown)}`,
     })),
   ];
 
@@ -118,12 +145,16 @@ export async function exportEpub(m: AssembledManuscript): Promise<ExportResult> 
     {
       title: m.title,
       author: m.author,
-      cover: m.coverUrl ?? undefined,
+      cover,
       description: m.synopsis ?? undefined,
       tocTitle: "Contents",
       prependChapterTitles: false,
       css: CSS,
       verbose: false,
+      // Defaults are a 20s timeout and three retries per image; owned Blob
+      // objects either answer quickly or are gone.
+      fetchTimeout: 10_000,
+      retryTimes: 1,
     },
     content,
   );

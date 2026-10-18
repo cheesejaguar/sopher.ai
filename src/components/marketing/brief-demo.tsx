@@ -47,9 +47,9 @@ export function BriefDemo() {
           key={example.id}
           name="brief-example"
           open={index === 0}
-          className="group border-y border-black/10 bg-instrument/55 dark:border-white/10"
+          className="group border-y border-hairline bg-instrument/55"
         >
-          <summary className="grid min-h-14 cursor-pointer list-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-black/[0.04] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring dark:hover:bg-white/[0.045] sm:px-4 [&::-webkit-details-marker]:hidden">
+          <summary className="grid min-h-14 cursor-pointer list-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-wash focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring sm:px-4 [&::-webkit-details-marker]:hidden">
             <span className="font-mono text-[0.6875rem] text-primary">
               {String(index + 1).padStart(2, "0")}
             </span>
@@ -69,7 +69,7 @@ export function BriefDemo() {
             </span>
           </summary>
 
-          <div className="grid gap-5 border-t border-black/10 p-3 dark:border-white/10 sm:p-5 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
+          <div className="grid gap-5 border-t border-hairline p-3 sm:p-5 md:grid-cols-[13rem_minmax(0,1fr)] md:gap-8">
             <div className="min-w-0 text-left">
               <p className="font-mono text-[0.6875rem] tracking-[0.12em] text-muted-foreground uppercase">
                 The brief

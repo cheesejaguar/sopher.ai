@@ -1,6 +1,13 @@
 # Pricing and unit economics
 
-Derived from production data, not estimates. Every LLM call is metered into
+Derived from production data, not estimates.
+
+> **2026-10 model refresh:** tiers moved to Sonnet 5.5 (same rates as Sonnet 5)
+> and Opus 5.5 ($4/$20 vs Opus 5's $5/$25; cache reads $0.20). Draft and
+> standard COGS are unchanged; premium prose is ~20% cheaper per token, but Opus
+> 5.5 always thinks adaptively (bounded with `effort: "low"`), so the published
+> 36 cr premium figure is kept as a conservative upper bound until it is
+> re-measured from real 5.5 runs. Every LLM call is metered into
 `llm_calls`; the figures below come from two complete books.
 
 ## Measured cost of a book

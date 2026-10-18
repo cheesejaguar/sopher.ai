@@ -43,7 +43,7 @@ beforeEach(() => {
 
 describe("Story Bible entity actions", () => {
   it("rejects malformed input before opening a database transaction", async () => {
-    const result = await updateBibleEntity("project-1", "not-an-id", {
+    const result = await updateBibleEntity("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", "not-an-id", {
       ...characterInput,
       name: "",
     });
@@ -83,11 +83,20 @@ describe("Story Bible entity actions", () => {
       return [[], [{ status: "saved", entity_id: entityId }]];
     });
 
-    const result = await updateBibleEntity("project-1", entityId, characterInput);
+    const result = await updateBibleEntity(
+      "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      entityId,
+      characterInput,
+    );
 
     expect(result).toEqual({ ok: true, entityId });
-    expect(mocks.reconcile).toHaveBeenCalledWith({ projectId: "project-1", userId: "user-1" });
-    expect(mocks.revalidatePath).toHaveBeenCalledWith("/projects/project-1/bible");
+    expect(mocks.reconcile).toHaveBeenCalledWith({
+      projectId: "71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d",
+      userId: "user-1",
+    });
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(
+      "/projects/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/bible",
+    );
   });
 
   it("returns a truthful read-only result while authoring is active", async () => {
@@ -97,7 +106,9 @@ describe("Story Bible entity actions", () => {
       return [[], [{ status: "active_run", entity_id: null }]];
     });
 
-    await expect(updateBibleEntity("project-1", entityId, characterInput)).resolves.toMatchObject({
+    await expect(
+      updateBibleEntity("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", entityId, characterInput),
+    ).resolves.toMatchObject({
       ok: false,
       error: "active_run",
       message: expect.stringContaining("Finish or stop"),
@@ -114,7 +125,7 @@ describe("Story Bible entity actions", () => {
       return [[], [{ status: "created", entity_id: entityId }]];
     });
 
-    const result = await createBibleEntity("project-1", {
+    const result = await createBibleEntity("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", {
       ...characterInput,
       kind: "location",
       name: "Bellweather Observatory",
@@ -122,8 +133,25 @@ describe("Story Bible entity actions", () => {
     expect(result).toEqual({ ok: true, entityId });
 
     await expect(
-      createBibleEntity("project-1", { ...characterInput, kind: "organization" }),
+      createBibleEntity("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", {
+        ...characterInput,
+        kind: "organization",
+      }),
     ).resolves.toMatchObject({ ok: false, error: "invalid" });
     expect(mocks.transaction).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Story Bible project id validation", () => {
+  it("returns not found for a malformed project id without reconciling", async () => {
+    await expect(createBibleEntity("not-a-uuid", characterInput)).resolves.toMatchObject({
+      ok: false,
+      error: "not_found",
+    });
+    await expect(
+      updateBibleEntity("not-a-uuid", "11111111-1111-4111-8111-111111111111", characterInput),
+    ).resolves.toMatchObject({ ok: false, error: "not_found" });
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+    expect(mocks.transaction).not.toHaveBeenCalled();
   });
 });

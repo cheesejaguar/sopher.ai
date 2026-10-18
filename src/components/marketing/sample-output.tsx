@@ -44,7 +44,7 @@ export function SampleOutput() {
   return (
     <section
       aria-labelledby="sample-output-heading"
-      className="defer-offscreen defer-samples border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-samples border-b border-hairline"
     >
       <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-16 sm:gap-10 sm:px-6 sm:py-24 lg:grid-cols-12 lg:px-8 lg:py-32">
         <div className="lg:col-span-4">
@@ -59,7 +59,7 @@ export function SampleOutput() {
             Illustrative opening pages from three labeled sample briefs, shown so you can judge
             voice, pacing, and control of detail.
           </p>
-          <div className="mt-8 hidden border-t border-black/10 pt-4 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase dark:border-white/10 lg:block">
+          <div className="mt-8 hidden border-t border-hairline pt-4 font-mono text-[0.6875rem] tracking-[0.08em] text-muted-foreground uppercase lg:block">
             Manuscript view / chapter 01
           </div>
         </div>
@@ -70,7 +70,7 @@ export function SampleOutput() {
               key={sample.value}
               name="sample-genre"
               open={index === 0}
-              className="group border-b border-black/10 first:border-t dark:border-white/10"
+              className="group border-b border-hairline first:border-t"
             >
               <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-4 px-3 text-xs font-semibold tracking-[0.08em] text-muted-foreground uppercase transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring [&::-webkit-details-marker]:hidden">
                 <span>{sample.genre}</span>

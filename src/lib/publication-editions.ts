@@ -8,6 +8,7 @@ import { lockProjectAuthoring } from "@/db/transaction-operations";
 import { bookMatterSchema, type BookMatter } from "@/lib/book-package";
 import { captureExportSnapshot, type ExportSnapshot } from "@/lib/export/assemble";
 import type { FigureMap } from "@/lib/export/figures";
+import { isOwnedBlobUrl } from "@/lib/security/blob-url";
 
 const READER_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 export const MAX_ACTIVE_READER_SHARES_PER_PROJECT = 20;
@@ -27,18 +28,9 @@ const publicationFigureSchema = z.object({
   height: z.number().int().positive().optional(),
 });
 
+/** Reader editions only ever proxy objects from this deployment's Blob store. */
 export function isOwnedReaderAssetUrl(value: string | null | undefined): value is string {
-  if (!value) return false;
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
-      (url.hostname === "public.blob.vercel-storage.com" ||
-        url.hostname.endsWith(".public.blob.vercel-storage.com"))
-    );
-  } catch {
-    return false;
-  }
+  return isOwnedBlobUrl(value);
 }
 
 export function readerAssetKey(url: string): string {
@@ -91,10 +83,26 @@ function tokenHash(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
-function readerLinkSecret(): string {
-  const secret = process.env.READER_LINK_SECRET ?? process.env.CLERK_SECRET_KEY;
-  if (secret) return secret;
-  if (process.env.NODE_ENV !== "production") return "sopher-local-reader-link-secret-v1";
+let warnedClerkSecretFallback = false;
+
+/**
+ * The key reader tokens are derived from. A dedicated READER_LINK_SECRET keeps
+ * reader-link derivation independent of the auth provider's key. The Clerk
+ * fallback stays for deployments that predate it; links are verified by their
+ * stored hash, so switching secrets never breaks a live link.
+ */
+export function readerLinkSecret(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.READER_LINK_SECRET) return env.READER_LINK_SECRET;
+  if (env.CLERK_SECRET_KEY) {
+    if (env.NODE_ENV === "production" && !warnedClerkSecretFallback) {
+      warnedClerkSecretFallback = true;
+      console.warn(
+        "[reader-links] READER_LINK_SECRET is unset; deriving reader tokens from CLERK_SECRET_KEY",
+      );
+    }
+    return env.CLERK_SECRET_KEY;
+  }
+  if (env.NODE_ENV !== "production") return "sopher-local-reader-link-secret-v1";
   throw new Error("READER_LINK_SECRET is not configured");
 }
 

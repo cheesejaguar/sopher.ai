@@ -93,7 +93,7 @@ export function StepBrief({
           rows={10}
           required
           aria-describedby="wizard-brief-hint"
-          className="prose-manuscript mx-auto mt-6 block w-full resize-none bg-transparent outline-none placeholder:text-paper-muted"
+          className="prose-manuscript mx-auto mt-6 block w-full resize-none rounded-sm bg-transparent outline-none placeholder:text-paper-muted focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-solid focus-visible:outline-paper-link"
         />
         {/* Deliberately not a live region: it changes on every keystroke. */}
         <p

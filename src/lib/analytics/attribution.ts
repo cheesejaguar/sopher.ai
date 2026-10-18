@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { Acquisition } from "@/db/schema";
 
 /**
@@ -56,12 +58,32 @@ export function isEmptyAttribution(a: Acquisition): boolean {
   return !a.source && !a.medium && !a.campaign && !a.referrerHost;
 }
 
+/**
+ * The cookie is httpOnly but still client-controlled — anyone can send any
+ * value — and `requireUser` persists the parse result into `users.acquisition`.
+ * Only the exact shape `readAttribution` writes, with its length caps, gets
+ * through; unknown keys are stripped rather than stored.
+ */
+const utmValue = z.string().max(100).optional();
+const attributionCookieSchema = z.object({
+  source: utmValue,
+  medium: utmValue,
+  campaign: utmValue,
+  term: utmValue,
+  content: utmValue,
+  referrerHost: z.string().max(100).optional(),
+  landingPath: z.string().max(200).optional(),
+  capturedAt: z.iso.datetime(),
+}) satisfies z.ZodType<Acquisition>;
+
+/** Generous for the real payload (well under 1 KB); bounds the parse work. */
+const MAX_ATTRIBUTION_COOKIE_CHARS = 4_096;
+
 export function parseAttributionCookie(raw: string | undefined): Acquisition | null {
-  if (!raw) return null;
+  if (!raw || raw.length > MAX_ATTRIBUTION_COOKIE_CHARS) return null;
   try {
-    const parsed = JSON.parse(decodeURIComponent(raw));
-    if (!parsed || typeof parsed !== "object" || typeof parsed.capturedAt !== "string") return null;
-    return parsed as Acquisition;
+    const parsed = attributionCookieSchema.safeParse(JSON.parse(decodeURIComponent(raw)));
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }

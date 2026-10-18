@@ -56,7 +56,7 @@ export async function generateChapterSummary(input: ChapterSummaryInput): Promis
         // call runs after every chapter, so a rejection here strands a chapter
         // that is already written — and takes the story bible with it.
         output: Output.object({ schema: chapterSummaryWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "summarizer"),
+        providerOptions: gatewayOptions(input.meter, "summarizer", { model: model }),
       }),
   );
 
@@ -121,10 +121,4 @@ export async function persistChapterSummary(
 
   if (transaction) return persist(transaction);
   await withDbTransaction(persist);
-}
-
-export async function summarizeChapter(input: ChapterSummaryInput): Promise<ChapterSummary> {
-  const summary = await generateChapterSummary(input);
-  await persistChapterSummary(input, summary);
-  return summary;
 }

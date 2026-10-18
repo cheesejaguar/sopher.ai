@@ -395,7 +395,7 @@ export async function applyBookReplace(
   if (outcome.status === "conflict") return failure("conflict", outcome.conflicts);
   if (outcome.status !== "applied") return failure(outcome.status);
 
-  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}`, "layout");
   revalidatePath(`/projects/${projectId}/manuscript`);
   if (outcome.entitiesRenamed > 0) revalidatePath(`/projects/${projectId}/bible`);
   return {

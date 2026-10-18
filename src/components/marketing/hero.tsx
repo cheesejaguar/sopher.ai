@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 
 export function Hero() {
   return (
-    <section className="marketing-canvas marketing-hero-stage relative overflow-hidden border-b border-black/10 dark:border-white/10">
+    <section className="marketing-canvas marketing-hero-stage relative overflow-hidden border-b border-hairline">
       <span
         aria-hidden="true"
         className="marketing-proof-depth-plane pointer-events-none absolute -top-20 -right-20 hidden h-[38rem] w-[28rem] border border-ion/15 opacity-55 lg:block"
@@ -55,7 +55,7 @@ export function Hero() {
               <span aria-hidden="true">↓</span>
             </Link>
           </div>
-          <div className="order-6 grid min-w-0 max-w-xl grid-cols-[auto_minmax(0,1fr)] gap-x-4 border-t border-black/10 pt-4 font-mono text-[0.6875rem] leading-5 tracking-[0.08em] text-muted-foreground uppercase dark:border-white/12 lg:mt-12">
+          <div className="order-6 grid min-w-0 max-w-xl grid-cols-[auto_minmax(0,1fr)] gap-x-4 border-t border-hairline pt-4 font-mono text-[0.6875rem] leading-5 tracking-[0.08em] text-muted-foreground uppercase lg:mt-12">
             <span className="text-primary">Start with</span>
             <span>One idea only you could have</span>
             <span className="text-ion">Grow into</span>
@@ -64,7 +64,7 @@ export function Hero() {
         </div>
 
         <div className="relative order-4 min-w-0 max-w-full lg:col-span-6 lg:pl-2">
-          <div className="mb-5 hidden items-center justify-between border-b border-black/10 pb-3 font-mono text-[0.6875rem] tracking-[0.1em] text-muted-foreground uppercase dark:border-white/12 lg:flex">
+          <div className="mb-5 hidden items-center justify-between border-b border-hairline pb-3 font-mono text-[0.6875rem] tracking-[0.1em] text-muted-foreground uppercase lg:flex">
             <span>From first spark to final page</span>
             <span className="text-ion">You direct the story</span>
           </div>
@@ -72,7 +72,7 @@ export function Hero() {
         </div>
       </div>
 
-      <div className="defer-offscreen defer-proof relative z-10 border-t border-black/10 bg-instrument/88 dark:border-white/10">
+      <div className="defer-offscreen defer-proof relative z-10 border-t border-hairline bg-instrument/88">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-4 py-14 sm:gap-10 sm:px-6 sm:py-20 lg:grid-cols-12 lg:px-8 lg:py-24">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Proof 01 / live manuscript</p>

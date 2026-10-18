@@ -20,6 +20,61 @@ import { getStripe, stripeConfigured } from "@/lib/payments/stripe";
 
 export const maxDuration = 60;
 
+/** Grants a paid Checkout Session's credits once, then mails the receipt. */
+async function fulfilCheckoutSession(session: Stripe.Checkout.Session): Promise<Response> {
+  // Only fulfil once payment actually cleared — a session can complete with
+  // an async method still pending.
+  if (session.payment_status !== "paid") {
+    return Response.json({ received: true, ignored: "payment not settled" });
+  }
+
+  const userId = session.metadata?.userId ?? session.client_reference_id ?? null;
+  const credits = Number(session.metadata?.credits ?? 0);
+  const packId = session.metadata?.packId ?? "credits";
+
+  if (!userId || !Number.isFinite(credits) || credits <= 0) {
+    // Nothing actionable, but return 200: a 4xx makes Stripe retry forever.
+    return Response.json({ received: true, ignored: "missing metadata" });
+  }
+
+  const granted = await grantCredits({
+    userId,
+    credits,
+    description: `${packId} pack — ${credits} credits`,
+    externalRef: session.id,
+    // What Stripe actually collected. Credits are not dollars once bonus
+    // tiers exist ($60 buys 66 credits), so this is the only figure that
+    // reconciles with the Stripe dashboard.
+    usdPaid: (session.amount_total ?? 0) / 100,
+  });
+
+  // Receipt only on first fulfilment — a retried delivery must not re-mail.
+  // And never let the receipt path fail the response: a 500 here would make
+  // Stripe redeliver into the idempotent no-op, losing the receipt forever.
+  if (granted) {
+    try {
+      const [user] = await getDb()
+        .select({ email: schema.users.email })
+        .from(schema.users)
+        .where(eq(schema.users.id, userId))
+        .limit(1);
+      if (user?.email) {
+        await sendReceiptEmail({
+          to: user.email,
+          packName: packId,
+          credits,
+          usd: (session.amount_total ?? 0) / 100,
+          idempotencyKey: `stripe-receipt:${session.id}`,
+        });
+      }
+    } catch (error) {
+      console.warn("[email] receipt failed after grant:", error);
+    }
+  }
+
+  return Response.json({ received: true, granted });
+}
+
 export async function POST(req: Request) {
   if (!stripeConfigured) {
     return Response.json({ error: "Payments are not configured" }, { status: 503 });
@@ -44,60 +99,15 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  if (event.type === "checkout.session.completed") {
-    const session = event.data.object;
-
-    // Only fulfil once payment actually cleared — a session can complete with
-    // an async method still pending.
-    if (session.payment_status !== "paid") {
-      return Response.json({ received: true, ignored: "payment not settled" });
-    }
-
-    const userId = session.metadata?.userId ?? session.client_reference_id ?? null;
-    const credits = Number(session.metadata?.credits ?? 0);
-    const packId = session.metadata?.packId ?? "credits";
-
-    if (!userId || !Number.isFinite(credits) || credits <= 0) {
-      // Nothing actionable, but return 200: a 4xx makes Stripe retry forever.
-      return Response.json({ received: true, ignored: "missing metadata" });
-    }
-
-    const granted = await grantCredits({
-      userId,
-      credits,
-      description: `${packId} pack — ${credits} credits`,
-      externalRef: session.id,
-      // What Stripe actually collected. Credits are not dollars once bonus
-      // tiers exist ($60 buys 66 credits), so this is the only figure that
-      // reconciles with the Stripe dashboard.
-      usdPaid: (session.amount_total ?? 0) / 100,
-    });
-
-    // Receipt only on first fulfilment — a retried delivery must not re-mail.
-    // And never let the receipt path fail the response: a 500 here would make
-    // Stripe redeliver into the idempotent no-op, losing the receipt forever.
-    if (granted) {
-      try {
-        const [user] = await getDb()
-          .select({ email: schema.users.email })
-          .from(schema.users)
-          .where(eq(schema.users.id, userId))
-          .limit(1);
-        if (user?.email) {
-          await sendReceiptEmail({
-            to: user.email,
-            packName: packId,
-            credits,
-            usd: (session.amount_total ?? 0) / 100,
-            idempotencyKey: `stripe-receipt:${session.id}`,
-          });
-        }
-      } catch (error) {
-        console.warn("[email] receipt failed after grant:", error);
-      }
-    }
-
-    return Response.json({ received: true, granted });
+  // Card payments settle at completion; delayed methods (bank debits) complete
+  // the session unpaid and settle later with async_payment_succeeded. Both run
+  // the same fulfilment, keyed on the session id, so whichever event reports a
+  // paid session first grants and the other is a no-op.
+  if (
+    event.type === "checkout.session.completed" ||
+    event.type === "checkout.session.async_payment_succeeded"
+  ) {
+    return fulfilCheckoutSession(event.data.object);
   }
 
   if (event.type === "charge.refunded") {
@@ -129,5 +139,66 @@ export async function POST(req: Request) {
     return Response.json({ received: true });
   }
 
+  // A chargeback takes the money back the moment funds are withdrawn, so the
+  // credits it bought go with it, at face value like a refund. `created`
+  // covers ordinary chargebacks; `funds_withdrawn` covers an inquiry that
+  // later escalates. Both share one external_ref, so only the first debits.
+  // Inquiries (`warning_*`) move no money and are ignored.
+  if (event.type === "charge.dispute.created" || event.type === "charge.dispute.funds_withdrawn") {
+    const dispute = event.data.object;
+    if (dispute.status.startsWith("warning_")) {
+      return Response.json({ received: true, ignored: "inquiry" });
+    }
+    const userId = await disputedChargeUserId(dispute);
+    const usd = (dispute.amount ?? 0) / 100;
+    if (userId && usd > 0) {
+      await grantCredits({
+        userId,
+        credits: -usd,
+        description: `Dispute — $${usd.toFixed(2)}`,
+        externalRef: `dispute:${dispute.id}`,
+        kind: "refund",
+        usdPaid: -usd,
+      });
+    }
+    return Response.json({ received: true });
+  }
+
+  // A won dispute returns the funds, so return the credits — but only if this
+  // dispute actually debited them; otherwise a win would mint free credits.
+  if (event.type === "charge.dispute.closed") {
+    const dispute = event.data.object;
+    if (dispute.status !== "won") return Response.json({ received: true });
+    const [debit] = await getDb()
+      .select({ userId: schema.creditLedger.userId, usdPaid: schema.creditLedger.usdPaid })
+      .from(schema.creditLedger)
+      .where(eq(schema.creditLedger.externalRef, `dispute:${dispute.id}`))
+      .limit(1);
+    const usd = -Number(debit?.usdPaid ?? 0);
+    if (debit && usd > 0) {
+      await grantCredits({
+        userId: debit.userId,
+        credits: usd,
+        description: `Dispute won — $${usd.toFixed(2)} restored`,
+        externalRef: `dispute-won:${dispute.id}`,
+        kind: "adjustment",
+        usdPaid: usd,
+      });
+    }
+    return Response.json({ received: true });
+  }
+
   return Response.json({ received: true });
+}
+
+/**
+ * Disputes do not inherit metadata; the charge does, from the payment intent
+ * the checkout route stamps with the buyer's user id.
+ */
+async function disputedChargeUserId(dispute: Stripe.Dispute): Promise<string | null> {
+  const charge =
+    typeof dispute.charge === "string"
+      ? await getStripe().charges.retrieve(dispute.charge)
+      : dispute.charge;
+  return charge.metadata?.userId ?? null;
 }

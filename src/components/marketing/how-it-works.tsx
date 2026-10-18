@@ -5,7 +5,7 @@ export function HowItWorks() {
     <section
       id="how-it-works"
       aria-labelledby="how-it-works-heading"
-      className="defer-offscreen defer-how scroll-mt-20 border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-how scroll-mt-20 border-b border-hairline"
     >
       <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
         <div className="grid gap-8 lg:grid-cols-12">
@@ -27,12 +27,12 @@ export function HowItWorks() {
           </div>
         </div>
 
-        <ol className="mt-10 border-y border-black/10 dark:border-white/10 sm:mt-16">
+        <ol className="mt-10 border-y border-hairline sm:mt-16">
           {STEPS.map((step, index) => (
             <li
               id={`pipeline-${step.name.toLowerCase()}`}
               key={step.name}
-              className="grid scroll-mt-24 gap-3 border-b border-black/10 py-5 last:border-b-0 dark:border-white/10 sm:gap-4 sm:py-7 min-[1200px]:grid-cols-[4rem_12rem_1fr] min-[1200px]:items-start min-[1440px]:grid-cols-[5rem_17rem_1fr] min-[1440px]:py-9"
+              className="grid scroll-mt-24 gap-3 border-b border-hairline py-5 last:border-b-0 sm:gap-4 sm:py-7 min-[1200px]:grid-cols-[4rem_12rem_1fr] min-[1200px]:items-start min-[1440px]:grid-cols-[5rem_17rem_1fr] min-[1440px]:py-9"
             >
               <span className="font-mono text-xs tracking-[0.12em] text-primary sm:pt-1">
                 {step.num}
@@ -70,7 +70,7 @@ export function HowItWorks() {
           <h3 className="font-display text-2xl font-semibold tracking-[-0.025em] lg:col-span-4">
             You make the calls.
           </h3>
-          <ul className="grid gap-px bg-black/10 dark:bg-white/10 sm:grid-cols-2 lg:col-span-8">
+          <ul className="grid gap-px bg-hairline sm:grid-cols-2 lg:col-span-8">
             {[
               "Approve or revise the outline",
               "Inspect generation as it runs",

@@ -17,7 +17,7 @@ export default function GenresIndex() {
     <>
       <BreadcrumbJsonLd trail={[{ name: "Genres", path: "/genres" }]} />
 
-      <header className="marketing-canvas border-b border-black/10 dark:border-white/10">
+      <header className="marketing-canvas border-b border-hairline">
         <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-20 lg:grid-cols-12 lg:px-8 lg:py-28">
           <div className="lg:col-span-4">
             <p className="folio-label text-primary">Structural library / 07 genres</p>
@@ -38,7 +38,7 @@ export default function GenresIndex() {
 
       <section aria-labelledby="genre-index-heading">
         <div className="mx-auto w-full max-w-7xl px-6 py-20 lg:px-8 lg:py-28">
-          <div className="flex items-end justify-between gap-6 border-b border-black/10 pb-4 dark:border-white/10">
+          <div className="flex items-end justify-between gap-6 border-b border-hairline pb-4">
             <h2 id="genre-index-heading" className="font-display text-2xl font-semibold">
               Choose a production profile
             </h2>
@@ -47,12 +47,12 @@ export default function GenresIndex() {
             </span>
           </div>
 
-          <ul className="border-b border-black/10 dark:border-white/10">
+          <ul className="border-b border-hairline">
             {GENRE_PAGES.map((page, index) => (
               <li key={page.id}>
                 <Link
                   href={`/genres/${page.slug}`}
-                  className="group grid min-h-32 gap-4 border-b border-black/10 py-6 last:border-b-0 hover:bg-black/[0.025] dark:border-white/10 dark:hover:bg-white/[0.025] sm:grid-cols-[4rem_minmax(10rem,0.7fr)_1.3fr_auto] sm:items-start sm:px-3"
+                  className="group grid min-h-32 gap-4 border-b border-hairline py-6 last:border-b-0 hover:bg-wash-subtle sm:grid-cols-[4rem_minmax(10rem,0.7fr)_1.3fr_auto] sm:items-start sm:px-3"
                 >
                   <span className="font-mono text-xs tracking-[0.12em] text-primary sm:pt-1">
                     {String(index + 1).padStart(2, "0")}
@@ -88,7 +88,7 @@ export default function GenresIndex() {
             </p>
             <a
               href="/studio"
-              className="inline-flex min-h-11 items-center justify-center border border-black/15 px-5 text-sm font-medium hover:bg-black/[0.035] dark:border-white/15 dark:hover:bg-white/[0.04]"
+              className="inline-flex min-h-11 items-center justify-center border border-hairline-strong px-5 text-sm font-medium hover:bg-wash"
             >
               Start from your brief
             </a>

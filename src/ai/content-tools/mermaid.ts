@@ -52,7 +52,7 @@ export const mermaidTool: ContentTool = {
           prompt: mermaidPrompt(input.text),
           maxOutputTokens: meteredMaxOutputTokens("tool.mermaid"),
           prepareStep: meteredInputGuard("tool.mermaid"),
-          providerOptions: gatewayOptions(meter, "content-tool"),
+          providerOptions: gatewayOptions(meter, "content-tool", { model: model }),
         }),
     );
 

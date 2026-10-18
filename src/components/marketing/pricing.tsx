@@ -34,7 +34,7 @@ function PackOffer({
   return (
     <article
       className={cn(
-        "relative flex h-full min-w-0 max-w-full flex-col border border-black/10 bg-black/[0.018] p-5 dark:border-white/12 dark:bg-white/[0.025] sm:p-6",
+        "relative flex h-full min-w-0 max-w-full flex-col border border-hairline bg-wash-subtle p-5 sm:p-6",
         featured && "border-primary bg-primary/[0.045] dark:bg-primary/[0.07]",
       )}
     >
@@ -58,7 +58,7 @@ function PackOffer({
         </p>
       </div>
 
-      <div className="mt-7 h-px bg-black/10 dark:bg-white/10" />
+      <div className="mt-7 h-px bg-hairline" />
       <ul className="mt-6 flex flex-col gap-3">
         <li className="flex gap-3">
           <Check aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-primary" />
@@ -106,7 +106,7 @@ export function Pricing({
     <section
       id="pricing"
       aria-labelledby="pricing-heading"
-      className="defer-offscreen defer-pricing border-b border-black/10 dark:border-white/10"
+      className="defer-offscreen defer-pricing border-b border-hairline"
     >
       <div className="mx-auto w-full max-w-7xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
         <div className="grid gap-10 lg:grid-cols-12">
@@ -131,11 +131,11 @@ export function Pricing({
             </div>
           </div>
 
-          <div className="border-t border-black/10 pt-5 dark:border-white/10 lg:col-span-5">
+          <div className="border-t border-hairline pt-5 lg:col-span-5">
             <SubHeading className="font-display text-xl font-semibold tracking-[-0.025em]">
               What does a book cost?
             </SubHeading>
-            <dl className="mt-5 divide-y divide-black/10 border-b border-black/10 dark:divide-white/10 dark:border-white/10">
+            <dl className="mt-5 divide-y divide-hairline border-b border-hairline">
               {PUBLIC_TIER_COST_ROWS.map((row) => (
                 <div
                   key={row.tier}
@@ -157,7 +157,7 @@ export function Pricing({
           </div>
         </div>
 
-        <div className="mt-14 flex items-end justify-between gap-5 border-b border-black/10 pb-4 dark:border-white/10">
+        <div className="mt-14 flex items-end justify-between gap-5 border-b border-hairline pb-4">
           <div>
             <p className="folio-label text-muted-foreground">After your included story</p>
             <SubHeading className="mt-2 font-display text-2xl font-semibold tracking-[-0.03em]">

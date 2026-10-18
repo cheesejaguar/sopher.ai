@@ -1,7 +1,6 @@
 import { cache } from "react";
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { countWords } from "@/lib/editor/anchors";
 import { validFullBookCompletionExistsSql } from "@/lib/run-completion-proof";
 
 type ChapterVisibilitySeed = {
@@ -35,8 +34,10 @@ type ArchivedChapterRevisionRow = {
   chapterId: string;
   chapterNumber: number;
   revisionId: string;
-  content: string;
   createdAt: Date;
+  wordCount: number;
+  /** Whitespace-normalized prefix, one character longer than the excerpt. */
+  excerptSource: string;
 };
 
 export type ArchivedChapterRecovery = {
@@ -51,37 +52,23 @@ export type ArchivedChapterRecovery = {
 const ARCHIVED_EXCERPT_CHARS = 280;
 
 /**
- * Selects the newest generation-reset snapshot for each currently retired
- * chapter. Kept pure so recovery ordering and metadata can be regression
- * tested without a database.
+ * Shapes one archived snapshot for the recovery shelf. The query already
+ * normalized whitespace and fetched one character past the excerpt, so a
+ * longer source proves the draft continues. Kept pure so the excerpt rule can
+ * be regression tested without a database.
  */
-export function latestArchivedChapterRecoveries(
-  rows: ArchivedChapterRevisionRow[],
-): ArchivedChapterRecovery[] {
-  const latestByChapter = new Map<number, ArchivedChapterRevisionRow>();
-  for (const row of rows) {
-    const current = latestByChapter.get(row.chapterNumber);
-    if (!current || row.createdAt.getTime() > current.createdAt.getTime()) {
-      latestByChapter.set(row.chapterNumber, row);
-    }
-  }
-
-  return [...latestByChapter.values()]
-    .sort((a, b) => a.chapterNumber - b.chapterNumber)
-    .map((row) => {
-      const normalized = row.content.replace(/\s+/g, " ").trim();
-      return {
-        chapterId: row.chapterId,
-        chapterNumber: row.chapterNumber,
-        revisionId: row.revisionId,
-        archivedAt: row.createdAt,
-        wordCount: countWords(row.content),
-        excerpt:
-          normalized.length > ARCHIVED_EXCERPT_CHARS
-            ? `${normalized.slice(0, ARCHIVED_EXCERPT_CHARS).trimEnd()}…`
-            : normalized,
-      };
-    });
+export function archivedChapterRecovery(row: ArchivedChapterRevisionRow): ArchivedChapterRecovery {
+  return {
+    chapterId: row.chapterId,
+    chapterNumber: row.chapterNumber,
+    revisionId: row.revisionId,
+    archivedAt: row.createdAt,
+    wordCount: row.wordCount,
+    excerpt:
+      row.excerptSource.length > ARCHIVED_EXCERPT_CHARS
+        ? `${row.excerptSource.slice(0, ARCHIVED_EXCERPT_CHARS).trimEnd()}…`
+        : row.excerptSource,
+  };
 }
 
 /**
@@ -136,13 +123,19 @@ export const getChapterList = cache(async (bookId: string) => {
  */
 export const getArchivedChapterRecoveries = cache(async (bookId: string) => {
   const db = getDb();
-  const rows = await db
-    .select({
-      chapterId: schema.chapters.id,
-      chapterNumber: schema.chapters.chapterNumber,
-      revisionId: schema.chapterRevisions.id,
-      content: schema.chapterRevisions.content,
-      createdAt: schema.chapterRevisions.createdAt,
+  // Only the newest reset snapshot per chapter matters, and only its excerpt
+  // and word count are shown. Postgres picks that row (DISTINCT ON, ordered by
+  // the per-book unique chapter number) and reduces the prose, instead of
+  // shipping every archived draft here to be discarded. The reduction runs in
+  // the outer query so it touches one revision per chapter, not every
+  // candidate the inner sort compares.
+  const latest = db
+    .selectDistinctOn([schema.chapters.chapterNumber], {
+      chapterId: sql<string>`${schema.chapters.id}`.as("chapter_id"),
+      chapterNumber: sql<number>`${schema.chapters.chapterNumber}`.as("chapter_number"),
+      revisionId: sql<string>`${schema.chapterRevisions.id}`.as("revision_id"),
+      createdAt: sql<Date>`${schema.chapterRevisions.createdAt}`.as("created_at"),
+      content: sql<string>`${schema.chapterRevisions.content}`.as("content"),
     })
     .from(schema.chapters)
     .innerJoin(schema.chapterRevisions, eq(schema.chapterRevisions.chapterId, schema.chapters.id))
@@ -155,9 +148,39 @@ export const getArchivedChapterRecoveries = cache(async (bookId: string) => {
         sql`${schema.chapterRevisions.source} like 'generation-reset%'`,
       ),
     )
-    .orderBy(schema.chapters.chapterNumber, desc(schema.chapterRevisions.createdAt));
+    .orderBy(
+      schema.chapters.chapterNumber,
+      desc(schema.chapterRevisions.createdAt),
+      desc(schema.chapterRevisions.id),
+    )
+    .as("latest");
+  const rows = await db
+    .select({
+      chapterId: latest.chapterId,
+      chapterNumber: latest.chapterNumber,
+      revisionId: latest.revisionId,
+      // Raw sql fields skip Drizzle's column decoder; neon-http returns a string.
+      createdAt: sql<Date | string>`${latest.createdAt}`,
+      // Mirrors countWords: whitespace-separated pieces, empty pieces dropped.
+      wordCount: sql<number>`(
+        select count(*) from regexp_split_to_table(${latest.content}, '[[:space:]]+') as word
+        where word <> ''
+      )::int`,
+      excerptSource: sql<string>`left(
+        btrim(regexp_replace(${latest.content}, '[[:space:]]+', ' ', 'g')),
+        ${ARCHIVED_EXCERPT_CHARS + 1}
+      )`,
+    })
+    .from(latest)
+    .orderBy(latest.chapterNumber);
 
-  return latestArchivedChapterRecoveries(rows);
+  return rows.map((row) =>
+    archivedChapterRecovery({
+      ...row,
+      createdAt: new Date(row.createdAt),
+      wordCount: Number(row.wordCount),
+    }),
+  );
 });
 
 export const getChapterWithContent = cache(async (bookId: string, chapterNumber: number) => {
@@ -275,7 +298,12 @@ export async function getActiveFullBookRun(projectId: string) {
   return run ?? null;
 }
 
-export async function getLatestFullBookRun(projectId: string) {
+/**
+ * The whole-book run the Write surface shows: the newest active run if one
+ * exists, otherwise the newest run of any status. One ordered query instead of
+ * an active lookup followed by a fallback lookup.
+ */
+export async function getCurrentFullBookRun(projectId: string) {
   const db = getDb();
   const [run] = await db
     .select()
@@ -286,7 +314,10 @@ export async function getLatestFullBookRun(projectId: string) {
         eq(schema.generationRuns.kind, "full_book"),
       ),
     )
-    .orderBy(desc(schema.generationRuns.createdAt))
+    .orderBy(
+      sql`case when ${schema.generationRuns.status} in ('queued', 'running', 'awaiting_input') then 0 else 1 end`,
+      desc(schema.generationRuns.createdAt),
+    )
     .limit(1);
   return run ?? null;
 }
@@ -304,8 +335,11 @@ export function authoringJourneyRunPrioritySql() {
   end`;
 }
 
-/** Select the run that currently governs the author's next step. */
-export async function getLatestAuthoringJourneyRun(projectId: string) {
+/**
+ * Select the run that currently governs the author's next step. Per-request
+ * deduped: the project layout and its page both derive the journey.
+ */
+export const getLatestAuthoringJourneyRun = cache(async (projectId: string) => {
   const db = getDb();
   const [run] = await db
     .select()
@@ -319,7 +353,7 @@ export async function getLatestAuthoringJourneyRun(projectId: string) {
     .orderBy(authoringJourneyRunPrioritySql(), desc(schema.generationRuns.createdAt))
     .limit(1);
   return run ?? null;
-}
+});
 
 export async function getProjectSpend(projectId: string) {
   const db = getDb();

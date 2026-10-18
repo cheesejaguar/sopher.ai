@@ -189,7 +189,9 @@ function applyReplacements(
   let skipped = 0;
   for (const r of replacements) {
     if (r.original && out.includes(r.original)) {
-      out = out.replace(r.original, r.revised);
+      // A replacer function: a string replacement would expand $&, $', $` and
+      // $$ patterns that are ordinary characters in prose.
+      out = out.replace(r.original, () => r.revised);
     } else {
       skipped += 1;
     }
@@ -217,7 +219,7 @@ export async function editChapter(input: EditChapterInput): Promise<EditChapterR
         maxOutputTokens: meteredMaxOutputTokens("editor.edit"),
         prepareStep: meteredInputGuard("editor.edit"),
         output: Output.object({ schema: editReplacementsWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "editor"),
+        providerOptions: gatewayOptions(input.meter, "editor", { model: model }),
       }),
   );
 
@@ -247,7 +249,7 @@ function reviewPrompt(input: ReviewChapterInput, metricsNote: string): string {
       `## Output format (this overrides the response format in your instructions)`,
       `Return suggestions where "anchorText" is an exact verbatim contiguous quote copied from the chapter (at least 8 characters, unique enough to locate) and "replacement" is the concrete revised text for that quote. One suggestion may replace multiple sentences or paragraphs when the fix needs that scope.`,
       `Every "replacement" must make an actual textual change to its "anchorText". Never return praise, an unchanged passage, "no change needed", a request to verify something, or a suggestion to consider a change elsewhere. Implement the change in the replacement itself; if no justified change exists, return an empty suggestions array.`,
-      `Give a one-line rationale, a category (line, structure, continuity, style), and a severity (info, warning, error) for each.`,
+      `Give a one-line rationale, a category (line, structure, style), and a severity (info, warning, error) for each. Continuity is reviewed by a separate manuscript-wide sweep and must not be returned here.`,
       `Respect the author's voice: light touch — refinement, not rewriting. Only suggest changes the measurements or clear craft principles support.`,
     ].join("\n"),
   ]
@@ -282,7 +284,7 @@ export async function reviewChapter(
         // "critical" — threw NoObjectGeneratedError and cost the author a
         // paid pass that produced nothing.
         output: Output.object({ schema: editSuggestionListWireSchema }),
-        providerOptions: gatewayOptions(input.meter, "editor"),
+        providerOptions: gatewayOptions(input.meter, "editor", { model: model }),
       }),
   );
 

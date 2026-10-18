@@ -2,35 +2,33 @@ import { notFound } from "next/navigation";
 import { and, eq, ne } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
-import {
-  getActiveFullBookRun,
-  getChapterList,
-  getLatestFullBookRun,
-  getProjectWithBook,
-} from "@/db/queries/books";
+import { requirePageUser } from "@/lib/auth";
+import { getChapterList, getCurrentFullBookRun, getProjectWithBook } from "@/db/queries/books";
 import { estimateBookCost } from "@/ai/estimate";
 import type { QualityTier } from "@/ai/models";
 import type { GenerationConfig } from "@/lib/run-events";
 import { WriteExperience } from "@/components/generation/write-experience";
 import type { RunSnapshot, RunStatus } from "@/hooks/use-run-stream";
 import { getStudioAccess } from "@/lib/studio-access";
-import { getRunHealth } from "@/lib/run-health";
+import { getRequestRunHealth } from "@/lib/run-health";
 import { getBalance } from "@/lib/billing/credits";
 import { fullBookRequiredCredits } from "@/lib/full-book-credit-requirement";
 
 export default async function WritePage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
-  const [data, access, balance] = await Promise.all([
+  const { userId } = await requirePageUser();
+  const [data, access, balance, run] = await Promise.all([
     getProjectWithBook(userId, projectId),
     getStudioAccess(userId),
     getBalance(userId),
+    getCurrentFullBookRun(projectId),
   ]);
   if (!data) notFound();
   const { project, book } = data;
-
-  const run = (await getActiveFullBookRun(projectId)) ?? (await getLatestFullBookRun(projectId));
+  // Start the slow Workflow probe before the chapter query. It is request
+  // scoped, so when the layout's journey describes the same run, both share
+  // one probe and one persisted observation.
+  const healthPromise = run ? getRequestRunHealth(run) : null;
   const runConfig = (run?.config ?? {}) as Partial<GenerationConfig>;
 
   // Launch settings always come from the project as it exists now. A historical
@@ -77,7 +75,7 @@ export default async function WritePage({ params }: { params: Promise<{ projectI
           ),
         )
         .orderBy(schema.generationEvents.seq),
-      getRunHealth(run),
+      healthPromise ?? getRequestRunHealth(run),
     ]);
     snapshot = {
       run: {

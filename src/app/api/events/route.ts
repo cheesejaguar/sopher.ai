@@ -4,8 +4,13 @@ import { getDb, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { ANON_COOKIE } from "@/lib/analytics/attribution";
 import { isEventName, sanitizeProps } from "@/lib/analytics/events";
+import { readCappedText } from "@/lib/security/body";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
 
 export const maxDuration = 10;
+
+/** An event is a name plus a handful of scalar props; nothing legitimate is near this. */
+const MAX_EVENT_BODY_BYTES = 8 * 1024;
 
 /**
  * Product-analytics ingest.
@@ -15,14 +20,25 @@ export const maxDuration = 10;
  * be one of ours and props are capped and coerced to scalars. Without that this
  * is an open write endpoint into our database.
  *
- * Always 204, even on a rejected event. A browser cannot do anything useful
- * with an analytics error, and a 4xx here would show up as console noise on
- * every page for anyone running an extension that mangles the body.
+ * Always 204, even on a rejected, oversized or rate-limited event. A browser
+ * cannot do anything useful with an analytics error, and a 4xx here would show
+ * up as console noise on every page for anyone running an extension that
+ * mangles the body. Being unauthenticated, it is IP-rate-limited and
+ * body-capped before anything is parsed or written.
  */
 export async function POST(req: Request) {
   const noContent = new Response(null, { status: 204 });
 
-  const body = await req.json().catch(() => null);
+  if ((await rateLimit(LIMITS.events, req, undefined)).limited) return noContent;
+
+  const raw = await readCappedText(req, MAX_EVENT_BODY_BYTES);
+  if (!raw) return noContent;
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return noContent;
+  }
   if (!body || typeof body !== "object") return noContent;
 
   const { name, props } = body as { name?: unknown; props?: unknown };

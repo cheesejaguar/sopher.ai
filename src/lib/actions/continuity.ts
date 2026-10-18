@@ -27,6 +27,8 @@ import { isChapterComplete } from "@/workflows/resume";
 import { standaloneContinuityRequiredUsd } from "@/workflows/opening-credit-plan";
 import { newestCompletedRunOrder } from "@/lib/generation-run-order";
 
+const issueStatusSchema = z.enum(["resolved", "dismissed"]);
+
 /**
  * Resolve or dismiss a continuity issue. Resolution is a human judgement —
  * the agents only ever open issues; closing them belongs to the author.
@@ -37,6 +39,8 @@ export async function setContinuityIssueStatus(
 ): Promise<void> {
   const { userId } = await requireUser();
   if (!z.uuid().safeParse(issueId).success) throw new Error("Issue not found");
+  // The TS union is erased on the wire; the column would accept any string.
+  if (!issueStatusSchema.safeParse(status).success) throw new Error("Invalid issue status");
 
   const db = getDb();
   // Ownership: issue -> book -> project -> user.

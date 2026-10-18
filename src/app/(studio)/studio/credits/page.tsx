@@ -5,7 +5,7 @@ import { PackButtons } from "@/components/credits/pack-buttons";
 import { PurchaseReturnStatus } from "@/components/credits/purchase-return-status";
 import { RelativeTime } from "@/components/relative-time";
 import { PageHeader } from "@/components/studio/product-primitives";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { CREDIT_PACKS, getBalance, listLedger } from "@/lib/billing/credits";
 import {
   FULL_BOOK_UNLOCK_DESCRIPTION,
@@ -52,7 +52,7 @@ export default async function CreditsPage({
   // "/\evil.com", which browsers normalize to "//evil.com" — an off-site link
   // rendered on a signed-in page right after a payment.
   const safeReturn = safeInternalPath(returnTo);
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const resumeRunId = creditReturnRunId(resumeRun, safeReturn);
   const purchaseSessionId = purchase === "complete" ? checkoutSessionId(returnedSessionId) : null;
   const checkoutReturnTo =

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { TestInputRejectedError } = vi.hoisted(() => ({
+  TestInputRejectedError: class AuthoringInputRejectedError extends Error {},
+}));
+
 const mocks = vi.hoisted(() => ({
   getDb: vi.fn(),
   requireUser: vi.fn(),
@@ -26,6 +30,7 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/billing/credits", () => ({ getBalance: mocks.getBalance }));
 
 vi.mock("@/lib/authoring-inputs", () => ({
+  AuthoringInputRejectedError: TestInputRejectedError,
   acceptAuthoringRunInput: mocks.acceptAuthoringRunInput,
   authoringInputPayloadsEqual: mocks.authoringInputPayloadsEqual,
   authoringInputToken: mocks.authoringInputToken,
@@ -212,6 +217,73 @@ describe("POST /api/runs/[runId]/input protocol-v3 creative decisions", () => {
     );
     mocks.authoringInputToken.mockReturnValue(`authoring-input:${RUN_ID}:creative_decision:3`);
     mocks.deliverAuthoringRunInput.mockResolvedValue("delivered");
+  });
+
+  function stubPendingQuestion() {
+    const questionId = "22222222-2222-4222-8222-222222222222";
+    const decisionDigest = "a".repeat(64);
+    const run = {
+      id: RUN_ID,
+      status: "awaiting_input",
+      config: { protocolVersion: 3 },
+      pauseKind: "creative_decision",
+      pauseVersion: 3,
+      pauseRegisteredAt: new Date("2026-08-02T12:00:00.000Z"),
+      pauseDetails: { questionId, resumeStage: "outline" },
+      cancellationRequestedAt: null,
+    };
+    const question = {
+      id: questionId,
+      decisionDigest,
+      options: [{ id: "option-1", label: "One", description: "First direction" }],
+      pauseVersion: 3,
+      status: "pending",
+    };
+    const select = vi
+      .fn()
+      .mockReturnValueOnce(runQuery([run]))
+      .mockReturnValueOnce(runQuery([]))
+      .mockReturnValueOnce(runQuery([question]));
+    mocks.getDb.mockReturnValue({ select });
+    return {
+      kind: "creative-decision",
+      questionId,
+      decisionDigest,
+      mode: "option",
+      selectedOptionId: "option-1",
+      requestKey: "44444444-4444-4444-8444-444444444444",
+    };
+  }
+
+  it("never returns raw database text when accepting the input fails", async () => {
+    const body = stubPendingQuestion();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.acceptAuthoringRunInput.mockRejectedValue(
+      new Error('Failed query: insert into "authoring_run_inputs" params: secret-payload'),
+    );
+
+    const response = await request(body);
+
+    expect(response.status).toBe(409);
+    const json = await response.json();
+    expect(json.error).toBe("Input could not be accepted");
+    expect(JSON.stringify(json)).not.toContain("Failed query");
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("passes deliberate refusals through to the author", async () => {
+    const body = stubPendingQuestion();
+    mocks.acceptAuthoringRunInput.mockRejectedValue(
+      new TestInputRejectedError("This authoring input was already answered differently"),
+    );
+
+    const response = await request(body);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "This authoring input was already answered differently",
+    });
   });
 
   it("persists the exact registered question response before signaling its hook", async () => {

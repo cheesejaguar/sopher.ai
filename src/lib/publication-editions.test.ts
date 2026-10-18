@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildManuscript, type ExportSnapshot } from "@/lib/export/assemble";
 import {
@@ -6,9 +6,37 @@ import {
   publicationAssetUrls,
   publicationSnapshot,
   publicationSourceDigest,
+  readerLinkSecret,
   readerTokenForRequest,
   readerShareTokenSchema,
 } from "./publication-editions";
+
+describe("readerLinkSecret", () => {
+  it("prefers the dedicated secret", () => {
+    expect(
+      readerLinkSecret({
+        NODE_ENV: "production",
+        READER_LINK_SECRET: "dedicated",
+        CLERK_SECRET_KEY: "clerk",
+      }),
+    ).toBe("dedicated");
+  });
+
+  it("falls back to the Clerk key in production, warning only once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const env = { NODE_ENV: "production" as const, CLERK_SECRET_KEY: "clerk" };
+    expect(readerLinkSecret(env)).toBe("clerk");
+    expect(readerLinkSecret(env)).toBe("clerk");
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("refuses to run production without any secret", () => {
+    expect(() => readerLinkSecret({ NODE_ENV: "production" })).toThrow(
+      "READER_LINK_SECRET is not configured",
+    );
+  });
+});
 
 const PROJECT_ASSETS = new Set([
   "https://assets.public.blob.vercel-storage.com/cover.png",

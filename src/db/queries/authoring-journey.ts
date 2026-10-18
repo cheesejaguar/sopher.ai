@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "react";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 
 import { getDb, schema } from "@/db";
@@ -27,7 +28,7 @@ import {
   classifyRunHealth,
   countSavedAuthoringCheckpoints,
   generationEstimate,
-  getRunHealth,
+  getRequestRunHealth,
   type WorkflowHealthStatus,
 } from "@/lib/run-health";
 import { requiresRunOwnedFullBookCompletionProof } from "@/lib/run-completion-proof";
@@ -595,13 +596,42 @@ function singleProjectArtifacts(
   };
 }
 
-export async function getAuthoringJourneySnapshot(input: {
+type AuthoringJourneySnapshotInput = {
   userId: string;
   projectId: string;
   access?: JourneyAccess;
   data?: ProjectData;
   chapters?: ChapterList;
-}): Promise<AuthoringJourneySnapshot | null> {
+};
+
+type JourneyRequestScope = Map<string, Promise<AuthoringJourneySnapshot | null>>;
+
+/** One memo per server render, keyed by primitive ids (see getRequestRunHealth). */
+const journeyRequestScope = cache((): JourneyRequestScope => new Map());
+
+/**
+ * getAuthoringJourneySnapshot for server-rendered pages. The project layout
+ * and the page inside it both show the journey and render concurrently, so
+ * the second caller joins the first caller's in-flight snapshot. The optional
+ * prefetched inputs only save queries and never change the result, so the
+ * first caller's hints serve both.
+ */
+export function getRequestAuthoringJourneySnapshot(
+  input: AuthoringJourneySnapshotInput,
+  scope: JourneyRequestScope = journeyRequestScope(),
+): Promise<AuthoringJourneySnapshot | null> {
+  const key = `${input.userId}:${input.projectId}`;
+  const existing = scope.get(key);
+  if (existing) return existing;
+  const snapshot = getAuthoringJourneySnapshot(input);
+  scope.set(key, snapshot);
+  snapshot.catch(() => scope.delete(key));
+  return snapshot;
+}
+
+export async function getAuthoringJourneySnapshot(
+  input: AuthoringJourneySnapshotInput,
+): Promise<AuthoringJourneySnapshot | null> {
   const db = getDb();
   const [data, access, [user], run, balanceCredits] = await Promise.all([
     input.data ?? getProjectWithBook(input.userId, input.projectId),
@@ -622,7 +652,7 @@ export async function getAuthoringJourneySnapshot(input: {
     await Promise.all([
       input.chapters ?? (data.book ? getChapterList(data.book.id) : Promise.resolve([])),
       data.book ? getLatestOutline(data.book.id) : Promise.resolve(null),
-      run ? getRunHealth(run) : Promise.resolve(null),
+      run ? getRequestRunHealth(run) : Promise.resolve(null),
       run ? readBlockingIncidentCategories([run.id]) : Promise.resolve([]),
       run ? findRunsWithUnresolvedMetering([run]) : Promise.resolve(new Set<string>()),
     ]);

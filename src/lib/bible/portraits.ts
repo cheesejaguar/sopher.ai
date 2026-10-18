@@ -1,3 +1,4 @@
+import { MODELS } from "@/ai/models";
 import { MODEL_PRICING } from "@/lib/billing/pricing";
 import type { EntityKind } from "@/ai/schemas/entities";
 
@@ -10,7 +11,7 @@ import type { EntityKind } from "@/ai/schemas/entities";
  * a choice the author makes with the price in front of them.
  */
 
-export const PORTRAIT_USD = MODEL_PRICING["google/gemini-3.1-flash-image"]?.perImageUsd ?? 0.067;
+export const PORTRAIT_USD = MODEL_PRICING[MODELS.standard.image]?.perImageUsd ?? 0.067;
 
 /**
  * Kinds worth illustrating. An "organization" or "event" portrait is rarely

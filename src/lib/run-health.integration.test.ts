@@ -5,7 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getDb, schema } from "@/db";
-import { getRunHealth } from "@/lib/run-health";
+import { getRunHealth, WORKFLOW_MISSING_OBSERVATION_MIN_INTERVAL_MS } from "@/lib/run-health";
 
 function isolatedDatabaseUrl(): string | null {
   const isolated = process.env.E2E_DATABASE_ISOLATED;
@@ -129,6 +129,49 @@ describeIsolated("run health against isolated Neon", () => {
       progressPct: 5,
       authoringBegan: true,
     });
+  });
+
+  it("counts repeated missing probes inside one window as a single observation", async () => {
+    if (!observer) throw new Error("Isolated database observer is unavailable");
+    await observer`
+      update generation_runs
+      set workflow_observed_status = null, workflow_observed_at = null,
+          workflow_missing_count = 0, workflow_missing_since = null
+      where id = ${runId}
+    `;
+    const readRun = async () => {
+      const [run] = await getDb()
+        .select()
+        .from(schema.generationRuns)
+        .where(eq(schema.generationRuns.id, runId))
+        .limit(1);
+      if (!run) throw new Error("Run fixture disappeared");
+      return run;
+    };
+
+    // The fixture has no Workflow run id, so every probe observes "missing".
+    const first = await getRunHealth(await readRun());
+    const afterFirst = await readRun();
+    const second = await getRunHealth(afterFirst);
+    const afterSecond = await readRun();
+
+    expect(first.workflowMissingCount).toBe(1);
+    expect(second.workflowMissingCount).toBe(1);
+    expect(afterSecond.workflowMissingCount).toBe(1);
+    expect(afterSecond.workflowObservedStatus).toBe("missing");
+    // The counted observation's time is kept, so polling cannot slide it.
+    expect(afterSecond.workflowObservedAt?.toISOString()).toBe(
+      afterFirst.workflowObservedAt?.toISOString(),
+    );
+
+    // Once the window has passed, the next probe counts again.
+    await observer`
+      update generation_runs
+      set workflow_observed_at = workflow_observed_at - ${`${WORKFLOW_MISSING_OBSERVATION_MIN_INTERVAL_MS + 1000} milliseconds`}::interval
+      where id = ${runId}
+    `;
+    const third = await getRunHealth(await readRun());
+    expect(third.workflowMissingCount).toBe(2);
   });
 
   it("reports net credits after delivery refunds without subtracting unrelated adjustments", async () => {

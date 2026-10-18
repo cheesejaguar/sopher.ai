@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isSoftRetiredManuscriptChapter,
   isVisibleManuscriptChapter,
-  latestArchivedChapterRecoveries,
+  archivedChapterRecovery,
 } from "./books";
 
 describe("isVisibleManuscriptChapter", () => {
@@ -41,67 +41,57 @@ describe("isVisibleManuscriptChapter", () => {
   });
 });
 
-describe("latestArchivedChapterRecoveries", () => {
-  it("keeps the newest generation-reset snapshot per retired chapter", () => {
-    const rows = [
-      {
-        chapterId: "chapter-12",
-        chapterNumber: 12,
-        revisionId: "revision-old",
-        content: "An older version of the final crossing.",
-        createdAt: new Date("2026-07-20T10:00:00.000Z"),
-      },
-      {
+describe("archivedChapterRecovery", () => {
+  it("passes a short normalized excerpt through with its snapshot metadata", () => {
+    expect(
+      archivedChapterRecovery({
         chapterId: "chapter-11",
         chapterNumber: 11,
         revisionId: "revision-eleven",
-        content: "The bell rang twice before Mara entered the archive.",
         createdAt: new Date("2026-07-21T10:00:00.000Z"),
-      },
-      {
-        chapterId: "chapter-12",
-        chapterNumber: 12,
-        revisionId: "revision-new",
-        content: "The final crossing began at low tide.",
-        createdAt: new Date("2026-07-22T10:00:00.000Z"),
-      },
-    ];
-
-    expect(latestArchivedChapterRecoveries(rows)).toEqual([
-      {
-        chapterId: "chapter-11",
-        chapterNumber: 11,
-        revisionId: "revision-eleven",
-        archivedAt: new Date("2026-07-21T10:00:00.000Z"),
         wordCount: 9,
-        excerpt: "The bell rang twice before Mara entered the archive.",
-      },
-      {
-        chapterId: "chapter-12",
-        chapterNumber: 12,
-        revisionId: "revision-new",
-        archivedAt: new Date("2026-07-22T10:00:00.000Z"),
-        wordCount: 7,
-        excerpt: "The final crossing began at low tide.",
-      },
-    ]);
+        excerptSource: "The bell rang twice before Mara entered the archive.",
+      }),
+    ).toEqual({
+      chapterId: "chapter-11",
+      chapterNumber: 11,
+      revisionId: "revision-eleven",
+      archivedAt: new Date("2026-07-21T10:00:00.000Z"),
+      wordCount: 9,
+      excerpt: "The bell rang twice before Mara entered the archive.",
+    });
   });
 
-  it("normalizes and truncates an archived excerpt without exposing the full draft", () => {
-    const content = Array.from({ length: 90 }, (_, index) => `word${index}`).join(" \n ");
-    const [recovery] = latestArchivedChapterRecoveries([
-      {
-        chapterId: "chapter-9",
-        chapterNumber: 9,
-        revisionId: "revision-9",
-        content,
-        createdAt: new Date("2026-07-23T10:00:00.000Z"),
-      },
-    ]);
+  it("truncates a source that runs past the excerpt without exposing the full draft", () => {
+    // The query returns one character past the excerpt when the draft continues.
+    const excerptSource = Array.from({ length: 90 }, (_, index) => `word${index}`)
+      .join(" ")
+      .slice(0, 281);
+    const recovery = archivedChapterRecovery({
+      chapterId: "chapter-9",
+      chapterNumber: 9,
+      revisionId: "revision-9",
+      createdAt: new Date("2026-07-23T10:00:00.000Z"),
+      wordCount: 90,
+      excerptSource,
+    });
 
     expect(recovery.wordCount).toBe(90);
-    expect(recovery.excerpt).not.toContain("\n");
     expect(recovery.excerpt.endsWith("…")).toBe(true);
     expect(recovery.excerpt.length).toBeLessThanOrEqual(281);
+  });
+
+  it("keeps an excerpt of exactly the limit whole", () => {
+    const excerptSource = "a".repeat(280);
+    const recovery = archivedChapterRecovery({
+      chapterId: "chapter-3",
+      chapterNumber: 3,
+      revisionId: "revision-3",
+      createdAt: new Date("2026-07-23T10:00:00.000Z"),
+      wordCount: 1,
+      excerptSource,
+    });
+
+    expect(recovery.excerpt).toBe(excerptSource);
   });
 });

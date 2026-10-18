@@ -11,6 +11,16 @@ export type { AssembledManuscript } from "./assemble";
 export { EXPORT_FORMATS, FORMAT_META, filenameStem } from "./types";
 export type { ExportFormat, ExportResult, PrintOptions } from "./types";
 
+/** Every author-written text an exporter renders, for narrowing figure downloads. */
+function manuscriptTexts(manuscript: AssembledManuscript): string[] {
+  return [
+    ...manuscript.chapters.map((chapter) => chapter.markdown),
+    ...Object.values(manuscript.matter ?? {}).filter(
+      (value): value is string => typeof value === "string",
+    ),
+  ];
+}
+
 /**
  * Renders an assembled manuscript into the requested format's bytes.
  *
@@ -29,12 +39,18 @@ export async function renderExport(
     // PDF and DOCX embed image bytes directly, so figures must be downloaded
     // first. EPUB fetches referenced images itself; markdown keeps the source.
     case "docx":
-      return exportDocx({ ...manuscript, figures: await hydrateFigureBytes(manuscript.figures) });
+      return exportDocx({
+        ...manuscript,
+        figures: await hydrateFigureBytes(manuscript.figures, manuscriptTexts(manuscript)),
+      });
     case "epub":
       return exportEpub(manuscript);
     case "pdf":
       return exportPdf(
-        { ...manuscript, figures: await hydrateFigureBytes(manuscript.figures) },
+        {
+          ...manuscript,
+          figures: await hydrateFigureBytes(manuscript.figures, manuscriptTexts(manuscript)),
+        },
         print,
       );
   }

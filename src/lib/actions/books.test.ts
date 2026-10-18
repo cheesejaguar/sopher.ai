@@ -63,7 +63,7 @@ describe("updateBookPackage", () => {
       },
     });
 
-    await updateBookPackage("project-1", {
+    await updateBookPackage("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", {
       title: "  The Finished Title  ",
       synopsis: "  A polished description.  ",
       author: "  A. Writer  ",
@@ -96,11 +96,11 @@ describe("updateBookPackage", () => {
     expect(updates[1]).toEqual(
       expect.objectContaining({ title: "The Finished Title", updatedAt: expect.any(Date) }),
     );
-    expect(mocks.revalidatePath.mock.calls.map(([path]) => path)).toEqual([
-      "/projects/project-1",
-      "/projects/project-1/book",
-      "/projects/project-1/manuscript",
-      "/studio",
+    expect(mocks.revalidatePath.mock.calls).toEqual([
+      ["/projects/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", "layout"],
+      ["/projects/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/book"],
+      ["/projects/71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d/manuscript"],
+      ["/studio"],
     ]);
   });
 
@@ -108,7 +108,10 @@ describe("updateBookPackage", () => {
     const { update } = transactionWithBook(undefined);
 
     await expect(
-      updateBookPackage("project-1", { title: "A title", synopsis: "A synopsis" }),
+      updateBookPackage("71b0c5d2-3e4f-4a5b-8c6d-7e8f9a0b1c2d", {
+        title: "A title",
+        synopsis: "A synopsis",
+      }),
     ).rejects.toThrow("Book not found");
 
     expect(update).not.toHaveBeenCalled();

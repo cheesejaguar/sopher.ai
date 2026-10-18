@@ -35,6 +35,7 @@ export type UpdateBookPackageInput = z.infer<typeof editableBookMatterSchema>;
  */
 export async function updateBook(projectId: string, input: unknown): Promise<void> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Book not found");
   const data = updateBookSchema.parse(input);
 
   const db = getDb();
@@ -66,7 +67,7 @@ export async function updateBook(projectId: string, input: unknown): Promise<voi
       .set({ title: data.title.trim(), updatedAt: new Date() })
       .where(eq(schema.projects.id, projectId));
   }
-  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}`, "layout");
   revalidatePath("/studio");
 }
 
@@ -77,6 +78,7 @@ export async function updateBook(projectId: string, input: unknown): Promise<voi
  */
 export async function updateBookPackage(projectId: string, input: unknown): Promise<void> {
   const { userId } = await requireUser();
+  if (!z.uuid().safeParse(projectId).success) throw new Error("Book not found");
   const data = editableBookMatterSchema.parse(input);
 
   await withDbTransaction(async (tx) => {
@@ -127,7 +129,7 @@ export async function updateBookPackage(projectId: string, input: unknown): Prom
       .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)));
   });
 
-  revalidatePath(`/projects/${projectId}`);
+  revalidatePath(`/projects/${projectId}`, "layout");
   revalidatePath(`/projects/${projectId}/book`);
   revalidatePath(`/projects/${projectId}/manuscript`);
   revalidatePath("/studio");

@@ -146,6 +146,18 @@ describe("POST /api/entities/[entityId]/portrait", () => {
     mocks.scheduleUnreferencedBlobCleanup.mockResolvedValue(undefined);
   });
 
+  it("answers a malformed entity id with 404 before any lookup", async () => {
+    const response = await POST(
+      new Request("https://sopher.ai/api/entities/not-a-uuid/portrait", {
+        method: "POST",
+        headers: { "Idempotency-Key": "33333333-3333-4333-8333-333333333333" },
+      }),
+      { params: Promise.resolve({ entityId: "not-a-uuid" }) },
+    );
+    expect(response.status).toBe(404);
+    expect(mocks.getEntityForPortrait).not.toHaveBeenCalled();
+  });
+
   it("preserves the active-production lock before credits, models, or Blob writes", async () => {
     mocks.withDbTransaction.mockResolvedValueOnce(null);
     mocks.authorizeProjectSpend.mockResolvedValueOnce(

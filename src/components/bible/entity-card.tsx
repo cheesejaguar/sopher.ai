@@ -371,7 +371,7 @@ export function EntityCard({
                 sizes="(min-width: 1536px) 28vw, (min-width: 640px) 45vw, 100vw"
                 className="object-cover transition duration-300 ease-out group-hover:scale-[1.025] motion-reduce:transition-none"
               />
-              <span className="absolute right-3 bottom-3 flex min-h-11 items-center gap-2 rounded-sm border border-white/20 bg-black/75 px-3 text-xs font-medium text-white shadow-[0_8px_24px_-12px_rgb(0_0_0/85%)]">
+              <span className="absolute right-3 bottom-3 flex min-h-11 items-center gap-2 rounded-sm border border-scrim-foreground/20 bg-scrim/75 px-3 text-xs font-medium text-scrim-foreground shadow-[0_8px_24px_-12px_rgb(0_0_0/85%)]">
                 <Expand aria-hidden="true" className="size-4" />
                 View full image
               </span>
@@ -389,7 +389,7 @@ export function EntityCard({
                 ) : null}
               </DialogDescription>
             </DialogHeader>
-            <div className="relative h-[min(70dvh,calc(100vw-3.5rem))] min-h-32 w-full overflow-hidden bg-black/45">
+            <div className="relative h-[min(70dvh,calc(100vw-3.5rem))] min-h-32 w-full overflow-hidden bg-scrim/45">
               <Image src={portraitUrl} alt="" fill sizes="90vw" className="object-contain" />
             </div>
           </DialogContent>

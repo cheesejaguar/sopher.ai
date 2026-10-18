@@ -6,7 +6,7 @@ import { requireUser, UnauthorizedError } from "@/lib/auth";
 import { readBookMatter } from "@/lib/book-package";
 import { renderExport } from "@/lib/export";
 import { buildChapterManuscript, chapterFilenameStem } from "@/lib/export/chapter";
-import { loadFigures } from "@/lib/export/figures";
+import { loadFigures, loadProjectImageAssetUrls } from "@/lib/export/figures";
 import { EXPORT_FORMATS, FORMAT_META } from "@/lib/export/types";
 
 export const maxDuration = 60;
@@ -70,6 +70,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ chapterId: stri
     matter: readBookMatter(row.frontMatter),
     chapter: { number: row.number, title: row.title, content: row.content },
     figures: await loadFigures(row.projectId),
+    assetUrls: await loadProjectImageAssetUrls(row.projectId),
   });
   const rendered = await renderExport(format, manuscript);
 

@@ -1,7 +1,11 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { devAuthAllowed } from "@/lib/clerk";
-import { hasCompleteClerkConfiguration, isProtectedPath } from "@/lib/auth-route-policy";
+import {
+  hasBackslashInPath,
+  hasCompleteClerkConfiguration,
+  isProtectedPath,
+} from "@/lib/auth-route-policy";
 import {
   ANON_COOKIE,
   ATTRIBUTION_COOKIE,
@@ -18,8 +22,9 @@ import {
 // way. Inverting it makes forgetting fail safe instead of open.
 //
 // Carve-outs: webhooks authenticate by signature (Stripe, svix), estimates
-// quotes prices before sign-in, and events records the pre-signup funnel —
-// which is most of the funnel.
+// quotes prices before sign-in, events records the pre-signup funnel — which
+// is most of the funnel — and csp-report receives browsers' credential-less
+// CSP violation reports.
 const hasClerkKeys = hasCompleteClerkConfiguration(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
   process.env.CLERK_SECRET_KEY,
@@ -99,6 +104,9 @@ const selectedProxy = hasClerkKeys
       };
 
 export default function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (hasBackslashInPath(req.url, req.nextUrl.pathname)) {
+    return new NextResponse(null, { status: 404 });
+  }
   if (isAnonymousReaderRequest(req.nextUrl.pathname)) return NextResponse.next();
   return selectedProxy(req, event);
 }

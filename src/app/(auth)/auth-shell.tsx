@@ -20,7 +20,7 @@ export function AuthShell({
     <main
       id="main-content"
       tabIndex={-1}
-      className="grid min-h-dvh min-w-0 max-w-full overflow-x-clip bg-background font-sans text-foreground outline-none [&_.text-primary]:text-[#5130b8] dark:[&_.text-primary]:text-[#b5aaff] lg:grid-cols-2"
+      className="grid min-h-dvh min-w-0 max-w-full overflow-x-clip bg-background font-sans text-foreground outline-none lg:grid-cols-2"
     >
       <section
         aria-labelledby="auth-heading"

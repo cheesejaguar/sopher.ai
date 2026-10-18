@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 
 import { BriefEditor } from "@/components/studio/brief-editor";
 import { ResponsiveInspector } from "@/components/studio/product-primitives";
-import { requireUser } from "@/lib/auth";
+import { requirePageUser } from "@/lib/auth";
 import { getProjectWithBook } from "@/db/queries/books";
 import { TIER_LABELS } from "@/ai/models";
 
@@ -20,7 +20,7 @@ const TENSE_LABELS = { past: "Past tense", present: "Present tense" } as const;
 
 export default async function BriefPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const { userId } = await requireUser();
+  const { userId } = await requirePageUser();
   const data = await getProjectWithBook(userId, projectId);
   if (!data) notFound();
   const { project } = data;

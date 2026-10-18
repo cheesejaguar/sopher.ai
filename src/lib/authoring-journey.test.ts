@@ -470,7 +470,7 @@ describe("deriveAuthoringJourney", () => {
     expect(journey.nextAction.kind).not.toBe("recover_saved_work");
   });
 
-  it("surfaces the exact persisted credit requirement without rounding it to a whole credit", () => {
+  it("surfaces the credit requirement to a tenth, rounded so a shortfall never reads as covered", () => {
     const journey = deriveAuthoringJourney(
       seed({
         project: { experience: "full_book" },
@@ -490,8 +490,8 @@ describe("deriveAuthoringJourney", () => {
       }),
     );
 
-    expect(journey.nextAction.description).toContain("4.375 credits");
-    expect(journey.nextAction.description).toContain("balance is 1.25");
+    expect(journey.nextAction.description).toContain("4.4 credits");
+    expect(journey.nextAction.description).toContain("balance is 1.2");
   });
 
   it("uses Add credits as the one next action for an underfunded ready full book", () => {
@@ -948,6 +948,35 @@ describe("authoringJourneyWithProgress", () => {
 
     expect(paused.nextAction.kind).toBe("review_outline");
     expect(paused.nextAction.href).toBe(`/projects/${PROJECT_ID}/outline`);
+  });
+
+  it("follows a run that resumed from a credit pause instead of reviving an outline review", () => {
+    const initial = deriveAuthoringJourney(
+      seed({
+        project: { experience: "full_book" },
+        access: { fullBookUnlocked: true },
+        artifacts: { outlineReady: true },
+        run: run({
+          databaseStatus: "awaiting_input",
+          effectiveStatus: "awaiting_input",
+          stage: "awaiting_credits",
+          pause: { kind: "credits", version: 2, balanceCredits: 1, requiredCredits: 4 },
+          health: "waiting",
+        }),
+      }),
+    );
+    expect(initial.nextAction.kind).toBe("add_credits");
+
+    const resumed = authoringJourneyWithProgress(initial, {
+      runId: RUN_ID,
+      stage: "chapters",
+      pct: 15,
+      draftedCount: 0,
+      totalChapters: 6,
+    });
+
+    expect(resumed.run).toMatchObject({ effectiveStatus: "running", pause: null });
+    expect(resumed.nextAction.kind).toBe("watch_production");
   });
 
   it("advances every shared surface to stopping safely after cancellation is accepted", () => {

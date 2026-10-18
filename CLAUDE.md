@@ -28,8 +28,9 @@ All quality gates: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
 
 ## Architecture
 
-- `src/ai/models.ts` — the ONLY place gateway model slugs live (sonnet-5 /
-  opus-5 / haiku-4.5 tiers). `src/lib/billing/pricing.ts` mirrors gateway
+- `src/ai/models.ts` — the ONLY place gateway model slugs live (sonnet-5.5 /
+  opus-5.5 / haiku-4.5 tiers) and the per-model reasoning policy
+  (`anthropicReasoningOptions`: 5.5 models cannot disable thinking). `src/lib/billing/pricing.ts` mirrors gateway
   pricing; verify both against `https://ai-gateway.vercel.sh/v1/models` when
   changing models.
 - `src/ai/metering.ts` — every LLM call goes through `metered()` (budget
@@ -67,11 +68,9 @@ All quality gates: `pnpm typecheck && pnpm lint && pnpm test && pnpm build`.
   `Date.now()` in server components before uncached data access (use
   `RelativeTime`); Suspense-wrap `usePathname`/`useSearchParams` consumers
   (see `stage-nav.tsx`); `proxy.ts` not middleware.ts.
-- Route handlers: `requireUser()` (dev-user fallback until Clerk keys exist) +
+- Route handlers: `requireUser()` (fails closed without Clerk keys; `ALLOW_DEV_AUTH=1` opts into a dev identity) +
   zod parse + ownership check. Server actions for mutations; route handlers
   only for streams/webhooks/downloads.
-- `_port/` holds legacy source being referenced during the rebuild — excluded
-  from tsconfig/eslint; delete when porting is fully done.
 
 ## Deployment
 
@@ -81,6 +80,9 @@ Ops via Vercel MCP (`get_deployment_build_logs`, `get_runtime_errors`) or CLI.
 Workflow runs: `npx workflow inspect runs --backend vercel --project sopher-ai
 --team cheesejaguar-2353s-projects`.
 
-Known local quirk: `@workflow/vitest`'s in-process runner fails on a
-builtin-modules JSON import — verify workflows through `pnpm dev` + routes
-instead (see `vitest.integration.config.ts`).
+Verify workflows end to end through `pnpm dev` + the routes (there are no
+`@workflow/vitest` specs; `vitest.integration.config.ts` is kept for them).
+
+Keep the repo out of iCloud-synced folders (`~/Documents`, `~/Desktop`): evicted
+`node_modules` files hang `tsc`, and sync conflict copies (`foo 2.ts`) appear —
+they are gitignored and excluded from tsconfig/ESLint, and CI rejects them.
