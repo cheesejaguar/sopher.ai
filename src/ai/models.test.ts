@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { MODEL_PRICING } from "@/lib/billing/pricing";
@@ -26,7 +29,27 @@ describe("model catalogue", () => {
   });
 });
 
+describe("models.ts source", () => {
+  it("prices every gateway slug written anywhere in models.ts, including flag-gated ones", () => {
+    const source = readFileSync(fileURLToPath(new URL("./models.ts", import.meta.url)), "utf8");
+    const slugs = [
+      ...new Set(
+        [...source.matchAll(/"((?:anthropic|google|openai|xai)\/[\w.-]+)"/g)].map((m) => m[1]!),
+      ),
+    ];
+    expect(slugs).toContain("anthropic/claude-haiku-5.5");
+    const unpriced = slugs.filter((slug) => !(slug in MODEL_PRICING));
+    expect(unpriced).toEqual([]);
+  });
+});
+
 describe("anthropicReasoningOptions", () => {
+  it("turns Haiku 5.5's adaptive thinking off, which would otherwise eat max_tokens", () => {
+    expect(anthropicReasoningOptions("anthropic/claude-haiku-5.5")).toEqual({
+      thinking: { type: "disabled" },
+    });
+  });
+
   it("uses between_tools for Sonnet 5.5 on its own", () => {
     expect(anthropicReasoningOptions("anthropic/claude-sonnet-5.5")).toEqual({
       thinking: { type: "between_tools" },

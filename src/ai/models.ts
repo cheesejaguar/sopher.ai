@@ -15,7 +15,14 @@ export type TierModels = {
   image: string;
 };
 
-const HAIKU = "anthropic/claude-haiku-4.5";
+const HAIKU_4_5 = "anthropic/claude-haiku-4.5";
+const HAIKU_5_5 = "anthropic/claude-haiku-5.5";
+/**
+ * The cheap tier stays on Haiku 4.5 until NEXT_PUBLIC_SOPHER_HAIKU_MODEL=5.5.
+ * NEXT_PUBLIC_ because client components (wizard estimate, run viewer) import
+ * this module; Next inlines the value at build, so server and client agree.
+ */
+const HAIKU = process.env.NEXT_PUBLIC_SOPHER_HAIKU_MODEL === "5.5" ? HAIKU_5_5 : HAIKU_4_5;
 const SONNET = "anthropic/claude-sonnet-5.5";
 const OPUS = "anthropic/claude-opus-5.5";
 const IMAGE = "google/gemini-3.1-flash-image";
@@ -73,6 +80,10 @@ export const PROSE_FALLBACK_MODELS = ["anthropic/claude-sonnet-5"];
  *   and Sonnet 5 rejects `between_tools`.
  * - Sonnet 5.5 cannot disable thinking; `between_tools` is its off switch (the
  *   Gateway maps `disabled` to it, with a warning).
+ * - Haiku 5.5 (Gateway list, 2026-10-21; not yet exercised live): thinking
+ *   toggle plus `effort`; it rejects temperature, top_p, top_k, assistant
+ *   prefill and budget_tokens, none of which we send. Adaptive thinking counts
+ *   against max_tokens, so it is turned off like Haiku 4.5.
  * - Opus 5.5 always thinks adaptively; `effort` is the only control, and the
  *   Gateway strips a `thinking` setting with a warning.
  */
@@ -84,7 +95,8 @@ type ReasoningControl = {
 };
 
 const REASONING: Record<string, ReasoningControl> = {
-  [HAIKU]: { off: "disabled", effort: false },
+  [HAIKU_4_5]: { off: "disabled", effort: false },
+  [HAIKU_5_5]: { off: "disabled", effort: true },
   "anthropic/claude-sonnet-5": { off: "disabled", effort: true },
   [SONNET]: { off: "between_tools", effort: true },
   [OPUS]: { off: null, effort: true },
