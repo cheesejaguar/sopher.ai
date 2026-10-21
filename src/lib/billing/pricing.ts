@@ -8,11 +8,39 @@ export type ModelPricing = {
   cacheWritePerMTok: number;
   /** Flat USD per generated image (image models bill per image, not per token). */
   perImageUsd?: number;
+  /**
+   * Long-prompt tier. When a request's total prompt (uncached + cache read +
+   * cache write tokens) exceeds `aboveInputTokens`, EVERY token of that request,
+   * output included, is billed at these rates instead (Gateway `*_tiers`).
+   */
+  longContext?: {
+    aboveInputTokens: number;
+    inputPerMTok: number;
+    outputPerMTok: number;
+    cachedInputPerMTok: number;
+    cacheWritePerMTok: number;
+  };
 };
 
 // Superseded slugs stay priced: runs pinned to an older deployment, and
 // historical reconciliation, still report them.
 export const MODEL_PRICING: Record<string, ModelPricing> = {
+  // Verified 2026-10-21 against the Gateway model list and
+  // https://www.anthropic.com/claude-haiku-5-5: prompts over 100K tokens
+  // bill at the second tier (half of Haiku 4.5's rates).
+  "anthropic/claude-haiku-5.5": {
+    inputPerMTok: 0.1,
+    outputPerMTok: 0.5,
+    cachedInputPerMTok: 0.01,
+    cacheWritePerMTok: 0.125,
+    longContext: {
+      aboveInputTokens: 100_000,
+      inputPerMTok: 0.5,
+      outputPerMTok: 2.5,
+      cachedInputPerMTok: 0.05,
+      cacheWritePerMTok: 0.625,
+    },
+  },
   "anthropic/claude-haiku-4.5": {
     inputPerMTok: 1,
     outputPerMTok: 5,
@@ -31,10 +59,12 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     cachedInputPerMTok: 0.3,
     cacheWritePerMTok: 3.75,
   },
+  // Cache reads halved to $0.10 on 2026-10-07 (Anthropic Haiku 5.5 launch
+  // post; Gateway list agrees as of 2026-10-21).
   "anthropic/claude-sonnet-5.5": {
     inputPerMTok: 2,
     outputPerMTok: 10,
-    cachedInputPerMTok: 0.2,
+    cachedInputPerMTok: 0.1,
     cacheWritePerMTok: 2.5,
   },
   "anthropic/claude-opus-5": {
@@ -123,7 +153,12 @@ export type UsageTokens = {
 };
 
 export function calculateUsd(model: string, usage: UsageTokens): number {
-  const pricing = MODEL_PRICING[canonicalModelId(model)] ?? fallbackPricingFor(model);
+  const base = MODEL_PRICING[canonicalModelId(model)] ?? fallbackPricingFor(model);
+  // inputTokens is the request's whole prompt (cache reads and writes included).
+  const pricing =
+    base.longContext && usage.inputTokens > base.longContext.aboveInputTokens
+      ? { ...base, ...base.longContext }
+      : base;
   const cachedRead = usage.cachedInputTokens ?? 0;
   const cacheWrite = usage.cacheWriteTokens ?? 0;
   const uncachedInput = Math.max(0, usage.inputTokens - cachedRead - cacheWrite);

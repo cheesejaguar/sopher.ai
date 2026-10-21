@@ -43,6 +43,45 @@ describe("calculateUsd", () => {
   });
 });
 
+describe("Haiku 5.5 long-prompt tier", () => {
+  const model = "anthropic/claude-haiku-5.5";
+
+  it("bills a prompt of exactly 100K tokens at the base tier", () => {
+    expect(calculateUsd(model, { inputTokens: 100_000, outputTokens: 1_000_000 })).toBeCloseTo(
+      0.01 + 0.5,
+      6,
+    );
+  });
+
+  it("bills every token of a prompt over 100K at the long tier, output included", () => {
+    expect(calculateUsd(model, { inputTokens: 100_001, outputTokens: 1_000_000 })).toBeCloseTo(
+      (100_001 * 0.5) / 1_000_000 + 2.5,
+      5,
+    );
+  });
+
+  it("counts cache reads and writes toward the tier threshold", () => {
+    const usd = calculateUsd(model, {
+      inputTokens: 200_000,
+      cachedInputTokens: 150_000,
+      cacheWriteTokens: 40_000,
+      outputTokens: 0,
+    });
+    expect(usd).toBeCloseTo((10_000 * 0.5 + 150_000 * 0.05 + 40_000 * 0.625) / 1_000_000, 6);
+  });
+
+  it("is far cheaper than the unknown-model fallback it previously hit", () => {
+    const usage = { inputTokens: 10_000, outputTokens: 2_000 };
+    expect(calculateUsd(model, usage)).toBeLessThan(calculateUsd("unknown/model", usage) / 10);
+  });
+});
+
+describe("Sonnet 5.5 cache reads", () => {
+  it("are $0.10 per million after the 2026-10-07 cut", () => {
+    expect(MODEL_PRICING["anthropic/claude-sonnet-5.5"].cachedInputPerMTok).toBe(0.1);
+  });
+});
+
 describe("canonicalModelId", () => {
   it.each([
     ["claude-sonnet-5-5", "anthropic/claude-sonnet-5.5"],
@@ -50,6 +89,7 @@ describe("canonicalModelId", () => {
     ["claude-sonnet-5", "anthropic/claude-sonnet-5"],
     ["claude-opus-5", "anthropic/claude-opus-5"],
     ["claude-haiku-4-5-20251001", "anthropic/claude-haiku-4.5"],
+    ["claude-haiku-5-5", "anthropic/claude-haiku-5.5"],
     ["anthropic/claude-sonnet-5.5", "anthropic/claude-sonnet-5.5"],
   ])("maps the Gateway's streamed id %s to %s", (reported, slug) => {
     expect(canonicalModelId(reported)).toBe(slug);
