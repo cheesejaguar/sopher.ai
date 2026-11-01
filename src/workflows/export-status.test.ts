@@ -13,8 +13,6 @@ vi.mock("@/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/db")>();
   return { ...actual, getDb: mocks.getDb };
 });
-vi.mock("@/lib/export/assemble", () => ({ loadManuscript: vi.fn() }));
-vi.mock("@/lib/export", () => ({ renderExport: vi.fn() }));
 
 import { markExportStatus } from "./export";
 

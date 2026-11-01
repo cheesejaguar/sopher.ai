@@ -33,10 +33,6 @@ vi.mock("@/components/editor/editor-shell-loader", () => ({
     return <div>Scoped editor loaded</div>;
   },
 }));
-vi.mock("@/components/studio/incomplete-production-notice", () => ({
-  incompleteProductionStatus: () => null,
-}));
-
 import EditorChapterPage from "./page";
 
 function query<T>(rows: T[]) {

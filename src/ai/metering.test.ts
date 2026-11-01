@@ -481,10 +481,11 @@ describe("metered atomic authorization", () => {
     });
     const rejected = {
       score: 857_361, // distinctive: short numbers also match stack-trace line numbers
+      // Stays within the array cap: zod >=4.6.6 skips element validation once
+      // an array exceeds .max(), and the element paths are what this checks.
       issues: [
         { severity: "high", chapters: [1, 2, 3] },
         { severity: "major", chapters: [4] },
-        { severity: "major", chapters: [5] },
       ],
       notes: { "Chapter 3: the lighthouse keeper wept": "unresolved" },
     };
@@ -537,7 +538,6 @@ describe("metered atomic authorization", () => {
       "score: too_big",
       "issues[].severity: invalid_value",
       "issues[].chapters: too_big",
-      "issues: too_big",
       "notes.*: invalid_type",
     ]);
     for (const leak of ["lighthouse", "keeper wept", "high", "857361"]) {

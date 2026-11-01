@@ -76,15 +76,6 @@ vi.mock("@/ai/metering", async (importOriginal) => {
   };
 });
 
-vi.mock("@/ai/metering-limits", () => ({
-  meteredInputGuard: vi.fn(() => undefined),
-  meteredMaxOutputTokens: vi.fn(() => 1_024),
-}));
-
-vi.mock("@/ai/models", () => ({
-  MODELS: { standard: { image: "test-image-model" } },
-}));
-
 vi.mock("@/lib/blob/orphan-cleanup", () => ({
   scheduleUnreferencedBlobCleanup: mocks.scheduleUnreferencedBlobCleanup,
   compensateUnreferencedBlobUpload: mocks.compensateUnreferencedBlobUpload,
@@ -202,7 +193,21 @@ describe("POST /api/entities/[entityId]/portrait", () => {
       message: "Portrait persistence failed and could not be verified",
       errors: [persistenceError, verificationError],
     });
+    expect(mocks.metered).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1", projectId }),
+      {
+        role: "content-tool",
+        operation: "entity.portrait",
+        model: "google/gemini-3.1-flash-image",
+      },
+      expect.any(Function),
+    );
     expect(mocks.put).toHaveBeenCalledOnce();
+    expect(mocks.put).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`^portraits/${projectId}/${entityId}-[0-9a-f-]{36}\\.png$`)),
+      Buffer.from([1, 2, 3]),
+      { access: "public", contentType: "image/png" },
+    );
     expect(mocks.withDbTransaction).toHaveBeenCalledTimes(3);
     expect(mocks.refundMeteredDelivery).not.toHaveBeenCalled();
     expect(mocks.completeMeteredDelivery).not.toHaveBeenCalled();

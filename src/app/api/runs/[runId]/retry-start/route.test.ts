@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   markAuthoringRunAcceptanceUncertain: vi.fn(),
   settleStubbedAuthoringRunHandoff: vi.fn(),
   terminalizeAuthoringRun: vi.fn(),
-  isE2EWorkflowStubEnabled: vi.fn(),
   start: vi.fn(),
 }));
 
@@ -54,10 +53,6 @@ vi.mock("@/lib/generation-runs", async (importOriginal) => {
     terminalizeAuthoringRun: mocks.terminalizeAuthoringRun,
   };
 });
-
-vi.mock("@/lib/e2e-workflow-stub", () => ({
-  isE2EWorkflowStubEnabled: mocks.isE2EWorkflowStubEnabled,
-}));
 
 vi.mock("workflow/api", () => ({ start: mocks.start }));
 vi.mock("@/workflows/generate-book", () => ({ generateBook: vi.fn() }));
@@ -143,12 +138,16 @@ describe("POST /api/runs/[runId]/retry-start", () => {
     mocks.linkAuthoringRunWorkflow.mockResolvedValue(true);
     mocks.markAuthoringRunAcceptanceUncertain.mockResolvedValue(true);
     mocks.settleStubbedAuthoringRunHandoff.mockResolvedValue(true);
-    mocks.isE2EWorkflowStubEnabled.mockReturnValue(false);
+    // The real stub gate stays closed unless a test opens every one of its
+    // conditions; clear any ambient E2E configuration from the shell.
+    vi.stubEnv("E2E_STUB_WORKFLOW", undefined);
+    vi.stubEnv("E2E_DATABASE_ISOLATED", undefined);
     mocks.start.mockResolvedValue({ runId: "workflow-1" });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   it("reattaches a durable Workflow before consuming retry rate limit", async () => {
@@ -414,7 +413,11 @@ describe("POST /api/runs/[runId]/retry-start", () => {
 
   it("confirms an isolated same-run retry without creating a real Workflow", async () => {
     mockSelectRows([snapshot()]);
-    mocks.isE2EWorkflowStubEnabled.mockReturnValue(true);
+    vi.stubEnv("VERCEL_ENV", undefined);
+    vi.stubEnv("E2E_DATABASE_HOST", "isolated.e2e.test");
+    vi.stubEnv("DATABASE_URL", "postgres://user:pass@isolated.e2e.test/db");
+    vi.stubEnv("E2E_DATABASE_ISOLATED", "1");
+    vi.stubEnv("E2E_STUB_WORKFLOW", "1");
 
     const response = await request();
 
