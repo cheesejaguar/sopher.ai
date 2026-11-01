@@ -306,7 +306,9 @@ describe("finalizeStep terminal boundaries", () => {
     try {
       await expect(finalizeStep(ref)).resolves.toBeUndefined();
       expect(db.run.status).toBe("completed");
-      expect(db.run.config.completion?.finalized?.manuscriptDigest).toBeTruthy();
+      expect(db.run.config.completion?.finalized?.manuscriptDigest).toBe(
+        manuscriptDigest(db.chapters),
+      );
       expect(db.events).toHaveLength(1);
       expect(db.ledger).toHaveLength(1);
     } finally {
